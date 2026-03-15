@@ -143,6 +143,87 @@ describe("GraphQL Content Delivery API", () => {
     expect(result.data.allPosts).toHaveLength(2);
   });
 
+  // --- Filtering ---
+
+  it("filters by string equality", async () => {
+    const result = await gqlQuery(app, `{
+      allPosts(filter: { title: { eq: "First Post" } }) { title }
+    }`);
+    expect(result.errors).toBeUndefined();
+    expect(result.data.allPosts).toHaveLength(1);
+    expect(result.data.allPosts[0].title).toBe("First Post");
+  });
+
+  it("filters by integer comparison", async () => {
+    const result = await gqlQuery(app, `{
+      allPosts(filter: { views: { gt: 60 } }) { title views }
+    }`);
+    expect(result.errors).toBeUndefined();
+    expect(result.data.allPosts).toHaveLength(1);
+    expect(result.data.allPosts[0].title).toBe("First Post");
+  });
+
+  it("filters by boolean equality", async () => {
+    const result = await gqlQuery(app, `{
+      allPosts(filter: { published: { eq: true } }) { title }
+    }`);
+    expect(result.errors).toBeUndefined();
+    expect(result.data.allPosts).toHaveLength(1);
+    expect(result.data.allPosts[0].title).toBe("First Post");
+  });
+
+  it("filters with string matches (regex)", async () => {
+    const result = await gqlQuery(app, `{
+      allPosts(filter: { title: { matches: "First" } }) { title }
+    }`);
+    expect(result.errors).toBeUndefined();
+    expect(result.data.allPosts).toHaveLength(1);
+  });
+
+  it("filters with AND", async () => {
+    const result = await gqlQuery(app, `{
+      allPosts(filter: { AND: [{ published: { eq: true } }, { views: { gte: 50 } }] }) { title }
+    }`);
+    expect(result.errors).toBeUndefined();
+    expect(result.data.allPosts).toHaveLength(1);
+  });
+
+  it("filters with OR", async () => {
+    const result = await gqlQuery(app, `{
+      allPosts(filter: { OR: [{ title: { eq: "First Post" } }, { title: { eq: "Second Post" } }] }) { title }
+    }`);
+    expect(result.errors).toBeUndefined();
+    expect(result.data.allPosts).toHaveLength(2);
+  });
+
+  it("meta query respects filter", async () => {
+    const result = await gqlQuery(app, `{
+      _allPostsMeta(filter: { published: { eq: true } }) { count }
+    }`);
+    expect(result.errors).toBeUndefined();
+    expect(result.data._allPostsMeta.count).toBe(1);
+  });
+
+  // --- Ordering ---
+
+  it("orders by field ASC", async () => {
+    const result = await gqlQuery(app, `{
+      allPosts(orderBy: [views_ASC]) { title views }
+    }`);
+    expect(result.errors).toBeUndefined();
+    expect(result.data.allPosts[0].views).toBe(50);
+    expect(result.data.allPosts[1].views).toBe(100);
+  });
+
+  it("orders by field DESC", async () => {
+    const result = await gqlQuery(app, `{
+      allPosts(orderBy: [views_DESC]) { title views }
+    }`);
+    expect(result.errors).toBeUndefined();
+    expect(result.data.allPosts[0].views).toBe(100);
+    expect(result.data.allPosts[1].views).toBe(50);
+  });
+
   it("includes meta fields on records", async () => {
     const result = await gqlQuery(app, `{
       allPosts {
