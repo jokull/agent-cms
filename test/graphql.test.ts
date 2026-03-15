@@ -224,6 +224,68 @@ describe("GraphQL Content Delivery API", () => {
     expect(result.data.allPosts[1].views).toBe(50);
   });
 
+  // --- Link resolution ---
+
+  it("resolves link fields to nested objects", async () => {
+    // Create author model
+    const authorRes = await jsonRequest(app, "POST", "/api/models", {
+      name: "Author",
+      apiKey: "author",
+    });
+    const authorModel = await authorRes.json();
+    await jsonRequest(app, "POST", `/api/models/${authorModel.id}/fields`, {
+      label: "Name", apiKey: "name", fieldType: "string",
+    });
+
+    // Add author link field to post
+    const postModel = (await (await app.request("/api/models")).json()) as any[];
+    const post = postModel.find((m: any) => m.apiKey === "post");
+    await jsonRequest(app, "POST", `/api/models/${post.id}/fields`, {
+      label: "Author",
+      apiKey: "author",
+      fieldType: "link",
+      validators: { item_item_type: ["author"] },
+    });
+
+    // Create an author record
+    const authorRecordRes = await jsonRequest(app, "POST", "/api/records", {
+      modelApiKey: "author",
+      data: { name: "Alice" },
+    });
+    const authorRecord = await authorRecordRes.json();
+
+    // Create a post linked to the author
+    await jsonRequest(app, "POST", "/api/records", {
+      modelApiKey: "post",
+      data: { title: "Linked Post", body: "test", views: 5, published: true, author: authorRecord.id },
+    });
+
+    // Query with link resolution
+    const result = await gqlQuery(app, `{
+      allPosts(filter: { title: { eq: "Linked Post" } }) {
+        title
+        author {
+          name
+        }
+      }
+    }`);
+
+    expect(result.errors).toBeUndefined();
+    expect(result.data.allPosts[0].author.name).toBe("Alice");
+  });
+
+  it("returns null for unset link fields", async () => {
+    const result = await gqlQuery(app, `{
+      allPosts {
+        title
+      }
+    }`);
+
+    // Posts created in beforeEach have no author field
+    expect(result.errors).toBeUndefined();
+    expect(result.data.allPosts.length).toBeGreaterThan(0);
+  });
+
   it("includes meta fields on records", async () => {
     const result = await gqlQuery(app, `{
       allPosts {

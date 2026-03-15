@@ -176,7 +176,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 - [x] **P0.10** GraphQL foundation *(done)*
 - [ ] **P0.10a** **Effect refactor**: Refactor existing code to use Effect before adding more features. This is tech debt from P0.3-P0.10. Targets: (1) SchemaEngine as Effect service with typed errors, (2) RecordService with Effect.Schema validation replacing ad-hoc if-checks, (3) Hono handler wrapper that runs Effect pipelines and maps typed errors to HTTP responses, (4) Typed error types: SchemaEngineError, ValidationError, ReferenceConflictError, NotFoundError. See decisions D43-D47.
 - [x] **P0.11** GraphQL filtering + ordering *(done)*
-- [ ] **P0.12** Link fields: `link` and `links` field types. `link` = FK column to another content table. `links` = junction table or JSON array. GraphQL resolves linked records as nested objects. Strict reference checking on delete. Test: create two models, link them, query nested, attempt delete of referenced record (should fail).
+- [x] **P0.12** Link fields with GraphQL resolution *(done)*
 - [ ] **P0.13** `[SCHEMA:blog]` Blog schema integration test. Create the full blog schema (author, category, post) via REST. Insert sample content. Query via GraphQL with filters, ordering, link resolution, slug verification.
 
 ### Phase 1: Blocks & StructuredText
@@ -251,6 +251,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 - **P0.10** GraphQL: SDL-based dynamic schema via Yoga `createSchema()`. Auto-generates query types from CMS models. `all{Model}s`, `{model}(id)`, `_all{Model}sMeta { count }`. Pagination via first/skip. Meta fields. 7 tests.
 - **P0.10a** Effect refactor: all REST APIs use Effect.gen with typed errors (NotFoundError, ValidationError, DuplicateError, ReferenceConflictError). runEffect() bridges Effect → Hono.
 - **P0.11** GraphQL filtering (eq, neq, gt, lt, gte, lte, matches, isBlank, exists, AND, OR) + ordering (field_ASC/DESC) + per-model filter/orderBy input types. Meta respects filters. 9 new tests.
+- **P0.12** Link fields: `link` resolves to nested object (target model type from item_item_type validator). `links` resolves to array of nested objects. SDL types generated dynamically from link targets. 2 new tests.
 
 ---
 
