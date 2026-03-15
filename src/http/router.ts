@@ -9,6 +9,7 @@ import { SqlClient } from "@effect/sql";
 import * as ModelService from "../services/model-service.js";
 import * as FieldService from "../services/field-service.js";
 import * as RecordService from "../services/record-service.js";
+import * as PublishService from "../services/publish-service.js";
 import { type CmsError, errorToResponse } from "../errors.js";
 
 /** Helper: run a CMS Effect and return an HTTP response */
@@ -185,6 +186,25 @@ const recordsRouter = HttpRouter.empty.pipe(
       const params = yield* HttpRouter.params;
       const modelApiKey = yield* queryParam("modelApiKey");
       return yield* handle(RecordService.removeRecord(modelApiKey, params.id));
+    })
+  ),
+
+  // Publish / Unpublish
+  HttpRouter.post(
+    "/records/:id/publish",
+    Effect.gen(function* () {
+      const params = yield* HttpRouter.params;
+      const modelApiKey = yield* queryParam("modelApiKey");
+      return yield* handle(PublishService.publishRecord(modelApiKey, params.id));
+    })
+  ),
+
+  HttpRouter.post(
+    "/records/:id/unpublish",
+    Effect.gen(function* () {
+      const params = yield* HttpRouter.params;
+      const modelApiKey = yield* queryParam("modelApiKey");
+      return yield* handle(PublishService.unpublishRecord(modelApiKey, params.id));
     })
   )
 );
