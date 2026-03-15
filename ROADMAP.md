@@ -152,26 +152,7 @@ Milestone: after localization and media gallery work.
 
 ## In Progress
 
-**P0.10a** Full Effect migration — IN PROGRESS
-
-Architecture: Effect is the COMPLETE runtime. Drop Hono, use @effect/platform HttpRouter.
-
-Done so far:
-- `src/schema-engine/sql-ddl.ts`: Effect-based DDL (create/migrate/drop tables)
-- `src/schema-engine/sql-records.ts`: Effect-based record CRUD (insert/select/update/delete)
-- `src/db/migrate.ts`: Migration runner via @effect/sql (replaces Drizzle migrator)
-- `src/services/model-service.ts`: Model CRUD as Effect pipelines with @effect/sql
-- `src/services/field-service.ts`: Field CRUD as Effect pipelines with @effect/sql
-- `src/services/record-service.ts`: Record CRUD as Effect pipelines with @effect/sql
-- `src/graphql/schema-builder.ts`: Rewritten to use @effect/sql for all queries
-- Tests for @effect/sql DDL + records passing independently
-
-In progress:
-- Replace Hono with @effect/platform HttpRouter — earlier attempt had `toWebHandler` issues, need to debug properly using community patterns (see Discord thread saved in decisions)
-- Fix `runEffect` error handling — SqlError from @effect/sql not handled by `errorToResponse`
-- Wire everything together: services → HTTP handlers → tests
-
-Key reference: github.com/kriegcloud/beep-effect — community example of Effect + @effect/sql + Drizzle (for migrations only) pattern. Uses EntityId, Model.Class, SqlSchema, custom Repo base.
+(empty — pick from backlog)
 
 ---
 
@@ -266,11 +247,11 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 - **P0.7** Strict model deletion: refuse DELETE if other models have link/links fields referencing this model. Tested with cross-model link reference.
 - **P0.8** Record CRUD: POST/GET/GET/:id/PATCH/DELETE on `/api/records`. Writes to dynamic content tables. Validates required fields. Singleton enforcement. Draft status on create. Status transitions on edit. 12 tests.
 - **P0.9** Slug field: `generateSlug()` using slugify with Django-parity transliteration. Auto-generate from source field (via `slug_source` validator). Uniqueness enforcement with numeric suffix. Tests: Icelandic chars (Þ→th, ð→d, æ→ae), uniqueness, explicit override. 11 tests.
-- **P0.10** GraphQL: SDL-based dynamic schema via Yoga `createSchema()`. Auto-generates query types from CMS models. `all{Model}s`, `{model}(id)`, `_all{Model}sMeta { count }`. Pagination via first/skip. Meta fields. 7 tests.
-- **P0.10a** Effect refactor: all REST APIs use Effect.gen with typed errors (NotFoundError, ValidationError, DuplicateError, ReferenceConflictError). runEffect() bridges Effect → Hono.
-- **P0.11** GraphQL filtering (eq, neq, gt, lt, gte, lte, matches, isBlank, exists, AND, OR) + ordering (field_ASC/DESC) + per-model filter/orderBy input types. Meta respects filters. 9 new tests.
-- **P0.12** Link fields: `link` resolves to nested object (target model type from item_item_type validator). `links` resolves to array of nested objects. SDL types generated dynamically from link targets. 2 new tests.
-- **P0.13** `[SCHEMA:blog]` Full integration test: author (singleton) + category + post models. Fields: string, text, slug, media, link, boolean. Slug auto-generation with diacritics. GraphQL queries with filtering, ordering, link resolution, meta counts. Singleton/required field enforcement. Strict deletion refusal. 5 tests.
+- **P0.10** GraphQL: SDL-based dynamic schema via Yoga `createSchema()`, auto-generated from CMS metadata.
+- **P0.10a** MILESTONE: Full Effect migration. Dropped Hono. @effect/platform HttpRouter for HTTP. @effect/sql for all dynamic table operations. Service layer (model/field/record services) as Effect.gen pipelines. Drizzle only for migration SQL generation. 68 tests, -1977/+547 lines. Key pattern: `Effect.flatten(HttpRouter.toHttpApp(router))` for web handler.
+- **P0.11** GraphQL filtering, ordering, link resolution, meta fields.
+- **P0.12** Link fields with nested GraphQL resolution.
+- **P0.13** `[SCHEMA:blog]` Full integration test passing.
 
 ---
 
