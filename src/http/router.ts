@@ -10,6 +10,8 @@ import * as ModelService from "../services/model-service.js";
 import * as FieldService from "../services/field-service.js";
 import * as RecordService from "../services/record-service.js";
 import * as PublishService from "../services/publish-service.js";
+import * as AssetService from "../services/asset-service.js";
+import * as LocaleService from "../services/locale-service.js";
 import { type CmsError, errorToResponse } from "../errors.js";
 
 /** Helper: run a CMS Effect and return an HTTP response */
@@ -209,6 +211,56 @@ const recordsRouter = HttpRouter.empty.pipe(
   )
 );
 
+// --- Assets ---
+const assetsRouter = HttpRouter.empty.pipe(
+  HttpRouter.get("/", handle(AssetService.listAssets())),
+
+  HttpRouter.post(
+    "/",
+    Effect.gen(function* () {
+      const req = yield* HttpServerRequest.HttpServerRequest;
+      const body = yield* req.json;
+      return yield* handle(AssetService.createAsset(body), 201);
+    })
+  ),
+
+  HttpRouter.get(
+    "/:id",
+    Effect.gen(function* () {
+      const params = yield* HttpRouter.params;
+      return yield* handle(AssetService.getAsset(params.id));
+    })
+  ),
+
+  HttpRouter.del(
+    "/:id",
+    Effect.gen(function* () {
+      const params = yield* HttpRouter.params;
+      return yield* handle(AssetService.deleteAsset(params.id));
+    })
+  )
+);
+
+// --- Locales ---
+const localesRouter = HttpRouter.empty.pipe(
+  HttpRouter.get("/", handle(LocaleService.listLocales())),
+  HttpRouter.post(
+    "/",
+    Effect.gen(function* () {
+      const req = yield* HttpServerRequest.HttpServerRequest;
+      const body = yield* req.json;
+      return yield* handle(LocaleService.createLocale(body), 201);
+    })
+  ),
+  HttpRouter.del(
+    "/:id",
+    Effect.gen(function* () {
+      const params = yield* HttpRouter.params;
+      return yield* handle(LocaleService.deleteLocale(params.id));
+    })
+  )
+);
+
 // --- Health ---
 const healthRouter = HttpRouter.empty.pipe(
   HttpRouter.get("/health", HttpServerResponse.json({ status: "ok" }))
@@ -220,6 +272,8 @@ export const appRouter = HttpRouter.empty.pipe(
   HttpRouter.concat(modelsRouter.pipe(HttpRouter.prefixAll("/api/models"))),
   HttpRouter.concat(fieldsRouter.pipe(HttpRouter.prefixAll("/api"))),
   HttpRouter.concat(recordsRouter.pipe(HttpRouter.prefixAll("/api"))),
+  HttpRouter.concat(assetsRouter.pipe(HttpRouter.prefixAll("/api/assets"))),
+  HttpRouter.concat(localesRouter.pipe(HttpRouter.prefixAll("/api/locales"))),
 );
 
 /**
