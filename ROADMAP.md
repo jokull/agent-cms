@@ -171,7 +171,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 - [x] **P0.6** REST fields CRUD *(done)*
 - [x] **P0.7** Strict model deletion reference checking *(done)*
 - [x] **P0.8** Record CRUD *(done)*
-- [ ] **P0.9** Slug field type: auto-generate from a source field using `slugify`. On record create/update, compute slug if source field changed. Enforce uniqueness. Test with diacritics: "Þórbergur Ögmundsson" → "thorbergur-ogmundsson".
+- [x] **P0.9** Slug field with diacritics and uniqueness *(done)*
 - [ ] **P0.10** GraphQL foundation: Yoga server on the Worker. Use Pothos `SchemaBuilder` with Drizzle plugin to dynamically generate object types from runtime Drizzle tables. Loop over CMS models, call `builder.drizzleObject()` for each. Implement `all{Model}` and `{model}` queries. Test: create model + records via REST, query via GraphQL, verify response shape.
 - [ ] **P0.11** GraphQL filtering + ordering + pagination: `filter` argument with `eq`, `neq`, `gt`, `lt`, `gte`, `lte`, `matches`, `isBlank`, `exists`, `AND`, `OR`. `orderBy` arrays. `first`/`skip` pagination. `_all{Model}Meta { count }`. Test each operator.
 - [ ] **P0.12** Link fields: `link` and `links` field types. `link` = FK column to another content table. `links` = junction table or JSON array. GraphQL resolves linked records as nested objects. Strict reference checking on delete. Test: create two models, link them, query nested, attempt delete of referenced record (should fail).
@@ -245,6 +245,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 - **P0.6** REST Fields API: full CRUD on `/api/models/:id/fields`. POST adds field + column to dynamic table. DELETE removes field + drops column. All v1 field types supported. Validators stored as JSON. 11 tests.
 - **P0.7** Strict model deletion: refuse DELETE if other models have link/links fields referencing this model. Tested with cross-model link reference.
 - **P0.8** Record CRUD: POST/GET/GET/:id/PATCH/DELETE on `/api/records`. Writes to dynamic content tables. Validates required fields. Singleton enforcement. Draft status on create. Status transitions on edit. 12 tests.
+- **P0.9** Slug field: `generateSlug()` using slugify with Django-parity transliteration. Auto-generate from source field (via `slug_source` validator). Uniqueness enforcement with numeric suffix. Tests: Icelandic chars (Þ→th, ð→d, æ→ae), uniqueness, explicit override. 11 tests.
 
 ---
 

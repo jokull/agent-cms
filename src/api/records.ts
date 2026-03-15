@@ -5,6 +5,7 @@ import type { Env } from "../types.js";
 import type { FieldType } from "../types.js";
 import * as schema from "../db/schema.js";
 import { generateSchema } from "../schema-engine/index.js";
+import { generateSlug } from "../slug.js";
 
 export const recordsApi = new Hono<{ Bindings: Env; Variables: { db: any } }>();
 
@@ -90,9 +91,36 @@ recordsApi.post("/", async (c) => {
     _updatedAt: now,
   };
 
-  // Copy field values from body.data
+  // Copy field values from body.data, auto-generate slugs
   const data = body.data ?? {};
   for (const field of modelFields) {
+    if (field.fieldType === "slug") {
+      // Auto-generate slug from source field if not explicitly provided
+      const sourceFieldKey = (field.validators as any)?.slug_source;
+      if (!data[field.apiKey] && sourceFieldKey && data[sourceFieldKey]) {
+        data[field.apiKey] = generateSlug(data[sourceFieldKey]);
+      } else if (data[field.apiKey]) {
+        data[field.apiKey] = generateSlug(data[field.apiKey]);
+      }
+
+      // Enforce uniqueness
+      if (data[field.apiKey]) {
+        let slug = data[field.apiKey];
+        let suffix = 1;
+        while (true) {
+          const existing = db
+            .select()
+            .from(table)
+            .where(eq((table as any)[field.apiKey], slug))
+            .get();
+          if (!existing) break;
+          suffix++;
+          slug = `${data[field.apiKey]}-${suffix}`;
+        }
+        data[field.apiKey] = slug;
+      }
+    }
+
     if (data[field.apiKey] !== undefined) {
       record[field.apiKey] = data[field.apiKey];
     }
