@@ -26,7 +26,7 @@ function syncModelTable(db: any, modelId: string) {
 // GET /api/models/:modelId/fields — list fields for a model
 fieldsApi.get("/", (c) => {
   const db = c.get("db");
-  const modelId = c.req.param("modelId");
+  const modelId = c.req.param("modelId")!;
 
   const model = db.select().from(schema.models).where(eq(schema.models.id, modelId)).get();
   if (!model) {
@@ -45,7 +45,7 @@ fieldsApi.get("/", (c) => {
 // POST /api/models/:modelId/fields — create a field
 fieldsApi.post("/", async (c) => {
   const db = c.get("db");
-  const modelId = c.req.param("modelId");
+  const modelId = c.req.param("modelId")!;
   const body = await c.req.json();
 
   // Validate model exists
@@ -117,7 +117,7 @@ fieldsApi.post("/", async (c) => {
 // PATCH /api/fields/:id — update a field
 fieldsApi.patch("/:fieldId", async (c) => {
   const db = c.get("db");
-  const fieldId = c.req.param("fieldId");
+  const fieldId = c.req.param("fieldId")!;
   const body = await c.req.json();
 
   const existing = db.select().from(schema.fields).where(eq(schema.fields.id, fieldId)).get() as any;
@@ -142,7 +142,7 @@ fieldsApi.patch("/:fieldId", async (c) => {
 // DELETE /api/fields/:id — delete a field
 fieldsApi.delete("/:fieldId", (c) => {
   const db = c.get("db");
-  const fieldId = c.req.param("fieldId");
+  const fieldId = c.req.param("fieldId")!;
 
   const field = db.select().from(schema.fields).where(eq(schema.fields.id, fieldId)).get() as any;
   if (!field) {

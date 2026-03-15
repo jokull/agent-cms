@@ -8,6 +8,8 @@ export default defineConfig({
   resolve: {
     alias: {
       "~": path.resolve(__dirname, "./src"),
+      // Ensure only one instance of graphql is loaded (CJS/ESM dedup)
+      graphql: path.resolve(__dirname, "node_modules/graphql/index.mjs"),
     },
   },
 });

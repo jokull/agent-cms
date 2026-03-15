@@ -172,7 +172,9 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 - [x] **P0.7** Strict model deletion reference checking *(done)*
 - [x] **P0.8** Record CRUD *(done)*
 - [x] **P0.9** Slug field with diacritics and uniqueness *(done)*
-- [ ] **P0.10** GraphQL foundation: Yoga server on the Worker. Use Pothos `SchemaBuilder` with Drizzle plugin to dynamically generate object types from runtime Drizzle tables. Loop over CMS models, call `builder.drizzleObject()` for each. Implement `all{Model}` and `{model}` queries. Test: create model + records via REST, query via GraphQL, verify response shape.
+- [x] **P0.10** GraphQL foundation *(done — SDL-based, working)*
+- [x] **P0.10** GraphQL foundation *(done)*
+- [ ] **P0.10a** **Effect refactor**: Refactor existing code to use Effect before adding more features. This is tech debt from P0.3-P0.10. Targets: (1) SchemaEngine as Effect service with typed errors, (2) RecordService with Effect.Schema validation replacing ad-hoc if-checks, (3) Hono handler wrapper that runs Effect pipelines and maps typed errors to HTTP responses, (4) Typed error types: SchemaEngineError, ValidationError, ReferenceConflictError, NotFoundError. See decisions D43-D47.
 - [ ] **P0.11** GraphQL filtering + ordering + pagination: `filter` argument with `eq`, `neq`, `gt`, `lt`, `gte`, `lte`, `matches`, `isBlank`, `exists`, `AND`, `OR`. `orderBy` arrays. `first`/`skip` pagination. `_all{Model}Meta { count }`. Test each operator.
 - [ ] **P0.12** Link fields: `link` and `links` field types. `link` = FK column to another content table. `links` = junction table or JSON array. GraphQL resolves linked records as nested objects. Strict reference checking on delete. Test: create two models, link them, query nested, attempt delete of referenced record (should fail).
 - [ ] **P0.13** `[SCHEMA:blog]` Blog schema integration test. Create the full blog schema (author, category, post) via REST. Insert sample content. Query via GraphQL with filters, ordering, link resolution, slug verification.
@@ -246,6 +248,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 - **P0.7** Strict model deletion: refuse DELETE if other models have link/links fields referencing this model. Tested with cross-model link reference.
 - **P0.8** Record CRUD: POST/GET/GET/:id/PATCH/DELETE on `/api/records`. Writes to dynamic content tables. Validates required fields. Singleton enforcement. Draft status on create. Status transitions on edit. 12 tests.
 - **P0.9** Slug field: `generateSlug()` using slugify with Django-parity transliteration. Auto-generate from source field (via `slug_source` validator). Uniqueness enforcement with numeric suffix. Tests: Icelandic chars (Þ→th, ð→d, æ→ae), uniqueness, explicit override. 11 tests.
+- **P0.10** GraphQL: SDL-based dynamic schema via Yoga `createSchema()`. Auto-generates query types from CMS models. `all{Model}s`, `{model}(id)`, `_all{Model}sMeta { count }`. Pagination via first/skip. Meta fields. 7 tests. NOTE: Uses SDL approach (not Pothos) to avoid graphql module duplication. Pothos evaluation deferred.
 
 ---
 

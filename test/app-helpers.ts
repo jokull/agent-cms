@@ -6,6 +6,7 @@ import * as schema from "../src/db/schema.js";
 import { modelsApi } from "../src/api/models.js";
 import { fieldsApi } from "../src/api/fields.js";
 import { recordsApi } from "../src/api/records.js";
+import { createGraphQLHandler } from "../src/graphql/handler.js";
 
 /**
  * Create a test app with an in-memory SQLite database.
@@ -31,7 +32,28 @@ export function createTestApp() {
   app.route("/api/models/:modelId/fields", fieldsApi);
   app.route("/api/records", recordsApi);
 
+  // GraphQL endpoint
+  const yoga = createGraphQLHandler(db);
+  app.all("/graphql", async (c) => {
+    const response = await yoga.handle(c.req.raw);
+    return response;
+  });
+
   return { app, db };
+}
+
+/** Helper to execute a GraphQL query */
+export async function gqlQuery(
+  app: Hono,
+  query: string,
+  variables?: Record<string, any>
+) {
+  const res = await app.request("/graphql", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, variables }),
+  });
+  return res.json() as Promise<{ data?: any; errors?: any[] }>;
 }
 
 /** Helper to make JSON requests against the test app */
