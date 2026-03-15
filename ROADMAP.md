@@ -181,7 +181,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 ### Phase 1: Blocks & StructuredText
 
 - [x] **P1.1** Block type support *(done — already works from P0.5, verified with 3 new tests)*
-- [ ] **P1.2** StructuredText field type — storage: `structured_text` field creates a TEXT column. DAST `@effect/schema` validator (match the DatoCMS DAST spec — use `datocms-structured-text-utils` as reference for node types and allowed children). Test: validate well-formed and malformed DAST documents.
+- [x] **P1.2** DAST validation *(done — 22 tests)*
 - [ ] **P1.3** StructuredText write orchestration: REST accepts `{ value: <DAST>, blocks: { <ulid>: { type: "hero_section", fields: {...} }, ... } }`. Server validates DAST, validates block data against block type fields, writes block rows to `block_*` tables, writes DAST JSON to content table column. All in one transaction. Test with a simple block.
 - [ ] **P1.4** StructuredText update + orphan cleanup: On update, diff old vs new DAST, identify removed block IDs, delete them (recursively if nested). Test: create record with 3 blocks, update to 2 blocks, verify orphan deleted.
 - [ ] **P1.5** GraphQL StructuredText resolution: Return `{ value, blocks, links }`. Walk DAST, collect block IDs by type, batch-fetch from `block_*` tables, return as typed union. Test with a field containing two different block types.
