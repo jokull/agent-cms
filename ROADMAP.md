@@ -152,7 +152,18 @@ Milestone: after localization and media gallery work.
 
 ## In Progress
 
-(empty — pick from backlog)
+**P0.10a** @effect/sql migration — IN PROGRESS
+
+Done so far:
+- `src/schema-engine/sql-ddl.ts`: Effect-based DDL operations (create/migrate/drop tables, add/drop columns)
+- `src/schema-engine/sql-records.ts`: Effect-based record CRUD (insert, select, update, delete with JSON serialization)
+- Tests passing with `@effect/sql-sqlite-node` `:memory:` layer
+
+Remaining:
+- Wire REST API handlers (models, fields, records) to use `sql-ddl.ts` and `sql-records.ts` instead of the Drizzle-based `generateSchema()` + `migrateTable()` for dynamic tables
+- Wire GraphQL resolvers to use `sql-records.ts` instead of Drizzle dynamic table queries
+- Remove Drizzle-based dynamic table code (`generate.ts`, `ddl.ts`, `migrate.ts`, `field-mapper.ts`)
+- Update test helpers to provide `SqlClient.SqlClient` layer alongside Drizzle for system tables
 
 ---
 
