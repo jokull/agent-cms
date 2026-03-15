@@ -172,6 +172,36 @@ export function patchRecord(id: string, body: any) {
 
     const data = body.data ?? {};
     for (const field of modelFields) {
+      // StructuredText update: delete old blocks, write new ones
+      if (field.field_type === "structured_text" && data[field.api_key] !== undefined) {
+        const stInput = data[field.api_key];
+        if (stInput && typeof stInput === "object" && stInput.value) {
+          // Delete old blocks for this field
+          yield* deleteBlocksForField({
+            rootRecordId: id,
+            fieldApiKey: field.api_key,
+          });
+
+          const allowedBlockTypes = field.validators?.structured_text_blocks as string[] | undefined;
+
+          const dast = yield* writeStructuredText({
+            fieldApiKey: field.api_key,
+            rootRecordId: id,
+            value: stInput.value,
+            blocks: stInput.blocks ?? {},
+            allowedBlockTypes,
+          });
+
+          data[field.api_key] = dast;
+        } else if (stInput === null) {
+          // Clearing the field — delete all blocks
+          yield* deleteBlocksForField({
+            rootRecordId: id,
+            fieldApiKey: field.api_key,
+          });
+        }
+      }
+
       if (data[field.api_key] !== undefined) {
         updates[field.api_key] = data[field.api_key];
       }

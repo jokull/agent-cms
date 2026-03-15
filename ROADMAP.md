@@ -183,7 +183,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 - [x] **P1.1** Block type support *(done — already works from P0.5, verified with 3 new tests)*
 - [x] **P1.2** DAST validation *(done — 22 tests)*
 - [x] **P1.3** StructuredText write orchestration *(done — 5 tests)*
-- [ ] **P1.4** StructuredText update + orphan cleanup: On update, diff old vs new DAST, identify removed block IDs, delete them (recursively if nested). Test: create record with 3 blocks, update to 2 blocks, verify orphan deleted.
+- [x] **P1.4** StructuredText update + orphan cleanup *(done — 3 tests)*
 - [x] **P1.5** GraphQL StructuredText resolution *(done — { value, blocks, links }, 3 tests)*
 - [ ] **P1.6** Nested blocks: A block type with a StructuredText field that itself allows blocks. Test recursive resolution: content record → block A (has ST field) → block B (inside A's ST). Verify GraphQL returns the full nested `{ value, blocks }` structure.
 - [ ] **P1.7** StructuredText validators: `structured_text_blocks` (whitelist block types), `structured_text_links` (whitelist linkable model types). Reject writes with block types or link targets not in the whitelist. Test both acceptance and rejection.
