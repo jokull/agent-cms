@@ -177,7 +177,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 - [ ] **P0.10a** **Effect refactor**: Refactor existing code to use Effect before adding more features. This is tech debt from P0.3-P0.10. Targets: (1) SchemaEngine as Effect service with typed errors, (2) RecordService with Effect.Schema validation replacing ad-hoc if-checks, (3) Hono handler wrapper that runs Effect pipelines and maps typed errors to HTTP responses, (4) Typed error types: SchemaEngineError, ValidationError, ReferenceConflictError, NotFoundError. See decisions D43-D47.
 - [x] **P0.11** GraphQL filtering + ordering *(done)*
 - [x] **P0.12** Link fields with GraphQL resolution *(done)*
-- [ ] **P0.13** `[SCHEMA:blog]` Blog schema integration test. Create the full blog schema (author, category, post) via REST. Insert sample content. Query via GraphQL with filters, ordering, link resolution, slug verification.
+- [x] **P0.13** `[SCHEMA:blog]` integration test *(done — 100 tests passing)*
 
 ### Phase 1: Blocks & StructuredText
 
@@ -252,6 +252,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 - **P0.10a** Effect refactor: all REST APIs use Effect.gen with typed errors (NotFoundError, ValidationError, DuplicateError, ReferenceConflictError). runEffect() bridges Effect → Hono.
 - **P0.11** GraphQL filtering (eq, neq, gt, lt, gte, lte, matches, isBlank, exists, AND, OR) + ordering (field_ASC/DESC) + per-model filter/orderBy input types. Meta respects filters. 9 new tests.
 - **P0.12** Link fields: `link` resolves to nested object (target model type from item_item_type validator). `links` resolves to array of nested objects. SDL types generated dynamically from link targets. 2 new tests.
+- **P0.13** `[SCHEMA:blog]` Full integration test: author (singleton) + category + post models. Fields: string, text, slug, media, link, boolean. Slug auto-generation with diacritics. GraphQL queries with filtering, ordering, link resolution, meta counts. Singleton/required field enforcement. Strict deletion refusal. 5 tests.
 
 ---
 
