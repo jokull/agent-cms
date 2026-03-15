@@ -169,5 +169,35 @@ describe("Models REST API", () => {
       const res = await app.request("/api/models/nonexistent", { method: "DELETE" });
       expect(res.status).toBe(404);
     });
+
+    it("refuses to delete a model referenced by link fields in other models", async () => {
+      // Create two models
+      const authorRes = await jsonRequest(app, "POST", "/api/models", {
+        name: "Author",
+        apiKey: "author",
+      });
+      const author = await authorRes.json();
+
+      const postRes = await jsonRequest(app, "POST", "/api/models", {
+        name: "Post",
+        apiKey: "post",
+      });
+      const post = await postRes.json();
+
+      // Add a link field on post pointing to author
+      await jsonRequest(app, "POST", `/api/models/${post.id}/fields`, {
+        label: "Author",
+        apiKey: "post_author",
+        fieldType: "link",
+        validators: { item_item_type: ["author"] },
+      });
+
+      // Try to delete author — should be refused
+      const deleteRes = await app.request(`/api/models/${author.id}`, { method: "DELETE" });
+      expect(deleteRes.status).toBe(409);
+      const body = await deleteRes.json();
+      expect(body.error).toContain("referenced by");
+      expect(body.error).toContain("post.post_author");
+    });
   });
 });

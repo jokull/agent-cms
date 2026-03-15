@@ -169,7 +169,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 - [x] **P0.4** Schema engine DDL diffing + migration *(done)*
 - [x] **P0.5** REST models CRUD *(done)*
 - [x] **P0.6** REST fields CRUD *(done)*
-- [ ] **P0.7** REST models CRUD complete: `PATCH /models/:id`, `DELETE /models/:id`. Deletion is strict — refuse if any link/links fields in other models reference this model. Test the refusal. → [C11]
+- [x] **P0.7** Strict model deletion reference checking *(done)*
 - [ ] **P0.8** Record CRUD: `POST /records`, `GET /records`, `GET /records/:id`, `PATCH /records/:id`, `DELETE /records/:id`. Records are written to the dynamic content table. `@effect/schema` validation against field definitions at write time. Test with a simple model (string + integer fields).
 - [ ] **P0.9** Slug field type: auto-generate from a source field using `slugify`. On record create/update, compute slug if source field changed. Enforce uniqueness. Test with diacritics: "Þórbergur Ögmundsson" → "thorbergur-ogmundsson".
 - [ ] **P0.10** GraphQL foundation: Yoga server on the Worker. Use Pothos `SchemaBuilder` with Drizzle plugin to dynamically generate object types from runtime Drizzle tables. Loop over CMS models, call `builder.drizzleObject()` for each. Implement `all{Model}` and `{model}` queries. Test: create model + records via REST, query via GraphQL, verify response shape.
@@ -243,6 +243,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 - **P0.4** Schema engine migration: `migrateTable()` diffs Drizzle table vs SQLite state → CREATE TABLE if missing, ALTER TABLE ADD/DROP COLUMN for changes. `dropTable()` for model removal. 8 tests: create, add columns, drop columns, data preservation, idempotency, block tables.
 - **P0.5** REST Models API: full CRUD (POST/GET/GET/:id/PATCH/DELETE) on `/api/models`. POST creates model + dynamic table via schema engine. DELETE does strict reference checking + drops table. 12 tests: creation, block models, duplicates, validation, listing, detail, update, deletion.
 - **P0.6** REST Fields API: full CRUD on `/api/models/:id/fields`. POST adds field + column to dynamic table. DELETE removes field + drops column. All v1 field types supported. Validators stored as JSON. 11 tests.
+- **P0.7** Strict model deletion: refuse DELETE if other models have link/links fields referencing this model. Tested with cross-model link reference.
 
 ---
 
