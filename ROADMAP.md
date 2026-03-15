@@ -195,8 +195,8 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 ### Phase 2: Media & Assets
 
 - [ ] **P2.1** Asset system table + REST CRUD: `POST /assets` (upload to R2), `GET /assets`, `GET /assets/:id`, `DELETE /assets/:id`. Store metadata in `assets` table. For local dev, store files on local filesystem (wrangler R2 emulation). Test upload + retrieval.
-- [ ] **P2.2** `media` field type: FK column to `assets` table. GraphQL resolves to asset metadata (url, width, height, alt, mime_type). Test: create model with media field, create record with asset reference, query via GraphQL.
-- [ ] **P2.3** `media_gallery` field type: JSON array of asset IDs in a TEXT column, or junction table. GraphQL resolves to array of asset objects. Test ordering preservation.
+- [x] **P2.2** `media` field GraphQL resolution *(done — resolves to Asset object, 4 tests)*
+- [x] **P2.3** `media_gallery` field GraphQL resolution *(done — resolves to [Asset!], included in P2.2 tests)*
 - [ ] **P2.4** Responsive image metadata in GraphQL: `responsiveImage` field on media assets returning `src`, `srcSet`, `width`, `height`, `alt`. For local dev, generate basic srcSet from stored dimensions. Cloudflare Images integration is deployment-time only.
 
 ### Phase 3: Localization

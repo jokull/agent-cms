@@ -156,7 +156,7 @@ describe("[SCHEMA:recipes] Recipe Site", () => {
         cook_time
         servings
         cuisine { name slug }
-        cover
+        cover { filename mimeType width height }
         steps {
           value
           blocks
@@ -173,7 +173,7 @@ describe("[SCHEMA:recipes] Recipe Site", () => {
     expect(r.servings).toBe(4);
     expect(r.cuisine.name).toBe("Italian");
     expect(r.cuisine.slug).toBe("italian");
-    expect(r.cover).toBe(asset.id); // Media field returns asset ID
+    expect(r.cover.filename).toBe("pasta.jpg"); // Media field resolves to asset object
 
     // StructuredText resolution
     expect(r.steps.value.schema).toBe("dast");

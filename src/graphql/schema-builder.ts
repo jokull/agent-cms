@@ -14,7 +14,8 @@ function fieldToSDL(
   typeNames: Map<string, string>
 ): string {
   switch (fieldType) {
-    case "string": case "text": case "slug": case "media": return "String";
+    case "string": case "text": case "slug": return "String";
+    case "media": return "Asset";
     case "boolean": return "Boolean";
     case "integer": return "Int";
     case "link": {
@@ -27,7 +28,7 @@ function fieldToSDL(
       if (targets?.length === 1 && typeNames.has(targets[0])) return `[${typeNames.get(targets[0])!}!]`;
       return "JSON";
     }
-    case "media_gallery": return "JSON";
+    case "media_gallery": return "[Asset!]";
     case "structured_text": return "StructuredText";
     default: return "String";
   }
@@ -138,6 +139,19 @@ export function buildGraphQLSchema(sqlLayer: any) {
 
     typeDefs.push("scalar JSON");
     typeDefs.push(`
+      type Asset {
+        id: ID!
+        filename: String!
+        mimeType: String!
+        size: Int!
+        width: Int
+        height: Int
+        alt: String
+        title: String
+        url: String!
+      }
+    `);
+    typeDefs.push(`
       """DatoCMS-compatible StructuredText response"""
       type StructuredText {
         value: JSON!
@@ -215,6 +229,51 @@ export function buildGraphQLSchema(sqlLayer: any) {
               ).filter(Boolean);
             };
           }
+        }
+        // Media field resolver: return asset metadata
+        if (f.field_type === "media") {
+          typeResolvers[f.api_key] = (parent: any) => {
+            const assetId = parent[f.api_key];
+            if (!assetId) return null;
+            return runSql(
+              Effect.gen(function* () {
+                const s = yield* SqlClient.SqlClient;
+                const rows = yield* s.unsafe<Record<string, any>>("SELECT * FROM assets WHERE id = ?", [assetId]);
+                if (rows.length === 0) return null;
+                const a = rows[0];
+                return {
+                  id: a.id, filename: a.filename, mimeType: a.mime_type,
+                  size: a.size, width: a.width, height: a.height,
+                  alt: a.alt, title: a.title,
+                  url: `/assets/${a.id}/${a.filename}`, // Local dev URL
+                };
+              })
+            );
+          };
+        }
+        // Media gallery resolver: return array of asset metadata
+        if (f.field_type === "media_gallery") {
+          typeResolvers[f.api_key] = (parent: any) => {
+            let ids = parent[f.api_key];
+            if (typeof ids === "string") { try { ids = JSON.parse(ids); } catch { return []; } }
+            if (!Array.isArray(ids)) return [];
+            return ids.map((assetId: string) =>
+              runSql(
+                Effect.gen(function* () {
+                  const s = yield* SqlClient.SqlClient;
+                  const rows = yield* s.unsafe<Record<string, any>>("SELECT * FROM assets WHERE id = ?", [assetId]);
+                  if (rows.length === 0) return null;
+                  const a = rows[0];
+                  return {
+                    id: a.id, filename: a.filename, mimeType: a.mime_type,
+                    size: a.size, width: a.width, height: a.height,
+                    alt: a.alt, title: a.title,
+                    url: `/assets/${a.id}/${a.filename}`,
+                  };
+                })
+              )
+            ).filter(Boolean);
+          };
         }
         // StructuredText resolver: return { value, blocks, links }
         if (f.field_type === "structured_text") {
