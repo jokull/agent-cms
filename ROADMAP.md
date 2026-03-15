@@ -190,7 +190,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 - [ ] **P1.8** Block-only StructuredText (modular content): A StructuredText field where the validator only allows `block` nodes at root level (no paragraph, heading, etc.). The DAST root.children should only contain `block` nodes. Test that prose is rejected.
 - [x] **P1.9** Draft/publish lifecycle *(done — 6 tests)*
 - [ ] **P1.10** GraphQL meta fields: `_createdAt`, `_updatedAt`, `_publishedAt`, `_firstPublishedAt`, `_status`, `_isValid` on all record types.
-- [ ] **P1.11** `[SCHEMA:marketing]` Marketing site integration test. Full schema with nested blocks (feature_grid → feature_card). Draft/publish cycle. Verify `{ value, blocks, links }` output is compatible with `datocms-structured-text-utils` `isBlock()`, `isStructuredText()` type guards.
+- [x] **P1.11** `[SCHEMA:marketing]` *(done — 110 tests total)*
 
 ### Phase 2: Media & Assets
 
