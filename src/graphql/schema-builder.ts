@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
 import { extractBlockIds } from "../dast/index.js";
 import type { ModelRow, FieldRow, AssetRow } from "../db/row-types.js";
+import { getLinkTargets, getLinksTargets } from "../db/validators.js";
 import { compileFilterToSql, compileOrderBy } from "./filter-compiler.js";
 
 function toTypeName(apiKey: string): string {
@@ -12,7 +13,7 @@ function toTypeName(apiKey: string): string {
 
 function fieldToSDL(
   fieldType: string,
-  validators: Record<string, any>,
+  validators: Record<string, unknown>,
   typeNames: Map<string, string>
 ): string {
   switch (fieldType) {
@@ -21,12 +22,12 @@ function fieldToSDL(
     case "boolean": return "Boolean";
     case "integer": return "Int";
     case "link": {
-      const targets = validators.item_item_type as string[] | undefined;
+      const targets = getLinkTargets(validators);
       if (targets?.length === 1 && typeNames.has(targets[0])) return typeNames.get(targets[0])!;
       return "JSON";
     }
     case "links": {
-      const targets = validators.items_item_type as string[] | undefined;
+      const targets = getLinksTargets(validators);
       if (targets?.length === 1 && typeNames.has(targets[0])) return `[${typeNames.get(targets[0])!}!]`;
       return "JSON";
     }
@@ -197,7 +198,7 @@ export function buildGraphQLSchema(sqlLayer: any) {
 
       for (const f of fields) {
         if (f.field_type === "link") {
-          const targets = f.validators.item_item_type;
+          const targets = getLinkTargets(f.validators);
           if (targets?.length === 1 && typeNames.has(targets[0])) {
             const targetTable = `content_${targets[0]}`;
             typeResolvers[f.api_key] = (parent: any) => {
@@ -214,7 +215,7 @@ export function buildGraphQLSchema(sqlLayer: any) {
           }
         }
         if (f.field_type === "links") {
-          const targets = f.validators.items_item_type;
+          const targets = getLinksTargets(f.validators);
           if (targets?.length === 1 && typeNames.has(targets[0])) {
             const targetTable = `content_${targets[0]}`;
             typeResolvers[f.api_key] = (parent: any) => {

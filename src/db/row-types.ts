@@ -97,10 +97,16 @@ export function isContentRow(row: unknown): row is ContentRow {
 
 /** Parse a FieldRow's validators from JSON string to object */
 export function parseFieldValidators(field: FieldRow): ParsedFieldRow {
-  return {
-    ...field,
-    validators: JSON.parse(field.validators || "{}") as Record<string, unknown>,
-  };
+  let validators: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(field.validators || "{}");
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      validators = parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Invalid JSON — use empty validators
+  }
+  return { ...field, validators };
 }
 
 /** Check if a content row's status indicates it's published */
@@ -112,7 +118,11 @@ export function isPublished(row: ContentRow): boolean {
 export function parseSnapshot(row: ContentRow): Record<string, unknown> | null {
   if (!row._published_snapshot) return null;
   try {
-    return JSON.parse(row._published_snapshot) as Record<string, unknown>;
+    const parsed: unknown = JSON.parse(row._published_snapshot);
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+    return null;
   } catch {
     return null;
   }

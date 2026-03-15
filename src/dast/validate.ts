@@ -1,11 +1,4 @@
-import type {
-  DastDocument,
-  RootNode,
-  BlockLevelNode,
-  InlineNode,
-  ListItemNode,
-  Mark,
-} from "./types.js";
+import type { DastDocument } from "./types.js";
 
 const VALID_MARKS: Set<string> = new Set([
   "strong", "emphasis", "underline", "strikethrough", "code", "highlight",
@@ -24,6 +17,25 @@ export interface ValidationError {
   message: string;
 }
 
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function getString(obj: Record<string, unknown>, key: string): string | undefined {
+  const v = obj[key];
+  return typeof v === "string" ? v : undefined;
+}
+
+function getNumber(obj: Record<string, unknown>, key: string): number | undefined {
+  const v = obj[key];
+  return typeof v === "number" ? v : undefined;
+}
+
+function getArray(obj: Record<string, unknown>, key: string): unknown[] | undefined {
+  const v = obj[key];
+  return Array.isArray(v) ? v : undefined;
+}
+
 /**
  * Validate a DAST document structure.
  * Returns an array of errors (empty = valid).
@@ -31,118 +43,128 @@ export interface ValidationError {
 export function validateDast(doc: unknown): ValidationError[] {
   const errors: ValidationError[] = [];
 
-  if (!doc || typeof doc !== "object") {
+  if (!isRecord(doc)) {
     errors.push({ path: "", message: "Document must be an object" });
     return errors;
   }
 
-  const d = doc as Record<string, unknown>;
-
-  if (d.schema !== "dast") {
+  if (doc.schema !== "dast") {
     errors.push({ path: "schema", message: 'schema must be "dast"' });
   }
 
-  if (!d.document || typeof d.document !== "object") {
+  if (!isRecord(doc.document)) {
     errors.push({ path: "document", message: "document is required and must be an object" });
     return errors;
   }
 
-  validateRoot(d.document as Record<string, unknown>, "document", errors);
+  validateRoot(doc.document, "document", errors);
   return errors;
 }
 
-function validateRoot(node: any, path: string, errors: ValidationError[]) {
+function validateRoot(node: Record<string, unknown>, path: string, errors: ValidationError[]) {
   if (node.type !== "root") {
     errors.push({ path, message: 'Root node must have type "root"' });
     return;
   }
 
-  if (!Array.isArray(node.children)) {
+  const children = getArray(node, "children");
+  if (!children) {
     errors.push({ path: `${path}.children`, message: "Root children must be an array" });
     return;
   }
 
-  for (let i = 0; i < node.children.length; i++) {
-    validateBlockLevelNode(node.children[i], `${path}.children[${i}]`, errors);
+  for (let i = 0; i < children.length; i++) {
+    validateBlockLevelNode(children[i], `${path}.children[${i}]`, errors);
   }
 }
 
-function validateBlockLevelNode(node: any, path: string, errors: ValidationError[]) {
-  if (!node || typeof node !== "object") {
+function validateBlockLevelNode(node: unknown, path: string, errors: ValidationError[]) {
+  if (!isRecord(node)) {
     errors.push({ path, message: "Block-level node must be an object" });
     return;
   }
 
-  if (!VALID_BLOCK_LEVEL_TYPES.has(node.type)) {
-    errors.push({ path, message: `Invalid block-level node type: "${node.type}". Must be one of: ${[...VALID_BLOCK_LEVEL_TYPES].join(", ")}` });
+  const type = getString(node, "type");
+  if (!type || !VALID_BLOCK_LEVEL_TYPES.has(type)) {
+    errors.push({ path, message: `Invalid block-level node type: "${type ?? "unknown"}". Must be one of: ${[...VALID_BLOCK_LEVEL_TYPES].join(", ")}` });
     return;
   }
 
-  switch (node.type) {
+  switch (type) {
     case "paragraph":
       validateInlineChildren(node, path, errors);
       break;
-    case "heading":
-      if (typeof node.level !== "number" || node.level < 1 || node.level > 6) {
+    case "heading": {
+      const level = getNumber(node, "level");
+      if (level === undefined || level < 1 || level > 6) {
         errors.push({ path: `${path}.level`, message: "Heading level must be 1-6" });
       }
       validateInlineChildren(node, path, errors);
       break;
-    case "list":
-      if (node.style !== "bulleted" && node.style !== "numbered") {
+    }
+    case "list": {
+      const style = getString(node, "style");
+      if (style !== "bulleted" && style !== "numbered") {
         errors.push({ path: `${path}.style`, message: 'List style must be "bulleted" or "numbered"' });
       }
-      if (!Array.isArray(node.children)) {
+      const children = getArray(node, "children");
+      if (!children) {
         errors.push({ path: `${path}.children`, message: "List children must be an array" });
       } else {
-        for (let i = 0; i < node.children.length; i++) {
-          validateListItem(node.children[i], `${path}.children[${i}]`, errors);
+        for (let i = 0; i < children.length; i++) {
+          validateListItem(children[i], `${path}.children[${i}]`, errors);
         }
       }
       break;
-    case "blockquote":
-      if (!Array.isArray(node.children)) {
+    }
+    case "blockquote": {
+      const children = getArray(node, "children");
+      if (!children) {
         errors.push({ path: `${path}.children`, message: "Blockquote children must be an array" });
       } else {
-        for (let i = 0; i < node.children.length; i++) {
-          if (node.children[i]?.type !== "paragraph") {
+        for (let i = 0; i < children.length; i++) {
+          const child = children[i];
+          if (!isRecord(child) || child.type !== "paragraph") {
             errors.push({ path: `${path}.children[${i}]`, message: "Blockquote children must be paragraphs" });
           } else {
-            validateInlineChildren(node.children[i], `${path}.children[${i}]`, errors);
+            validateInlineChildren(child, `${path}.children[${i}]`, errors);
           }
         }
       }
       break;
+    }
     case "code":
       if (typeof node.code !== "string") {
         errors.push({ path: `${path}.code`, message: "Code node must have a code string" });
       }
       break;
     case "thematicBreak":
-      // No additional validation needed
       break;
-    case "block":
-      if (typeof node.item !== "string" || !node.item) {
+    case "block": {
+      const item = getString(node, "item");
+      if (!item) {
         errors.push({ path: `${path}.item`, message: "Block node must have an item ID string" });
       }
       break;
+    }
   }
 }
 
-function validateListItem(node: any, path: string, errors: ValidationError[]) {
-  if (!node || node.type !== "listItem") {
+function validateListItem(node: unknown, path: string, errors: ValidationError[]) {
+  if (!isRecord(node) || node.type !== "listItem") {
     errors.push({ path, message: 'List item must have type "listItem"' });
     return;
   }
-  if (!Array.isArray(node.children)) {
+  const children = getArray(node, "children");
+  if (!children) {
     errors.push({ path: `${path}.children`, message: "ListItem children must be an array" });
     return;
   }
-  for (let i = 0; i < node.children.length; i++) {
-    const child = node.children[i];
-    if (child?.type === "paragraph") {
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i];
+    if (isRecord(child) && child.type === "paragraph") {
       validateInlineChildren(child, `${path}.children[${i}]`, errors);
-    } else if (child?.type === "list") {
+    } else if (isRecord(child) && child.type === "list") {
       validateBlockLevelNode(child, `${path}.children[${i}]`, errors);
     } else {
       errors.push({ path: `${path}.children[${i}]`, message: "ListItem children must be paragraph or list" });
@@ -150,38 +172,41 @@ function validateListItem(node: any, path: string, errors: ValidationError[]) {
   }
 }
 
-function validateInlineChildren(node: any, path: string, errors: ValidationError[]) {
-  if (!Array.isArray(node.children)) {
+function validateInlineChildren(node: Record<string, unknown>, path: string, errors: ValidationError[]) {
+  const children = getArray(node, "children");
+  if (!children) {
     errors.push({ path: `${path}.children`, message: "Node children must be an array" });
     return;
   }
-  for (let i = 0; i < node.children.length; i++) {
-    validateInlineNode(node.children[i], `${path}.children[${i}]`, errors);
+  for (let i = 0; i < children.length; i++) {
+    validateInlineNode(children[i], `${path}.children[${i}]`, errors);
   }
 }
 
-function validateInlineNode(node: any, path: string, errors: ValidationError[]) {
-  if (!node || typeof node !== "object") {
+function validateInlineNode(node: unknown, path: string, errors: ValidationError[]) {
+  if (!isRecord(node)) {
     errors.push({ path, message: "Inline node must be an object" });
     return;
   }
 
-  if (!VALID_INLINE_TYPES.has(node.type)) {
-    errors.push({ path, message: `Invalid inline node type: "${node.type}"` });
+  const type = getString(node, "type");
+  if (!type || !VALID_INLINE_TYPES.has(type)) {
+    errors.push({ path, message: `Invalid inline node type: "${type ?? "unknown"}"` });
     return;
   }
 
-  switch (node.type) {
+  switch (type) {
     case "span":
       if (typeof node.value !== "string") {
         errors.push({ path: `${path}.value`, message: "Span must have a value string" });
       }
-      if (node.marks) {
-        if (!Array.isArray(node.marks)) {
+      if (node.marks !== undefined) {
+        const marks = getArray(node, "marks");
+        if (!marks) {
           errors.push({ path: `${path}.marks`, message: "Marks must be an array" });
         } else {
-          for (const mark of node.marks) {
-            if (!VALID_MARKS.has(mark)) {
+          for (const mark of marks) {
+            if (typeof mark !== "string" || !VALID_MARKS.has(mark)) {
               errors.push({ path: `${path}.marks`, message: `Invalid mark: "${mark}"` });
             }
           }
@@ -194,48 +219,45 @@ function validateInlineNode(node: any, path: string, errors: ValidationError[]) 
       }
       validateInlineChildren(node, path, errors);
       break;
-    case "itemLink":
-      if (typeof node.item !== "string" || !node.item) {
-        errors.push({ path: `${path}.item`, message: "ItemLink must have an item ID string" });
-      }
+    case "itemLink": {
+      const item = getString(node, "item");
+      if (!item) errors.push({ path: `${path}.item`, message: "ItemLink must have an item ID string" });
       validateInlineChildren(node, path, errors);
       break;
-    case "inlineItem":
-      if (typeof node.item !== "string" || !node.item) {
-        errors.push({ path: `${path}.item`, message: "InlineItem must have an item ID string" });
-      }
+    }
+    case "inlineItem": {
+      const item = getString(node, "item");
+      if (!item) errors.push({ path: `${path}.item`, message: "InlineItem must have an item ID string" });
       break;
-    case "inlineBlock":
-      if (typeof node.item !== "string" || !node.item) {
-        errors.push({ path: `${path}.item`, message: "InlineBlock must have an item ID string" });
-      }
+    }
+    case "inlineBlock": {
+      const item = getString(node, "item");
+      if (!item) errors.push({ path: `${path}.item`, message: "InlineBlock must have an item ID string" });
       break;
+    }
   }
 }
 
 /**
  * Validate that a DAST document only contains block nodes at root level.
- * Used for "modular content" / page-builder fields where prose is not allowed.
- * Returns an array of errors (empty = valid).
  */
 export function validateBlocksOnly(doc: unknown): ValidationError[] {
   const errors: ValidationError[] = [];
 
-  if (!doc || typeof doc !== "object") {
+  if (!isRecord(doc)) {
     errors.push({ path: "", message: "Document must be an object" });
     return errors;
   }
 
-  const d = doc as Record<string, unknown>;
-  const document = d.document as Record<string, unknown> | undefined;
-  if (!document?.children || !Array.isArray(document.children)) {
-    return errors; // Let validateDast catch structural issues
-  }
+  const document = isRecord(doc.document) ? doc.document : undefined;
+  if (!document) return errors;
 
-  const children = document.children as unknown[];
+  const children = getArray(document, "children");
+  if (!children) return errors;
+
   for (let i = 0; i < children.length; i++) {
-    const child = children[i] as Record<string, unknown> | undefined;
-    if (child?.type !== "block") {
+    const child = isRecord(children[i]) ? (children[i] as Record<string, unknown>) : undefined;
+    if (!child || child.type !== "block") {
       errors.push({
         path: `document.children[${i}]`,
         message: `Only block nodes are allowed at root level in a blocks-only field. Found "${child?.type ?? "unknown"}" node.`,
@@ -248,7 +270,6 @@ export function validateBlocksOnly(doc: unknown): ValidationError[] {
 
 /**
  * Extract all block IDs referenced in a DAST document.
- * Finds all `block` and `inlineBlock` node `item` values.
  */
 export function extractBlockIds(doc: DastDocument): string[] {
   const ids: string[] = [];
@@ -256,20 +277,19 @@ export function extractBlockIds(doc: DastDocument): string[] {
   return ids;
 }
 
-function walkNodes(nodes: any[], ids: string[]) {
+function walkNodes(nodes: unknown[], ids: string[]) {
   for (const node of nodes) {
-    if (node.type === "block" || node.type === "inlineBlock") {
-      if (node.item) ids.push(node.item);
+    if (!isRecord(node)) continue;
+    if ((node.type === "block" || node.type === "inlineBlock") && typeof node.item === "string") {
+      ids.push(node.item);
     }
-    if (Array.isArray(node.children)) {
-      walkNodes(node.children, ids);
-    }
+    const children = getArray(node, "children");
+    if (children) walkNodes(children, ids);
   }
 }
 
 /**
  * Extract all record link IDs referenced in a DAST document.
- * Finds all `itemLink` and `inlineItem` node `item` values.
  */
 export function extractLinkIds(doc: DastDocument): string[] {
   const ids: string[] = [];
@@ -277,13 +297,13 @@ export function extractLinkIds(doc: DastDocument): string[] {
   return ids;
 }
 
-function walkLinkNodes(nodes: any[], ids: string[]) {
+function walkLinkNodes(nodes: unknown[], ids: string[]) {
   for (const node of nodes) {
-    if (node.type === "itemLink" || node.type === "inlineItem") {
-      if (node.item) ids.push(node.item);
+    if (!isRecord(node)) continue;
+    if ((node.type === "itemLink" || node.type === "inlineItem") && typeof node.item === "string") {
+      ids.push(node.item);
     }
-    if (Array.isArray(node.children)) {
-      walkLinkNodes(node.children, ids);
-    }
+    const children = getArray(node, "children");
+    if (children) walkLinkNodes(children, ids);
   }
 }

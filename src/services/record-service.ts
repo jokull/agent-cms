@@ -12,7 +12,8 @@ import {
 } from "../schema-engine/sql-records.js";
 import { writeStructuredText, deleteBlocksForField } from "./structured-text-service.js";
 import type { ModelRow, FieldRow, ParsedFieldRow, ContentRow } from "../db/row-types.js";
-import { parseFieldValidators } from "../db/row-types.js";
+import { parseFieldValidators, isContentRow } from "../db/row-types.js";
+import { getSlugSource, getBlockWhitelist, getBlocksOnly, isRequired } from "../db/validators.js";
 
 function getModelByApiKey(apiKey: string) {
   return Effect.gen(function* () {
@@ -60,8 +61,7 @@ export function createRecord(body: unknown) {
 
     // Validate required fields
     for (const field of modelFields) {
-      const validators = field.validators;
-      if (validators.required && (data[field.api_key] === undefined || data[field.api_key] === null || data[field.api_key] === ""))
+      if (isRequired(field.validators) && (data[field.api_key] === undefined || data[field.api_key] === null || data[field.api_key] === ""))
         return yield* new ValidationError({ message: `Field '${field.api_key}' is required`, field: field.api_key });
     }
 
@@ -80,8 +80,8 @@ export function createRecord(body: unknown) {
       if (field.field_type === "structured_text" && data[field.api_key] !== undefined) {
         const stInput = data[field.api_key];
         if (isStructuredTextInput(stInput)) {
-          const allowedBlockTypes = field.validators?.structured_text_blocks as string[] | undefined;
-          const blocksOnly = field.validators?.blocks_only as boolean | undefined;
+          const allowedBlockTypes = getBlockWhitelist(field.validators);
+          const blocksOnly = getBlocksOnly(field.validators);
 
           const dast = yield* writeStructuredText({
             fieldApiKey: field.api_key,
@@ -97,8 +97,8 @@ export function createRecord(body: unknown) {
       }
 
       if (field.field_type === "slug") {
-        const sourceFieldKey = field.validators?.slug_source;
-        if (!data[field.api_key] && typeof sourceFieldKey === "string" && data[sourceFieldKey]) {
+        const sourceFieldKey = getSlugSource(field.validators);
+        if (!data[field.api_key] && sourceFieldKey && data[sourceFieldKey]) {
           data[field.api_key] = generateSlug(String(data[sourceFieldKey]));
         } else if (data[field.api_key]) {
           data[field.api_key] = generateSlug(String(data[field.api_key]));
@@ -169,8 +169,7 @@ export function patchRecord(id: string, body: unknown) {
     const updates: Record<string, unknown> = { _updated_at: new Date().toISOString() };
 
     // Status transition: published → updated on edit
-    const existingRow = existing as ContentRow;
-    if (existingRow._status === "published") {
+    if (isContentRow(existing) && existing._status === "published") {
       updates._status = "updated";
     }
 
@@ -182,8 +181,8 @@ export function patchRecord(id: string, body: unknown) {
         if (isStructuredTextInput(stInput)) {
           yield* deleteBlocksForField({ rootRecordId: id, fieldApiKey: field.api_key });
 
-          const allowedBlockTypes = field.validators?.structured_text_blocks as string[] | undefined;
-          const blocksOnly = field.validators?.blocks_only as boolean | undefined;
+          const allowedBlockTypes = getBlockWhitelist(field.validators);
+          const blocksOnly = getBlocksOnly(field.validators);
 
           const dast = yield* writeStructuredText({
             fieldApiKey: field.api_key,
