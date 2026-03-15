@@ -165,7 +165,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 
 - [x] **P0.1** Scaffold project *(done)*
 - [x] **P0.2** System tables + tests *(done)*
-- [ ] **P0.3** Schema engine core: given rows from `models` + `fields` tables, generate Drizzle `sqliteTable()` definitions programmatically. Start with `string`, `text`, `boolean`, `integer` field types only. Implement as an Effect service (`SchemaEngine`) with typed errors. Write unit tests: define a model with fields in system tables → generate Drizzle table → verify column names and types. → [C1, C5]
+- [x] **P0.3** Schema engine core + DDL creation *(done)*
 - [ ] **P0.4** Schema engine DDL: given generated Drizzle tables, diff against current D1 state and emit + execute `CREATE TABLE` / `ALTER TABLE` DDL. Test: create a model, run migration, verify table exists. Add a field, run migration, verify column added. Remove a field, run migration, verify column dropped. → [C1, C2]
 - [ ] **P0.5** REST framework: set up Hono for the management API. Implement `POST /models` and `GET /models`. On model creation: insert into system tables → run schema engine → verify content table created. Use Effect for the handler pipeline (validation → DB → schema engine → response). Write integration test.
 - [ ] **P0.6** REST fields CRUD: `POST /models/:id/fields`, `GET /models/:id/fields`, `PATCH /fields/:id`, `DELETE /fields/:id`. Each mutation triggers schema engine. Test: add field → column appears, remove field → column gone.
@@ -239,6 +239,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 
 - **P0.1** Scaffold project: Hono + Effect + Drizzle 1.0 beta + Yoga + Vitest + ulidx + slugify. `wrangler.toml` with local D1. Health check endpoint + test passing. `wrangler dev` confirmed working.
 - **P0.2** System tables (models, fields, fieldsets, locales, assets) in Drizzle. Migration generated. 10 tests: CRUD, cascade deletes, JSON columns, unique constraints, locale fallback chains.
+- **P0.3** Schema engine: `generateSchema()` reads model/field metadata → produces Drizzle `sqliteTable()` definitions. `createTableFromSchema()` generates DDL and creates tables. All v1 field types mapped. 12 tests: content tables, block tables, JSON roundtrips, multi-table isolation.
 
 ---
 
