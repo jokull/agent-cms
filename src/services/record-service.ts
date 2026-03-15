@@ -10,6 +10,7 @@ import {
   updateRecord as sqlUpdateRecord,
   deleteRecord as sqlDeleteRecord,
 } from "../schema-engine/sql-records.js";
+import { writeStructuredText, deleteBlocksForField } from "./structured-text-service.js";
 
 function getModelByApiKey(apiKey: string) {
   return Effect.gen(function* () {
@@ -75,6 +76,26 @@ export function createRecord(body: any) {
 
     // Process fields
     for (const field of modelFields) {
+      // StructuredText: validate DAST + write blocks
+      if (field.field_type === "structured_text" && data[field.api_key] !== undefined) {
+        const stInput = data[field.api_key];
+        if (stInput && typeof stInput === "object" && stInput.value) {
+          // Get allowed block types from validators
+          const allowedBlockTypes = field.validators?.structured_text_blocks as string[] | undefined;
+
+          const dast = yield* writeStructuredText({
+            fieldApiKey: field.api_key,
+            rootRecordId: id,
+            value: stInput.value,
+            blocks: stInput.blocks ?? {},
+            allowedBlockTypes,
+          });
+
+          // Store just the DAST document as JSON
+          data[field.api_key] = dast;
+        }
+      }
+
       if (field.field_type === "slug") {
         const sourceFieldKey = field.validators?.slug_source;
         if (!data[field.api_key] && sourceFieldKey && data[sourceFieldKey]) {

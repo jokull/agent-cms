@@ -182,7 +182,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 
 - [x] **P1.1** Block type support *(done — already works from P0.5, verified with 3 new tests)*
 - [x] **P1.2** DAST validation *(done — 22 tests)*
-- [ ] **P1.3** StructuredText write orchestration: REST accepts `{ value: <DAST>, blocks: { <ulid>: { type: "hero_section", fields: {...} }, ... } }`. Server validates DAST, validates block data against block type fields, writes block rows to `block_*` tables, writes DAST JSON to content table column. All in one transaction. Test with a simple block.
+- [x] **P1.3** StructuredText write orchestration *(done — 5 tests)*
 - [ ] **P1.4** StructuredText update + orphan cleanup: On update, diff old vs new DAST, identify removed block IDs, delete them (recursively if nested). Test: create record with 3 blocks, update to 2 blocks, verify orphan deleted.
 - [ ] **P1.5** GraphQL StructuredText resolution: Return `{ value, blocks, links }`. Walk DAST, collect block IDs by type, batch-fetch from `block_*` tables, return as typed union. Test with a field containing two different block types.
 - [ ] **P1.6** Nested blocks: A block type with a StructuredText field that itself allows blocks. Test recursive resolution: content record → block A (has ST field) → block B (inside A's ST). Verify GraphQL returns the full nested `{ value, blocks }` structure.
