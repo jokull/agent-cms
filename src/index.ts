@@ -4,6 +4,7 @@ import type { Env } from "./types.js";
 import * as schema from "./db/schema.js";
 import { modelsApi } from "./api/models.js";
 import { fieldsApi } from "./api/fields.js";
+import { recordsApi } from "./api/records.js";
 
 const app = new Hono<{ Bindings: Env; Variables: { db: any } }>();
 
@@ -20,5 +21,6 @@ app.use("/api/*", async (c, next) => {
 // REST Management API
 app.route("/api/models", modelsApi);
 app.route("/api/models/:modelId/fields", fieldsApi);
+app.route("/api/records", recordsApi);
 
 export default app;

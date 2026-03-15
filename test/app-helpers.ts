@@ -5,6 +5,7 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import * as schema from "../src/db/schema.js";
 import { modelsApi } from "../src/api/models.js";
 import { fieldsApi } from "../src/api/fields.js";
+import { recordsApi } from "../src/api/records.js";
 
 /**
  * Create a test app with an in-memory SQLite database.
@@ -28,6 +29,7 @@ export function createTestApp() {
   app.get("/health", (c) => c.json({ status: "ok" }));
   app.route("/api/models", modelsApi);
   app.route("/api/models/:modelId/fields", fieldsApi);
+  app.route("/api/records", recordsApi);
 
   return { app, db };
 }
