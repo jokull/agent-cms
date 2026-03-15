@@ -1,29 +1,30 @@
 import { Hono } from "hono";
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import { migrate } from "drizzle-orm/better-sqlite3/migrator";
-import * as schema from "../src/db/schema.js";
+import { Effect, Layer } from "effect";
+import { SqlClient } from "@effect/sql";
+import { SqliteClient } from "@effect/sql-sqlite-node";
 import { modelsApi } from "../src/api/models.js";
 import { fieldsApi } from "../src/api/fields.js";
 import { recordsApi } from "../src/api/records.js";
 import { createGraphQLHandler } from "../src/graphql/handler.js";
+import { runMigrations } from "../src/db/migrate.js";
 
 /**
- * Create a test app with an in-memory SQLite database.
- * Returns the Hono app and the Drizzle DB instance for direct inspection.
+ * Create a test app with an in-memory SQLite database via @effect/sql.
+ * Returns the Hono app and the SQL layer for direct inspection.
  */
 export function createTestApp() {
-  const sqlite = new Database(":memory:");
-  sqlite.pragma("journal_mode = WAL");
-  sqlite.pragma("foreign_keys = ON");
-  const db = drizzle(sqlite, { schema });
-  migrate(db, { migrationsFolder: "./drizzle" });
+  const sqlLayer = SqliteClient.layer({ filename: ":memory:" });
+
+  // Run migrations synchronously at setup time
+  Effect.runSync(
+    runMigrations("./drizzle").pipe(Effect.provide(sqlLayer))
+  );
 
   const app = new Hono();
 
-  // Inject DB into context (same pattern as production but with better-sqlite3)
+  // Inject SQL layer into Hono context
   app.use("*", async (c, next) => {
-    c.set("db", db);
+    c.set("sqlLayer", sqlLayer);
     await next();
   });
 
@@ -32,14 +33,15 @@ export function createTestApp() {
   app.route("/api/models/:modelId/fields", fieldsApi);
   app.route("/api/records", recordsApi);
 
-  // GraphQL endpoint
-  const yoga = createGraphQLHandler(db);
+  // GraphQL endpoint (uses @effect/sql via the layer)
   app.all("/graphql", async (c) => {
-    const response = await yoga.handle(c.req.raw);
+    // Build the handler with the sql layer for resolvers
+    const handler = createGraphQLHandler(sqlLayer);
+    const response = await handler(c.req.raw);
     return response;
   });
 
-  return { app, db };
+  return { app, sqlLayer };
 }
 
 /** Helper to execute a GraphQL query */

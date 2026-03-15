@@ -1,20 +1,20 @@
 import { Hono } from "hono";
-import { drizzle } from "drizzle-orm/d1";
+import { D1Client } from "@effect/sql-d1";
 import type { Env } from "./types.js";
-import * as schema from "./db/schema.js";
 import { modelsApi } from "./api/models.js";
 import { fieldsApi } from "./api/fields.js";
 import { recordsApi } from "./api/records.js";
+import { createGraphQLHandler } from "./graphql/handler.js";
 
-const app = new Hono<{ Bindings: Env; Variables: { db: any } }>();
+const app = new Hono<{ Bindings: Env; Variables: { sqlLayer: any } }>();
 
 // Health check (no DB needed)
 app.get("/health", (c) => c.json({ status: "ok" }));
 
-// DB middleware for API routes only
+// DB middleware: create @effect/sql-d1 layer from D1 binding
 app.use("/api/*", async (c, next) => {
-  const db = drizzle(c.env.DB, { schema });
-  c.set("db", db);
+  const sqlLayer = D1Client.layer({ db: c.env.DB });
+  c.set("sqlLayer", sqlLayer);
   await next();
 });
 
@@ -22,5 +22,12 @@ app.use("/api/*", async (c, next) => {
 app.route("/api/models", modelsApi);
 app.route("/api/models/:modelId/fields", fieldsApi);
 app.route("/api/records", recordsApi);
+
+// GraphQL Content Delivery API
+app.all("/graphql", async (c) => {
+  const sqlLayer = D1Client.layer({ db: c.env.DB });
+  const handler = createGraphQLHandler(sqlLayer);
+  return handler(c.req.raw);
+});
 
 export default app;

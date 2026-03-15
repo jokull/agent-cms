@@ -152,18 +152,26 @@ Milestone: after localization and media gallery work.
 
 ## In Progress
 
-**P0.10a** @effect/sql migration — IN PROGRESS
+**P0.10a** Full Effect migration — IN PROGRESS
+
+Architecture: Effect is the COMPLETE runtime. Drop Hono, use @effect/platform HttpRouter.
 
 Done so far:
-- `src/schema-engine/sql-ddl.ts`: Effect-based DDL operations (create/migrate/drop tables, add/drop columns)
-- `src/schema-engine/sql-records.ts`: Effect-based record CRUD (insert, select, update, delete with JSON serialization)
-- Tests passing with `@effect/sql-sqlite-node` `:memory:` layer
+- `src/schema-engine/sql-ddl.ts`: Effect-based DDL (create/migrate/drop tables)
+- `src/schema-engine/sql-records.ts`: Effect-based record CRUD (insert/select/update/delete)
+- `src/db/migrate.ts`: Migration runner via @effect/sql (replaces Drizzle migrator)
+- `src/services/model-service.ts`: Model CRUD as Effect pipelines with @effect/sql
+- `src/services/field-service.ts`: Field CRUD as Effect pipelines with @effect/sql
+- `src/services/record-service.ts`: Record CRUD as Effect pipelines with @effect/sql
+- `src/graphql/schema-builder.ts`: Rewritten to use @effect/sql for all queries
+- Tests for @effect/sql DDL + records passing independently
 
-Remaining:
-- Wire REST API handlers (models, fields, records) to use `sql-ddl.ts` and `sql-records.ts` instead of the Drizzle-based `generateSchema()` + `migrateTable()` for dynamic tables
-- Wire GraphQL resolvers to use `sql-records.ts` instead of Drizzle dynamic table queries
-- Remove Drizzle-based dynamic table code (`generate.ts`, `ddl.ts`, `migrate.ts`, `field-mapper.ts`)
-- Update test helpers to provide `SqlClient.SqlClient` layer alongside Drizzle for system tables
+In progress:
+- Replace Hono with @effect/platform HttpRouter — earlier attempt had `toWebHandler` issues, need to debug properly using community patterns (see Discord thread saved in decisions)
+- Fix `runEffect` error handling — SqlError from @effect/sql not handled by `errorToResponse`
+- Wire everything together: services → HTTP handlers → tests
+
+Key reference: github.com/kriegcloud/beep-effect — community example of Effect + @effect/sql + Drizzle (for migrations only) pattern. Uses EntityId, Model.Class, SqlSchema, custom Repo base.
 
 ---
 
