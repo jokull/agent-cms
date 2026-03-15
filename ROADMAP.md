@@ -11,17 +11,16 @@ See [DECISIONS.md](./DECISIONS.md) for the full canonical record of all product 
 
 | Layer | Choice |
 |---|---|
-| Application framework | Effect (typed errors, DI, structured concurrency) |
-| Runtime | Cloudflare Workers |
-| Database | D1 (SQLite) |
-| ORM | Drizzle 1.0 beta (with Effect integration) |
-| GraphQL schema | Pothos (`@pothos/core` + Drizzle plugin) |
-| GraphQL server | Yoga (consumer API) |
-| Editor API | REST / Hono (management API for MCP/agents) |
+| Runtime framework | **Effect** — the complete runtime (HTTP, SQL, validation, DI, errors) |
+| HTTP | `@effect/platform` HttpRouter → CF Worker `fetch` handler |
+| System tables | Drizzle 1.0 beta (static, typed) |
+| Dynamic tables | `@effect/sql` template literals (`@effect/sql-d1` prod, `@effect/sql-sqlite-node` test) |
+| GraphQL | Yoga + SDL `createSchema()` (consumer API) |
+| Hosting | Cloudflare Workers + D1 + R2 + KV |
 | Assets | R2 storage + Cloudflare Images transforms |
 | IDs | ULID via `ulidx` (time-sortable, 26 chars) |
-| Validation | `@effect/schema` |
-| Tests | Vitest |
+| Validation | `Schema` from `effect` package |
+| Tests | Vitest + `@effect/vitest` |
 | Slugs | `slugify` (simov/slugify) |
 | Rich text | StructuredText / DAST only (no separate modular content type) |
 
@@ -32,10 +31,10 @@ These are settled. Do not revisit without explicit instruction.
 - **Table-per-model**: Each CMS model → real SQLite table (`content_{api_key}`). Each block type → `block_{api_key}` table, shared globally.
 - **StructuredText is the only block-containing field type**. "Modular content" (page builder) = StructuredText with a block-only validator whitelist (no prose nodes).
 - **Block ownership**: Blocks store `_root_record_id` FK (CASCADE) + `_root_field_api_key`. DAST JSON encodes the hierarchy — no polymorphic parent FK.
-- **Effect everywhere**: Typed errors, dependency injection (Layers for dynamic Drizzle/GraphQL schemas), structured concurrency for transactional block writes. Drizzle 1.0 Effect integration for native composability.
-- **Pothos for GraphQL**: Code-first schema builder with Drizzle plugin, Relay connections, dataloader. Dynamically generated from CMS metadata in loops over `builder.drizzleObject()` / `builder.unionType()`.
-- **`@effect/schema` for validation**: Replaces Zod. DAST validation, record validation, REST input validation — all produce typed, recoverable errors in the Effect channel.
-- **Schema engine**: System tables (`models`, `fields`) are the meta-schema. On startup, read them → generate Drizzle table definitions programmatically → feed to Pothos → build GraphQL schema. Cache schema descriptor in KV. → [C1, C5]
+- **Effect is the runtime**: Not just a utility — Effect handles HTTP (`@effect/platform` HttpRouter, replaces Hono), SQL (`@effect/sql` for dynamic tables), validation (`Schema`), DI (Layers), and typed errors. The most important layers (dynamic schemas, content tables) have no static type safety, so Effect provides the runtime safety net.
+- **Drizzle for system tables only**: Static, typed queries against `models`, `fields`, `locales`, `assets`. No Drizzle for dynamic content/block tables.
+- **`@effect/sql` for dynamic tables**: `SqlClient` template literals for all content/block table operations (CREATE TABLE, INSERT, SELECT, etc.). `@effect/sql-d1` in production, `@effect/sql-sqlite-node` in tests — same interface, swapped via Layer.
+- **Schema engine**: System tables read via Drizzle → DDL generated and executed via `@effect/sql` → GraphQL schema built via SDL + Yoga. → [C1, C5]
 - **Draft/publish**: Single row per record. `_published_snapshot` JSON column holds the published state. Real columns = draft. `includeDrafts` toggles which the GraphQL resolver reads. → [C10]
 - **Strict references**: Refuse to delete models/fields/blocks that are referenced elsewhere. Return clear error.
 - **Client-generated ULIDs**: Agents provide block IDs in DAST + block payloads. Server validates they match.
@@ -174,7 +173,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 - [x] **P0.9** Slug field with diacritics and uniqueness *(done)*
 - [x] **P0.10** GraphQL foundation *(done — SDL-based, working)*
 - [x] **P0.10** GraphQL foundation *(done)*
-- [ ] **P0.10a** **Effect refactor**: Refactor existing code to use Effect before adding more features. This is tech debt from P0.3-P0.10. Targets: (1) SchemaEngine as Effect service with typed errors, (2) RecordService with Effect.Schema validation replacing ad-hoc if-checks, (3) Hono handler wrapper that runs Effect pipelines and maps typed errors to HTTP responses, (4) Typed error types: SchemaEngineError, ValidationError, ReferenceConflictError, NotFoundError. See decisions D43-D47.
+- [ ] **P0.10a** **Effect platform migration**: Replace Hono with `@effect/platform` HttpRouter. Replace Drizzle for dynamic tables with `@effect/sql` template literals. Keep Drizzle for system tables only. Use `@effect/sql-sqlite-node` for tests. All HTTP routes become Effect pipelines. Typed errors map to HTTP responses via `Effect.catchTags`. `SqlClient.SqlClient` injected via Layer (D1 prod, sqlite-node test). This is the foundational refactor — everything after this builds on Effect-native patterns. See D43-D48.
 - [x] **P0.11** GraphQL filtering + ordering *(done)*
 - [x] **P0.12** Link fields with GraphQL resolution *(done)*
 - [x] **P0.13** `[SCHEMA:blog]` integration test *(done — 100 tests passing)*
@@ -259,24 +258,26 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 ## Architecture Reference
 
 ```
-MCP Tools → REST (Hono) → Effect pipeline → Schema Engine → D1 (SQLite)
-                                                                ↓
-                                                    Drizzle (runtime-built from system tables)
-                                                                ↓
-                                                    Pothos (dynamic GraphQL schema from Drizzle)
-                                                                ↓
+MCP Tools → REST (@effect/platform HttpRouter) → Effect pipelines → D1 (SQLite)
+                                                                        ↓
+                                                    System tables: Drizzle (static, typed)
+                                                    Dynamic tables: @effect/sql (runtime SQL)
+                                                                        ↓
+                                                    GraphQL schema (SDL + Yoga createSchema)
+                                                                        ↓
                                                     Yoga (GraphQL Content Delivery API)
 
 Storage: R2 (assets) · KV (schema cache) · D1 (everything else)
-Tables:  system (models, fields, locales, assets) + dynamic (content_*, block_*)
-Effect:  Typed errors · Layer DI · @effect/schema validation · Drizzle integration
+Tables:  system (Drizzle) + dynamic content_*/block_* (@effect/sql)
+Runtime: Effect everywhere — HTTP, SQL, validation, DI, typed errors
+Test:    @effect/sql-sqlite-node ":memory:" (same SqlClient interface as D1)
 ```
 
 **API split:** GraphQL for consumers (read), REST for editors/agents (write). Mirrors DatoCMS CDA vs CMA.
 
-**Effect architecture:** All operations are Effect pipelines with typed errors. Services (SchemaEngine, DrizzleSchema, GraphQLSchema, D1 binding) are provided via Layers. Schema changes rebuild the Drizzle and Pothos layers and swap them.
+**Effect is the runtime:** HTTP routes are Effect pipelines via `@effect/platform` HttpRouter. `SqlClient.SqlClient` is the database service (D1 or sqlite-node, swapped via Layer). `Schema` validates all inputs. Typed errors (`NotFoundError`, `ValidationError`, etc.) automatically map to HTTP responses.
 
-**Schema lifecycle:** REST mutation → Effect pipeline → update system tables → schema engine diffs → DDL → rebuild Drizzle objects → Pothos rebuilds GraphQL schema → serve. Every schema change cascades to content. → [C11]
+**Schema lifecycle:** REST mutation → update system tables (Drizzle) → schema engine diffs → DDL via `@effect/sql` → rebuild GraphQL schema (SDL + Yoga) → serve. → [C11]
 
 **StructuredText storage:** DAST JSON in TEXT column + block rows in `block_*` tables. Blocks store `_root_record_id` (CASCADE) for cleanup. DAST encodes the tree; SQL doesn't track nesting hierarchy. → [C3]
 

@@ -62,15 +62,17 @@ The core architectural challenge. The system tables (`models`, `fields`) are a *
 3. **Build** GraphQL schema via Pothos (`builder.drizzleObject()` for each model, `builder.unionType()` for block unions, custom StructuredText types)
 4. **Serve** via Yoga's dynamic schema support (`schema: () => currentSchema`)
 
-This is essentially a **code generator that runs at runtime** — producing Drizzle table objects + relations from metadata rows.
+This is essentially a **DDL generator that runs at runtime** — reading metadata and producing SQL to manage content/block tables.
 
-### The hard parts:
+### The approach (updated):
 
-- **Drizzle schema as data**: Drizzle's API is designed for static `schema.ts` files. We need to call `sqliteTable()`, `text()`, `integer()`, etc. programmatically based on field type mappings. This is doable but needs a clean `fieldType → drizzleColumn` mapper. Implemented as an Effect service for composability and typed errors.
-- **Relations**: Drizzle relations (`one()`, `many()`) must also be generated dynamically. Link fields → foreign key relations. Block ownership → polymorphic relations. StructuredText → block/link resolution relations.
-- **Caching in KV**: The generated schema can be serialized as a JSON descriptor (not the Drizzle objects themselves — those are runtime constructs). On cold start: check KV for cached descriptor → if hit, rebuild Drizzle objects from descriptor (fast, no DB read). If miss or stale, read system tables and regenerate. Schema version counter in KV for invalidation.
-- **Cache invalidation**: Every REST management API call that changes models/fields must bump the schema version. Workers reading from KV will pick up the new version on next request.
-- **Eval concern**: We're not literally `eval()`-ing code. We're calling Drizzle's builder functions programmatically. No eval needed — just a mapping layer from metadata → Drizzle API calls. This is safe and testable.
+- **Drizzle for system tables only**: The `models`, `fields`, `locales`, `assets` tables use Drizzle's static schema. Type-safe, standard ORM usage.
+- **`@effect/sql` for dynamic tables**: Content and block tables are created, altered, and queried via `SqlClient` template literals. No Drizzle codegen for dynamic tables — runtime safety comes from Effect's typed errors and `Schema` validation, not static types. This is the right tool because the schema is unknown at compile time.
+- **DDL generation**: Schema engine reads system tables (via Drizzle) → generates CREATE TABLE / ALTER TABLE SQL → executes via `@effect/sql`. Field type → SQL type mapping is a simple function.
+- **GraphQL generation**: Schema engine reads system tables → generates SDL strings → feeds to Yoga's `createSchema()`. Resolvers use `@effect/sql` to query dynamic tables.
+- **Caching in KV**: Schema descriptor (JSON representation of models + fields) cached in KV. On cold start: check KV → if hit, rebuild GraphQL schema from descriptor. If miss, read system tables and regenerate. Schema version counter for invalidation.
+- **`SqlClient.SqlClient` interface**: Same interface for D1 (production) and better-sqlite3 (tests). Application code is portable — only the Layer changes.
+- **No eval, no Drizzle codegen for dynamic tables**: Just SQL template literals. Safe, testable, composable with Effect.
 
 ### Performance budget:
 - Cold start with KV cache hit: ~5-10ms (deserialize descriptor → build Drizzle objects → build GraphQL schema)

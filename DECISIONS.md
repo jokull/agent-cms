@@ -22,7 +22,7 @@ Canonical record of all settled decisions for agent-cms. ROADMAP.md references a
 | # | Decision | Choice | Rationale |
 |---|---|---|---|
 | D11 | Consumer API | GraphQL via Yoga | Flexible queries, relations, filtering, localization, StructuredText resolution. Consumers pick exactly what they need. Matches DatoCMS CDA patterns. |
-| D12 | Editor/Management API | REST | CRUD operations for MCP tools/agents. Simpler than GraphQL for writes — single endpoint per operation, clear semantics, easy to make idempotent. No over/under-fetching concern for mutations. |
+| D12 | Editor/Management API | REST via `@effect/platform` HttpRouter | CRUD operations for MCP tools/agents. Simpler than GraphQL for writes. Fully Effect-native HTTP — typed errors map to HTTP responses automatically, services injected via Layers. Replaces Hono. |
 | D13 | Schema introspection | REST | List models, fields, validators. Agents need predictable structure for planning — REST is more natural than GraphQL introspection for this. |
 | D14 | GraphQL StructuredText shape | `{ value, blocks, links }` matching DatoCMS exactly | Enables reuse of entire DatoCMS rendering ecosystem: `datocms-structured-text-utils` (types, guards, validate), `datocms-structured-text-to-html-string`, `react-datocms <StructuredText>`, `datocms-structured-text-to-plain-text`, `datocms-html-to-structured-text`. All are purely DAST-format-based with zero DatoCMS API dependency. |
 | D15 | Draft/published in GraphQL | `includeDrafts` argument or header | Default (`false`): only published records, read from `_published_snapshot`. `true`: includes draft/updated records, reads from real columns. Matches DatoCMS pattern. |
@@ -35,7 +35,7 @@ Canonical record of all settled decisions for agent-cms. ROADMAP.md references a
 
 | # | Decision | Choice | Rationale |
 |---|---|---|---|
-| D20 | Schema engine | "Table of tables" → runtime Drizzle codegen | System tables (`models`, `fields`) are the meta-schema. On startup: read system tables → generate Drizzle `sqliteTable()` definitions programmatically → build GraphQL schema from those. Cache schema descriptor in KV for fast cold starts. |
+| D20 | Schema engine | "Table of tables" → runtime DDL via `@effect/sql` | System tables (`models`, `fields`) are the meta-schema queried via Drizzle (static). Dynamic content/block tables are managed via `@effect/sql` raw SQL (CREATE TABLE, ALTER TABLE, INSERT, SELECT). No Drizzle codegen for dynamic tables — runtime safety comes from Effect, not static types. |
 | D21 | Auto-migration | Runtime DDL diffing on every schema change | Core DX feature. REST mutation → update system tables → schema engine diffs current vs desired → emits DDL → executes transactionally. SQLite supports transactional DDL (advantage over Postgres). |
 | D22 | Schema lifecycle | Every schema mutation cascades to content | Block type removal scans DAST trees. Field removal cleans block rows. Model removal is strict (refuse if referenced). See CHALLENGES.md [C11] for full matrix. |
 | D23 | Field type change (v1) | Reject if field has existing data | Simplest safe approach. Require field to be empty before type change. Can add coercion later. |
@@ -45,7 +45,7 @@ Canonical record of all settled decisions for agent-cms. ROADMAP.md references a
 
 | # | Decision | Choice | Rationale |
 |---|---|---|---|
-| D25 | GraphQL schema builder | Pothos (`@pothos/core`) — evaluate, not committed | Strong candidate for code-first schema building (plugin ecosystem: Relay, dataloader, validation, errors). Drizzle plugin maps tables to GraphQL types. However, fit with dynamic runtime schemas + Effect is unproven. **Try Pothos first; if it fights the dynamic/Effect pattern, fall back to raw `graphql-js` constructors or our own generator using `drizzle-graphql` as reference.** |
+| D25 | GraphQL schema builder | SDL + Yoga `createSchema()` for now; Pothos to evaluate later | Current approach: generate SDL strings from CMS metadata, use Yoga's `createSchema()`. Works, avoids graphql module duplication. Pothos remains a candidate if we need its plugin ecosystem (Relay, dataloader). |
 | D26 | GraphQL StructuredText resolution | Recursive batch-fetch, not JOIN tree | Walk DAST → collect block IDs by type → batch-fetch from `block_*` tables → check fetched blocks for nested StructuredText fields → recurse until no more block references. Leverages our knowledge of the data shape. |
 | D41 | Pothos plugins (if adopted) | Core, Drizzle, Relay, Dataloader, Validation, Errors | Relay for cursor connections. Dataloader for N+1 prevention on link/block resolution. Validation with `@effect/schema`. Skip: Auth (no auth v1), Prisma (not applicable). |
 | D42 | GraphQL fallback plan | Raw `graphql-js` or own generator from `drizzle-graphql` reference | If Pothos doesn't fit the dynamic schema + Effect pattern, build our own. The `drizzle-graphql` repo remains useful reference code for query/mutation generation from Drizzle tables. |
@@ -56,7 +56,7 @@ Canonical record of all settled decisions for agent-cms. ROADMAP.md references a
 |---|---|---|---|
 | D27 | Runtime | Cloudflare Workers | Edge-native, integrated with D1/R2/KV/Images |
 | D28 | Database | D1 (SQLite) | Managed SQLite on Cloudflare. One D1 = one CMS instance. No environments concept — staging is a separate deployment. |
-| D29 | ORM | Drizzle 1.0 beta with Effect integration | Best TypeScript ORM, native D1 support, relational queries, programmatic schema definition API. Drizzle 1.0 has first-class Effect support — database operations return Effect types natively, composing cleanly with the rest of the Effect stack. |
+| D29 | Database access | **Drizzle for system tables** (static, typed) + **`@effect/sql` for dynamic tables** (runtime SQL) | Drizzle gives real type safety for the static system tables (models, fields, locales, assets). Dynamic content/block tables use `@effect/sql` (`SqlClient` template literals) — no static types possible, so runtime safety via Effect is the right tool. `@effect/sql-d1` in production, `@effect/sql-sqlite-node` in tests. Both share the `SqlClient.SqlClient` interface — application code is portable. |
 | D30 | Asset storage | R2 | Cloudflare-native object storage |
 | D31 | Image transforms | Cloudflare Images | Fully managed, no self-hosted infra (replaced earlier imgproxy decision). For local dev, serve originals without transforms. |
 | D32 | Schema cache | KV | Store serialized schema descriptor. Version counter for invalidation. Cold start fast path. |
@@ -68,11 +68,12 @@ Canonical record of all settled decisions for agent-cms. ROADMAP.md references a
 
 | # | Decision | Choice | Rationale |
 |---|---|---|---|
-| D43 | Application framework | Effect | Typed errors, dependency injection (Layer/Context), structured concurrency, `@effect/schema` for validation — all in the type system. Particularly strong fit for: schema engine (multi-step transactional operations with typed failure modes), block write orchestration (atomic create/update/delete with rollback), dynamic service composition (Drizzle schema + GraphQL schema rebuilt on changes, injected via Layers). |
-| D44 | Error handling | Effect typed errors throughout | Every operation declares what can fail: `SchemaEngineError`, `ValidationError`, `ReferenceConflictError`, etc. REST API maps these to precise HTTP responses. No untyped exceptions. The strict reference checking (D19) becomes a typed error the agent can act on. |
-| D45 | Dependency injection | Effect Layers for runtime services | Dynamic Drizzle schema, GraphQL schema, D1 binding, KV cache — all provided as Effect services via Layers. On schema change: rebuild the Drizzle layer → rebuild GraphQL layer → swap. Clean, testable, no global mutable state. |
-| D46 | Database operations | Drizzle 1.0 Effect integration | Drizzle 1.0 returns Effect types natively. Database queries compose with schema engine operations, validation, and error handling in a single Effect pipeline. Transactions use Effect's resource management (`acquireUseRelease`). |
-| D47 | Validation | `@effect/schema` | Replaces Zod. Runtime validation + TypeScript type inference, integrated with Effect's error channel. DAST validation, record field validation, REST input validation all produce typed, recoverable errors. |
+| D43 | Application framework | Effect as the **complete runtime** | Effect is not just a utility — it's the runtime. HTTP (`@effect/platform` HttpRouter), SQL (`@effect/sql`), validation (`Schema`), error handling, DI (Layers) — all Effect. This is critical because the most important layers (dynamic schemas, content tables) have no static type safety. Effect provides the runtime safety net: typed errors, structured concurrency, resource management. |
+| D44 | HTTP layer | `@effect/platform` HttpRouter (replaces Hono) | Fully Effect-native HTTP. Routes are Effect pipelines. Request body/params parsed via `Schema`. Typed errors automatically map to HTTP status codes via `Effect.catchTags`. Services injected via Layers. For CF Workers: `HttpRouter.toWebHandler` produces a standard `fetch` handler. |
+| D45 | Dependency injection | Effect Layers for runtime services | `SqlClient.SqlClient` (D1 or sqlite-node), schema engine, GraphQL schema — all provided as Effect services via Layers. Tests swap D1 for sqlite-node via a different Layer. On schema change: rebuild GraphQL layer. |
+| D46 | Database operations | `@effect/sql` template literals for dynamic tables | `sql\`SELECT * FROM ${sql(tableName)} WHERE id = ${id}\`` — parameterized, safe, composable with Effect pipelines. `sql.insert()`, `sql.update()`, `sql.and()`, `sql.or()` for query building. Drizzle only for system tables. |
+| D47 | Validation | `Schema` from `effect` package | Runtime validation + TypeScript type inference. `HttpServerRequest.schemaBodyJson(schema)` validates request bodies. `Schema.decodeUnknown` for DAST validation, record field validation. All produce typed `ParseError` that maps to 400 responses. |
+| D48 | Test database | `@effect/sql-sqlite-node` with `:memory:` | Same `SqlClient.SqlClient` interface as D1. Tests use in-memory SQLite via `SqliteClient.layer({ filename: ":memory:" })`. Application code is identical between test and production — only the Layer differs. |
 
 ## Scope
 
