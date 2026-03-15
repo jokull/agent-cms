@@ -80,8 +80,9 @@ export function createRecord(body: any) {
       if (field.field_type === "structured_text" && data[field.api_key] !== undefined) {
         const stInput = data[field.api_key];
         if (stInput && typeof stInput === "object" && stInput.value) {
-          // Get allowed block types from validators
+          // Get allowed block types and blocks_only flag from validators
           const allowedBlockTypes = field.validators?.structured_text_blocks as string[] | undefined;
+          const blocksOnly = field.validators?.blocks_only as boolean | undefined;
 
           const dast = yield* writeStructuredText({
             fieldApiKey: field.api_key,
@@ -89,6 +90,7 @@ export function createRecord(body: any) {
             value: stInput.value,
             blocks: stInput.blocks ?? {},
             allowedBlockTypes,
+            blocksOnly,
           });
 
           // Store just the DAST document as JSON
@@ -183,6 +185,7 @@ export function patchRecord(id: string, body: any) {
           });
 
           const allowedBlockTypes = field.validators?.structured_text_blocks as string[] | undefined;
+          const blocksOnly = field.validators?.blocks_only as boolean | undefined;
 
           const dast = yield* writeStructuredText({
             fieldApiKey: field.api_key,
@@ -190,6 +193,7 @@ export function patchRecord(id: string, body: any) {
             value: stInput.value,
             blocks: stInput.blocks ?? {},
             allowedBlockTypes,
+            blocksOnly,
           });
 
           data[field.api_key] = dast;

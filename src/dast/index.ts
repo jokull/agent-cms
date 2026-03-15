@@ -20,5 +20,5 @@ export type {
   StructuredTextValue,
 } from "./types.js";
 
-export { validateDast, extractBlockIds, extractLinkIds } from "./validate.js";
+export { validateDast, validateBlocksOnly, extractBlockIds, extractLinkIds } from "./validate.js";
 export type { ValidationError } from "./validate.js";

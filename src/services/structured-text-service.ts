@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
-import { validateDast, extractBlockIds } from "../dast/index.js";
+import { validateDast, validateBlocksOnly, extractBlockIds } from "../dast/index.js";
 import { ValidationError } from "../errors.js";
 import type { DastDocument } from "../dast/types.js";
 
@@ -26,10 +26,11 @@ export function writeStructuredText(params: {
   value: any;
   blocks?: Record<string, any>;
   allowedBlockTypes?: string[];
+  blocksOnly?: boolean;
 }) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const { fieldApiKey, rootRecordId, value, blocks = {}, allowedBlockTypes } = params;
+    const { fieldApiKey, rootRecordId, value, blocks = {}, allowedBlockTypes, blocksOnly } = params;
 
     // 1. Validate DAST structure
     const dastErrors = validateDast(value);
@@ -41,6 +42,17 @@ export function writeStructuredText(params: {
     }
 
     const dast = value as DastDocument;
+
+    // 1b. Validate blocks-only constraint (modular content / page builder)
+    if (blocksOnly) {
+      const blocksOnlyErrors = validateBlocksOnly(value);
+      if (blocksOnlyErrors.length > 0) {
+        return yield* new ValidationError({
+          message: `Blocks-only field '${fieldApiKey}': ${blocksOnlyErrors.map((e) => e.message).join("; ")}`,
+          field: fieldApiKey,
+        });
+      }
+    }
 
     // 2. Extract block IDs from DAST and validate they match provided blocks
     const referencedBlockIds = extractBlockIds(dast);

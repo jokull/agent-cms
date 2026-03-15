@@ -214,6 +214,37 @@ function validateInlineNode(node: any, path: string, errors: ValidationError[]) 
 }
 
 /**
+ * Validate that a DAST document only contains block nodes at root level.
+ * Used for "modular content" / page-builder fields where prose is not allowed.
+ * Returns an array of errors (empty = valid).
+ */
+export function validateBlocksOnly(doc: unknown): ValidationError[] {
+  const errors: ValidationError[] = [];
+
+  if (!doc || typeof doc !== "object") {
+    errors.push({ path: "", message: "Document must be an object" });
+    return errors;
+  }
+
+  const d = doc as any;
+  if (!d.document?.children || !Array.isArray(d.document.children)) {
+    return errors; // Let validateDast catch structural issues
+  }
+
+  for (let i = 0; i < d.document.children.length; i++) {
+    const child = d.document.children[i];
+    if (child?.type !== "block") {
+      errors.push({
+        path: `document.children[${i}]`,
+        message: `Only block nodes are allowed at root level in a blocks-only field. Found "${child?.type ?? "unknown"}" node.`,
+      });
+    }
+  }
+
+  return errors;
+}
+
+/**
  * Extract all block IDs referenced in a DAST document.
  * Finds all `block` and `inlineBlock` node `item` values.
  */
