@@ -1,9 +1,10 @@
 import { describe, it, expect } from "vitest";
-import app from "../src/index.js";
+import { createTestApp } from "./app-helpers.js";
 
 describe("Health check", () => {
   it("returns ok", async () => {
-    const response = await app.request("/health");
+    const { handler } = createTestApp();
+    const response = await handler(new Request("http://localhost/health"));
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body).toEqual({ status: "ok" });

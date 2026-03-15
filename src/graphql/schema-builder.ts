@@ -50,8 +50,17 @@ function applyFilters(records: any[], filter: any): any[] {
       const v = rec[key];
       for (const [op, exp] of Object.entries(ff as Record<string, any>)) {
         switch (op) {
-          case "eq": if (v !== exp) return false; break;
-          case "neq": if (v === exp) return false; break;
+          case "eq": {
+            // Handle boolean coercion (SQLite stores 0/1)
+            const ev = typeof exp === "boolean" ? (exp ? 1 : 0) : exp;
+            if (v !== ev && v !== exp) return false;
+            break;
+          }
+          case "neq": {
+            const ev = typeof exp === "boolean" ? (exp ? 1 : 0) : exp;
+            if (v === ev || v === exp) return false;
+            break;
+          }
           case "gt": if (!(v > exp)) return false; break;
           case "lt": if (!(v < exp)) return false; break;
           case "gte": if (!(v >= exp)) return false; break;
@@ -97,9 +106,14 @@ function deserializeRecord(record: Record<string, any>): Record<string, any> {
 
 /**
  * Build a GraphQL schema from CMS metadata, queried via @effect/sql.
- * Returns an Effect that produces the schema.
+ * Accepts the sqlLayer so resolvers can query the database at request time.
  */
-export function buildGraphQLSchema() {
+export function buildGraphQLSchema(sqlLayer: any) {
+  // Helper to run sql queries synchronously through the layer
+  function runSql<A>(effect: Effect.Effect<A, any, SqlClient.SqlClient>): A {
+    return Effect.runSync(effect.pipe(Effect.provide(sqlLayer)));
+  }
+
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
 
@@ -161,9 +175,12 @@ export function buildGraphQLSchema() {
             typeResolvers[f.api_key] = (parent: any) => {
               const linkedId = parent[f.api_key];
               if (!linkedId) return null;
-              return Effect.runSync(
-                sql.unsafe<Record<string, any>>(`SELECT * FROM "${targetTable}" WHERE id = ?`, [linkedId])
-                  .pipe(Effect.map((rows) => rows.length > 0 ? deserializeRecord(rows[0]) : null))
+              return runSql(
+                Effect.gen(function* () {
+                  const s = yield* SqlClient.SqlClient;
+                  const rows = yield* s.unsafe<Record<string, any>>(`SELECT * FROM "${targetTable}" WHERE id = ?`, [linkedId]);
+                  return rows.length > 0 ? deserializeRecord(rows[0]) : null;
+                })
               );
             };
           }
@@ -179,9 +196,12 @@ export function buildGraphQLSchema() {
               }
               if (!Array.isArray(linkedIds)) return [];
               return linkedIds.map((id: string) =>
-                Effect.runSync(
-                  sql.unsafe<Record<string, any>>(`SELECT * FROM "${targetTable}" WHERE id = ?`, [id])
-                    .pipe(Effect.map((rows) => rows.length > 0 ? deserializeRecord(rows[0]) : null))
+                runSql(
+                  Effect.gen(function* () {
+                    const s = yield* SqlClient.SqlClient;
+                    const rows = yield* s.unsafe<Record<string, any>>(`SELECT * FROM "${targetTable}" WHERE id = ?`, [id]);
+                    return rows.length > 0 ? deserializeRecord(rows[0]) : null;
+                  })
                 )
               ).filter(Boolean);
             };
@@ -210,13 +230,25 @@ export function buildGraphQLSchema() {
       queryFieldDefs.push(`${model.api_key}(id: ID, filter: ${typeName}Filter): ${typeName}`);
       queryFieldDefs.push(`_all${typeName}sMeta(filter: ${typeName}Filter): ${typeName}Meta!`);
 
-      // Query resolvers — use captured sql client
+      // Query resolvers — use runSql to query through the layer
+      const queryAll = () => runSql(
+        Effect.gen(function* () {
+          const s = yield* SqlClient.SqlClient;
+          const rows = yield* s.unsafe<Record<string, any>>(`SELECT * FROM "${tableName}"`);
+          return rows.map(deserializeRecord);
+        })
+      );
+
+      const queryById = (id: string) => runSql(
+        Effect.gen(function* () {
+          const s = yield* SqlClient.SqlClient;
+          const rows = yield* s.unsafe<Record<string, any>>(`SELECT * FROM "${tableName}" WHERE id = ?`, [id]);
+          return rows.length > 0 ? deserializeRecord(rows[0]) : null;
+        })
+      );
+
       resolvers.Query[listName] = (_: any, args: any) => {
-        let records = Effect.runSync(
-          sql.unsafe<Record<string, any>>(`SELECT * FROM "${tableName}"`).pipe(
-            Effect.map((rows) => rows.map(deserializeRecord))
-          )
-        );
+        let records = queryAll();
         records = applyFilters(records, args.filter);
         records = applyOrdering(records, args.orderBy);
         const skip = args.skip ?? 0;
@@ -225,19 +257,9 @@ export function buildGraphQLSchema() {
       };
 
       resolvers.Query[model.api_key] = (_: any, args: any) => {
-        if (args.id) {
-          return Effect.runSync(
-            sql.unsafe<Record<string, any>>(`SELECT * FROM "${tableName}" WHERE id = ?`, [args.id]).pipe(
-              Effect.map((rows) => rows.length > 0 ? deserializeRecord(rows[0]) : null)
-            )
-          );
-        }
+        if (args.id) return queryById(args.id);
         if (args.filter) {
-          let records = Effect.runSync(
-            sql.unsafe<Record<string, any>>(`SELECT * FROM "${tableName}"`).pipe(
-              Effect.map((rows) => rows.map(deserializeRecord))
-            )
-          );
+          let records = queryAll();
           records = applyFilters(records, args.filter);
           return records[0] ?? null;
         }
@@ -245,11 +267,7 @@ export function buildGraphQLSchema() {
       };
 
       resolvers.Query[`_all${typeName}sMeta`] = (_: any, args: any) => {
-        let records = Effect.runSync(
-          sql.unsafe<Record<string, any>>(`SELECT * FROM "${tableName}"`).pipe(
-            Effect.map((rows) => rows.map(deserializeRecord))
-          )
-        );
+        let records = queryAll();
         records = applyFilters(records, args.filter);
         return { count: records.length };
       };

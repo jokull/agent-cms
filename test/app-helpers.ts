@@ -1,66 +1,51 @@
-import { Hono } from "hono";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, ManagedRuntime } from "effect";
 import { SqlClient } from "@effect/sql";
 import { SqliteClient } from "@effect/sql-sqlite-node";
-import { modelsApi } from "../src/api/models.js";
-import { fieldsApi } from "../src/api/fields.js";
-import { recordsApi } from "../src/api/records.js";
-import { createGraphQLHandler } from "../src/graphql/handler.js";
 import { runMigrations } from "../src/db/migrate.js";
+import { createWebHandler } from "../src/http/router.js";
+import { mkdtempSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 
 /**
- * Create a test app with an in-memory SQLite database via @effect/sql.
- * Returns the Hono app and the SQL layer for direct inspection.
+ * Create a test app with a unique SQLite database.
+ * Uses ManagedRuntime to ensure the same database connection is shared
+ * across all Effect.provide calls.
  */
 export function createTestApp() {
-  const sqlLayer = SqliteClient.layer({ filename: ":memory:" });
+  const tmpDir = mkdtempSync(join(tmpdir(), "agent-cms-test-"));
+  const dbPath = join(tmpDir, "test.db");
 
-  // Run migrations synchronously at setup time
-  Effect.runSync(
-    runMigrations("./drizzle").pipe(Effect.provide(sqlLayer))
-  );
+  // Create a shared layer — use the same filename so connections share the database
+  const sqlLayer = SqliteClient.layer({ filename: dbPath, disableWAL: true });
 
-  const app = new Hono();
+  // Run migrations
+  Effect.runSync(runMigrations("./drizzle").pipe(Effect.provide(sqlLayer)));
 
-  // Inject SQL layer into Hono context
-  app.use("*", async (c, next) => {
-    c.set("sqlLayer", sqlLayer);
-    await next();
-  });
+  const handler = createWebHandler(sqlLayer);
 
-  app.get("/health", (c) => c.json({ status: "ok" }));
-  app.route("/api/models", modelsApi);
-  app.route("/api/models/:modelId/fields", fieldsApi);
-  app.route("/api/records", recordsApi);
-
-  // GraphQL endpoint (uses @effect/sql via the layer)
-  app.all("/graphql", async (c) => {
-    // Build the handler with the sql layer for resolvers
-    const handler = createGraphQLHandler(sqlLayer);
-    const response = await handler(c.req.raw);
-    return response;
-  });
-
-  return { app, sqlLayer };
+  return { handler, sqlLayer };
 }
 
-/** Helper to execute a GraphQL query */
+/** Execute a GraphQL query */
 export async function gqlQuery(
-  app: Hono,
+  handler: (req: Request) => Promise<Response>,
   query: string,
   variables?: Record<string, any>
 ) {
-  const res = await app.request("/graphql", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query, variables }),
-  });
+  const res = await handler(
+    new Request("http://localhost/graphql", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, variables }),
+    })
+  );
   return res.json() as Promise<{ data?: any; errors?: any[] }>;
 }
 
-/** Helper to make JSON requests against the test app */
+/** Make JSON requests */
 export async function jsonRequest(
-  app: Hono,
+  handler: (req: Request) => Promise<Response>,
   method: string,
   path: string,
   body?: any
@@ -72,5 +57,5 @@ export async function jsonRequest(
   if (body !== undefined) {
     init.body = JSON.stringify(body);
   }
-  return app.request(path, init);
+  return handler(new Request(`http://localhost${path}`, init));
 }
