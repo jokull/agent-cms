@@ -2,6 +2,7 @@ import { createSchema } from "graphql-yoga";
 import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
 import { extractBlockIds } from "../dast/index.js";
+import { compileFilterToSql, compileOrderBy } from "./filter-compiler.js";
 
 function toTypeName(apiKey: string): string {
   return apiKey.charAt(0).toUpperCase() +
@@ -339,46 +340,87 @@ export function buildGraphQLSchema(sqlLayer: any) {
       queryFieldDefs.push(`${model.api_key}(id: ID, filter: ${typeName}Filter): ${typeName}`);
       queryFieldDefs.push(`_all${typeName}sMeta(filter: ${typeName}Filter): ${typeName}Meta!`);
 
-      // Query resolvers — use runSql to query through the layer
-      const queryAll = () => runSql(
-        Effect.gen(function* () {
-          const s = yield* SqlClient.SqlClient;
-          const rows = yield* s.unsafe<Record<string, any>>(`SELECT * FROM "${tableName}"`);
-          return rows.map(deserializeRecord);
-        })
-      );
+      // Query resolvers — push filtering/ordering/pagination to SQL
+      function queryWithFilter(args: { filter?: any; orderBy?: string[]; first?: number; skip?: number }) {
+        return runSql(
+          Effect.gen(function* () {
+            const s = yield* SqlClient.SqlClient;
 
-      const queryById = (id: string) => runSql(
-        Effect.gen(function* () {
-          const s = yield* SqlClient.SqlClient;
-          const rows = yield* s.unsafe<Record<string, any>>(`SELECT * FROM "${tableName}" WHERE id = ?`, [id]);
-          return rows.length > 0 ? deserializeRecord(rows[0]) : null;
-        })
-      );
+            let query = `SELECT * FROM "${tableName}"`;
+            let params: any[] = [];
+
+            // Compile filter to SQL WHERE clause
+            const compiled = compileFilterToSql(args.filter);
+            if (compiled) {
+              query += ` WHERE ${compiled.where}`;
+              params = compiled.params;
+            }
+
+            // Compile ORDER BY
+            const orderBy = compileOrderBy(args.orderBy);
+            if (orderBy) {
+              query += ` ORDER BY ${orderBy}`;
+            }
+
+            // Pagination
+            const limit = args.first ?? 500;
+            query += ` LIMIT ?`;
+            params.push(limit);
+
+            if (args.skip) {
+              query += ` OFFSET ?`;
+              params.push(args.skip);
+            }
+
+            const rows = yield* s.unsafe<Record<string, any>>(query, params);
+            return rows.map(deserializeRecord);
+          })
+        );
+      }
+
+      function countWithFilter(filter?: any) {
+        return runSql(
+          Effect.gen(function* () {
+            const s = yield* SqlClient.SqlClient;
+
+            let query = `SELECT COUNT(*) as count FROM "${tableName}"`;
+            let params: any[] = [];
+
+            const compiled = compileFilterToSql(filter);
+            if (compiled) {
+              query += ` WHERE ${compiled.where}`;
+              params = compiled.params;
+            }
+
+            const rows = yield* s.unsafe<{ count: number }>(query, params);
+            return rows[0]?.count ?? 0;
+          })
+        );
+      }
 
       resolvers.Query[listName] = (_: any, args: any) => {
-        let records = queryAll();
-        records = applyFilters(records, args.filter);
-        records = applyOrdering(records, args.orderBy);
-        const skip = args.skip ?? 0;
-        const first = args.first ?? Math.min(records.length, 500);
-        return records.slice(skip, skip + first);
+        return queryWithFilter(args);
       };
 
       resolvers.Query[model.api_key] = (_: any, args: any) => {
-        if (args.id) return queryById(args.id);
+        if (args.id) {
+          return runSql(
+            Effect.gen(function* () {
+              const s = yield* SqlClient.SqlClient;
+              const rows = yield* s.unsafe<Record<string, any>>(`SELECT * FROM "${tableName}" WHERE id = ?`, [args.id]);
+              return rows.length > 0 ? deserializeRecord(rows[0]) : null;
+            })
+          );
+        }
         if (args.filter) {
-          let records = queryAll();
-          records = applyFilters(records, args.filter);
+          const records = queryWithFilter({ filter: args.filter, first: 1 });
           return records[0] ?? null;
         }
         return null;
       };
 
       resolvers.Query[`_all${typeName}sMeta`] = (_: any, args: any) => {
-        let records = queryAll();
-        records = applyFilters(records, args.filter);
-        return { count: records.length };
+        return { count: countWithFilter(args.filter) };
       };
     }
 
