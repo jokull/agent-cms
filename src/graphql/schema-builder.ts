@@ -1,6 +1,7 @@
 import { createSchema } from "graphql-yoga";
 import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
+import { extractBlockIds } from "../dast/index.js";
 
 function toTypeName(apiKey: string): string {
   return apiKey.charAt(0).toUpperCase() +
@@ -26,7 +27,8 @@ function fieldToSDL(
       if (targets?.length === 1 && typeNames.has(targets[0])) return `[${typeNames.get(targets[0])!}!]`;
       return "JSON";
     }
-    case "media_gallery": case "structured_text": return "JSON";
+    case "media_gallery": return "JSON";
+    case "structured_text": return "StructuredText";
     default: return "String";
   }
 }
@@ -119,6 +121,7 @@ export function buildGraphQLSchema(sqlLayer: any) {
 
     // Load all models and fields
     const models = yield* sql.unsafe<Record<string, any>>("SELECT * FROM models WHERE is_block = 0 ORDER BY created_at");
+    const blockModels = yield* sql.unsafe<Record<string, any>>("SELECT * FROM models WHERE is_block = 1");
     const allFields = yield* sql.unsafe<Record<string, any>>("SELECT * FROM fields ORDER BY position");
 
     // Group fields by model
@@ -135,6 +138,12 @@ export function buildGraphQLSchema(sqlLayer: any) {
 
     typeDefs.push("scalar JSON");
     typeDefs.push(`
+      """DatoCMS-compatible StructuredText response"""
+      type StructuredText {
+        value: JSON!
+        blocks: [JSON!]!
+        links: [JSON!]!
+      }
       input StringFilter { eq: String, neq: String, matches: String, isBlank: Boolean, exists: Boolean }
       input IntFilter { eq: Int, neq: Int, gt: Int, lt: Int, gte: Int, lte: Int, exists: Boolean }
       input BooleanFilter { eq: Boolean, exists: Boolean }
@@ -206,6 +215,47 @@ export function buildGraphQLSchema(sqlLayer: any) {
               ).filter(Boolean);
             };
           }
+        }
+        // StructuredText resolver: return { value, blocks, links }
+        if (f.field_type === "structured_text") {
+          typeResolvers[f.api_key] = (parent: any) => {
+            let dast = parent[f.api_key];
+            if (!dast) return null;
+            if (typeof dast === "string") {
+              try { dast = JSON.parse(dast); } catch { return null; }
+            }
+
+            // Extract block IDs from DAST
+            const blockIds = extractBlockIds(dast);
+
+            // Fetch blocks from their respective tables
+            const blocks: any[] = [];
+            if (blockIds.length > 0) {
+              for (const bm of blockModels) {
+                const fetched = runSql(
+                  Effect.gen(function* () {
+                    const s = yield* SqlClient.SqlClient;
+                    // Get blocks from this block type table that match our record
+                    const rows = yield* s.unsafe<Record<string, any>>(
+                      `SELECT * FROM "block_${bm.api_key}" WHERE _root_record_id = ? AND _root_field_api_key = ?`,
+                      [parent.id, f.api_key]
+                    );
+                    return rows.map((r: any) => ({
+                      ...deserializeRecord(r),
+                      __typename: toTypeName(bm.api_key),
+                    }));
+                  })
+                );
+                blocks.push(...fetched);
+              }
+            }
+
+            return {
+              value: dast,
+              blocks,
+              links: [], // TODO: resolve itemLink/inlineItem references
+            };
+          };
         }
       }
       resolvers[typeName] = typeResolvers;
