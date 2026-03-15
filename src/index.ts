@@ -1,15 +1,22 @@
 import { Hono } from "hono";
+import { drizzle } from "drizzle-orm/d1";
 import type { Env } from "./types.js";
+import * as schema from "./db/schema.js";
+import { modelsApi } from "./api/models.js";
 
-const app = new Hono<{ Bindings: Env }>();
+const app = new Hono<{ Bindings: Env; Variables: { db: any } }>();
 
-// Health check
+// Health check (no DB needed)
 app.get("/health", (c) => c.json({ status: "ok" }));
 
-// REST Management API (TODO: P0.5+)
-// app.route("/api", managementApi);
+// DB middleware for API routes only
+app.use("/api/*", async (c, next) => {
+  const db = drizzle(c.env.DB, { schema });
+  c.set("db", db);
+  await next();
+});
 
-// GraphQL Content Delivery API (TODO: P0.10+)
-// app.route("/graphql", graphqlHandler);
+// REST Management API
+app.route("/api/models", modelsApi);
 
 export default app;
