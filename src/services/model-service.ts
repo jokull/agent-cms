@@ -8,34 +8,8 @@ import {
   ReferenceConflictError,
 } from "../errors.js";
 import { migrateContentTable, dropTableSql } from "../schema-engine/sql-ddl.js";
-import type { FieldType } from "../types.js";
-
-interface ModelRow {
-  id: string;
-  name: string;
-  api_key: string;
-  is_block: number;
-  singleton: number;
-  sortable: number;
-  tree: number;
-  has_draft: number;
-  ordering: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-interface FieldRow {
-  id: string;
-  model_id: string;
-  label: string;
-  api_key: string;
-  field_type: string;
-  position: number;
-  localized: number;
-  validators: string;
-  created_at: string;
-  updated_at: string;
-}
+import type { ModelRow, FieldRow, ParsedFieldRow } from "../db/row-types.js";
+import { parseFieldValidators } from "../db/row-types.js";
 
 export function listModels() {
   return Effect.gen(function* () {
@@ -57,19 +31,18 @@ export function getModel(id: string) {
 
     return {
       ...models[0],
-      fields: fields.map((f) => ({ ...f, validators: JSON.parse(f.validators || "{}") })),
+      fields: fields.map(parseFieldValidators),
     };
   });
 }
 
-export function createModel(body: any) {
+export function createModel(body: unknown) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
 
-    if (!body.name || typeof body.name !== "string")
-      return yield* new ValidationError({ message: "name is required and must be a string" });
-    if (!body.apiKey || typeof body.apiKey !== "string")
-      return yield* new ValidationError({ message: "apiKey is required and must be a string" });
+    if (!isCreateModelInput(body))
+      return yield* new ValidationError({ message: "name and apiKey are required strings" });
+
     if (!/^[a-z][a-z0-9_]*$/.test(body.apiKey))
       return yield* new ValidationError({
         message: "apiKey must start with a lowercase letter and contain only lowercase letters, numbers, and underscores",
@@ -84,14 +57,16 @@ export function createModel(body: any) {
 
     const now = new Date().toISOString();
     const id = ulid();
+    const isBlock = body.isBlock ?? false;
+    const singleton = body.singleton ?? false;
 
     yield* sql.unsafe(
       `INSERT INTO models (id, name, api_key, is_block, singleton, sortable, tree, has_draft, ordering, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id, body.name, body.apiKey,
-        body.isBlock ? 1 : 0,
-        body.singleton ? 1 : 0,
+        isBlock ? 1 : 0,
+        singleton ? 1 : 0,
         body.sortable ? 1 : 0,
         body.tree ? 1 : 0,
         body.hasDraft !== false ? 1 : 0,
@@ -100,13 +75,11 @@ export function createModel(body: any) {
       ]
     );
 
-    // Create the dynamic table (empty for now, fields added later)
-    yield* migrateContentTable(body.apiKey, body.isBlock ?? false, []);
+    yield* migrateContentTable(body.apiKey, isBlock, []);
 
     return {
       id, name: body.name, apiKey: body.apiKey,
-      isBlock: body.isBlock ?? false,
-      singleton: body.singleton ?? false,
+      isBlock, singleton,
       sortable: body.sortable ?? false,
       tree: body.tree ?? false,
       hasDraft: body.hasDraft !== false,
@@ -116,7 +89,7 @@ export function createModel(body: any) {
   });
 }
 
-export function updateModel(id: string, body: any) {
+export function updateModel(id: string, body: Record<string, unknown>) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const existing = yield* sql.unsafe<ModelRow>("SELECT * FROM models WHERE id = ?", [id]);
@@ -124,7 +97,7 @@ export function updateModel(id: string, body: any) {
 
     const now = new Date().toISOString();
     const sets: string[] = ["updated_at = ?"];
-    const values: any[] = [now];
+    const values: unknown[] = [now];
 
     if (body.name !== undefined) { sets.push("name = ?"); values.push(body.name); }
     if (body.singleton !== undefined) { sets.push("singleton = ?"); values.push(body.singleton ? 1 : 0); }
@@ -175,10 +148,28 @@ export function deleteModel(id: string) {
 
     const tableName = model.is_block ? `block_${model.api_key}` : `content_${model.api_key}`;
     yield* dropTableSql(tableName);
-
-    // Delete model (FK cascade deletes fields)
     yield* sql.unsafe("DELETE FROM models WHERE id = ?", [id]);
 
     return { deleted: true };
   });
+}
+
+// --- Input validation ---
+
+interface CreateModelInput {
+  name: string;
+  apiKey: string;
+  isBlock?: boolean;
+  singleton?: boolean;
+  sortable?: boolean;
+  tree?: boolean;
+  hasDraft?: boolean;
+  ordering?: string;
+}
+
+function isCreateModelInput(input: unknown): input is CreateModelInput {
+  if (typeof input !== "object" || input === null) return false;
+  const obj = input as Record<string, unknown>;
+  return typeof obj.name === "string" && obj.name.length > 0 &&
+         typeof obj.apiKey === "string" && obj.apiKey.length > 0;
 }

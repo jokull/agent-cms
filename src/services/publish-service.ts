@@ -1,30 +1,26 @@
 import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
-import { NotFoundError, ValidationError } from "../errors.js";
+import { NotFoundError } from "../errors.js";
 import { selectById } from "../schema-engine/sql-records.js";
+import type { ModelRow, ContentRow } from "../db/row-types.js";
 
-/**
- * Publish a record: copy current columns to _published_snapshot, set status.
- */
 export function publishRecord(modelApiKey: string, recordId: string) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
 
-    // Get model
-    const models = yield* sql.unsafe<Record<string, any>>(
+    const models = yield* sql.unsafe<ModelRow>(
       "SELECT * FROM models WHERE api_key = ? AND is_block = 0",
       [modelApiKey]
     );
     if (models.length === 0) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
-    const model = models[0];
 
-    const tableName = `content_${model.api_key}`;
+    const tableName = `content_${models[0].api_key}`;
     const record = yield* selectById(tableName, recordId);
     if (!record) return yield* new NotFoundError({ entity: "Record", id: recordId });
 
-    // Build snapshot from current record (excluding system columns)
-    const snapshot: Record<string, any> = {};
-    for (const [key, value] of Object.entries(record as Record<string, any>)) {
+    // Build snapshot from current field values (exclude system columns)
+    const snapshot: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(record)) {
       if (!key.startsWith("_") && key !== "id") {
         snapshot[key] = value;
       }
@@ -40,14 +36,11 @@ export function publishRecord(modelApiKey: string, recordId: string) {
   });
 }
 
-/**
- * Unpublish a record: revert to draft, clear snapshot.
- */
 export function unpublishRecord(modelApiKey: string, recordId: string) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
 
-    const models = yield* sql.unsafe<Record<string, any>>(
+    const models = yield* sql.unsafe<ModelRow>(
       "SELECT * FROM models WHERE api_key = ? AND is_block = 0",
       [modelApiKey]
     );

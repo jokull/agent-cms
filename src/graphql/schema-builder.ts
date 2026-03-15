@@ -2,6 +2,7 @@ import { createSchema } from "graphql-yoga";
 import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
 import { extractBlockIds } from "../dast/index.js";
+import type { ModelRow, FieldRow, AssetRow } from "../db/row-types.js";
 import { compileFilterToSql, compileOrderBy } from "./filter-compiler.js";
 
 function toTypeName(apiKey: string): string {
@@ -121,16 +122,19 @@ export function buildGraphQLSchema(sqlLayer: any) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
 
-    // Load all models and fields
-    const models = yield* sql.unsafe<Record<string, any>>("SELECT * FROM models WHERE is_block = 0 ORDER BY created_at");
-    const blockModels = yield* sql.unsafe<Record<string, any>>("SELECT * FROM models WHERE is_block = 1");
-    const allFields = yield* sql.unsafe<Record<string, any>>("SELECT * FROM fields ORDER BY position");
+    // Load all models and fields with typed rows
+    const models = yield* sql.unsafe<ModelRow>("SELECT * FROM models WHERE is_block = 0 ORDER BY created_at");
+    const blockModels = yield* sql.unsafe<ModelRow>("SELECT * FROM models WHERE is_block = 1");
+    const allFields = yield* sql.unsafe<FieldRow>("SELECT * FROM fields ORDER BY position");
 
-    // Group fields by model
-    const fieldsByModelId = new Map<string, any[]>();
+    // Group fields by model, parsing validators
+    interface ParsedField extends Omit<FieldRow, "validators"> {
+      validators: Record<string, unknown>;
+    }
+    const fieldsByModelId = new Map<string, ParsedField[]>();
     for (const f of allFields) {
       const list = fieldsByModelId.get(f.model_id) ?? [];
-      list.push({ ...f, validators: JSON.parse(f.validators || "{}") });
+      list.push({ ...f, validators: JSON.parse(f.validators || "{}") as Record<string, unknown> });
       fieldsByModelId.set(f.model_id, list);
     }
 
@@ -239,7 +243,7 @@ export function buildGraphQLSchema(sqlLayer: any) {
             return runSql(
               Effect.gen(function* () {
                 const s = yield* SqlClient.SqlClient;
-                const rows = yield* s.unsafe<Record<string, any>>("SELECT * FROM assets WHERE id = ?", [assetId]);
+                const rows = yield* s.unsafe<AssetRow>("SELECT * FROM assets WHERE id = ?", [assetId]);
                 if (rows.length === 0) return null;
                 const a = rows[0];
                 return {
@@ -262,7 +266,7 @@ export function buildGraphQLSchema(sqlLayer: any) {
               runSql(
                 Effect.gen(function* () {
                   const s = yield* SqlClient.SqlClient;
-                  const rows = yield* s.unsafe<Record<string, any>>("SELECT * FROM assets WHERE id = ?", [assetId]);
+                  const rows = yield* s.unsafe<AssetRow>("SELECT * FROM assets WHERE id = ?", [assetId]);
                   if (rows.length === 0) return null;
                   const a = rows[0];
                   return {

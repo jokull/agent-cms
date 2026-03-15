@@ -36,7 +36,7 @@ export function validateDast(doc: unknown): ValidationError[] {
     return errors;
   }
 
-  const d = doc as any;
+  const d = doc as Record<string, unknown>;
 
   if (d.schema !== "dast") {
     errors.push({ path: "schema", message: 'schema must be "dast"' });
@@ -47,7 +47,7 @@ export function validateDast(doc: unknown): ValidationError[] {
     return errors;
   }
 
-  validateRoot(d.document, "document", errors);
+  validateRoot(d.document as Record<string, unknown>, "document", errors);
   return errors;
 }
 
@@ -226,13 +226,15 @@ export function validateBlocksOnly(doc: unknown): ValidationError[] {
     return errors;
   }
 
-  const d = doc as any;
-  if (!d.document?.children || !Array.isArray(d.document.children)) {
+  const d = doc as Record<string, unknown>;
+  const document = d.document as Record<string, unknown> | undefined;
+  if (!document?.children || !Array.isArray(document.children)) {
     return errors; // Let validateDast catch structural issues
   }
 
-  for (let i = 0; i < d.document.children.length; i++) {
-    const child = d.document.children[i];
+  const children = document.children as unknown[];
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i] as Record<string, unknown> | undefined;
     if (child?.type !== "block") {
       errors.push({
         path: `document.children[${i}]`,

@@ -11,11 +11,13 @@ import {
   deleteRecord as sqlDeleteRecord,
 } from "../schema-engine/sql-records.js";
 import { writeStructuredText, deleteBlocksForField } from "./structured-text-service.js";
+import type { ModelRow, FieldRow, ParsedFieldRow, ContentRow } from "../db/row-types.js";
+import { parseFieldValidators } from "../db/row-types.js";
 
 function getModelByApiKey(apiKey: string) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const models = yield* sql.unsafe<Record<string, any>>(
+    const models = yield* sql.unsafe<ModelRow>(
       "SELECT * FROM models WHERE api_key = ?",
       [apiKey]
     );
@@ -26,20 +28,17 @@ function getModelByApiKey(apiKey: string) {
 function getModelFields(modelId: string) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const fields = yield* sql.unsafe<Record<string, any>>(
+    const fields = yield* sql.unsafe<FieldRow>(
       "SELECT * FROM fields WHERE model_id = ? ORDER BY position",
       [modelId]
     );
-    return fields.map((f) => ({
-      ...f,
-      validators: JSON.parse(f.validators || "{}"),
-    }));
+    return fields.map(parseFieldValidators);
   });
 }
 
-export function createRecord(body: any) {
+export function createRecord(body: unknown) {
   return Effect.gen(function* () {
-    if (!body.modelApiKey || typeof body.modelApiKey !== "string")
+    if (!isCreateRecordInput(body))
       return yield* new ValidationError({ message: "modelApiKey is required" });
 
     const model = yield* getModelByApiKey(body.modelApiKey);
@@ -57,17 +56,18 @@ export function createRecord(body: any) {
     }
 
     const modelFields = yield* getModelFields(model.id);
-    const data = body.data ?? {};
+    const data: Record<string, unknown> = { ...(body.data ?? {}) };
 
     // Validate required fields
     for (const field of modelFields) {
-      if (field.validators.required && (data[field.api_key] === undefined || data[field.api_key] === null || data[field.api_key] === ""))
+      const validators = field.validators;
+      if (validators.required && (data[field.api_key] === undefined || data[field.api_key] === null || data[field.api_key] === ""))
         return yield* new ValidationError({ message: `Field '${field.api_key}' is required`, field: field.api_key });
     }
 
     const now = new Date().toISOString();
     const id = ulid();
-    const record: Record<string, any> = {
+    const record: Record<string, unknown> = {
       id,
       _status: "draft",
       _created_at: now,
@@ -79,8 +79,7 @@ export function createRecord(body: any) {
       // StructuredText: validate DAST + write blocks
       if (field.field_type === "structured_text" && data[field.api_key] !== undefined) {
         const stInput = data[field.api_key];
-        if (stInput && typeof stInput === "object" && stInput.value) {
-          // Get allowed block types and blocks_only flag from validators
+        if (isStructuredTextInput(stInput)) {
           const allowedBlockTypes = field.validators?.structured_text_blocks as string[] | undefined;
           const blocksOnly = field.validators?.blocks_only as boolean | undefined;
 
@@ -93,21 +92,21 @@ export function createRecord(body: any) {
             blocksOnly,
           });
 
-          // Store just the DAST document as JSON
           data[field.api_key] = dast;
         }
       }
 
       if (field.field_type === "slug") {
         const sourceFieldKey = field.validators?.slug_source;
-        if (!data[field.api_key] && sourceFieldKey && data[sourceFieldKey]) {
-          data[field.api_key] = generateSlug(data[sourceFieldKey]);
+        if (!data[field.api_key] && typeof sourceFieldKey === "string" && data[sourceFieldKey]) {
+          data[field.api_key] = generateSlug(String(data[sourceFieldKey]));
         } else if (data[field.api_key]) {
-          data[field.api_key] = generateSlug(data[field.api_key]);
+          data[field.api_key] = generateSlug(String(data[field.api_key]));
         }
         // Enforce uniqueness
         if (data[field.api_key]) {
-          let slug = data[field.api_key];
+          let slug = String(data[field.api_key]);
+          const baseSlug = slug;
           let suffix = 1;
           const sql = yield* SqlClient.SqlClient;
           while (true) {
@@ -117,11 +116,12 @@ export function createRecord(body: any) {
             );
             if (existing.length === 0) break;
             suffix++;
-            slug = `${data[field.api_key]}-${suffix}`;
+            slug = `${baseSlug}-${suffix}`;
           }
           data[field.api_key] = slug;
         }
       }
+
       if (data[field.api_key] !== undefined) {
         record[field.api_key] = data[field.api_key];
       }
@@ -154,9 +154,9 @@ export function getRecord(modelApiKey: string, id: string) {
   });
 }
 
-export function patchRecord(id: string, body: any) {
+export function patchRecord(id: string, body: unknown) {
   return Effect.gen(function* () {
-    if (!body.modelApiKey)
+    if (!isPatchRecordInput(body))
       return yield* new ValidationError({ message: "modelApiKey is required" });
     const model = yield* getModelByApiKey(body.modelApiKey);
     if (!model) return yield* new NotFoundError({ entity: "Model", id: body.modelApiKey });
@@ -166,23 +166,21 @@ export function patchRecord(id: string, body: any) {
     if (!existing) return yield* new NotFoundError({ entity: "Record", id });
 
     const modelFields = yield* getModelFields(model.id);
-    const updates: Record<string, any> = { _updated_at: new Date().toISOString() };
+    const updates: Record<string, unknown> = { _updated_at: new Date().toISOString() };
 
-    if ((existing as any)._status === "published") {
+    // Status transition: published → updated on edit
+    const existingRow = existing as ContentRow;
+    if (existingRow._status === "published") {
       updates._status = "updated";
     }
 
-    const data = body.data ?? {};
+    const data: Record<string, unknown> = { ...(body.data ?? {}) };
     for (const field of modelFields) {
       // StructuredText update: delete old blocks, write new ones
       if (field.field_type === "structured_text" && data[field.api_key] !== undefined) {
         const stInput = data[field.api_key];
-        if (stInput && typeof stInput === "object" && stInput.value) {
-          // Delete old blocks for this field
-          yield* deleteBlocksForField({
-            rootRecordId: id,
-            fieldApiKey: field.api_key,
-          });
+        if (isStructuredTextInput(stInput)) {
+          yield* deleteBlocksForField({ rootRecordId: id, fieldApiKey: field.api_key });
 
           const allowedBlockTypes = field.validators?.structured_text_blocks as string[] | undefined;
           const blocksOnly = field.validators?.blocks_only as boolean | undefined;
@@ -198,11 +196,7 @@ export function patchRecord(id: string, body: any) {
 
           data[field.api_key] = dast;
         } else if (stInput === null) {
-          // Clearing the field — delete all blocks
-          yield* deleteBlocksForField({
-            rootRecordId: id,
-            fieldApiKey: field.api_key,
-          });
+          yield* deleteBlocksForField({ rootRecordId: id, fieldApiKey: field.api_key });
         }
       }
 
@@ -230,4 +224,39 @@ export function removeRecord(modelApiKey: string, id: string) {
     yield* sqlDeleteRecord(tableName, id);
     return { deleted: true };
   });
+}
+
+// --- Input type guards ---
+
+interface CreateRecordInput {
+  modelApiKey: string;
+  data?: Record<string, unknown>;
+}
+
+function isCreateRecordInput(input: unknown): input is CreateRecordInput {
+  if (typeof input !== "object" || input === null) return false;
+  const obj = input as Record<string, unknown>;
+  return typeof obj.modelApiKey === "string" && obj.modelApiKey.length > 0;
+}
+
+interface PatchRecordInput {
+  modelApiKey: string;
+  data?: Record<string, unknown>;
+}
+
+function isPatchRecordInput(input: unknown): input is PatchRecordInput {
+  if (typeof input !== "object" || input === null) return false;
+  const obj = input as Record<string, unknown>;
+  return typeof obj.modelApiKey === "string";
+}
+
+interface StructuredTextInput {
+  value: unknown;
+  blocks?: Record<string, unknown>;
+}
+
+function isStructuredTextInput(input: unknown): input is StructuredTextInput {
+  if (typeof input !== "object" || input === null) return false;
+  const obj = input as Record<string, unknown>;
+  return "value" in obj && obj.value !== undefined;
 }
