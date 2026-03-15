@@ -45,10 +45,10 @@ Canonical record of all settled decisions for agent-cms. ROADMAP.md references a
 
 | # | Decision | Choice | Rationale |
 |---|---|---|---|
-| D25 | GraphQL schema builder | Pothos (`@pothos/core`) with Drizzle plugin | Code-first schema builder with excellent plugin ecosystem (Relay connections, dataloader, auth, validation, errors). Drizzle plugin (`@pothos/plugin-drizzle`) maps Drizzle tables to GraphQL types with automatic query optimization. We generate Drizzle tables dynamically from system tables, then feed them to Pothos — the plugin works because tables are known at schema-build time. Replaces the earlier plan to write our own generator from `drizzle-graphql` reference code. |
+| D25 | GraphQL schema builder | Pothos (`@pothos/core`) — evaluate, not committed | Strong candidate for code-first schema building (plugin ecosystem: Relay, dataloader, validation, errors). Drizzle plugin maps tables to GraphQL types. However, fit with dynamic runtime schemas + Effect is unproven. **Try Pothos first; if it fights the dynamic/Effect pattern, fall back to raw `graphql-js` constructors or our own generator using `drizzle-graphql` as reference.** |
 | D26 | GraphQL StructuredText resolution | Recursive batch-fetch, not JOIN tree | Walk DAST → collect block IDs by type → batch-fetch from `block_*` tables → check fetched blocks for nested StructuredText fields → recurse until no more block references. Leverages our knowledge of the data shape. |
-| D41 | Pothos plugins to use | Core, Drizzle, Relay, Dataloader, Validation, Errors | Relay for cursor connections. Dataloader for N+1 prevention on link/block resolution. Validation with `@effect/schema`. Errors plugin for typed error objects in mutations. Skip: Auth (no auth v1), Prisma (not applicable). |
-| D42 | Pothos dynamic schema pattern | Loop over CMS metadata, call builder methods programmatically | `builder.drizzleObject()` / `builder.objectRef()` / `builder.unionType()` called in loops over models/fields/blocks. Rebuild on schema change. Type-safety generics will be loose (`any`) — that's fine, our safety comes from CMS metadata validation. |
+| D41 | Pothos plugins (if adopted) | Core, Drizzle, Relay, Dataloader, Validation, Errors | Relay for cursor connections. Dataloader for N+1 prevention on link/block resolution. Validation with `@effect/schema`. Skip: Auth (no auth v1), Prisma (not applicable). |
+| D42 | GraphQL fallback plan | Raw `graphql-js` or own generator from `drizzle-graphql` reference | If Pothos doesn't fit the dynamic schema + Effect pattern, build our own. The `drizzle-graphql` repo remains useful reference code for query/mutation generation from Drizzle tables. |
 
 ## Infrastructure & Stack
 

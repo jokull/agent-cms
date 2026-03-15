@@ -163,7 +163,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 
 ### Phase 0: Foundation
 
-- [ ] **P0.1** Scaffold project: `wrangler init`, TypeScript, `package.json` with `effect`, `@effect/schema`, `drizzle-orm@beta`, `graphql-yoga`, `@pothos/core`, `@pothos/plugin-drizzle`, `ulidx`, `slugify`, `vitest`, `hono`. Configure `wrangler.toml` with local D1 binding. Verify `wrangler dev` starts.
+- [x] **P0.1** Scaffold project *(done)*
 - [ ] **P0.2** System tables in Drizzle: `models`, `fields`, `fieldsets`, `locales`, `assets`. Static schema in `src/db/schema.ts`. Run `drizzle-kit generate` and apply migration to local D1. Write a test that reads/writes to system tables.
 - [ ] **P0.3** Schema engine core: given rows from `models` + `fields` tables, generate Drizzle `sqliteTable()` definitions programmatically. Start with `string`, `text`, `boolean`, `integer` field types only. Implement as an Effect service (`SchemaEngine`) with typed errors. Write unit tests: define a model with fields in system tables → generate Drizzle table → verify column names and types. → [C1, C5]
 - [ ] **P0.4** Schema engine DDL: given generated Drizzle tables, diff against current D1 state and emit + execute `CREATE TABLE` / `ALTER TABLE` DDL. Test: create a model, run migration, verify table exists. Add a field, run migration, verify column added. Remove a field, run migration, verify column dropped. → [C1, C2]
@@ -237,7 +237,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 
 ## Done
 
-(Items move here when completed, with the commit hash.)
+- **P0.1** Scaffold project: Hono + Effect + Drizzle 1.0 beta + Yoga + Vitest + ulidx + slugify. `wrangler.toml` with local D1. Health check endpoint + test passing. `wrangler dev` confirmed working.
 
 ---
 

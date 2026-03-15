@@ -1,0 +1,30 @@
+{
+  "name": "agent-cms",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "wrangler d1 migrations apply agent-cms-db --local"
+  },
+  "dependencies": {
+    "drizzle-orm": "^1.0.0-beta.17-67b1795",
+    "effect": "^3.19.19",
+    "graphql": "^16.13.1",
+    "graphql-yoga": "^5.18.1",
+    "hono": "^4.12.8",
+    "slugify": "^1.6.8",
+    "ulidx": "^2.4.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260313.1",
+    "drizzle-kit": "^1.0.0-beta.17-67b1795",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0",
+    "wrangler": "^4.73.0"
+  }
+}
