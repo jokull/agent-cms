@@ -12,7 +12,7 @@ See [DECISIONS.md](./DECISIONS.md) for the full canonical record of all product 
 | Layer | Choice |
 |---|---|
 | Runtime framework | **Effect** — the complete runtime (HTTP, SQL, validation, DI, errors) |
-| HTTP | `@effect/platform` HttpRouter → CF Worker `fetch` handler |
+| HTTP | Hono (thin routing shell) + Effect pipelines (all logic) |
 | System tables | Drizzle 1.0 beta (static, typed) |
 | Dynamic tables | `@effect/sql` template literals (`@effect/sql-d1` prod, `@effect/sql-sqlite-node` test) |
 | GraphQL | Yoga + SDL `createSchema()` (consumer API) |
@@ -31,7 +31,7 @@ These are settled. Do not revisit without explicit instruction.
 - **Table-per-model**: Each CMS model → real SQLite table (`content_{api_key}`). Each block type → `block_{api_key}` table, shared globally.
 - **StructuredText is the only block-containing field type**. "Modular content" (page builder) = StructuredText with a block-only validator whitelist (no prose nodes).
 - **Block ownership**: Blocks store `_root_record_id` FK (CASCADE) + `_root_field_api_key`. DAST JSON encodes the hierarchy — no polymorphic parent FK.
-- **Effect is the runtime**: Not just a utility — Effect handles HTTP (`@effect/platform` HttpRouter, replaces Hono), SQL (`@effect/sql` for dynamic tables), validation (`Schema`), DI (Layers), and typed errors. The most important layers (dynamic schemas, content tables) have no static type safety, so Effect provides the runtime safety net.
+- **Effect is the runtime**: Not just a utility — Effect handles SQL (`@effect/sql` for dynamic tables), validation (`Schema`), DI (Layers), and typed errors. Hono stays as the thin HTTP routing shell (~14KB). The most important layers (dynamic schemas, content tables) have no static type safety, so Effect provides the runtime safety net. `@effect/platform` HttpRouter deferred to Effect 4.
 - **Drizzle for system tables only**: Static, typed queries against `models`, `fields`, `locales`, `assets`. No Drizzle for dynamic content/block tables.
 - **`@effect/sql` for dynamic tables**: `SqlClient` template literals for all content/block table operations (CREATE TABLE, INSERT, SELECT, etc.). `@effect/sql-d1` in production, `@effect/sql-sqlite-node` in tests — same interface, swapped via Layer.
 - **Schema engine**: System tables read via Drizzle → DDL generated and executed via `@effect/sql` → GraphQL schema built via SDL + Yoga. → [C1, C5]
@@ -173,7 +173,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 - [x] **P0.9** Slug field with diacritics and uniqueness *(done)*
 - [x] **P0.10** GraphQL foundation *(done — SDL-based, working)*
 - [x] **P0.10** GraphQL foundation *(done)*
-- [ ] **P0.10a** **Effect platform migration**: Replace Hono with `@effect/platform` HttpRouter. Replace Drizzle for dynamic tables with `@effect/sql` template literals. Keep Drizzle for system tables only. Use `@effect/sql-sqlite-node` for tests. All HTTP routes become Effect pipelines. Typed errors map to HTTP responses via `Effect.catchTags`. `SqlClient.SqlClient` injected via Layer (D1 prod, sqlite-node test). This is the foundational refactor — everything after this builds on Effect-native patterns. See D43-D48.
+- [ ] **P0.10a** **@effect/sql migration**: Replace Drizzle for dynamic tables with `@effect/sql` template literals. Keep Drizzle for system tables only. Use `@effect/sql-sqlite-node` for tests (`SqlClient.SqlClient` injected via Layer). Hono stays as HTTP shell (HttpRouter deferred to Effect 4). Schema engine DDL, record CRUD, and GraphQL resolvers all use `@effect/sql` for dynamic table operations. See D43-D48.
 - [x] **P0.11** GraphQL filtering + ordering *(done)*
 - [x] **P0.12** Link fields with GraphQL resolution *(done)*
 - [x] **P0.13** `[SCHEMA:blog]` integration test *(done — 100 tests passing)*
@@ -258,7 +258,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 ## Architecture Reference
 
 ```
-MCP Tools → REST (@effect/platform HttpRouter) → Effect pipelines → D1 (SQLite)
+MCP Tools → REST (Hono shell) → Effect pipelines → D1 (SQLite)
                                                                         ↓
                                                     System tables: Drizzle (static, typed)
                                                     Dynamic tables: @effect/sql (runtime SQL)
@@ -269,13 +269,13 @@ MCP Tools → REST (@effect/platform HttpRouter) → Effect pipelines → D1 (SQ
 
 Storage: R2 (assets) · KV (schema cache) · D1 (everything else)
 Tables:  system (Drizzle) + dynamic content_*/block_* (@effect/sql)
-Runtime: Effect everywhere — HTTP, SQL, validation, DI, typed errors
+Runtime: Effect (SQL, validation, DI, typed errors) + Hono (HTTP routing)
 Test:    @effect/sql-sqlite-node ":memory:" (same SqlClient interface as D1)
 ```
 
 **API split:** GraphQL for consumers (read), REST for editors/agents (write). Mirrors DatoCMS CDA vs CMA.
 
-**Effect is the runtime:** HTTP routes are Effect pipelines via `@effect/platform` HttpRouter. `SqlClient.SqlClient` is the database service (D1 or sqlite-node, swapped via Layer). `Schema` validates all inputs. Typed errors (`NotFoundError`, `ValidationError`, etc.) automatically map to HTTP responses.
+**Effect is the runtime:** All business logic runs as Effect pipelines inside Hono handlers. `SqlClient.SqlClient` is the database service for dynamic tables (D1 or sqlite-node, swapped via Layer). `Schema` validates inputs. Typed errors map to HTTP responses via `runEffect()`. Hono is the thin HTTP shell (~14KB, battle-tested on Workers).
 
 **Schema lifecycle:** REST mutation → update system tables (Drizzle) → schema engine diffs → DDL via `@effect/sql` → rebuild GraphQL schema (SDL + Yoga) → serve. → [C11]
 
