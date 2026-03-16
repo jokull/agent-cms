@@ -109,7 +109,12 @@ function deserializeRecord(record: Record<string, any>): Record<string, any> {
  * Build a GraphQL schema from CMS metadata, queried via @effect/sql.
  * Accepts the sqlLayer so resolvers can query the database at request time.
  */
-export function buildGraphQLSchema(sqlLayer: any) {
+export interface SchemaBuilderOptions {
+  assetBaseUrl?: string;
+  isProduction?: boolean;
+}
+
+export function buildGraphQLSchema(sqlLayer: any, options?: SchemaBuilderOptions) {
   // Helper to run sql queries — async for D1 compatibility, sync fallback for tests
   function runSql<A>(effect: Effect.Effect<A, unknown, SqlClient.SqlClient>): Promise<A> {
     return Effect.runPromise(Effect.provide(effect, sqlLayer) as Effect.Effect<A, never, never>);
@@ -117,6 +122,26 @@ export function buildGraphQLSchema(sqlLayer: any) {
 
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
+
+    // Asset URL helpers
+    const assetBase = options?.assetBaseUrl ?? "";
+
+    /** Generate the public URL for an asset */
+    function assetUrl(id: string, filename: string): string {
+      return `${assetBase}/assets/${id}/${filename}`;
+    }
+
+    /** Generate a Cloudflare Image Resizing transform URL */
+    function cfImageUrl(assetPath: string, params: Record<string, string | number>): string {
+      if (options?.isProduction) {
+        // Production: /cdn-cgi/image/width=W,fit=F,format=auto/path
+        const opts = Object.entries(params).map(([k, v]) => `${k}=${v}`).join(",");
+        return `${assetBase}/cdn-cgi/image/${opts}${assetPath}`;
+      }
+      // Development: pass as query params
+      const qs = Object.entries(params).map(([k, v]) => `${k}=${v}`).join("&");
+      return `${assetPath}?${qs}`;
+    }
 
     // Load all models and fields with typed rows
     const models = yield* sql.unsafe<ModelRow>("SELECT * FROM models WHERE is_block = 0 ORDER BY created_at");
@@ -313,7 +338,7 @@ export function buildGraphQLSchema(sqlLayer: any) {
                   return rows.length > 0 ? rows[0] : null;
                 })
               );
-              if (asset) imageUrl = `/assets/${asset.id}/${asset.filename}`;
+              if (asset) imageUrl = assetUrl(asset.id, asset.filename);
             }
           }
         }
@@ -330,7 +355,7 @@ export function buildGraphQLSchema(sqlLayer: any) {
               return rows.length > 0 ? rows[0] : null;
             })
           );
-          if (asset) imageUrl = `/assets/${asset.id}/${asset.filename}`;
+          if (asset) imageUrl = assetUrl(asset.id, asset.filename);
         }
 
         // Generate tags
@@ -488,7 +513,7 @@ export function buildGraphQLSchema(sqlLayer: any) {
             id: a.id, filename: a.filename, mimeType: a.mime_type,
             size: a.size, width: a.width, height: a.height,
             alt: a.alt, title: a.title, blurhash: a.blurhash ?? null,
-            url: `/assets/${a.id}/${a.filename}`,
+            url: assetUrl(a.id, a.filename),
           });
         }
         return map;
@@ -889,16 +914,17 @@ export function buildGraphQLSchema(sqlLayer: any) {
         const outH = requestedH ? Math.min(requestedH, origH) : Math.round(outW / aspect);
         const outAspect = outW / outH;
 
-        const url = asset.url;
+        const baseAssetPath = `/assets/${asset.id}/${asset.filename}`;
 
-        // Build transform URL query string
+        // Build transform URL using Cloudflare Image Resizing (production) or query params (dev)
         function transformUrl(targetWidth: number, targetFormat?: string): string {
-          const p = [`w=${targetWidth}`, `fit=${fit}`];
-          if (requestedH) p.push(`h=${Math.round(targetWidth / outAspect)}`);
-          if (quality) p.push(`q=${quality}`);
-          if (targetFormat ?? format) p.push(`format=${targetFormat ?? format}`);
-          if (gravity) p.push(`gravity=${gravity}`);
-          return `${url}?${p.join("&")}`;
+          const p: Record<string, string | number> = { width: targetWidth, fit };
+          if (requestedH) p.height = Math.round(targetWidth / outAspect);
+          if (quality) p.quality = quality;
+          const fmt = targetFormat ?? format;
+          if (fmt) p.format = fmt;
+          if (gravity) p.gravity = gravity;
+          return cfImageUrl(baseAssetPath, p);
         }
 
         // Generate srcSet at standard breakpoints, capped at output width
@@ -940,7 +966,7 @@ export function buildGraphQLSchema(sqlLayer: any) {
               id: a.id, filename: a.filename, mimeType: a.mime_type,
               size: a.size, width: a.width, height: a.height,
               alt: a.alt, title: a.title,
-              url: `/assets/${a.id}/${a.filename}`,
+              url: assetUrl(a.id, a.filename),
             };
           })
         );

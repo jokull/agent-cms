@@ -317,9 +317,9 @@ agent-cms is **not a standalone Worker** — it's a library + CLI that scaffolds
 
 #### Asset Upload (wrangler CLI flow)
 
-- [ ] **R2 binding in scaffolded project** — `wrangler.jsonc` includes R2 bucket binding
+- [x] **R2 binding in scaffolded project** *(done — wrangler.jsonc includes R2 bucket, CmsEnv accepts ASSETS R2Bucket)*
 - [ ] **`upload_asset` MCP tool** — registers asset metadata after `wrangler r2 object put`. Agent tells user: "upload with `wrangler r2 object put <bucket>/<key> --file=<path>`", then registers metadata.
-- [ ] **Production Cloudflare Image Resizing URLs** — responsiveImage resolver generates `/cdn-cgi/image/width=W,fit=F,format=auto/<r2-public-url>` when ENVIRONMENT != "development"
+- [x] **Production Cloudflare Image Resizing URLs** *(done — in production: `/cdn-cgi/image/width=W,fit=F,format=auto/<path>`, in dev: query params. Configurable via ASSET_BASE_URL env var.)*
 
 #### Done (DX)
 

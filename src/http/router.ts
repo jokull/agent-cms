@@ -279,7 +279,12 @@ export const appRouter = HttpRouter.empty.pipe(
  * Includes GraphQL endpoint via Yoga.
  * Uses Effect.flatten to work around @effect/platform 0.94.5 nested Effect issue.
  */
-export function createWebHandler(sqlLayer: any) {
+export interface WebHandlerOptions {
+  assetBaseUrl?: string;
+  isProduction?: boolean;
+}
+
+export function createWebHandler(sqlLayer: any, options?: WebHandlerOptions) {
   const restApp = Effect.flatten(HttpRouter.toHttpApp(appRouter)).pipe(
     Effect.catchAll(() => HttpServerResponse.json({ error: "Not found" }, { status: 404 })),
     Effect.provide(sqlLayer)
@@ -326,7 +331,10 @@ export function createWebHandler(sqlLayer: any) {
     if (url.pathname === "/graphql") {
       if (!graphqlHandler) {
         const { createGraphQLHandler } = await import("../graphql/handler.js");
-        graphqlHandler = createGraphQLHandler(sqlLayer);
+        graphqlHandler = createGraphQLHandler(sqlLayer, {
+          assetBaseUrl: options?.assetBaseUrl,
+          isProduction: options?.isProduction,
+        });
       }
       const response = await graphqlHandler(request);
       return withCors(response, request);

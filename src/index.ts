@@ -4,7 +4,11 @@ import { createWebHandler } from "./http/router.js";
 /** Cloudflare Worker environment bindings for agent-cms */
 export interface CmsEnv {
   DB: D1Database;
+  ASSETS?: R2Bucket;
   ENVIRONMENT?: string;
+  /** Public URL base for assets. Used to generate image transform URLs.
+   *  e.g. "https://assets.example.com" or "https://my-cms.workers.dev" */
+  ASSET_BASE_URL?: string;
 }
 
 /**
@@ -21,7 +25,10 @@ export interface CmsEnv {
  */
 export function createCMSHandler(env: CmsEnv) {
   const sqlLayer = D1Client.layer({ db: env.DB });
-  const handler = createWebHandler(sqlLayer);
+  const handler = createWebHandler(sqlLayer, {
+    assetBaseUrl: env.ASSET_BASE_URL,
+    isProduction: env.ENVIRONMENT === "production",
+  });
 
   return {
     fetch: (request: Request): Promise<Response> => handler(request),

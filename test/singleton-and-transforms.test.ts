@@ -123,7 +123,7 @@ describe("responsiveImage with transforms", () => {
     expect(img.width).toBe(600);
     expect(img.height).toBe(400);
     expect(img.aspectRatio).toBeCloseTo(1.5);
-    expect(img.src).toContain("w=600");
+    expect(img.src).toContain("width=600");
     expect(img.src).toContain("fit=cover");
     // srcSet breakpoints should be capped at 600
     expect(img.srcSet).toContain("320w");
@@ -145,7 +145,7 @@ describe("responsiveImage with transforms", () => {
     expect(result.errors).toBeUndefined();
     const img = result.data.allPosts[0].cover.responsiveImage;
     expect(img.width).toBe(800);
-    expect(img.src).toContain("q=80");
+    expect(img.src).toContain("quality=80");
   });
 
   it("exposes blurhash on Asset type", async () => {
