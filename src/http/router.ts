@@ -15,6 +15,7 @@ import * as LocaleService from "../services/locale-service.js";
 import { isCmsError, errorToResponse } from "../errors.js";
 import { ReorderInput } from "../services/input-schemas.js";
 import { ValidationError } from "../errors.js";
+import * as SchemaIO from "../services/schema-io.js";
 
 /** Helper: run a CMS Effect and return an HTTP response */
 function handle<A>(
@@ -265,6 +266,20 @@ const localesRouter = HttpRouter.empty.pipe(
   )
 );
 
+// --- Schema Import/Export ---
+const schemaRouter = HttpRouter.empty.pipe(
+  HttpRouter.get("/", handle(SchemaIO.exportSchema())),
+
+  HttpRouter.post(
+    "/",
+    Effect.gen(function* () {
+      const req = yield* HttpServerRequest.HttpServerRequest;
+      const body = yield* req.json;
+      return yield* handle(SchemaIO.importSchema(body), 201);
+    })
+  )
+);
+
 // --- Health ---
 const healthRouter = HttpRouter.empty.pipe(
   HttpRouter.get("/health", HttpServerResponse.json({ status: "ok" }))
@@ -278,6 +293,7 @@ export const appRouter = HttpRouter.empty.pipe(
   HttpRouter.concat(recordsRouter.pipe(HttpRouter.prefixAll("/api"))),
   HttpRouter.concat(assetsRouter.pipe(HttpRouter.prefixAll("/api/assets"))),
   HttpRouter.concat(localesRouter.pipe(HttpRouter.prefixAll("/api/locales"))),
+  HttpRouter.concat(schemaRouter.pipe(HttpRouter.prefixAll("/api/schema"))),
 );
 
 /**

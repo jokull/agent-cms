@@ -344,7 +344,7 @@ agent-cms is **not a standalone Worker** — it's a library + CLI that scaffolds
 
 ### Next up
 
-- [ ] **Schema import/export** — export full schema as JSON (`schema_info` output), import to hydrate a fresh CMS. Enables `./examples/blog/schema.json` that agents can load.
+- [x] **Schema import/export** *(done — `GET /api/schema` exports portable JSON, `POST /api/schema` imports. MCP tools: `export_schema`, `import_schema`. No IDs in export, references by api_key. Round-trip tested with locales, blocks, links, all field types. 6 tests)*
 - [ ] **Example: blog** — `./examples/blog/` with documented schema, seed script, and vinext frontend. Demonstrates: singleton queries, responsive images with transforms, _seoMetaTags, color fields, lat_lon, auto-slugs, category relationships.
 - [ ] **Schema lifecycle demo** — test adding/removing block types, fields, models on a live CMS and verify auto-migration (column add/drop) works correctly. Show elegant DAST cleanup when block types are removed.
 

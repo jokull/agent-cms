@@ -13,6 +13,7 @@ import * as PublishService from "../services/publish-service.js";
 import * as AssetService from "../services/asset-service.js";
 import * as WebhookService from "../services/webhook-service.js";
 import * as SchemaLifecycle from "../services/schema-lifecycle.js";
+import * as SchemaIO from "../services/schema-io.js";
 import { isCmsError } from "../errors.js";
 
 export function createMcpServer(sqlLayer: Layer.Layer<SqlClient.SqlClient>) {
@@ -404,6 +405,21 @@ Example r2Key: "uploads/hero.jpg"`,
   server.tool("delete_webhook", "Delete a webhook",
     { webhookId: z.string() },
     async ({ webhookId }) => run(WebhookService.deleteWebhook(webhookId))
+  );
+
+  // --- Schema Import/Export ---
+
+  server.tool("export_schema", "Export the full CMS schema (models, fields, locales) as portable JSON. No IDs — references use api_keys. Use import_schema to restore on a fresh CMS.",
+    {},
+    async () => run(SchemaIO.exportSchema())
+  );
+
+  server.tool("import_schema", `Import a CMS schema from JSON. Creates all locales, models, and fields in dependency order. Use on a fresh/empty CMS.
+
+The schema format matches export_schema output:
+{ "version": 1, "locales": [...], "models": [{ "name", "apiKey", "fields": [...] }] }`,
+    { schema: z.any().describe("The schema JSON object (from export_schema output)") },
+    async ({ schema }) => run(SchemaIO.importSchema(schema))
   );
 
   return server;
