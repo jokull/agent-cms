@@ -12,17 +12,17 @@ const [settings, posts] = await Promise.all([
   gqlFetch(cms, ALL_POSTS_QUERY, { first: 6 }),
 ]);
 
-const site = settings.site_settings;
+const site = settings.siteSettings;
 const allPosts = posts.allPosts;
 const totalPosts = posts._allPostsMeta.count;
 ---
 
-<Base title={site?.site_name ?? "Blog"}>
+<Base title={site?.siteName ?? "Blog"}>
   <section class="hero">
     {site?.logo?.responsiveImage && (
       <ResponsiveImage data={site.logo.responsiveImage} class="logo" loading="eager" />
     )}
-    <h1>{site?.site_name}</h1>
+    <h1>{site?.siteName}</h1>
     {site?.tagline && <p class="tagline">{site.tagline}</p>}
   </section>
 
@@ -31,10 +31,10 @@ const totalPosts = posts._allPostsMeta.count;
     <div class="post-grid">
       {allPosts.map((post) => (
         <article class="post-card">
-          {post.cover_image?.responsiveImage && (
+          {post.coverImage?.responsiveImage && (
             <a href={`/posts/${post.slug}`}>
               <ResponsiveImage
-                data={post.cover_image.responsiveImage}
+                data={post.coverImage.responsiveImage}
                 sizes="(min-width: 768px) 33vw, 100vw"
               />
             </a>
@@ -51,12 +51,12 @@ const totalPosts = posts._allPostsMeta.count;
             {post.excerpt && <p class="excerpt">{post.excerpt}</p>}
             <div class="post-meta">
               {post.author && <span>{post.author.name}</span>}
-              {post.published_date && (
-                <time datetime={post.published_date}>
-                  {new Date(post.published_date).toLocaleDateString("en", { year: "numeric", month: "long", day: "numeric" })}
+              {post.publishedDate && (
+                <time datetime={post.publishedDate}>
+                  {new Date(post.publishedDate).toLocaleDateString("en", { year: "numeric", month: "long", day: "numeric" })}
                 </time>
               )}
-              {post.reading_time && <span>{post.reading_time} min read</span>}
+              {post.readingTime && <span>{post.readingTime} min read</span>}
             </div>
           </div>
         </article>

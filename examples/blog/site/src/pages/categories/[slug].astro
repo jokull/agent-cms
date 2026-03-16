@@ -23,9 +23,9 @@ const posts = postsData.allPosts;
 
 <Base title={`${category.name} — Blog`}>
   <header class="category-header">
-    {category.cover_image?.responsiveImage && (
+    {category.coverImage?.responsiveImage && (
       <div class="cover">
-        <ResponsiveImage data={category.cover_image.responsiveImage} loading="eager" />
+        <ResponsiveImage data={category.coverImage.responsiveImage} loading="eager" />
       </div>
     )}
     <h1>{category.name}</h1>
@@ -35,9 +35,9 @@ const posts = postsData.allPosts;
   <div class="post-list">
     {posts.map((post) => (
       <article class="post-item">
-        {post.cover_image?.responsiveImage && (
+        {post.coverImage?.responsiveImage && (
           <a href={`/posts/${post.slug}`} class="post-image">
-            <ResponsiveImage data={post.cover_image.responsiveImage} sizes="200px" />
+            <ResponsiveImage data={post.coverImage.responsiveImage} sizes="200px" />
           </a>
         )}
         <div class="post-info">
@@ -45,12 +45,12 @@ const posts = postsData.allPosts;
           {post.excerpt && <p>{post.excerpt}</p>}
           <div class="post-meta">
             {post.author && <span>{post.author.name}</span>}
-            {post.published_date && (
-              <time datetime={post.published_date}>
-                {new Date(post.published_date).toLocaleDateString("en", { year: "numeric", month: "long", day: "numeric" })}
+            {post.publishedDate && (
+              <time datetime={post.publishedDate}>
+                {new Date(post.publishedDate).toLocaleDateString("en", { year: "numeric", month: "long", day: "numeric" })}
               </time>
             )}
-            {post.reading_time && <span>{post.reading_time} min read</span>}
+            {post.readingTime && <span>{post.readingTime} min read</span>}
           </div>
         </div>
       </article>

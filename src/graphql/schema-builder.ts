@@ -5,7 +5,7 @@ import { extractBlockIds, extractInlineBlockIds, extractLinkIds } from "../dast/
 import type { ModelRow, FieldRow, AssetRow } from "../db/row-types.js";
 import { getLinkTargets, getLinksTargets } from "../db/validators.js";
 import { parseFieldValidators } from "../db/row-types.js";
-import { compileFilterToSql, compileOrderBy } from "./filter-compiler.js";
+import { compileFilterToSql, compileOrderBy, type FilterCompilerOpts } from "./filter-compiler.js";
 import { FIELD_TYPE_REGISTRY, type FieldTypeDefinition } from "../field-types.js";
 import { isFieldType } from "../types.js";
 
@@ -243,11 +243,26 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
       type FloatMultiLocaleField { locale: String!, value: Float }
       type BooleanMultiLocaleField { locale: String!, value: Boolean }
       input MatchesFilter { pattern: String!, caseSensitive: Boolean }
-      input StringFilter { eq: String, neq: String, in: [String!], notIn: [String!], matches: String, matchesObject: MatchesFilter, isBlank: Boolean, isPresent: Boolean, exists: Boolean }
+      input StringFilter { eq: String, neq: String, in: [String!], notIn: [String!], matches: String, notMatches: String, isBlank: Boolean, isPresent: Boolean, exists: Boolean }
+      input TextFilter { matches: String, notMatches: String, isBlank: Boolean, isPresent: Boolean, exists: Boolean }
       input IntFilter { eq: Int, neq: Int, gt: Int, lt: Int, gte: Int, lte: Int, exists: Boolean }
       input FloatFilter { eq: Float, neq: Float, gt: Float, lt: Float, gte: Float, lte: Float, exists: Boolean }
       input BooleanFilter { eq: Boolean, exists: Boolean }
       input DateTimeFilter { eq: String, neq: String, gt: String, lt: String, gte: String, lte: String, exists: Boolean }
+      """Filter for single-reference fields (link, media) by record/asset ID"""
+      input LinkFilter { eq: ID, neq: ID, in: [ID!], notIn: [ID!], exists: Boolean }
+      """Filter for multi-reference fields (links, media_gallery) stored as JSON arrays"""
+      input LinksFilter { eq: [ID!], allIn: [ID!], anyIn: [ID!], notIn: [ID!], exists: Boolean }
+      """Filter for geolocation fields"""
+      input NearFilter { latitude: Float!, longitude: Float!, radius: Float! }
+      input LatLonFilter { near: NearFilter, exists: Boolean }
+      """Filter for fields that only support existence checks (seo, json, color)"""
+      input ExistsFilter { exists: Boolean }
+      """Filter records by which locales have content"""
+      input LocalesFilter { allIn: [String!], anyIn: [String!], notIn: [String!] }
+      """Filter for tree model parent field"""
+      input ParentFilter { eq: ID, exists: Boolean }
+      input PositionFilter { eq: Int, neq: Int, gt: Int, lt: Int, gte: Int, lte: Int }
     `);
 
     // Load locales for default locale resolution
@@ -742,14 +757,24 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
         "_publishedAt_ASC", "_publishedAt_DESC", "_firstPublishedAt_ASC", "_firstPublishedAt_DESC",
       ];
       if (model.sortable || model.tree) {
+        filterFields.push("_position: PositionFilter");
         orderByValues.push("_position_ASC", "_position_DESC");
+      }
+      if (model.tree) {
+        filterFields.push("_parent: ParentFilter");
+      }
+      if (localizedCamelKeys.size > 0) {
+        filterFields.push("_locales: LocalesFilter");
       }
       for (const f of fields) {
         const def = getRegistryDef(f.field_type);
         if (def?.filterType) {
           const gqlName = toCamelCase(f.api_key);
           filterFields.push(`${gqlName}: ${def.filterType}`);
-          orderByValues.push(`${gqlName}_ASC`, `${gqlName}_DESC`);
+          // Only add orderBy for scalar-ish fields (not arrays, objects, etc.)
+          if (!["LinksFilter", "LatLonFilter", "ExistsFilter"].includes(def.filterType)) {
+            orderByValues.push(`${gqlName}_ASC`, `${gqlName}_DESC`);
+          }
         }
       }
       filterFields.push(`AND: [${typeName}Filter!]`, `OR: [${typeName}Filter!]`);
@@ -769,6 +794,11 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
       // Build locale-awareness and camelCase→snake_case mapping for filter/order compilation
       const fieldNameMap = Object.fromEntries(camelToSnake);
       const fieldIsLocalized = (fieldName: string) => localizedCamelKeys.has(fieldName);
+      const localizedDbColumns = fields.filter((f) => f.localized).map((f) => f.api_key);
+      const jsonArrayFields = new Set(
+        fields.filter((f) => f.field_type === "links" || f.field_type === "media_gallery")
+          .map((f) => toCamelCase(f.api_key))
+      );
 
       async function queryWithFilter(
         args: { filter?: any; orderBy?: string[]; first?: number; skip?: number },
@@ -776,9 +806,11 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
         locale?: string
       ) {
         const filterLocale = locale ?? defaultLocale ?? undefined;
-        const filterOpts = {
+        const filterOpts: FilterCompilerOpts = {
           fieldIsLocalized,
           fieldNameMap,
+          localizedDbColumns,
+          jsonArrayFields,
           locale: filterLocale,
         };
 
@@ -811,7 +843,7 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
               query += ` ORDER BY ${orderBy}`;
             }
 
-            const limit = args.first ?? 500;
+            const limit = Math.min(args.first ?? 20, 500);
             query += ` LIMIT ?`;
             params.push(limit);
 
@@ -849,7 +881,12 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
               conditions.push(`"_status" IN ('published', 'updated')`);
             }
 
-            const compiled = compileFilterToSql(filter);
+            const compiled = compileFilterToSql(filter, {
+              fieldIsLocalized,
+              fieldNameMap,
+              localizedDbColumns,
+              jsonArrayFields,
+            });
             if (compiled) {
               conditions.push(compiled.where);
               params = compiled.params;
@@ -924,6 +961,73 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
     resolvers.Query._site = () => ({
       locales: locales.map((l) => l.code),
     });
+
+    // --- allUploads query — DatoCMS-compatible asset browsing ---
+    typeDefs.push(`
+      input UploadFilter {
+        id: StringFilter
+        filename: StringFilter
+        mimeType: StringFilter
+        width: IntFilter
+        height: IntFilter
+        size: IntFilter
+        alt: StringFilter
+        title: StringFilter
+        _createdAt: DateTimeFilter
+        AND: [UploadFilter!]
+        OR: [UploadFilter!]
+      }
+      enum UploadOrderBy {
+        filename_ASC filename_DESC
+        size_ASC size_DESC
+        _createdAt_ASC _createdAt_DESC
+      }
+      type UploadMeta { count: Int! }
+    `);
+    const uploadFieldMap: Record<string, string> = {
+      mimeType: "mime_type",
+      _createdAt: "created_at",
+    };
+    queryFieldDefs.push("allUploads(filter: UploadFilter, orderBy: [UploadOrderBy!], first: Int, skip: Int): [Asset!]!");
+    queryFieldDefs.push("_allUploadsMeta(filter: UploadFilter): UploadMeta!");
+    resolvers.Query.allUploads = async (_: any, args: any) => {
+      return await runSql(
+        Effect.gen(function* () {
+          const s = yield* SqlClient.SqlClient;
+          let query = `SELECT * FROM assets`;
+          let params: any[] = [];
+          const compiled = compileFilterToSql(args.filter, { fieldNameMap: uploadFieldMap });
+          if (compiled) { query += ` WHERE ${compiled.where}`; params = compiled.params; }
+          const orderBy = compileOrderBy(args.orderBy, { fieldNameMap: uploadFieldMap });
+          if (orderBy) query += ` ORDER BY ${orderBy}`;
+          const limit = Math.min(args.first ?? 20, 500);
+          query += ` LIMIT ?`; params.push(limit);
+          if (args.skip) { query += ` OFFSET ?`; params.push(args.skip); }
+          const rows = yield* s.unsafe<AssetRow>(query, params);
+          return rows.map((a) => ({
+            id: a.id, filename: a.filename, mimeType: a.mime_type,
+            size: a.size, width: a.width, height: a.height,
+            alt: a.alt, title: a.title, blurhash: a.blurhash ?? null,
+            url: assetUrl(a.id, a.filename),
+          }));
+        })
+      );
+    };
+    resolvers.Query._allUploadsMeta = async (_: any, args: any) => {
+      return {
+        count: await runSql(
+          Effect.gen(function* () {
+            const s = yield* SqlClient.SqlClient;
+            let query = `SELECT COUNT(*) as count FROM assets`;
+            let params: any[] = [];
+            const compiled = compileFilterToSql(args.filter, { fieldNameMap: uploadFieldMap });
+            if (compiled) { query += ` WHERE ${compiled.where}`; params = compiled.params; }
+            const rows = yield* s.unsafe<{ count: number }>(query, params);
+            return rows[0]?.count ?? 0;
+          })
+        ),
+      };
+    };
 
     // Asset.responsiveImage resolver
     // Accepts transforms (or imgixParams for DatoCMS compat) to control output dimensions/fit

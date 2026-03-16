@@ -159,10 +159,10 @@ type SiteSettings {
   _publishedAt: String
   _firstPublishedAt: String
   _seoMetaTags: [Tag!]!
-  site_name: String
+  siteName: String
   tagline: String
   logo: Asset
-  default_seo: SeoField
+  defaultSeo: SeoField
 }
 
 input SiteSettingsFilter {
@@ -172,7 +172,7 @@ input SiteSettingsFilter {
   _updatedAt: DateTimeFilter
   _publishedAt: DateTimeFilter
   _firstPublishedAt: DateTimeFilter
-  site_name: StringFilter
+  siteName: StringFilter
   tagline: StringFilter
   logo: StringFilter
   AND: [SiteSettingsFilter!]
@@ -188,8 +188,8 @@ enum SiteSettingsOrderBy {
   _publishedAt_DESC
   _firstPublishedAt_ASC
   _firstPublishedAt_DESC
-  site_name_ASC
-  site_name_DESC
+  siteName_ASC
+  siteName_DESC
   tagline_ASC
   tagline_DESC
   logo_ASC
@@ -261,9 +261,9 @@ type Category {
   name: String
   slug: String
   description: String
-  cover_image: Asset
+  coverImage: Asset
   icon: String
-  sort_order: Int
+  sortOrder: Int
 }
 
 input CategoryFilter {
@@ -276,9 +276,9 @@ input CategoryFilter {
   name: StringFilter
   slug: StringFilter
   description: StringFilter
-  cover_image: StringFilter
+  coverImage: StringFilter
   icon: StringFilter
-  sort_order: IntFilter
+  sortOrder: IntFilter
   AND: [CategoryFilter!]
   OR: [CategoryFilter!]
 }
@@ -298,12 +298,12 @@ enum CategoryOrderBy {
   slug_DESC
   description_ASC
   description_DESC
-  cover_image_ASC
-  cover_image_DESC
+  coverImage_ASC
+  coverImage_DESC
   icon_ASC
   icon_DESC
-  sort_order_ASC
-  sort_order_DESC
+  sortOrder_ASC
+  sortOrder_DESC
 }
 
 type CategoryMeta {
@@ -322,15 +322,15 @@ type Post {
   title: String
   slug: String
   excerpt: String
-  cover_image: Asset
+  coverImage: Asset
   content: StructuredText
   author: Author
   category: Category
-  related_posts: [Post!]
-  published_date: String
-  seo_field: SeoField
+  relatedPosts: [Post!]
+  publishedDate: String
+  seoField: SeoField
   gallery: [Asset!]
-  reading_time: Int
+  readingTime: Int
   featured: Boolean
 }
 
@@ -344,11 +344,11 @@ input PostFilter {
   title: StringFilter
   slug: StringFilter
   excerpt: StringFilter
-  cover_image: StringFilter
+  coverImage: StringFilter
   author: StringFilter
   category: StringFilter
-  published_date: StringFilter
-  reading_time: IntFilter
+  publishedDate: StringFilter
+  readingTime: IntFilter
   featured: BooleanFilter
   AND: [PostFilter!]
   OR: [PostFilter!]
@@ -369,16 +369,16 @@ enum PostOrderBy {
   slug_DESC
   excerpt_ASC
   excerpt_DESC
-  cover_image_ASC
-  cover_image_DESC
+  coverImage_ASC
+  coverImage_DESC
   author_ASC
   author_DESC
   category_ASC
   category_DESC
-  published_date_ASC
-  published_date_DESC
-  reading_time_ASC
-  reading_time_DESC
+  publishedDate_ASC
+  publishedDate_DESC
+  readingTime_ASC
+  readingTime_DESC
   featured_ASC
   featured_DESC
 }
@@ -389,7 +389,7 @@ type PostMeta {
 
 type Query {
   allSiteSettingss(locale: String, fallbackLocales: [String!], filter: SiteSettingsFilter, orderBy: [SiteSettingsOrderBy!], first: Int, skip: Int): [SiteSettings!]!
-  site_settings(locale: String, fallbackLocales: [String!], id: ID, filter: SiteSettingsFilter): SiteSettings
+  siteSettings(locale: String, fallbackLocales: [String!], id: ID, filter: SiteSettingsFilter): SiteSettings
   _allSiteSettingssMeta(filter: SiteSettingsFilter): SiteSettingsMeta!
   allAuthors(locale: String, fallbackLocales: [String!], filter: AuthorFilter, orderBy: [AuthorOrderBy!], first: Int, skip: Int): [Author!]!
   author(locale: String, fallbackLocales: [String!], id: ID, filter: AuthorFilter): Author

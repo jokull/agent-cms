@@ -2,8 +2,8 @@ import { graphql } from "gql.tada";
 
 export const SITE_SETTINGS_QUERY = graphql(`
   query SiteSettings {
-    site_settings {
-      site_name
+    siteSettings {
+      siteName
       tagline
       logo {
         url
@@ -15,7 +15,7 @@ export const SITE_SETTINGS_QUERY = graphql(`
           alt
         }
       }
-      default_seo {
+      defaultSeo {
         title
         description
       }
@@ -25,15 +25,15 @@ export const SITE_SETTINGS_QUERY = graphql(`
 
 export const ALL_POSTS_QUERY = graphql(`
   query AllPosts($first: Int, $skip: Int) {
-    allPosts(first: $first, skip: $skip, orderBy: [published_date_DESC]) {
+    allPosts(first: $first, skip: $skip, orderBy: [publishedDate_DESC]) {
       id
       title
       slug
       excerpt
-      published_date
-      reading_time
+      publishedDate
+      readingTime
       featured
-      cover_image {
+      coverImage {
         responsiveImage(transforms: { width: 800, height: 450, fit: "cover" }) {
           src
           srcSet
@@ -70,10 +70,10 @@ export const POST_BY_SLUG_QUERY = graphql(`
       title
       slug
       excerpt
-      published_date
-      reading_time
+      publishedDate
+      readingTime
       featured
-      cover_image {
+      coverImage {
         responsiveImage(transforms: { width: 1200, height: 630, fit: "cover" }) {
           src
           srcSet
@@ -107,10 +107,10 @@ export const POST_BY_SLUG_QUERY = graphql(`
         name
         slug
       }
-      related_posts {
+      relatedPosts {
         title
         slug
-        cover_image {
+        coverImage {
           responsiveImage(transforms: { width: 400, height: 225, fit: "cover" }) {
             src
             srcSet
@@ -131,7 +131,7 @@ export const POST_BY_SLUG_QUERY = graphql(`
           alt
         }
       }
-      seo_field {
+      seoField {
         title
         description
       }
@@ -146,14 +146,14 @@ export const POST_BY_SLUG_QUERY = graphql(`
 
 export const POSTS_BY_CATEGORY_QUERY = graphql(`
   query PostsByCategory($categorySlug: String!) {
-    allPosts(filter: { category: { eq: $categorySlug } }, orderBy: [published_date_DESC]) {
+    allPosts(filter: { category: { eq: $categorySlug } }, orderBy: [publishedDate_DESC]) {
       id
       title
       slug
       excerpt
-      published_date
-      reading_time
-      cover_image {
+      publishedDate
+      readingTime
+      coverImage {
         responsiveImage(transforms: { width: 600, height: 340, fit: "cover" }) {
           src
           srcSet
@@ -176,7 +176,7 @@ export const CATEGORY_BY_SLUG_QUERY = graphql(`
       name
       slug
       description
-      cover_image {
+      coverImage {
         responsiveImage(transforms: { width: 1200, height: 400, fit: "cover" }) {
           src
           srcSet
@@ -191,12 +191,12 @@ export const CATEGORY_BY_SLUG_QUERY = graphql(`
 
 export const ALL_CATEGORIES_QUERY = graphql(`
   query AllCategories {
-    allCategorys(orderBy: [sort_order_ASC]) {
+    allCategorys(orderBy: [sortOrder_ASC]) {
       name
       slug
       description
       icon
-      sort_order
+      sortOrder
     }
   }
 `);

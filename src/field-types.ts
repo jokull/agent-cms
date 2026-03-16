@@ -151,7 +151,7 @@ export const FIELD_TYPE_REGISTRY: Record<FieldType, FieldTypeDefinition> = {
   media: {
     sqliteType: "TEXT",
     graphqlType: "Asset",
-    filterType: "StringFilter",
+    filterType: "LinkFilter",
     localizable: false,
     multiLocaleType: "StringMultiLocaleField",
     inputSchema: null,
@@ -161,7 +161,7 @@ export const FIELD_TYPE_REGISTRY: Record<FieldType, FieldTypeDefinition> = {
   media_gallery: {
     sqliteType: "TEXT",
     graphqlType: "[Asset!]",
-    filterType: null,
+    filterType: "LinksFilter",
     localizable: false,
     multiLocaleType: "StringMultiLocaleField",
     inputSchema: null,
@@ -171,7 +171,7 @@ export const FIELD_TYPE_REGISTRY: Record<FieldType, FieldTypeDefinition> = {
   link: {
     sqliteType: "TEXT",
     graphqlType: null, // depends on validators (target model)
-    filterType: "StringFilter",
+    filterType: "LinkFilter",
     localizable: false,
     multiLocaleType: "StringMultiLocaleField",
     inputSchema: null,
@@ -181,7 +181,7 @@ export const FIELD_TYPE_REGISTRY: Record<FieldType, FieldTypeDefinition> = {
   links: {
     sqliteType: "TEXT",
     graphqlType: null, // depends on validators (target models)
-    filterType: null,
+    filterType: "LinksFilter",
     localizable: false,
     multiLocaleType: "StringMultiLocaleField",
     inputSchema: null,
@@ -191,7 +191,7 @@ export const FIELD_TYPE_REGISTRY: Record<FieldType, FieldTypeDefinition> = {
   structured_text: {
     sqliteType: "TEXT",
     graphqlType: "StructuredText",
-    filterType: null,
+    filterType: "TextFilter",
     localizable: false,
     multiLocaleType: "StringMultiLocaleField",
     inputSchema: null,
@@ -201,7 +201,7 @@ export const FIELD_TYPE_REGISTRY: Record<FieldType, FieldTypeDefinition> = {
   seo: {
     sqliteType: "TEXT",
     graphqlType: "SeoField",
-    filterType: null,
+    filterType: "ExistsFilter",
     localizable: false,
     multiLocaleType: "StringMultiLocaleField",
     inputSchema: SeoSchema,
@@ -211,7 +211,7 @@ export const FIELD_TYPE_REGISTRY: Record<FieldType, FieldTypeDefinition> = {
   json: {
     sqliteType: "TEXT",
     graphqlType: "JSON",
-    filterType: null,
+    filterType: "ExistsFilter",
     localizable: false,
     multiLocaleType: "StringMultiLocaleField",
     inputSchema: null,
@@ -221,7 +221,7 @@ export const FIELD_TYPE_REGISTRY: Record<FieldType, FieldTypeDefinition> = {
   color: {
     sqliteType: "TEXT",
     graphqlType: "ColorField",
-    filterType: null,
+    filterType: "ExistsFilter",
     localizable: false,
     multiLocaleType: "StringMultiLocaleField",
     inputSchema: ColorSchema,
@@ -231,7 +231,7 @@ export const FIELD_TYPE_REGISTRY: Record<FieldType, FieldTypeDefinition> = {
   lat_lon: {
     sqliteType: "TEXT",
     graphqlType: "LatLonField",
-    filterType: null,
+    filterType: "LatLonFilter",
     localizable: false,
     multiLocaleType: "StringMultiLocaleField",
     inputSchema: LatLonSchema,

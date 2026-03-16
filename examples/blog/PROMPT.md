@@ -2,6 +2,52 @@
 
 You are setting up a blog using agent-cms. Connect to the CMS MCP server. Execute each stage in order. Confirm success at each checkpoint before moving on.
 
+## Prerequisites (developer setup before running this prompt)
+
+Before connecting the agent, the developer needs to set up infrastructure:
+
+### 1. Deploy the CMS Worker
+
+```bash
+cd cms
+npm install
+npm run db:migrate        # apply local migrations
+npx wrangler deploy       # deploy to Cloudflare
+npm run db:migrate:remote # apply migrations to remote D1
+```
+
+### 2. Custom Domain (required for image resizing)
+
+The CMS worker needs a custom domain on a Cloudflare zone you control. `workers.dev` subdomains do not support Image Resizing.
+
+1. Add a custom domain to the worker: **Cloudflare Dashboard → Workers & Pages → test-blog-cms → Settings → Domains & Routes → Add → Custom Domain** (e.g. `cms.yourdomain.com`)
+2. Enable Image Resizing on the zone: **Dashboard → yourdomain.com → Speed → Optimization → Image Optimization → Image Resizing → Enable**
+3. Update `ASSET_BASE_URL` in `cms/wrangler.jsonc` to the custom domain URL (e.g. `https://cms.yourdomain.com`)
+4. Redeploy: `npx wrangler deploy`
+
+### 3. Connect the Agent
+
+Add the MCP server to Claude Desktop or Claude Code:
+
+```json
+{
+  "mcpServers": {
+    "blog-cms": { "url": "https://cms.yourdomain.com/mcp" }
+  }
+}
+```
+
+For local development (no image resizing):
+```json
+{
+  "mcpServers": {
+    "blog-cms": { "url": "http://localhost:8787/mcp" }
+  }
+}
+```
+
+---
+
 ## Stage 1: Create Schema
 
 ### 1.1 Create Models

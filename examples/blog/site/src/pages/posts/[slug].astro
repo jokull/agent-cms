@@ -19,9 +19,9 @@ if (!post) {
 
 <Base seoTags={post._seoMetaTags}>
   <article class="post">
-    {post.cover_image?.responsiveImage && (
+    {post.coverImage?.responsiveImage && (
       <div class="cover">
-        <ResponsiveImage data={post.cover_image.responsiveImage} loading="eager" sizes="100vw" />
+        <ResponsiveImage data={post.coverImage.responsiveImage} loading="eager" sizes="100vw" />
       </div>
     )}
 
@@ -41,12 +41,12 @@ if (!post) {
             <span>{post.author.name}</span>
           </div>
         )}
-        {post.published_date && (
-          <time datetime={post.published_date}>
-            {new Date(post.published_date).toLocaleDateString("en", { year: "numeric", month: "long", day: "numeric" })}
+        {post.publishedDate && (
+          <time datetime={post.publishedDate}>
+            {new Date(post.publishedDate).toLocaleDateString("en", { year: "numeric", month: "long", day: "numeric" })}
           </time>
         )}
-        {post.reading_time && <span>{post.reading_time} min read</span>}
+        {post.readingTime && <span>{post.readingTime} min read</span>}
         {post.featured && <span class="featured-badge">Featured</span>}
       </div>
     </header>
@@ -73,11 +73,11 @@ if (!post) {
       </section>
     )}
 
-    {post.related_posts && post.related_posts.length > 0 && (
+    {post.relatedPosts && post.relatedPosts.length > 0 && (
       <section class="related">
         <h2>Related Posts</h2>
         <div class="related-grid">
-          {post.related_posts.map((related) => (
+          {post.relatedPosts.map((related) => (
             <a href={`/posts/${related.slug}`} class="related-card">
               {related.coverImage?.responsiveImage && (
                 <ResponsiveImage data={related.coverImage.responsiveImage} />

@@ -20,6 +20,6 @@
   ],
   "vars": {
     "ENVIRONMENT": "production",
-    "ASSET_BASE_URL": "https://test-blog-cms.solberg.workers.dev"
+    "ASSET_BASE_URL": "https://test-cms.solberg.is"
   }
 }
