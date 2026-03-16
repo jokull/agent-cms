@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
 import { SqliteClient } from "@effect/sql-sqlite-node";
-import { runMigrations } from "../src/db/migrate.js";
+import { runMigrations } from "./migrate.js";
 
 // Pure @effect/sql test layer — no Drizzle needed
 const TestSqlLayer = SqliteClient.layer({ filename: ":memory:" });

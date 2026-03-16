@@ -1,7 +1,7 @@
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { SqlClient } from "@effect/sql";
 import { SqliteClient } from "@effect/sql-sqlite-node";
-import { runMigrations } from "../src/db/migrate.js";
+import { runMigrations } from "./migrate.js";
 import { createWebHandler } from "../src/http/router.js";
 import { mkdtempSync } from "fs";
 import { tmpdir } from "os";

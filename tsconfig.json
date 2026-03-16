@@ -6,7 +6,7 @@
     "lib": ["ES2022"],
     "types": ["@cloudflare/workers-types/2023-07-01"],
     "strict": true,
-    "exactOptionalPropertyTypes": true,
+    // exactOptionalPropertyTypes disabled — causes false positives with Effect/Yoga types
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,

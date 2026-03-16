@@ -5,7 +5,7 @@ import { SqlClient } from "@effect/sql";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createMcpServer } from "../src/mcp/server.js";
-import { runMigrations } from "../src/db/migrate.js";
+import { runMigrations } from "./migrate.js";
 import { ulid } from "ulidx";
 import { mkdtempSync } from "fs";
 import { tmpdir } from "os";

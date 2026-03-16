@@ -112,7 +112,7 @@ export function createRecord(rawBody: unknown) {
           rootRecordId: id,
           value: stInput.value,
           blocks: stInput.blocks,
-          allowedBlockTypes,
+          allowedBlockTypes: allowedBlockTypes ?? [],
           blocksOnly,
         });
 
@@ -257,7 +257,7 @@ export function patchRecord(id: string, rawBody: unknown) {
             rootRecordId: id,
             value: stInput.value,
             blocks: stInput.blocks,
-            allowedBlockTypes,
+            allowedBlockTypes: allowedBlockTypes ?? [],
             blocksOnly,
           });
 

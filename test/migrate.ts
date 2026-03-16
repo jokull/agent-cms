@@ -1,12 +1,15 @@
+/**
+ * Test-only migration runner. Reads Drizzle migration SQL files from the
+ * filesystem and executes them against an in-memory SQLite database.
+ *
+ * Production uses `wrangler d1 migrations apply` instead — the Worker
+ * bundle never touches the filesystem.
+ */
 import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
 import { readFileSync, readdirSync } from "fs";
 import { join } from "path";
 
-/**
- * Run system table migrations via @effect/sql.
- * Reads migration SQL files from the drizzle/ directory and executes them.
- */
 export function runMigrations(migrationsDir: string = "./drizzle") {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
@@ -22,8 +25,8 @@ export function runMigrations(migrationsDir: string = "./drizzle") {
 
     // Find migration directories (sorted by timestamp)
     const dirs = readdirSync(migrationsDir, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => d.name)
+      .filter((d: import("fs").Dirent) => d.isDirectory())
+      .map((d: import("fs").Dirent) => d.name)
       .sort();
 
     for (const dir of dirs) {
@@ -41,8 +44,8 @@ export function runMigrations(migrationsDir: string = "./drizzle") {
       // Split on statement breakpoints
       const statements = migrationSql
         .split("--> statement-breakpoint")
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
+        .map((s: string) => s.trim())
+        .filter((s: string) => s.length > 0);
 
       for (const statement of statements) {
         yield* sql.unsafe(statement);

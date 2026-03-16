@@ -251,6 +251,34 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 - [ ] **P6.8** R2 asset upload pipeline — actual file upload to R2 (currently metadata-only). Upload via presigned URL or Worker proxy. Store r2Key on asset row for transform URL generation.
 - [ ] **P6.9** Asset upload via MCP — `upload_asset` accepts base64 or URL, stores in R2, returns asset with transform URLs.
 
+### DX & Production Readiness
+
+Deployment architecture: system tables created via `wrangler d1 migrations apply` (Drizzle CLI). Dynamic content/block tables managed at runtime by the schema engine. Single D1+Worker = single environment; multi-env via wrangler devops.
+
+#### Done
+
+- [x] **TypeScript compiles** — zero `tsc --noEmit` errors. Removed `exactOptionalPropertyTypes` (incompatible with Effect/Yoga types). Moved test-only `migrate.ts` out of Worker bundle (uses `fs`).
+- [x] **GraphiQL playground** — enabled at `GET /graphql` via Yoga `landingPage: true`. Schema introspection works out of the box.
+- [x] **CORS** — all responses include `Access-Control-Allow-Origin`, preflight `OPTIONS` handled. Allows `X-Include-Drafts` and `Authorization` headers.
+- [x] **Schema caching** — GraphQL schema built once per Worker instance, not per-request.
+
+#### Needed for first real project
+
+- [ ] **`wrangler dev` local DX** — verify `wrangler dev` works end-to-end: create model via REST, query via GraphQL, use GraphiQL. Document the flow.
+- [ ] **`wrangler deploy` + D1 setup** — document: `wrangler d1 create`, `wrangler d1 migrations apply`, `wrangler deploy`. Verify first-request builds schema correctly from empty D1.
+- [ ] **Audit log system table** — `audit_log` table tracking schema and content mutations (who, what, when). Essential for CMS trust and debugging.
+- [ ] **R2 asset upload** — presigned URL endpoint for file upload to R2. Asset creation returns upload URL; client uploads directly to R2.
+- [ ] **MCP server registration** — document how to register the MCP server in Claude Desktop / Claude Code for agent-first schema management.
+- [ ] **README** — what this is, how to set up, how to use. Quickstart for both agent (MCP) and developer (REST/GraphQL) workflows.
+
+#### Nice-to-have DX
+
+- [ ] **GraphQL schema export** — `GET /graphql/schema` returns SDL for codegen integration
+- [ ] **Seed data scripts** — example schemas (blog, e-commerce) for quick testing
+- [ ] **Error messages with guidance** — errors like "Model not found" should suggest `list_models` (MCP) or `GET /api/models` (REST)
+- [ ] **Webhook delivery logs** — track webhook delivery success/failure for debugging
+- [ ] **API key auth** — optional `Authorization: Bearer <key>` for production. Store keys in Workers secrets.
+
 ### Future (not prioritized)
 
 - [ ] GraphQL subscriptions for real-time updates

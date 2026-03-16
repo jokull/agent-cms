@@ -126,8 +126,8 @@ function deserializeRecord(record: Record<string, any>): Record<string, any> {
  */
 export function buildGraphQLSchema(sqlLayer: any) {
   // Helper to run sql queries synchronously through the layer
-  function runSql<A>(effect: Effect.Effect<A, any, SqlClient.SqlClient>): A {
-    return Effect.runSync(effect.pipe(Effect.provide(sqlLayer)));
+  function runSql<A>(effect: Effect.Effect<A, unknown, SqlClient.SqlClient>): A {
+    return Effect.runSync(Effect.provide(effect, sqlLayer) as Effect.Effect<A, never, never>);
   }
 
   return Effect.gen(function* () {
@@ -649,10 +649,10 @@ export function buildGraphQLSchema(sqlLayer: any) {
                       `SELECT * FROM "block_${bm.api_key}" WHERE _root_record_id = ? AND _root_field_api_key = ?`,
                       [parent.id, f.api_key]
                     );
-                    return rows.map((r: any) => ({
-                      ...deserializeRecord(r),
-                      __typename: `${toTypeName(bm.api_key)}Record`,
-                    }));
+                    return rows.map((r: Record<string, any>) => {
+                      const deserialized = deserializeRecord(r);
+                      return { id: deserialized.id as string, ...deserialized, __typename: `${toTypeName(bm.api_key)}Record` };
+                    });
                   })
                 );
                 for (const record of fetched) {

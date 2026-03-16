@@ -15,34 +15,30 @@ import * as LocaleService from "../services/locale-service.js";
 import { type CmsError, errorToResponse } from "../errors.js";
 
 /** Helper: run a CMS Effect and return an HTTP response */
-function handle<A, E>(
-  effect: Effect.Effect<A, E, SqlClient.SqlClient>,
+function handle<A>(
+  effect: Effect.Effect<A, unknown, SqlClient.SqlClient>,
   status: number = 200
-): Effect.Effect<HttpServerResponse.HttpServerResponse, never, SqlClient.SqlClient> {
+) {
   return effect.pipe(
     Effect.flatMap((result) => HttpServerResponse.json(result, { status })),
-    Effect.catchAll((error) => {
-      // Check if it's one of our typed CMS errors
+    Effect.catchAll((error: unknown) => {
       if (error && typeof error === "object" && "_tag" in error && "message" in error) {
-        const mapped = errorToResponse(error as CmsError); // narrowed by _tag + message check
-        if (mapped) {
-          return HttpServerResponse.json(mapped.body, { status: mapped.status });
-        }
+        const mapped = errorToResponse(error as CmsError);
+        if (mapped) return HttpServerResponse.json(mapped.body, { status: mapped.status });
       }
-      // Unknown error — 500
       console.error("Unhandled error:", error);
       return HttpServerResponse.json({ error: "Internal server error" }, { status: 500 });
     }),
-    Effect.catchAllDefect((defect) => {
+    Effect.catchAllDefect((defect: unknown) => {
       console.error("Defect:", defect);
       return HttpServerResponse.json({ error: "Internal server error" }, { status: 500 });
     })
   );
 }
 
-/** Get path params */
-function pathParams() {
-  return HttpRouter.params;
+/** Extract a required path parameter, defaulting to empty string if missing */
+function param(params: Record<string, string | undefined>, name: string): string {
+  return params[name] ?? "";
 }
 
 /** Get query param */
@@ -71,7 +67,7 @@ const modelsRouter = HttpRouter.empty.pipe(
     "/:id",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
-      return yield* handle(ModelService.getModel(params.id));
+      return yield* handle(ModelService.getModel(param(params, "id")));
     })
   ),
 
@@ -81,7 +77,7 @@ const modelsRouter = HttpRouter.empty.pipe(
       const params = yield* HttpRouter.params;
       const req = yield* HttpServerRequest.HttpServerRequest;
       const body = yield* req.json;
-      return yield* handle(ModelService.updateModel(params.id, body));
+      return yield* handle(ModelService.updateModel(param(params, "id"), body as Record<string, unknown>));
     })
   ),
 
@@ -89,7 +85,7 @@ const modelsRouter = HttpRouter.empty.pipe(
     "/:id",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
-      return yield* handle(ModelService.deleteModel(params.id));
+      return yield* handle(ModelService.deleteModel(param(params, "id")));
     })
   )
 );
@@ -100,7 +96,7 @@ const fieldsRouter = HttpRouter.empty.pipe(
     "/models/:modelId/fields",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
-      return yield* handle(FieldService.listFields(params.modelId));
+      return yield* handle(FieldService.listFields(param(params, "modelId")));
     })
   ),
 
@@ -110,7 +106,7 @@ const fieldsRouter = HttpRouter.empty.pipe(
       const params = yield* HttpRouter.params;
       const req = yield* HttpServerRequest.HttpServerRequest;
       const body = yield* req.json;
-      return yield* handle(FieldService.createField(params.modelId, body), 201);
+      return yield* handle(FieldService.createField(param(params, "modelId"), body), 201);
     })
   ),
 
@@ -120,7 +116,7 @@ const fieldsRouter = HttpRouter.empty.pipe(
       const params = yield* HttpRouter.params;
       const req = yield* HttpServerRequest.HttpServerRequest;
       const body = yield* req.json;
-      return yield* handle(FieldService.updateField(params.fieldId, body));
+      return yield* handle(FieldService.updateField(param(params, "fieldId"), body as Record<string, unknown>));
     })
   ),
 
@@ -128,7 +124,7 @@ const fieldsRouter = HttpRouter.empty.pipe(
     "/models/:modelId/fields/:fieldId",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
-      return yield* handle(FieldService.deleteField(params.fieldId));
+      return yield* handle(FieldService.deleteField(param(params, "fieldId")));
     })
   )
 );
@@ -157,7 +153,7 @@ const recordsRouter = HttpRouter.empty.pipe(
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
       const modelApiKey = yield* queryParam("modelApiKey");
-      return yield* handle(RecordService.getRecord(modelApiKey, params.id));
+      return yield* handle(RecordService.getRecord(modelApiKey, param(params, "id")));
     })
   ),
 
@@ -167,7 +163,7 @@ const recordsRouter = HttpRouter.empty.pipe(
       const params = yield* HttpRouter.params;
       const req = yield* HttpServerRequest.HttpServerRequest;
       const body = yield* req.json;
-      return yield* handle(RecordService.patchRecord(params.id, body));
+      return yield* handle(RecordService.patchRecord(param(params, "id"), body));
     })
   ),
 
@@ -176,7 +172,7 @@ const recordsRouter = HttpRouter.empty.pipe(
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
       const modelApiKey = yield* queryParam("modelApiKey");
-      return yield* handle(RecordService.removeRecord(modelApiKey, params.id));
+      return yield* handle(RecordService.removeRecord(modelApiKey, param(params, "id")));
     })
   ),
 
@@ -186,7 +182,7 @@ const recordsRouter = HttpRouter.empty.pipe(
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
       const modelApiKey = yield* queryParam("modelApiKey");
-      return yield* handle(PublishService.publishRecord(modelApiKey, params.id));
+      return yield* handle(PublishService.publishRecord(modelApiKey, param(params, "id")));
     })
   ),
 
@@ -195,7 +191,7 @@ const recordsRouter = HttpRouter.empty.pipe(
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
       const modelApiKey = yield* queryParam("modelApiKey");
-      return yield* handle(PublishService.unpublishRecord(modelApiKey, params.id));
+      return yield* handle(PublishService.unpublishRecord(modelApiKey, param(params, "id")));
     })
   ),
 
@@ -230,7 +226,7 @@ const assetsRouter = HttpRouter.empty.pipe(
     "/:id",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
-      return yield* handle(AssetService.getAsset(params.id));
+      return yield* handle(AssetService.getAsset(param(params, "id")));
     })
   ),
 
@@ -238,7 +234,7 @@ const assetsRouter = HttpRouter.empty.pipe(
     "/:id",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
-      return yield* handle(AssetService.deleteAsset(params.id));
+      return yield* handle(AssetService.deleteAsset(param(params, "id")));
     })
   )
 );
@@ -258,7 +254,7 @@ const localesRouter = HttpRouter.empty.pipe(
     "/:id",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
-      return yield* handle(LocaleService.deleteLocale(params.id));
+      return yield* handle(LocaleService.deleteLocale(param(params, "id")));
     })
   )
 );
@@ -284,16 +280,33 @@ export const appRouter = HttpRouter.empty.pipe(
  * Uses Effect.flatten to work around @effect/platform 0.94.5 nested Effect issue.
  */
 export function createWebHandler(sqlLayer: any) {
-  const restHandler = HttpApp.toWebHandler(
-    Effect.flatten(HttpRouter.toHttpApp(appRouter)).pipe(
-      Effect.provide(sqlLayer)
-    )
+  const restApp = Effect.flatten(HttpRouter.toHttpApp(appRouter)).pipe(
+    Effect.catchAll(() => HttpServerResponse.json({ error: "Not found" }, { status: 404 })),
+    Effect.provide(sqlLayer)
   );
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Effect/platform router type variance
+  const restHandler = HttpApp.toWebHandler(restApp as any);
 
   // Lazy-import GraphQL handler to avoid circular deps
   let graphqlHandler: ((req: Request) => Promise<Response>) | null = null;
 
+  /** Add CORS headers to a response */
+  function withCors(response: Response, request: Request): Response {
+    const origin = request.headers.get("Origin") ?? "*";
+    const headers = new Headers(response.headers);
+    headers.set("Access-Control-Allow-Origin", origin);
+    headers.set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
+    headers.set("Access-Control-Allow-Headers", "Content-Type, X-Include-Drafts, Authorization");
+    headers.set("Access-Control-Max-Age", "86400");
+    return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+  }
+
   return async (request: Request): Promise<Response> => {
+    // Handle CORS preflight
+    if (request.method === "OPTIONS") {
+      return withCors(new Response(null, { status: 204 }), request);
+    }
+
     const url = new URL(request.url);
 
     // Route /graphql to Yoga
@@ -302,10 +315,12 @@ export function createWebHandler(sqlLayer: any) {
         const { createGraphQLHandler } = await import("../graphql/handler.js");
         graphqlHandler = createGraphQLHandler(sqlLayer);
       }
-      return graphqlHandler(request);
+      const response = await graphqlHandler(request);
+      return withCors(response, request);
     }
 
     // Everything else to the Effect router
-    return restHandler(request);
+    const response = await restHandler(request);
+    return withCors(response, request);
   };
 }

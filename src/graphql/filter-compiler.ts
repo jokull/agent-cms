@@ -19,22 +19,8 @@ interface FilterInput {
  * @param fieldIsLocalized - Function to check if a field stores JSON locale data
  * @param locale - Current locale for json_extract on localized fields
  */
-export function compileFilter(
-  sql: SqlClient.SqlClient,
-  filter: FilterInput | undefined,
-  fieldIsLocalized?: (field: string) => boolean,
-  locale?: string
-): ReturnType<typeof sql.unsafe> | null {
-  if (!filter || Object.keys(filter).length === 0) return null;
-
-  const conditions = buildConditions(sql, filter, fieldIsLocalized, locale);
-  if (conditions.length === 0) return null;
-
-  // We need to build the WHERE clause as a raw SQL string since
-  // @effect/sql's sql.and() returns a Fragment that can't be used
-  // with sql.unsafe() directly. Build parameterized SQL manually.
-  return null; // Placeholder — see compileFilterToSql below
-}
+// compileFilter() was removed — use compileFilterToSql() instead,
+// which builds parameterized SQL strings compatible with sql.unsafe().
 
 interface SqlCondition {
   sql: string;
