@@ -14,7 +14,7 @@ async function createTestMcp() {
   const dbPath = join(tmpDir, "test.db");
   const sqlLayer = SqliteClient.layer({ filename: dbPath, disableWAL: true });
 
-  Effect.runSync(runMigrations("./drizzle").pipe(Effect.provide(sqlLayer)));
+  Effect.runSync(runMigrations().pipe(Effect.provide(sqlLayer)));
 
   const mcpServer = createMcpServer(sqlLayer);
   const client = new Client({ name: "test-client", version: "1.0" });

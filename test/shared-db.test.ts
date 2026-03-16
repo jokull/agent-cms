@@ -15,7 +15,7 @@ describe("@effect/sql with system table migrations", () => {
   it("runs migrations and creates system tables", async () => {
     await run(
       Effect.gen(function* () {
-        yield* runMigrations("./drizzle");
+        yield* runMigrations();
 
         const tables = yield* SqlClient.SqlClient.pipe(
           Effect.flatMap((sql) =>
@@ -39,7 +39,7 @@ describe("@effect/sql with system table migrations", () => {
     await run(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
-        yield* runMigrations("./drizzle");
+        yield* runMigrations();
 
         // Insert a model via @effect/sql
         const now = new Date().toISOString();

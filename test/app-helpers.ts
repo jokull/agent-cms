@@ -20,7 +20,7 @@ export function createTestApp() {
   const sqlLayer = SqliteClient.layer({ filename: dbPath, disableWAL: true });
 
   // Run migrations
-  Effect.runSync(runMigrations("./drizzle").pipe(Effect.provide(sqlLayer)));
+  Effect.runSync(runMigrations().pipe(Effect.provide(sqlLayer)));
 
   const handler = createWebHandler(sqlLayer);
 

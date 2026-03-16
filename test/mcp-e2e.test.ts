@@ -25,7 +25,7 @@ describe("P5.6: End-to-end MCP → GraphQL", () => {
     const dbPath = join(tmpDir, "test.db");
     const sqlLayer = SqliteClient.layer({ filename: dbPath, disableWAL: true });
 
-    Effect.runSync(runMigrations("./drizzle").pipe(Effect.provide(sqlLayer)));
+    Effect.runSync(runMigrations().pipe(Effect.provide(sqlLayer)));
 
     // MCP server + client
     const mcpServer = createMcpServer(sqlLayer);

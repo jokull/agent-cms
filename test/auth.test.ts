@@ -11,7 +11,7 @@ function createAuthTestApp(readKey?: string, writeKey?: string) {
   const tmpDir = mkdtempSync(join(tmpdir(), "agent-cms-auth-"));
   const dbPath = join(tmpDir, "test.db");
   const sqlLayer = SqliteClient.layer({ filename: dbPath, disableWAL: true });
-  Effect.runSync(runMigrations("./drizzle").pipe(Effect.provide(sqlLayer)));
+  Effect.runSync(runMigrations().pipe(Effect.provide(sqlLayer)));
   const handler = createWebHandler(sqlLayer, { readKey, writeKey });
   return handler;
 }

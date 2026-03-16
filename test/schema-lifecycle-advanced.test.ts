@@ -24,7 +24,7 @@ describe("Schema Lifecycle — Advanced Operations", () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "agent-cms-lifecycle-"));
     const dbPath = join(tmpDir, "test.db");
     sqlLayer = SqliteClient.layer({ filename: dbPath, disableWAL: true });
-    Effect.runSync(runMigrations("./drizzle").pipe(Effect.provide(sqlLayer)));
+    Effect.runSync(runMigrations().pipe(Effect.provide(sqlLayer)));
 
     const mcpServer = createMcpServer(sqlLayer);
     agent = new Client({ name: "test", version: "1.0" });

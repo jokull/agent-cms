@@ -178,8 +178,7 @@ All fields are indexed by default. Opt a field out with `{"searchable": false}` 
 - **Assets**: R2 + Cloudflare Image Resizing
 - **Search**: SQLite FTS5 + Cloudflare Vectorize
 - **Application**: [Effect](https://effect.website) — HTTP routing, SQL, validation, error handling, dependency injection
-- **System schema**: [Drizzle](https://orm.drizzle.team) for typed system tables
-- **Dynamic schema**: `@effect/sql` for runtime-generated content tables
+- **Schema engine**: `@effect/sql` with hand-written DDL for both system tables and runtime-generated content tables
 - **GraphQL**: [graphql-yoga](https://the-guild.dev/graphql/yoga-server) with generated SDL
 
 ## Example
