@@ -44,7 +44,7 @@ These are settled. Do not revisit without explicit instruction.
 
 ## Field Types (v1)
 
-`string`, `text`, `boolean`, `integer`, `slug`, `media` (single image), `media_gallery` (multiple images), `link` (single record ref), `links` (multiple record refs), `structured_text`, `seo` (title/description/image/twitterCard composite)
+`string`, `text`, `boolean`, `integer`, `float`, `slug`, `media` (single image), `media_gallery` (multiple images), `link` (single record ref), `links` (multiple record refs), `structured_text`, `seo` (title/description/image/twitterCard composite), `json` (arbitrary JSON)
 
 ---
 
@@ -228,6 +228,8 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 - [x] Webhooks on record/schema changes *(done — CRUD via MCP, fires on record create/update/delete/publish/unpublish, 5 tests)*
 - [x] SEO composite field type *(done — `seo` field stores {title, description, image, twitterCard} as JSON, image resolves to Asset in GraphQL, 5 tests)*
 - [x] Tree/sortable models *(done — _position auto-increment, _parent_id for tree hierarchy, _parent/_children GraphQL resolvers, reorder_records MCP tool + REST endpoint, 6 tests)*
+- [x] `json` field type *(done — arbitrary JSON storage, GraphQL JSON scalar, 3 tests)*
+- [x] `float` field type *(done — REAL column, Float GraphQL type, FloatFilter, ordering, 4 tests)*
 - [ ] GraphQL subscriptions for real-time updates
 - [ ] Schema descriptor KV caching for production cold starts
 - [ ] Cloudflare Images integration (production only, not local dev)

@@ -18,7 +18,10 @@ function fieldTypeToSQLite(fieldType: FieldType): string {
     case "links":
     case "structured_text":
     case "seo":
+    case "json":
       return "TEXT"; // JSON stored as TEXT
+    case "float":
+      return "REAL";
     default: {
       const _exhaustive: never = fieldType;
       throw new Error(`Unknown field type: ${_exhaustive}`);

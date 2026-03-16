@@ -34,6 +34,8 @@ function fieldToSDL(
     case "media_gallery": return "[Asset!]";
     case "structured_text": return "StructuredText";
     case "seo": return "SeoField";
+    case "json": return "JSON";
+    case "float": return "Float";
     default: return "String";
   }
 }
@@ -43,6 +45,7 @@ function filterInputType(fieldType: string): string {
     case "string": case "text": case "slug": case "media": case "link": return "StringFilter";
     case "boolean": return "BooleanFilter";
     case "integer": return "IntFilter";
+    case "float": return "FloatFilter";
     default: return "StringFilter";
   }
 }
@@ -189,6 +192,7 @@ export function buildGraphQLSchema(sqlLayer: any) {
       }
       input StringFilter { eq: String, neq: String, matches: String, isBlank: Boolean, exists: Boolean }
       input IntFilter { eq: Int, neq: Int, gt: Int, lt: Int, gte: Int, lte: Int, exists: Boolean }
+      input FloatFilter { eq: Float, neq: Float, gt: Float, lt: Float, gte: Float, lte: Float, exists: Boolean }
       input BooleanFilter { eq: Boolean, exists: Boolean }
     `);
 
@@ -271,7 +275,7 @@ export function buildGraphQLSchema(sqlLayer: any) {
 
       // Localized field resolvers: extract value for requested locale
       for (const f of fields) {
-        if (f.localized && !["link", "links", "media", "media_gallery", "structured_text", "seo"].includes(f.field_type)) {
+        if (f.localized && !["link", "links", "media", "media_gallery", "structured_text", "seo", "json"].includes(f.field_type)) {
           typeResolvers[f.api_key] = (parent: any, _args: any, context: any) => {
             const rawValue = parent[f.api_key];
             if (rawValue === null || rawValue === undefined) return null;
@@ -468,7 +472,7 @@ export function buildGraphQLSchema(sqlLayer: any) {
         orderByValues.push("_position_ASC", "_position_DESC");
       }
       for (const f of fields) {
-        if (!["structured_text", "media_gallery", "links", "seo"].includes(f.field_type)) {
+        if (!["structured_text", "media_gallery", "links", "seo", "json"].includes(f.field_type)) {
           filterFields.push(`${f.api_key}: ${filterInputType(f.field_type)}`);
           orderByValues.push(`${f.api_key}_ASC`, `${f.api_key}_DESC`);
         }

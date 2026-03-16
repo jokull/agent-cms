@@ -35,6 +35,12 @@ export function mapFieldToColumn(fieldType: FieldType, apiKey: string) {
     case "seo":
       // SEO metadata JSON object
       return text(apiKey, { mode: "json" });
+    case "json":
+      // Arbitrary JSON storage
+      return text(apiKey, { mode: "json" });
+    case "float":
+      // Floating point number stored as REAL
+      return text(apiKey); // SQLite stores as TEXT, parsed to float
     default: {
       const _exhaustive: never = fieldType;
       throw new Error(`Unknown field type: ${_exhaustive}`);
