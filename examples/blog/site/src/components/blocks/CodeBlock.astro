@@ -1,0 +1,47 @@
+---
+interface Props {
+  data: {
+    code: string;
+    language?: string;
+    filename?: string;
+  };
+}
+
+const { data } = Astro.props;
+---
+
+<div class="code-block">
+  {data.filename && (
+    <div class="code-header">
+      <span class="filename">{data.filename}</span>
+      {data.language && <span class="language">{data.language}</span>}
+    </div>
+  )}
+  <pre><code class={data.language ? `language-${data.language}` : undefined}>{data.code}</code></pre>
+</div>
+
+<style>
+  .code-block {
+    margin: 1.5rem 0;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #1e1e1e;
+    color: #d4d4d4;
+  }
+  .code-header {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.5rem 1rem;
+    background: #2d2d2d;
+    font-size: 0.8rem;
+  }
+  .filename { color: #ccc; }
+  .language { color: #888; }
+  pre {
+    margin: 0;
+    padding: 1rem;
+    overflow-x: auto;
+    font-size: 0.9rem;
+    line-height: 1.5;
+  }
+</style>

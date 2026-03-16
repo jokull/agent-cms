@@ -1,0 +1,404 @@
+scalar JSON
+
+"""Cloudflare Image Resizing transform parameters"""
+input ImageTransformParams {
+  width: Int
+  height: Int
+  fit: String
+  quality: Int
+  format: String
+  gravity: String
+  dpr: Int
+}
+
+type Asset {
+  id: ID!
+  filename: String!
+  mimeType: String!
+  size: Int!
+  width: Int
+  height: Int
+  alt: String
+  title: String
+  url: String!
+  blurhash: String
+  responsiveImage(transforms: ImageTransformParams, cfImagesParams: ImageTransformParams): ResponsiveImage
+}
+
+type ResponsiveImage {
+  src: String!
+  srcSet: String!
+  webpSrcSet: String!
+  width: Int!
+  height: Int!
+  aspectRatio: Float!
+  alt: String
+  title: String
+  base64: String
+  bgColor: String
+  sizes: String
+}
+
+type SiteInfo {
+  locales: [String!]!
+}
+
+"""DatoCMS-compatible SEO meta tag"""
+type Tag {
+  tag: String!
+  attributes: JSON
+  content: String
+}
+
+type SeoField {
+  title: String
+  description: String
+  image: Asset
+  twitterCard: String
+}
+
+type ColorField {
+  red: Int!
+  green: Int!
+  blue: Int!
+  alpha: Int
+  hex: String!
+}
+
+type LatLonField {
+  latitude: Float!
+  longitude: Float!
+}
+
+"""DatoCMS-compatible StructuredText response"""
+type StructuredText {
+  value: JSON!
+  blocks: [JSON!]!
+  inlineBlocks: [JSON!]!
+  links: [JSON!]!
+}
+
+type StringMultiLocaleField {
+  locale: String!
+  value: String
+}
+
+type IntMultiLocaleField {
+  locale: String!
+  value: Int
+}
+
+type FloatMultiLocaleField {
+  locale: String!
+  value: Float
+}
+
+type BooleanMultiLocaleField {
+  locale: String!
+  value: Boolean
+}
+
+input MatchesFilter {
+  pattern: String!
+  caseSensitive: Boolean
+}
+
+input StringFilter {
+  eq: String
+  neq: String
+  in: [String!]
+  notIn: [String!]
+  matches: String
+  matchesObject: MatchesFilter
+  isBlank: Boolean
+  isPresent: Boolean
+  exists: Boolean
+}
+
+input IntFilter {
+  eq: Int
+  neq: Int
+  gt: Int
+  lt: Int
+  gte: Int
+  lte: Int
+  exists: Boolean
+}
+
+input FloatFilter {
+  eq: Float
+  neq: Float
+  gt: Float
+  lt: Float
+  gte: Float
+  lte: Float
+  exists: Boolean
+}
+
+input BooleanFilter {
+  eq: Boolean
+  exists: Boolean
+}
+
+input DateTimeFilter {
+  eq: String
+  neq: String
+  gt: String
+  lt: String
+  gte: String
+  lte: String
+  exists: Boolean
+}
+
+type SiteSettings {
+  id: ID!
+  _modelApiKey: String!
+  _status: String
+  _createdAt: String
+  _updatedAt: String
+  _publishedAt: String
+  _firstPublishedAt: String
+  _seoMetaTags: [Tag!]!
+  site_name: String
+  tagline: String
+  logo: Asset
+  default_seo: SeoField
+}
+
+input SiteSettingsFilter {
+  id: StringFilter
+  _status: StringFilter
+  _createdAt: DateTimeFilter
+  _updatedAt: DateTimeFilter
+  _publishedAt: DateTimeFilter
+  _firstPublishedAt: DateTimeFilter
+  site_name: StringFilter
+  tagline: StringFilter
+  logo: StringFilter
+  AND: [SiteSettingsFilter!]
+  OR: [SiteSettingsFilter!]
+}
+
+enum SiteSettingsOrderBy {
+  _createdAt_ASC
+  _createdAt_DESC
+  _updatedAt_ASC
+  _updatedAt_DESC
+  _publishedAt_ASC
+  _publishedAt_DESC
+  _firstPublishedAt_ASC
+  _firstPublishedAt_DESC
+  site_name_ASC
+  site_name_DESC
+  tagline_ASC
+  tagline_DESC
+  logo_ASC
+  logo_DESC
+}
+
+type SiteSettingsMeta {
+  count: Int!
+}
+
+type Author {
+  id: ID!
+  _modelApiKey: String!
+  _status: String
+  _createdAt: String
+  _updatedAt: String
+  _publishedAt: String
+  _firstPublishedAt: String
+  _seoMetaTags: [Tag!]!
+  name: String
+  bio: String
+  photo: Asset
+}
+
+input AuthorFilter {
+  id: StringFilter
+  _status: StringFilter
+  _createdAt: DateTimeFilter
+  _updatedAt: DateTimeFilter
+  _publishedAt: DateTimeFilter
+  _firstPublishedAt: DateTimeFilter
+  name: StringFilter
+  bio: StringFilter
+  photo: StringFilter
+  AND: [AuthorFilter!]
+  OR: [AuthorFilter!]
+}
+
+enum AuthorOrderBy {
+  _createdAt_ASC
+  _createdAt_DESC
+  _updatedAt_ASC
+  _updatedAt_DESC
+  _publishedAt_ASC
+  _publishedAt_DESC
+  _firstPublishedAt_ASC
+  _firstPublishedAt_DESC
+  name_ASC
+  name_DESC
+  bio_ASC
+  bio_DESC
+  photo_ASC
+  photo_DESC
+}
+
+type AuthorMeta {
+  count: Int!
+}
+
+type Category {
+  id: ID!
+  _modelApiKey: String!
+  _status: String
+  _createdAt: String
+  _updatedAt: String
+  _publishedAt: String
+  _firstPublishedAt: String
+  _seoMetaTags: [Tag!]!
+  name: String
+  slug: String
+  description: String
+  cover_image: Asset
+  icon: String
+  sort_order: Int
+}
+
+input CategoryFilter {
+  id: StringFilter
+  _status: StringFilter
+  _createdAt: DateTimeFilter
+  _updatedAt: DateTimeFilter
+  _publishedAt: DateTimeFilter
+  _firstPublishedAt: DateTimeFilter
+  name: StringFilter
+  slug: StringFilter
+  description: StringFilter
+  cover_image: StringFilter
+  icon: StringFilter
+  sort_order: IntFilter
+  AND: [CategoryFilter!]
+  OR: [CategoryFilter!]
+}
+
+enum CategoryOrderBy {
+  _createdAt_ASC
+  _createdAt_DESC
+  _updatedAt_ASC
+  _updatedAt_DESC
+  _publishedAt_ASC
+  _publishedAt_DESC
+  _firstPublishedAt_ASC
+  _firstPublishedAt_DESC
+  name_ASC
+  name_DESC
+  slug_ASC
+  slug_DESC
+  description_ASC
+  description_DESC
+  cover_image_ASC
+  cover_image_DESC
+  icon_ASC
+  icon_DESC
+  sort_order_ASC
+  sort_order_DESC
+}
+
+type CategoryMeta {
+  count: Int!
+}
+
+type Post {
+  id: ID!
+  _modelApiKey: String!
+  _status: String
+  _createdAt: String
+  _updatedAt: String
+  _publishedAt: String
+  _firstPublishedAt: String
+  _seoMetaTags: [Tag!]!
+  title: String
+  slug: String
+  excerpt: String
+  cover_image: Asset
+  content: StructuredText
+  author: Author
+  category: Category
+  related_posts: [Post!]
+  published_date: String
+  seo_field: SeoField
+  gallery: [Asset!]
+  reading_time: Int
+  featured: Boolean
+}
+
+input PostFilter {
+  id: StringFilter
+  _status: StringFilter
+  _createdAt: DateTimeFilter
+  _updatedAt: DateTimeFilter
+  _publishedAt: DateTimeFilter
+  _firstPublishedAt: DateTimeFilter
+  title: StringFilter
+  slug: StringFilter
+  excerpt: StringFilter
+  cover_image: StringFilter
+  author: StringFilter
+  category: StringFilter
+  published_date: StringFilter
+  reading_time: IntFilter
+  featured: BooleanFilter
+  AND: [PostFilter!]
+  OR: [PostFilter!]
+}
+
+enum PostOrderBy {
+  _createdAt_ASC
+  _createdAt_DESC
+  _updatedAt_ASC
+  _updatedAt_DESC
+  _publishedAt_ASC
+  _publishedAt_DESC
+  _firstPublishedAt_ASC
+  _firstPublishedAt_DESC
+  title_ASC
+  title_DESC
+  slug_ASC
+  slug_DESC
+  excerpt_ASC
+  excerpt_DESC
+  cover_image_ASC
+  cover_image_DESC
+  author_ASC
+  author_DESC
+  category_ASC
+  category_DESC
+  published_date_ASC
+  published_date_DESC
+  reading_time_ASC
+  reading_time_DESC
+  featured_ASC
+  featured_DESC
+}
+
+type PostMeta {
+  count: Int!
+}
+
+type Query {
+  allSiteSettingss(locale: String, fallbackLocales: [String!], filter: SiteSettingsFilter, orderBy: [SiteSettingsOrderBy!], first: Int, skip: Int): [SiteSettings!]!
+  site_settings(locale: String, fallbackLocales: [String!], id: ID, filter: SiteSettingsFilter): SiteSettings
+  _allSiteSettingssMeta(filter: SiteSettingsFilter): SiteSettingsMeta!
+  allAuthors(locale: String, fallbackLocales: [String!], filter: AuthorFilter, orderBy: [AuthorOrderBy!], first: Int, skip: Int): [Author!]!
+  author(locale: String, fallbackLocales: [String!], id: ID, filter: AuthorFilter): Author
+  _allAuthorsMeta(filter: AuthorFilter): AuthorMeta!
+  allCategorys(locale: String, fallbackLocales: [String!], filter: CategoryFilter, orderBy: [CategoryOrderBy!], first: Int, skip: Int): [Category!]!
+  category(locale: String, fallbackLocales: [String!], id: ID, filter: CategoryFilter): Category
+  _allCategorysMeta(filter: CategoryFilter): CategoryMeta!
+  allPosts(locale: String, fallbackLocales: [String!], filter: PostFilter, orderBy: [PostOrderBy!], first: Int, skip: Int): [Post!]!
+  post(locale: String, fallbackLocales: [String!], id: ID, filter: PostFilter): Post
+  _allPostsMeta(filter: PostFilter): PostMeta!
+  _site: SiteInfo!
+}

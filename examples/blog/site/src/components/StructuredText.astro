@@ -1,0 +1,94 @@
+---
+import HeroBlock from "./blocks/HeroBlock.astro";
+import CodeBlock from "./blocks/CodeBlock.astro";
+import ImageGallery from "./blocks/ImageGallery.astro";
+
+interface Props {
+  data: {
+    value: any;
+    blocks?: any[];
+    inlineBlocks?: any[];
+    links?: any[];
+  };
+}
+
+const { data } = Astro.props;
+
+const blockMap = new Map<string, any>();
+for (const block of data.blocks ?? []) {
+  blockMap.set(block.id, block);
+}
+
+const blockComponents: Record<string, any> = {
+  HeroSectionRecord: HeroBlock,
+  CodeBlockRecord: CodeBlock,
+  ImageGalleryRecord: ImageGallery,
+};
+
+function getTextContent(node: any): string {
+  if (node.type === "span") return node.value ?? "";
+  if (node.children) return node.children.map(getTextContent).join("");
+  return "";
+}
+---
+
+{data.value?.document?.children?.map((node: any) => {
+  if (node.type === "paragraph") {
+    return (
+      <p>
+        {node.children?.map((child: any) => {
+          if (child.type === "span") {
+            let content = child.value ?? "";
+            if (child.marks?.includes("strong")) return <strong>{content}</strong>;
+            if (child.marks?.includes("emphasis")) return <em>{content}</em>;
+            if (child.marks?.includes("code")) return <code>{content}</code>;
+            return content;
+          }
+          if (child.type === "link") {
+            return <a href={child.url}>{getTextContent(child)}</a>;
+          }
+          return null;
+        })}
+      </p>
+    );
+  }
+
+  if (node.type === "heading") {
+    const Tag = `h${node.level ?? 2}` as any;
+    const text = getTextContent(node);
+    return <Tag>{text}</Tag>;
+  }
+
+  if (node.type === "list") {
+    const Tag = node.style === "numbered" ? "ol" : "ul";
+    return (
+      <Tag>
+        {node.children?.map((item: any) => (
+          <li>
+            {item.children?.map((p: any) => getTextContent(p)).join("")}
+          </li>
+        ))}
+      </Tag>
+    );
+  }
+
+  if (node.type === "blockquote") {
+    return (
+      <blockquote>
+        {node.children?.map((p: any) => (
+          <p>{getTextContent(p)}</p>
+        ))}
+      </blockquote>
+    );
+  }
+
+  if (node.type === "block") {
+    const block = blockMap.get(node.item);
+    if (!block) return null;
+    const Component = blockComponents[block.__typename];
+    if (!Component) return <div>Unknown block: {block.__typename}</div>;
+    return <Component data={block} />;
+  }
+
+  return null;
+})}

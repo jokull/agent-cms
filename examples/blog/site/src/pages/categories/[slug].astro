@@ -1,0 +1,104 @@
+---
+import Base from "../../layouts/Base.astro";
+import ResponsiveImage from "../../components/ResponsiveImage.astro";
+import { env } from "cloudflare:workers";
+import { gqlFetch } from "../../graphql/client";
+import { CATEGORY_BY_SLUG_QUERY, POSTS_BY_CATEGORY_QUERY } from "../../graphql/queries";
+
+const { slug } = Astro.params;
+const cms = env.CMS;
+
+const [categoryData, postsData] = await Promise.all([
+  gqlFetch(cms, CATEGORY_BY_SLUG_QUERY, { slug: slug! }),
+  gqlFetch(cms, POSTS_BY_CATEGORY_QUERY, { categorySlug: slug! }),
+]);
+
+const category = categoryData.category;
+if (!category) {
+  return Astro.redirect("/404");
+}
+
+const posts = postsData.allPosts;
+---
+
+<Base title={`${category.name} — Blog`}>
+  <header class="category-header">
+    {category.cover_image?.responsiveImage && (
+      <div class="cover">
+        <ResponsiveImage data={category.cover_image.responsiveImage} loading="eager" />
+      </div>
+    )}
+    <h1>{category.name}</h1>
+    {category.description && <p class="description">{category.description}</p>}
+  </header>
+
+  <div class="post-list">
+    {posts.map((post) => (
+      <article class="post-item">
+        {post.cover_image?.responsiveImage && (
+          <a href={`/posts/${post.slug}`} class="post-image">
+            <ResponsiveImage data={post.cover_image.responsiveImage} sizes="200px" />
+          </a>
+        )}
+        <div class="post-info">
+          <h2><a href={`/posts/${post.slug}`}>{post.title}</a></h2>
+          {post.excerpt && <p>{post.excerpt}</p>}
+          <div class="post-meta">
+            {post.author && <span>{post.author.name}</span>}
+            {post.published_date && (
+              <time datetime={post.published_date}>
+                {new Date(post.published_date).toLocaleDateString("en", { year: "numeric", month: "long", day: "numeric" })}
+              </time>
+            )}
+            {post.reading_time && <span>{post.reading_time} min read</span>}
+          </div>
+        </div>
+      </article>
+    ))}
+  </div>
+
+  {posts.length === 0 && <p class="empty">No posts in this category yet.</p>}
+</Base>
+
+<style>
+  .category-header {
+    margin-bottom: 2rem;
+    text-align: center;
+  }
+  .category-header h1 { font-size: 2rem; margin: 1rem 0 0.5rem; }
+  .description { color: #666; font-size: 1.1rem; }
+  .cover { border-radius: 8px; overflow: hidden; margin-bottom: 1rem; }
+
+  .post-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  .post-item {
+    display: flex;
+    gap: 1.5rem;
+    background: white;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    padding: 1rem;
+  }
+
+  .post-image { flex-shrink: 0; width: 200px; }
+  .post-image :global(img) { border-radius: 4px; width: 100%; }
+
+  .post-info h2 { font-size: 1.2rem; margin-bottom: 0.5rem; }
+  .post-info h2 a { text-decoration: none; color: #1a1a1a; }
+  .post-info h2 a:hover { color: #2563eb; }
+  .post-info p { font-size: 0.9rem; color: #555; margin-bottom: 0.5rem; }
+
+  .post-meta {
+    display: flex;
+    gap: 1rem;
+    font-size: 0.8rem;
+    color: #888;
+  }
+
+  .empty { text-align: center; color: #888; padding: 3rem 0; }
+</style>

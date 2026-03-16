@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "test-blog-cms",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-12-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "test-blog-cms-db",
+      "database_id": "57879c1b-9faf-4f4f-95af-f2a009295f73",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ASSETS",
+      "bucket_name": "test-blog-assets"
+    }
+  ],
+  "vars": {
+    "ENVIRONMENT": "production",
+    "ASSET_BASE_URL": "https://test-blog-cms.solberg.workers.dev"
+  }
+}

@@ -1,0 +1,140 @@
+---
+import Base from "../../layouts/Base.astro";
+import ResponsiveImage from "../../components/ResponsiveImage.astro";
+import { env } from "cloudflare:workers";
+import { gqlFetch } from "../../graphql/client";
+import { ALL_POSTS_QUERY, ALL_CATEGORIES_QUERY } from "../../graphql/queries";
+
+const cms = env.CMS;
+
+const [postsData, categoriesData] = await Promise.all([
+  gqlFetch(cms, ALL_POSTS_QUERY, { first: 20 }),
+  gqlFetch(cms, ALL_CATEGORIES_QUERY),
+]);
+
+const posts = postsData.allPosts;
+const totalPosts = postsData._allPostsMeta.count;
+const categories = categoriesData.allCategorys;
+---
+
+<Base title="All Posts — Blog">
+  <div class="posts-page">
+    <aside class="sidebar">
+      <h2>Categories</h2>
+      <ul>
+        {categories.map((cat) => (
+          <li>
+            <a href={`/categories/${cat.slug}`}>
+              {cat.icon && <span class="icon">{cat.icon}</span>}
+              {cat.name}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </aside>
+
+    <section class="posts">
+      <h1>All Posts ({totalPosts})</h1>
+      <div class="post-list">
+        {posts.map((post) => (
+          <article class="post-item">
+            {post.cover_image?.responsiveImage && (
+              <a href={`/posts/${post.slug}`} class="post-image">
+                <ResponsiveImage data={post.cover_image.responsiveImage} sizes="200px" />
+              </a>
+            )}
+            <div class="post-info">
+              {post.category && (
+                <a href={`/categories/${post.category.slug}`} class="category">
+                  {post.category.name}
+                </a>
+              )}
+              <h2><a href={`/posts/${post.slug}`}>{post.title}</a></h2>
+              {post.excerpt && <p>{post.excerpt}</p>}
+              <div class="meta">
+                {post.author && <span>{post.author.name}</span>}
+                {post.published_date && (
+                  <time datetime={post.published_date}>
+                    {new Date(post.published_date).toLocaleDateString("en", { year: "numeric", month: "long", day: "numeric" })}
+                  </time>
+                )}
+                {post.reading_time && <span>{post.reading_time} min read</span>}
+                {post.featured && <span class="featured">Featured</span>}
+              </div>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  </div>
+</Base>
+
+<style>
+  .posts-page {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 3rem;
+  }
+
+  .sidebar h2 { font-size: 1rem; margin-bottom: 0.75rem; color: #888; text-transform: uppercase; letter-spacing: 0.05em; }
+  .sidebar ul { list-style: none; }
+  .sidebar li { margin-bottom: 0.5rem; }
+  .sidebar a { text-decoration: none; color: #555; font-size: 0.95rem; }
+  .sidebar a:hover { color: #2563eb; }
+  .icon { margin-right: 0.5rem; }
+
+  .posts h1 { font-size: 1.5rem; margin-bottom: 1.5rem; }
+
+  .post-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  .post-item {
+    display: flex;
+    gap: 1.5rem;
+    background: white;
+    border-radius: 8px;
+    padding: 1rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  }
+
+  .post-image { flex-shrink: 0; width: 180px; }
+  .post-image :global(img) { border-radius: 4px; width: 100%; }
+
+  .category {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    text-decoration: none;
+    font-weight: 600;
+  }
+
+  .post-info h2 { font-size: 1.15rem; margin: 0.25rem 0 0.5rem; }
+  .post-info h2 a { text-decoration: none; color: #1a1a1a; }
+  .post-info h2 a:hover { color: #2563eb; }
+  .post-info p { font-size: 0.9rem; color: #555; margin-bottom: 0.5rem; }
+
+  .meta {
+    display: flex;
+    gap: 1rem;
+    font-size: 0.8rem;
+    color: #888;
+  }
+
+  .featured {
+    background: #fef3c7;
+    color: #92400e;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    font-weight: 600;
+  }
+
+  @media (max-width: 768px) {
+    .posts-page { grid-template-columns: 1fr; }
+    .sidebar { display: none; }
+    .post-item { flex-direction: column; }
+    .post-image { width: 100%; }
+  }
+</style>

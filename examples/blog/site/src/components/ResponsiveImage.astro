@@ -1,0 +1,36 @@
+---
+interface Props {
+  data: {
+    src: string;
+    srcSet?: string;
+    webpSrcSet?: string;
+    width?: number;
+    height?: number;
+    aspectRatio?: number;
+    alt?: string;
+  };
+  class?: string;
+  loading?: "lazy" | "eager";
+  sizes?: string;
+}
+
+const { data, class: className, loading = "lazy", sizes = "100vw" } = Astro.props;
+---
+
+<picture>
+  {data.webpSrcSet && (
+    <source srcset={data.webpSrcSet} sizes={sizes} type="image/webp" />
+  )}
+  {data.srcSet && (
+    <source srcset={data.srcSet} sizes={sizes} />
+  )}
+  <img
+    src={data.src}
+    width={data.width}
+    height={data.height}
+    alt={data.alt ?? ""}
+    loading={loading}
+    class={className}
+    style={data.aspectRatio ? `aspect-ratio: ${data.aspectRatio}` : undefined}
+  />
+</picture>

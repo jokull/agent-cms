@@ -1,0 +1,104 @@
+---
+import SeoHead from "../components/SeoHead.astro";
+
+interface Props {
+  title?: string;
+  seoTags?: Array<{ tag: string; attributes?: Record<string, string>; content?: string }>;
+}
+
+const { title = "Blog", seoTags } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    {seoTags ? <SeoHead tags={seoTags} /> : <title>{title}</title>}
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  </head>
+  <body>
+    <header>
+      <nav>
+        <a href="/" class="site-name">Blog</a>
+        <div class="nav-links">
+          <a href="/">Home</a>
+          <a href="/posts">Posts</a>
+        </div>
+      </nav>
+    </header>
+    <main>
+      <slot />
+    </main>
+    <footer>
+      <p>Built with <a href="https://github.com/jokull/agent-cms">agent-cms</a> + <a href="https://astro.build">Astro</a></p>
+    </footer>
+  </body>
+</html>
+
+<style is:global>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    line-height: 1.6;
+    color: #1a1a1a;
+    background: #fafafa;
+  }
+
+  header {
+    border-bottom: 1px solid #eee;
+    background: white;
+  }
+
+  nav {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 1rem 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .site-name {
+    font-weight: 700;
+    font-size: 1.25rem;
+    text-decoration: none;
+    color: #1a1a1a;
+  }
+
+  .nav-links {
+    display: flex;
+    gap: 1.5rem;
+  }
+
+  .nav-links a {
+    text-decoration: none;
+    color: #666;
+  }
+
+  .nav-links a:hover { color: #1a1a1a; }
+
+  main {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 2rem;
+    min-height: 60vh;
+  }
+
+  footer {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 2rem;
+    text-align: center;
+    color: #888;
+    font-size: 0.9rem;
+    border-top: 1px solid #eee;
+  }
+
+  footer a { color: #666; }
+
+  a { color: #2563eb; }
+
+  img { max-width: 100%; height: auto; }
+</style>

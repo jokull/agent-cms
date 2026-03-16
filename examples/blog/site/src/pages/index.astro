@@ -1,0 +1,131 @@
+---
+import Base from "../layouts/Base.astro";
+import ResponsiveImage from "../components/ResponsiveImage.astro";
+import { env } from "cloudflare:workers";
+import { gqlFetch } from "../graphql/client";
+import { SITE_SETTINGS_QUERY, ALL_POSTS_QUERY } from "../graphql/queries";
+
+const cms = env.CMS;
+
+const [settings, posts] = await Promise.all([
+  gqlFetch(cms, SITE_SETTINGS_QUERY),
+  gqlFetch(cms, ALL_POSTS_QUERY, { first: 6 }),
+]);
+
+const site = settings.site_settings;
+const allPosts = posts.allPosts;
+const totalPosts = posts._allPostsMeta.count;
+---
+
+<Base title={site?.site_name ?? "Blog"}>
+  <section class="hero">
+    {site?.logo?.responsiveImage && (
+      <ResponsiveImage data={site.logo.responsiveImage} class="logo" loading="eager" />
+    )}
+    <h1>{site?.site_name}</h1>
+    {site?.tagline && <p class="tagline">{site.tagline}</p>}
+  </section>
+
+  <section class="posts">
+    <h2>Latest Posts</h2>
+    <div class="post-grid">
+      {allPosts.map((post) => (
+        <article class="post-card">
+          {post.cover_image?.responsiveImage && (
+            <a href={`/posts/${post.slug}`}>
+              <ResponsiveImage
+                data={post.cover_image.responsiveImage}
+                sizes="(min-width: 768px) 33vw, 100vw"
+              />
+            </a>
+          )}
+          <div class="post-card-body">
+            {post.category && (
+              <a href={`/categories/${post.category.slug}`} class="category-link">
+                {post.category.name}
+              </a>
+            )}
+            <h3>
+              <a href={`/posts/${post.slug}`}>{post.title}</a>
+            </h3>
+            {post.excerpt && <p class="excerpt">{post.excerpt}</p>}
+            <div class="post-meta">
+              {post.author && <span>{post.author.name}</span>}
+              {post.published_date && (
+                <time datetime={post.published_date}>
+                  {new Date(post.published_date).toLocaleDateString("en", { year: "numeric", month: "long", day: "numeric" })}
+                </time>
+              )}
+              {post.reading_time && <span>{post.reading_time} min read</span>}
+            </div>
+          </div>
+        </article>
+      ))}
+    </div>
+    {totalPosts > 6 && (
+      <div class="see-all">
+        <a href="/posts">See all {totalPosts} posts &rarr;</a>
+      </div>
+    )}
+  </section>
+</Base>
+
+<style>
+  .hero {
+    text-align: center;
+    padding: 3rem 0;
+  }
+  .hero h1 { font-size: 2.5rem; margin: 1rem 0 0.5rem; }
+  .hero :global(.logo) { max-width: 80px; margin: 0 auto; }
+  .tagline { font-size: 1.2rem; color: #666; }
+
+  .posts h2 {
+    font-size: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .post-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 2rem;
+  }
+
+  .post-card {
+    background: white;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    transition: box-shadow 0.2s;
+  }
+  .post-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.12); }
+
+  .post-card :global(img) { width: 100%; display: block; }
+
+  .post-card-body { padding: 1.25rem; }
+
+  .category-link {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    text-decoration: none;
+    font-weight: 600;
+  }
+
+  .post-card h3 { margin: 0.5rem 0; font-size: 1.15rem; }
+  .post-card h3 a { text-decoration: none; color: #1a1a1a; }
+  .post-card h3 a:hover { color: #2563eb; }
+
+  .excerpt { font-size: 0.9rem; color: #555; margin-bottom: 0.75rem; }
+
+  .post-meta {
+    display: flex;
+    gap: 1rem;
+    font-size: 0.8rem;
+    color: #888;
+  }
+
+  .see-all {
+    text-align: center;
+    margin-top: 2rem;
+  }
+</style>

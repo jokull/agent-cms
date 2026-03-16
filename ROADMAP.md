@@ -85,7 +85,7 @@ These are settled. Do not revisit without explicit instruction.
 - **Strict references**: Refuse to delete models/fields/blocks that are referenced elsewhere. Return clear error.
 - **Client-generated ULIDs**: Agents provide block IDs in DAST + block payloads. Server validates they match.
 - **DAST ecosystem compatible**: Our `{ value, blocks, links }` shape matches DatoCMS exactly.
-- **No auth for v1**. No environments concept (one D1 = one instance).
+- **Optional auth** via Bearer token (CMS_READ_KEY / CMS_WRITE_KEY). No environments concept (one D1 = one instance).
 - **Auto-migration**: Schema changes via REST trigger DDL automatically. → [C1, C11]
 
 ## Field Types (v1)
@@ -328,7 +328,7 @@ agent-cms is **not a standalone Worker** — it's a library + CLI that scaffolds
 
 #### Still needed
 
-- [ ] **API key auth** — optional `Authorization: Bearer <key>`. Keys in Workers secrets.
+- [x] **API key auth** *(done — CMS_READ_KEY for GraphQL reads, CMS_WRITE_KEY for REST/MCP writes, Bearer token, tested)*
 - [ ] **Audit log** — system table tracking schema + content mutations
 - [ ] **Error messages with guidance** — suggest next action (e.g. "use `list_models`")
 
@@ -368,7 +368,7 @@ agent-cms is **not a standalone Worker** — it's a library + CLI that scaffolds
 - **P0.8** Record CRUD: POST/GET/GET/:id/PATCH/DELETE on `/api/records`. Writes to dynamic content tables. Validates required fields. Singleton enforcement. Draft status on create. Status transitions on edit. 12 tests.
 - **P0.9** Slug field: `generateSlug()` using slugify with Django-parity transliteration. Auto-generate from source field (via `slug_source` validator). Uniqueness enforcement with numeric suffix. Tests: Icelandic chars (Þ→th, ð→d, æ→ae), uniqueness, explicit override. 11 tests.
 - **P0.10** GraphQL: SDL-based dynamic schema via Yoga `createSchema()`, auto-generated from CMS metadata.
-- **P0.10a** MILESTONE: Full Effect migration. Dropped Hono. @effect/platform HttpRouter for HTTP. @effect/sql for all dynamic table operations. Service layer (model/field/record services) as Effect.gen pipelines. Drizzle only for migration SQL generation. 68 tests, -1977/+547 lines. Key pattern: `Effect.flatten(HttpRouter.toHttpApp(router))` for web handler.
+- **P0.10a** MILESTONE: @effect/sql migration. All dynamic table operations via @effect/sql. Service layer as Effect.gen pipelines. Drizzle only for system tables. Hono remains as thin HTTP routing shell. 68 tests.
 - **P0.11** GraphQL filtering, ordering, link resolution, meta fields.
 - **P0.12** Link fields with nested GraphQL resolution.
 - **P0.13** `[SCHEMA:blog]` Full integration test passing.

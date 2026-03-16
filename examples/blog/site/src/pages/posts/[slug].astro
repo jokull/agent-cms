@@ -1,0 +1,193 @@
+---
+import Base from "../../layouts/Base.astro";
+import ResponsiveImage from "../../components/ResponsiveImage.astro";
+import StructuredText from "../../components/StructuredText.astro";
+import { env } from "cloudflare:workers";
+import { gqlFetch } from "../../graphql/client";
+import { POST_BY_SLUG_QUERY } from "../../graphql/queries";
+
+const { slug } = Astro.params;
+const cms = env.CMS;
+
+const data = await gqlFetch(cms, POST_BY_SLUG_QUERY, { slug: slug! });
+const post = data.post;
+
+if (!post) {
+  return Astro.redirect("/404");
+}
+---
+
+<Base seoTags={post._seoMetaTags}>
+  <article class="post">
+    {post.cover_image?.responsiveImage && (
+      <div class="cover">
+        <ResponsiveImage data={post.cover_image.responsiveImage} loading="eager" sizes="100vw" />
+      </div>
+    )}
+
+    <header>
+      {post.category && (
+        <a href={`/categories/${post.category.slug}`} class="category">
+          {post.category.name}
+        </a>
+      )}
+      <h1>{post.title}</h1>
+      <div class="meta">
+        {post.author && (
+          <div class="author">
+            {post.author.photo?.responsiveImage && (
+              <ResponsiveImage data={post.author.photo.responsiveImage} class="author-photo" />
+            )}
+            <span>{post.author.name}</span>
+          </div>
+        )}
+        {post.published_date && (
+          <time datetime={post.published_date}>
+            {new Date(post.published_date).toLocaleDateString("en", { year: "numeric", month: "long", day: "numeric" })}
+          </time>
+        )}
+        {post.reading_time && <span>{post.reading_time} min read</span>}
+        {post.featured && <span class="featured-badge">Featured</span>}
+      </div>
+    </header>
+
+    {post.content && (
+      <div class="content">
+        <StructuredText data={post.content} />
+      </div>
+    )}
+
+    {post.gallery && post.gallery.length > 0 && (
+      <section class="gallery">
+        <h2>Gallery</h2>
+        <div class="gallery-grid">
+          {post.gallery.map((image) =>
+            image.responsiveImage ? (
+              <ResponsiveImage
+                data={image.responsiveImage}
+                sizes="(min-width: 768px) 50vw, 100vw"
+              />
+            ) : null
+          )}
+        </div>
+      </section>
+    )}
+
+    {post.related_posts && post.related_posts.length > 0 && (
+      <section class="related">
+        <h2>Related Posts</h2>
+        <div class="related-grid">
+          {post.related_posts.map((related) => (
+            <a href={`/posts/${related.slug}`} class="related-card">
+              {related.coverImage?.responsiveImage && (
+                <ResponsiveImage data={related.coverImage.responsiveImage} />
+              )}
+              <h3>{related.title}</h3>
+            </a>
+          ))}
+        </div>
+      </section>
+    )}
+  </article>
+</Base>
+
+<style>
+  .post { max-width: 720px; margin: 0 auto; }
+
+  .cover {
+    margin: -2rem -2rem 2rem;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .cover :global(img) { width: 100%; display: block; }
+
+  header { margin-bottom: 2rem; }
+
+  .category {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+    text-decoration: none;
+  }
+
+  h1 {
+    font-size: 2.5rem;
+    line-height: 1.2;
+    margin: 0.5rem 0 1rem;
+  }
+
+  .meta {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    font-size: 0.9rem;
+    color: #666;
+  }
+
+  .author {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .author :global(.author-photo) {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+  }
+
+  .featured-badge {
+    background: #fef3c7;
+    color: #92400e;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+
+  .content :global(p) { margin: 1rem 0; }
+  .content :global(h2) { margin: 2rem 0 0.5rem; font-size: 1.5rem; }
+  .content :global(h3) { margin: 1.5rem 0 0.5rem; font-size: 1.25rem; }
+  .content :global(blockquote) {
+    border-left: 3px solid #ddd;
+    padding-left: 1rem;
+    margin: 1.5rem 0;
+    color: #555;
+  }
+  .content :global(pre) { margin: 1.5rem 0; }
+  .content :global(code) {
+    background: #f1f5f9;
+    padding: 0.15rem 0.35rem;
+    border-radius: 3px;
+    font-size: 0.9em;
+  }
+  .content :global(pre code) {
+    background: none;
+    padding: 0;
+  }
+
+  .gallery, .related { margin-top: 3rem; }
+  .gallery h2, .related h2 { font-size: 1.3rem; margin-bottom: 1rem; }
+
+  .gallery-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 0.5rem;
+  }
+  .gallery-grid :global(img) { border-radius: 4px; }
+
+  .related-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 1.5rem;
+  }
+
+  .related-card {
+    text-decoration: none;
+    color: #1a1a1a;
+  }
+  .related-card :global(img) { border-radius: 4px; }
+  .related-card h3 { font-size: 1rem; margin-top: 0.5rem; }
+  .related-card:hover h3 { color: #2563eb; }
+</style>

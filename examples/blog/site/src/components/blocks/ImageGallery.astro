@@ -1,0 +1,59 @@
+---
+import ResponsiveImage from "../ResponsiveImage.astro";
+
+interface Props {
+  data: {
+    images?: Array<{
+      responsiveImage?: {
+        src: string;
+        srcSet?: string;
+        webpSrcSet?: string;
+        width?: number;
+        height?: number;
+        aspectRatio?: number;
+        alt?: string;
+      };
+    }>;
+    caption?: string;
+    layout?: string;
+  };
+}
+
+const { data } = Astro.props;
+const layout = data.layout ?? "grid";
+---
+
+<figure class={`gallery gallery-${layout}`}>
+  <div class="gallery-grid">
+    {data.images?.map((image) =>
+      image.responsiveImage ? (
+        <div class="gallery-item">
+          <ResponsiveImage data={image.responsiveImage} sizes="(min-width: 768px) 50vw, 100vw" />
+        </div>
+      ) : null
+    )}
+  </div>
+  {data.caption && <figcaption>{data.caption}</figcaption>}
+</figure>
+
+<style>
+  .gallery {
+    margin: 2rem 0;
+  }
+  .gallery-grid {
+    display: grid;
+    gap: 0.5rem;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  }
+  .gallery-item :global(img) {
+    width: 100%;
+    height: auto;
+    border-radius: 4px;
+  }
+  figcaption {
+    text-align: center;
+    margin-top: 0.75rem;
+    font-size: 0.9rem;
+    color: #666;
+  }
+</style>

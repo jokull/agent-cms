@@ -79,11 +79,11 @@ Canonical record of all settled decisions for agent-cms. ROADMAP.md references a
 
 | # | Decision | Choice | Rationale |
 |---|---|---|---|
-| D36 | Auth | None for v1 | Easy to add later. Rely on Worker access controls. |
+| D36 | Auth | Optional Bearer token (CMS_READ_KEY / CMS_WRITE_KEY) | Read key for GraphQL, write key for REST/MCP. Set via `wrangler secret put`. Unauthenticated access allowed when keys are not configured. |
 | D37 | Environments | None — one D1 = one CMS instance | Staging/preview = separate Worker + D1 deployment. Not our concern. |
 | D38 | Video support | None for v1 | Media fields are image-only. |
 | D39 | Generic file uploads | None for v1 | Media fields reference images in R2. No arbitrary file type support. |
-| D40 | Field types not in v1 | `float`, `date`, `date_time`, `json`, `color`, `seo` | Can add later. v1 set: `string`, `text`, `boolean`, `integer`, `slug`, `media`, `media_gallery`, `link`, `links`, `structured_text` |
+| D40 | Field types in v1 | `string`, `text`, `boolean`, `integer`, `float`, `date`, `date_time`, `slug`, `media`, `media_gallery`, `link`, `links`, `structured_text`, `seo`, `json`, `color`, `lat_lon` | All 17 field types implemented. Registry pattern in `src/field-types.ts` enforces completeness. |
 
 ## System Table Schemas
 

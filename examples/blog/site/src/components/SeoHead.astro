@@ -1,0 +1,26 @@
+---
+interface SeoTag {
+  tag: string;
+  attributes?: Record<string, string>;
+  content?: string;
+}
+
+interface Props {
+  tags: SeoTag[];
+}
+
+const { tags } = Astro.props;
+---
+
+{tags.map((tag) => {
+  if (tag.tag === "title" && tag.content) {
+    return <title>{tag.content}</title>;
+  }
+  if (tag.tag === "meta" && tag.attributes) {
+    return <meta {...tag.attributes} />;
+  }
+  if (tag.tag === "link" && tag.attributes) {
+    return <link {...tag.attributes} />;
+  }
+  return null;
+})}
