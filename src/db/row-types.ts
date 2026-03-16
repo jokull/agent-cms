@@ -60,6 +60,7 @@ export interface AssetRow {
   readonly colors: string | null; // JSON string
   readonly focal_point: string | null; // JSON string
   readonly tags: string; // JSON string
+  readonly custom_data: string | null; // JSON string
   readonly created_at: string;
 }
 

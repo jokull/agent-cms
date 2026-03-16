@@ -478,5 +478,75 @@ Hybrid mode (default when Vectorize available): combines both for best results.`
     async (args) => run(SearchService.reindexAll(args.modelApiKey))
   );
 
+  // --- Site Settings ---
+
+  server.tool("get_site_settings", "Get global site settings (site name, title suffix, global SEO, favicon, social accounts)", {},
+    async () => run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        try {
+          const rows = yield* sql.unsafe<Record<string, unknown>>("SELECT * FROM site_settings LIMIT 1");
+          return rows.length > 0 ? rows[0] : { message: "No site settings configured yet. Use update_site_settings to create them." };
+        } catch {
+          return { message: "site_settings table not found. Run migration 0002 first." };
+        }
+      })
+    )
+  );
+
+  server.tool("update_site_settings", `Update global site settings. These power the _site GraphQL query (globalSeo, faviconMetaTags).
+
+Fields:
+- siteName: Site name shown in meta tags
+- titleSuffix: Appended to page titles (e.g. " | My Site")
+- noIndex: If true, adds noindex meta tag
+- faviconId: Asset ID for the favicon
+- facebookPageUrl: Facebook page URL
+- twitterAccount: Twitter handle (e.g. "@mysite")
+- fallbackSeoTitle/Description/ImageId/TwitterCard: Default SEO when records don't have their own`,
+    {
+      siteName: z.string().optional(),
+      titleSuffix: z.string().optional(),
+      noIndex: z.boolean().optional(),
+      faviconId: z.string().optional(),
+      facebookPageUrl: z.string().optional(),
+      twitterAccount: z.string().optional(),
+      fallbackSeoTitle: z.string().optional(),
+      fallbackSeoDescription: z.string().optional(),
+      fallbackSeoImageId: z.string().optional(),
+      fallbackSeoTwitterCard: z.string().optional(),
+    },
+    async (args) => run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sets: string[] = [];
+        const params: unknown[] = [];
+        const fieldMap: Record<string, string> = {
+          siteName: "site_name", titleSuffix: "title_suffix", noIndex: "no_index",
+          faviconId: "favicon_id", facebookPageUrl: "facebook_page_url",
+          twitterAccount: "twitter_account", fallbackSeoTitle: "fallback_seo_title",
+          fallbackSeoDescription: "fallback_seo_description", fallbackSeoImageId: "fallback_seo_image_id",
+          fallbackSeoTwitterCard: "fallback_seo_twitter_card",
+        };
+        for (const [key, value] of Object.entries(args)) {
+          const col = fieldMap[key];
+          if (col && value !== undefined) {
+            sets.push(`"${col}" = ?`);
+            params.push(typeof value === "boolean" ? (value ? 1 : 0) : value);
+          }
+        }
+        if (sets.length === 0) return { error: "No fields to update" };
+        sets.push(`"updated_at" = datetime('now')`);
+
+        // Upsert: insert default row if none exists, then update
+        yield* sql.unsafe(`INSERT OR IGNORE INTO site_settings (id) VALUES ('default')`);
+        yield* sql.unsafe(`UPDATE site_settings SET ${sets.join(", ")} WHERE id = 'default'`, params);
+
+        const rows = yield* sql.unsafe<Record<string, unknown>>("SELECT * FROM site_settings WHERE id = 'default'");
+        return rows[0];
+      })
+    )
+  );
+
   return server;
 }

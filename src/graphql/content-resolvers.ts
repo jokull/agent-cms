@@ -294,6 +294,7 @@ export function buildContentModelResolvers(
           id: a.id, filename: a.filename, mimeType: a.mime_type,
           size: a.size, width: a.width, height: a.height,
           alt: a.alt, title: a.title, blurhash: a.blurhash ?? null,
+          customData: a.custom_data ? JSON.parse(a.custom_data) : null,
           url: assetUrl(a.id, a.filename),
         });
       }

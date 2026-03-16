@@ -29,6 +29,7 @@ export interface AssetObject {
   alt: string | null;
   title: string | null;
   blurhash: string | null;
+  customData: Record<string, string> | null;
   url: string;
 }
 

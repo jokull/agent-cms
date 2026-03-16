@@ -26,7 +26,8 @@ type Asset {
   title: String
   url: String!
   blurhash: String
-  responsiveImage(transforms: ImageTransformParams, cfImagesParams: ImageTransformParams): ResponsiveImage
+  customData: JSON
+  responsiveImage(transforms: ImageTransformParams, cfImagesParams: ImageTransformParams, imgixParams: ImageTransformParams): ResponsiveImage
 }
 type ResponsiveImage {
   src: String!
@@ -43,6 +44,16 @@ type ResponsiveImage {
 }
 type SiteInfo {
   locales: [String!]!
+  faviconMetaTags: [Tag!]!
+  globalSeo(locale: String, fallbackLocales: [String!]): GlobalSeoField
+  noIndex: Boolean!
+}
+type GlobalSeoField {
+  siteName: String
+  titleSuffix: String
+  fallbackSeo: SeoField
+  facebookPageUrl: String
+  twitterAccount: String
 }
 """DatoCMS-compatible SEO meta tag"""
 type Tag {
