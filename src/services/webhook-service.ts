@@ -14,7 +14,7 @@ export type WebhookEvent =
   | "record.publish" | "record.unpublish"
   | "model.create" | "model.delete";
 
-const VALID_EVENTS: WebhookEvent[] = [
+const VALID_EVENTS: readonly string[] = [
   "record.create", "record.update", "record.delete",
   "record.publish", "record.unpublish",
   "model.create", "model.delete",
@@ -46,7 +46,7 @@ export function createWebhook(body: { url: string; events: string[]; name?: stri
       return yield* new ValidationError({ message: "url is required" });
 
     for (const event of body.events) {
-      if (!VALID_EVENTS.includes(event as WebhookEvent))
+      if (!VALID_EVENTS.includes(event))
         return yield* new ValidationError({ message: `Invalid event: ${event}. Valid: ${VALID_EVENTS.join(", ")}` });
     }
 

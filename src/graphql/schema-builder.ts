@@ -4,6 +4,7 @@ import { SqlClient } from "@effect/sql";
 import { extractBlockIds, extractInlineBlockIds } from "../dast/index.js";
 import type { ModelRow, FieldRow, AssetRow } from "../db/row-types.js";
 import { getLinkTargets, getLinksTargets } from "../db/validators.js";
+import { parseFieldValidators } from "../db/row-types.js";
 import { compileFilterToSql, compileOrderBy } from "./filter-compiler.js";
 
 function toTypeName(apiKey: string): string {
@@ -63,7 +64,7 @@ function applyFilters(records: any[], filter: any): any[] {
     for (const [key, ff] of Object.entries(filter)) {
       if (key === "AND" || key === "OR" || typeof ff !== "object" || ff === null) continue;
       const v = rec[key];
-      for (const [op, exp] of Object.entries(ff as Record<string, any>)) {
+      for (const [op, exp] of Object.entries(ff)) {
         switch (op) {
           case "eq": {
             // Handle boolean coercion (SQLite stores 0/1)
@@ -138,13 +139,10 @@ export function buildGraphQLSchema(sqlLayer: any) {
     const allFields = yield* sql.unsafe<FieldRow>("SELECT * FROM fields ORDER BY position");
 
     // Group fields by model, parsing validators
-    interface ParsedField extends Omit<FieldRow, "validators"> {
-      validators: Record<string, unknown>;
-    }
-    const fieldsByModelId = new Map<string, ParsedField[]>();
+    const fieldsByModelId = new Map<string, ReturnType<typeof parseFieldValidators>[]>();
     for (const f of allFields) {
       const list = fieldsByModelId.get(f.model_id) ?? [];
-      list.push({ ...f, validators: JSON.parse(f.validators || "{}") as Record<string, unknown> });
+      list.push(parseFieldValidators(f));
       fieldsByModelId.set(f.model_id, list);
     }
 

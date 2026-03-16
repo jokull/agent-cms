@@ -254,7 +254,8 @@ export function validateBlocksOnly(doc: unknown): ValidationError[] {
   if (!children) return errors;
 
   for (let i = 0; i < children.length; i++) {
-    const child = isRecord(children[i]) ? (children[i] as Record<string, unknown>) : undefined;
+    const raw = children[i];
+    const child = isRecord(raw) ? raw : undefined;
     if (!child || child.type !== "block") {
       errors.push({
         path: `document.children[${i}]`,
@@ -308,7 +309,7 @@ function walkNodesForType(nodes: unknown[], targetType: string, ids: string[]) {
 function walkNodesForTypes(nodes: unknown[], targetTypes: string[], ids: string[]) {
   for (const node of nodes) {
     if (!isRecord(node)) continue;
-    if (targetTypes.includes(node.type as string) && typeof node.item === "string") {
+    if (typeof node.type === "string" && targetTypes.includes(node.type) && typeof node.item === "string") {
       ids.push(node.item);
     }
     const children = getArray(node, "children");

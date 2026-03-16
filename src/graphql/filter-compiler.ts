@@ -38,7 +38,11 @@ export function compileFilter(
 
 interface SqlCondition {
   sql: string;
-  params: any[];
+  params: unknown[];
+}
+
+function isSqlCondition(v: SqlCondition | null): v is SqlCondition {
+  return v !== null;
 }
 
 /**
@@ -81,7 +85,7 @@ function buildSqlConditions(
           const params = sc.flatMap((c) => c.params);
           return { sql: `(${sql})`, params };
         })
-        .filter(Boolean) as SqlCondition[];
+        .filter(isSqlCondition);
 
       if (parts.length > 0) {
         conditions.push({
@@ -101,7 +105,7 @@ function buildSqlConditions(
           const params = sc.flatMap((c) => c.params);
           return { sql: `(${sql})`, params };
         })
-        .filter(Boolean) as SqlCondition[];
+        .filter(isSqlCondition);
 
       if (parts.length > 0) {
         conditions.push({
@@ -120,9 +124,8 @@ function buildSqlConditions(
         ? `json_extract("${key}", '$.${locale}')`
         : `"${key}"`;
 
-    const ops = value as Record<string, any>;
-
-    for (const [op, expected] of Object.entries(ops)) {
+    // value is already narrowed to non-null object by the check above
+    for (const [op, expected] of Object.entries(value)) {
       if (expected === undefined) continue;
 
       switch (op) {

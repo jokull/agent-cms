@@ -95,18 +95,21 @@ export function isContentRow(row: unknown): row is ContentRow {
 
 // --- Helpers ---
 
+/** Safely parse JSON to a Record, returning empty object on failure */
+function parseJsonRecord(json: string | null | undefined): Record<string, unknown> {
+  if (!json) return {};
+  try {
+    const parsed: unknown = JSON.parse(json);
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>; // narrowed by runtime check above; TS can't narrow JSON.parse
+    }
+  } catch { /* invalid JSON */ }
+  return {};
+}
+
 /** Parse a FieldRow's validators from JSON string to object */
 export function parseFieldValidators(field: FieldRow): ParsedFieldRow {
-  let validators: Record<string, unknown> = {};
-  try {
-    const parsed: unknown = JSON.parse(field.validators || "{}");
-    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-      validators = parsed as Record<string, unknown>;
-    }
-  } catch {
-    // Invalid JSON — use empty validators
-  }
-  return { ...field, validators };
+  return { ...field, validators: parseJsonRecord(field.validators) };
 }
 
 /** Check if a content row's status indicates it's published */
@@ -117,13 +120,6 @@ export function isPublished(row: ContentRow): boolean {
 /** Parse a published snapshot from JSON string */
 export function parseSnapshot(row: ContentRow): Record<string, unknown> | null {
   if (!row._published_snapshot) return null;
-  try {
-    const parsed: unknown = JSON.parse(row._published_snapshot);
-    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>;
-    }
-    return null;
-  } catch {
-    return null;
-  }
+  const result = parseJsonRecord(row._published_snapshot);
+  return Object.keys(result).length > 0 ? result : null;
 }

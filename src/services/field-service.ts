@@ -1,7 +1,7 @@
 import { Effect, Schema } from "effect";
 import { SqlClient } from "@effect/sql";
 import { ulid } from "ulidx";
-import { FIELD_TYPES, type FieldType } from "../types.js";
+import { FIELD_TYPES, isFieldType, type FieldType } from "../types.js";
 import { NotFoundError, ValidationError, DuplicateError } from "../errors.js";
 import { migrateContentTable } from "../schema-engine/sql-ddl.js";
 import type { ModelRow, FieldRow } from "../db/row-types.js";
@@ -25,7 +25,7 @@ function syncTable(modelId: string) {
     yield* migrateContentTable(
       model.api_key,
       !!model.is_block,
-      fields.map((f) => ({ apiKey: f.api_key, fieldType: f.field_type as FieldType }))
+      fields.map((f) => ({ apiKey: f.api_key, fieldType: isFieldType(f.field_type) ? f.field_type : "string" }))
     );
   });
 }
@@ -56,7 +56,7 @@ export function createField(modelId: string, rawBody: unknown) {
 
     if (!/^[a-z][a-z0-9_]*$/.test(body.apiKey))
       return yield* new ValidationError({ message: "apiKey must start with a lowercase letter and contain only lowercase letters, numbers, and underscores" });
-    if (!FIELD_TYPES.includes(body.fieldType as FieldType))
+    if (!isFieldType(body.fieldType))
       return yield* new ValidationError({ message: `fieldType must be one of: ${FIELD_TYPES.join(", ")}` });
 
     const existing = yield* sql.unsafe<{ id: string }>(

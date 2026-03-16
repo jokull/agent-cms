@@ -21,6 +21,11 @@ export const FIELD_TYPES = [
 
 export type FieldType = (typeof FIELD_TYPES)[number];
 
+/** Type guard for FieldType */
+export function isFieldType(value: string): value is FieldType {
+  return (FIELD_TYPES as readonly string[]).includes(value);
+}
+
 /** Record publication status */
 export const RECORD_STATUSES = ["draft", "published", "updated"] as const;
 export type RecordStatus = (typeof RECORD_STATUSES)[number];

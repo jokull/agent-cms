@@ -1,6 +1,6 @@
 import { sqliteTable, text, integer, foreignKey } from "drizzle-orm/sqlite-core";
 import type { SQLiteTableWithColumns } from "drizzle-orm/sqlite-core";
-import type { FieldType } from "../types.js";
+import { isFieldType, type FieldType } from "../types.js";
 import { mapFieldToColumn } from "./field-mapper.js";
 
 /** Row shape from the `models` system table */
@@ -101,7 +101,7 @@ function generateContentTable(
 
   for (const field of fields) {
     columns[field.apiKey] = mapFieldToColumn(
-      field.fieldType as FieldType,
+      isFieldType(field.fieldType) ? field.fieldType : "string",
       field.apiKey
     );
   }
@@ -123,7 +123,7 @@ function generateBlockTable(
 
   for (const field of fields) {
     columns[field.apiKey] = mapFieldToColumn(
-      field.fieldType as FieldType,
+      isFieldType(field.fieldType) ? field.fieldType : "string",
       field.apiKey
     );
   }

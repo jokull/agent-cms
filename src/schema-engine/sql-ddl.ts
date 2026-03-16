@@ -177,7 +177,9 @@ export function migrateContentTable(
       } else {
         yield* createContentTable(modelApiKey, fields, options);
       }
-      return { created: true, columnsAdded: [] as string[], columnsDropped: [] as string[] };
+      const columnsAdded: string[] = [];
+      const columnsDropped: string[] = [];
+      return { created: true, columnsAdded, columnsDropped };
     }
 
     // Table exists — diff columns

@@ -23,8 +23,8 @@ function handle<A, E>(
     Effect.flatMap((result) => HttpServerResponse.json(result, { status })),
     Effect.catchAll((error) => {
       // Check if it's one of our typed CMS errors
-      if (error && typeof error === "object" && "_tag" in error) {
-        const mapped = errorToResponse(error as CmsError);
+      if (error && typeof error === "object" && "_tag" in error && "message" in error) {
+        const mapped = errorToResponse(error as CmsError); // narrowed by _tag + message check
         if (mapped) {
           return HttpServerResponse.json(mapped.body, { status: mapped.status });
         }
@@ -38,17 +38,6 @@ function handle<A, E>(
       return HttpServerResponse.json({ error: "Internal server error" }, { status: 500 });
     })
   );
-}
-
-/** Parse JSON body from request */
-function jsonBody(): Effect.Effect<any, never, HttpServerRequest.HttpServerRequest> {
-  return Effect.gen(function* () {
-    const req = yield* HttpServerRequest.HttpServerRequest;
-    return yield* Effect.tryPromise({
-      try: () => req.json,
-      catch: () => ({} as any),
-    });
-  });
 }
 
 /** Get path params */
@@ -215,8 +204,11 @@ const recordsRouter = HttpRouter.empty.pipe(
     "/reorder",
     Effect.gen(function* () {
       const req = yield* HttpServerRequest.HttpServerRequest;
-      const body = yield* req.json as any;
-      return yield* handle(RecordService.reorderRecords(body.modelApiKey, body.recordIds));
+      const body: unknown = yield* req.json;
+      const b = (typeof body === "object" && body !== null) ? body : {};
+      const modelApiKey = "modelApiKey" in b ? String(b.modelApiKey) : "";
+      const recordIds = "recordIds" in b && Array.isArray(b.recordIds) ? b.recordIds.map(String) : [];
+      return yield* handle(RecordService.reorderRecords(modelApiKey, recordIds));
     })
   )
 );
