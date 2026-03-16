@@ -155,7 +155,7 @@ async function main() {
     `import { createCMSHandler } from "agent-cms";
 
 export default {
-  fetch(request: Request, env: { DB: D1Database; ASSETS: R2Bucket; ENVIRONMENT?: string }) {
+  fetch(request: Request, env: { DB: D1Database; ASSETS: R2Bucket; ENVIRONMENT?: string; CMS_READ_KEY?: string; CMS_WRITE_KEY?: string }) {
     return createCMSHandler(env).fetch(request);
   },
 };
@@ -253,6 +253,9 @@ export default {
   console.log(`  }\n`);
 
   if (!flags["local-only"]) {
+    console.log(`  Set API keys (required for production):\n`);
+    console.log(`    npx wrangler secret put CMS_READ_KEY    # for GraphQL reads`);
+    console.log(`    npx wrangler secret put CMS_WRITE_KEY   # for REST/MCP writes\n`);
     console.log(`  Deploy to production:\n`);
     console.log(`    npm run db:migrate:remote`);
     console.log(`    npm run deploy\n`);

@@ -282,6 +282,10 @@ export const appRouter = HttpRouter.empty.pipe(
 export interface WebHandlerOptions {
   assetBaseUrl?: string;
   isProduction?: boolean;
+  /** Read API key — if set, required for GraphQL reads (like DatoCMS CDA token) */
+  readKey?: string;
+  /** Write API key — if set, required for REST writes, MCP, publish/unpublish (like DatoCMS CMA token) */
+  writeKey?: string;
 }
 
 export function createWebHandler(sqlLayer: any, options?: WebHandlerOptions) {
@@ -314,6 +318,44 @@ export function createWebHandler(sqlLayer: any, options?: WebHandlerOptions) {
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   }
 
+  /**
+   * Extract Bearer token from Authorization header.
+   * Accepts: "Bearer <token>" or raw "<token>"
+   */
+  function getBearerToken(request: Request): string | null {
+    const header = request.headers.get("Authorization");
+    if (!header) return null;
+    if (header.startsWith("Bearer ")) return header.slice(7);
+    return header;
+  }
+
+  /**
+   * Check if a request is authorized for the given access level.
+   * If no keys are configured, all requests are allowed (local dev).
+   */
+  function checkAuth(request: Request, level: "read" | "write"): Response | null {
+    const token = getBearerToken(request);
+
+    if (level === "write" && options?.writeKey) {
+      if (token !== options.writeKey) {
+        return new Response(JSON.stringify({ error: "Unauthorized. Provide a valid write API key via Authorization: Bearer <key>" }), {
+          status: 401, headers: { "Content-Type": "application/json" },
+        });
+      }
+    }
+
+    if (level === "read" && options?.readKey) {
+      // Write key also grants read access
+      if (token !== options.readKey && token !== options?.writeKey) {
+        return new Response(JSON.stringify({ error: "Unauthorized. Provide a valid API key via Authorization: Bearer <key>" }), {
+          status: 401, headers: { "Content-Type": "application/json" },
+        });
+      }
+    }
+
+    return null; // authorized
+  }
+
   return async (request: Request): Promise<Response> => {
     // Handle CORS preflight
     if (request.method === "OPTIONS") {
@@ -321,6 +363,33 @@ export function createWebHandler(sqlLayer: any, options?: WebHandlerOptions) {
     }
 
     const url = new URL(request.url);
+
+    // /health — no auth
+    if (url.pathname === "/health") {
+      return withCors(new Response(JSON.stringify({ status: "ok" }), {
+        headers: { "Content-Type": "application/json" },
+      }), request);
+    }
+
+    // /graphql GET (GraphiQL playground) — no auth
+    if (url.pathname === "/graphql" && request.method === "GET") {
+      // Fall through to graphql handler below (landingPage: true serves GraphiQL)
+    }
+    // /graphql POST — read auth
+    else if (url.pathname === "/graphql" && request.method === "POST") {
+      const denied = checkAuth(request, "read");
+      if (denied) return withCors(denied, request);
+    }
+    // /mcp — write auth
+    else if (url.pathname === "/mcp") {
+      const denied = checkAuth(request, "write");
+      if (denied) return withCors(denied, request);
+    }
+    // /api/* — write auth
+    else if (url.pathname.startsWith("/api/")) {
+      const denied = checkAuth(request, "write");
+      if (denied) return withCors(denied, request);
+    }
 
     // Route /mcp to MCP HTTP transport
     if (url.pathname === "/mcp") {

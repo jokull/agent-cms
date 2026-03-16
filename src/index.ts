@@ -6,9 +6,14 @@ export interface CmsEnv {
   DB: D1Database;
   ASSETS?: R2Bucket;
   ENVIRONMENT?: string;
-  /** Public URL base for assets. Used to generate image transform URLs.
-   *  e.g. "https://assets.example.com" or "https://my-cms.workers.dev" */
+  /** Public URL base for assets (e.g. "https://my-cms.workers.dev") */
   ASSET_BASE_URL?: string;
+  /** Read API key — required for GraphQL reads. Like DatoCMS CDA token.
+   *  Set via: wrangler secret put CMS_READ_KEY */
+  CMS_READ_KEY?: string;
+  /** Write API key — required for REST writes, MCP, publish/unpublish.
+   *  Like DatoCMS CMA token. Set via: wrangler secret put CMS_WRITE_KEY */
+  CMS_WRITE_KEY?: string;
 }
 
 /**
@@ -28,6 +33,8 @@ export function createCMSHandler(env: CmsEnv) {
   const handler = createWebHandler(sqlLayer, {
     assetBaseUrl: env.ASSET_BASE_URL,
     isProduction: env.ENVIRONMENT === "production",
+    readKey: env.CMS_READ_KEY,
+    writeKey: env.CMS_WRITE_KEY,
   });
 
   return {
