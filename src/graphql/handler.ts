@@ -10,22 +10,22 @@ export interface GraphQLContext {
 /**
  * Create a GraphQL Yoga web handler.
  * Reads X-Include-Drafts header and passes it to resolvers via context.
+ * Schema is built async (required for D1's async SqlClient).
  */
 export function createGraphQLHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>) {
-  let cachedSchema: ReturnType<typeof buildGraphQLSchema> extends Effect.Effect<infer A, any, any> ? A : never;
+  // Schema is rebuilt on every request to pick up model/field changes.
+  // In production, add caching with invalidation on schema mutations.
+  function getSchema() {
+    return Effect.runPromise(
+      buildGraphQLSchema(sqlLayer).pipe(Effect.provide(sqlLayer))
+    );
+  }
 
   const yoga = createYoga({
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Yoga's schema generic doesn't align with our context type
-    schema: (() => {
-      if (!cachedSchema) {
-        cachedSchema = Effect.runSync(
-          buildGraphQLSchema(sqlLayer).pipe(Effect.provide(sqlLayer))
-        );
-      }
-      return cachedSchema;
-    }) as any,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    schema: (() => getSchema()) as any,
     graphqlEndpoint: "/graphql",
-    landingPage: true, // Enable GraphiQL playground
+    landingPage: true,
     context: ({ request }: { request: Request }) => {
       const includeDrafts = request.headers.get("X-Include-Drafts") === "true";
       return { includeDrafts } satisfies GraphQLContext;

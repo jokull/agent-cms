@@ -125,9 +125,9 @@ function deserializeRecord(record: Record<string, any>): Record<string, any> {
  * Accepts the sqlLayer so resolvers can query the database at request time.
  */
 export function buildGraphQLSchema(sqlLayer: any) {
-  // Helper to run sql queries synchronously through the layer
-  function runSql<A>(effect: Effect.Effect<A, unknown, SqlClient.SqlClient>): A {
-    return Effect.runSync(Effect.provide(effect, sqlLayer) as Effect.Effect<A, never, never>);
+  // Helper to run sql queries — async for D1 compatibility, sync fallback for tests
+  function runSql<A>(effect: Effect.Effect<A, unknown, SqlClient.SqlClient>): Promise<A> {
+    return Effect.runPromise(Effect.provide(effect, sqlLayer) as Effect.Effect<A, never, never>);
   }
 
   return Effect.gen(function* () {
@@ -292,7 +292,7 @@ export function buildGraphQLSchema(sqlLayer: any) {
       const firstTextField = fields.find((f) => f.field_type === "text");
       const firstMediaField = fields.find((f) => f.field_type === "media");
 
-      typeResolvers._seoMetaTags = (parent: any) => {
+      typeResolvers._seoMetaTags = async (parent: any) => {
         const tags: Array<{ tag: string; attributes: Record<string, string> | null; content: string | null }> = [];
 
         // Extract SEO data from seo field or heuristic fields
@@ -310,7 +310,7 @@ export function buildGraphQLSchema(sqlLayer: any) {
             twitterCard = seo.twitterCard ?? null;
             if (seo.image) {
               // Resolve image URL from asset ID
-              const asset = runSql(
+              const asset = await runSql(
                 Effect.gen(function* () {
                   const s = yield* SqlClient.SqlClient;
                   const rows = yield* s.unsafe<AssetRow>("SELECT * FROM assets WHERE id = ?", [seo.image]);
@@ -327,7 +327,7 @@ export function buildGraphQLSchema(sqlLayer: any) {
         if (!description && firstTextField) description = parent[firstTextField.api_key] ?? null;
         if (!imageUrl && firstMediaField && parent[firstMediaField.api_key]) {
           const assetId = parent[firstMediaField.api_key];
-          const asset = runSql(
+          const asset = await runSql(
             Effect.gen(function* () {
               const s = yield* SqlClient.SqlClient;
               const rows = yield* s.unsafe<AssetRow>("SELECT * FROM assets WHERE id = ?", [assetId]);
@@ -365,10 +365,10 @@ export function buildGraphQLSchema(sqlLayer: any) {
       }
       if (model.tree) {
         typeResolvers._parentId = (p: any) => p._parent_id ?? null;
-        typeResolvers._parent = (parent: any) => {
+        typeResolvers._parent = async (parent: any) => {
           const parentId = parent._parent_id;
           if (!parentId) return null;
-          return runSql(
+          return await runSql(
             Effect.gen(function* () {
               const s = yield* SqlClient.SqlClient;
               const rows = yield* s.unsafe<Record<string, any>>(
@@ -378,8 +378,8 @@ export function buildGraphQLSchema(sqlLayer: any) {
             })
           );
         };
-        typeResolvers._children = (parent: any) => {
-          return runSql(
+        typeResolvers._children = async (parent: any) => {
+          return await runSql(
             Effect.gen(function* () {
               const s = yield* SqlClient.SqlClient;
               const rows = yield* s.unsafe<Record<string, any>>(
@@ -474,10 +474,10 @@ export function buildGraphQLSchema(sqlLayer: any) {
       // --- Batch resolution helpers (reduces N+1 to 1 query per field per record) ---
 
       /** Batch-fetch assets by IDs, return map of id → asset object */
-      function batchFetchAssets(ids: string[]): Map<string, Record<string, any>> {
+      async function batchFetchAssets(ids: string[]): Promise<Map<string, Record<string, any>>> {
         if (ids.length === 0) return new Map();
         const placeholders = ids.map(() => "?").join(", ");
-        const rows = runSql(
+        const rows = await runSql(
           Effect.gen(function* () {
             const s = yield* SqlClient.SqlClient;
             return yield* s.unsafe<AssetRow>(
@@ -498,11 +498,11 @@ export function buildGraphQLSchema(sqlLayer: any) {
       }
 
       /** Batch-fetch records from a content table by IDs, return map of id → record */
-      function batchFetchRecords(tableApiKey: string, ids: string[]): Map<string, Record<string, any>> {
+      async function batchFetchRecords(tableApiKey: string, ids: string[]): Promise<Map<string, Record<string, any>>> {
         if (ids.length === 0) return new Map();
         const tName = typeNames.get(tableApiKey);
         const placeholders = ids.map(() => "?").join(", ");
-        const rows = runSql(
+        const rows = await runSql(
           Effect.gen(function* () {
             const s = yield* SqlClient.SqlClient;
             return yield* s.unsafe<Record<string, any>>(
@@ -518,9 +518,9 @@ export function buildGraphQLSchema(sqlLayer: any) {
       }
 
       /** Resolve a single record ID across target tables (for single link fields) */
-      function resolveLinkedRecord(targetApiKeys: string[], id: string): Record<string, any> | null {
+      async function resolveLinkedRecord(targetApiKeys: string[], id: string): Promise<Record<string, any> | null> {
         for (const apiKey of targetApiKeys) {
-          const map = batchFetchRecords(apiKey, [id]);
+          const map = await batchFetchRecords(apiKey, [id]);
           const found = map.get(id);
           if (found) return found;
         }
@@ -528,12 +528,12 @@ export function buildGraphQLSchema(sqlLayer: any) {
       }
 
       /** Batch-resolve multiple record IDs across target tables (for links fields) */
-      function batchResolveLinkedRecords(targetApiKeys: string[], ids: string[]): Map<string, Record<string, any>> {
+      async function batchResolveLinkedRecords(targetApiKeys: string[], ids: string[]): Promise<Map<string, Record<string, any>>> {
         const result = new Map<string, Record<string, any>>();
         const remaining = new Set(ids);
         for (const apiKey of targetApiKeys) {
           if (remaining.size === 0) break;
-          const map = batchFetchRecords(apiKey, [...remaining]);
+          const map = await batchFetchRecords(apiKey, [...remaining]);
           for (const [id, record] of map) {
             result.set(id, record);
             remaining.delete(id);
@@ -546,24 +546,24 @@ export function buildGraphQLSchema(sqlLayer: any) {
         if (f.field_type === "link") {
           const targets = getLinkTargets(f.validators);
           if (targets && targets.length > 0) {
-            typeResolvers[f.api_key] = (parent: any) => {
+            typeResolvers[f.api_key] = async (parent: any) => {
               const linkedId = parent[f.api_key];
               if (!linkedId) return null;
-              return resolveLinkedRecord(targets, linkedId);
+              return await resolveLinkedRecord(targets, linkedId);
             };
           }
         }
         if (f.field_type === "links") {
           const targets = getLinksTargets(f.validators);
           if (targets && targets.length > 0) {
-            typeResolvers[f.api_key] = (parent: any) => {
+            typeResolvers[f.api_key] = async (parent: any) => {
               let linkedIds = parent[f.api_key];
               if (typeof linkedIds === "string") {
                 try { linkedIds = JSON.parse(linkedIds); } catch { return []; }
               }
               if (!Array.isArray(linkedIds)) return [];
               // Batch-fetch all linked records in one IN query per target table
-              const resolved = batchResolveLinkedRecords(targets, linkedIds);
+              const resolved = await batchResolveLinkedRecords(targets, linkedIds);
               // Return in original order, preserving insertion order
               return linkedIds.map((id: string) => resolved.get(id) ?? null).filter(Boolean);
             };
@@ -571,27 +571,27 @@ export function buildGraphQLSchema(sqlLayer: any) {
         }
         // Media field resolver: batch-fetch single asset
         if (f.field_type === "media") {
-          typeResolvers[f.api_key] = (parent: any) => {
+          typeResolvers[f.api_key] = async (parent: any) => {
             const assetId = parent[f.api_key];
             if (!assetId) return null;
-            const map = batchFetchAssets([assetId]);
+            const map = await batchFetchAssets([assetId]);
             return map.get(assetId) ?? null;
           };
         }
         // Media gallery resolver: batch-fetch all assets in one IN query
         if (f.field_type === "media_gallery") {
-          typeResolvers[f.api_key] = (parent: any) => {
+          typeResolvers[f.api_key] = async (parent: any) => {
             let ids = parent[f.api_key];
             if (typeof ids === "string") { try { ids = JSON.parse(ids); } catch { return []; } }
             if (!Array.isArray(ids)) return [];
-            const assetMap = batchFetchAssets(ids);
+            const assetMap = await batchFetchAssets(ids);
             // Return in original order
             return ids.map((id: string) => assetMap.get(id) ?? null).filter(Boolean);
           };
         }
         // SEO field resolver: return parsed JSON with image asset resolution
         if (f.field_type === "seo") {
-          typeResolvers[f.api_key] = (parent: any) => {
+          typeResolvers[f.api_key] = async (parent: any) => {
             let seo = parent[f.api_key];
             if (!seo) return null;
             if (typeof seo === "string") {
@@ -603,7 +603,7 @@ export function buildGraphQLSchema(sqlLayer: any) {
         }
         // Color field resolver: parse JSON, compute hex
         if (f.field_type === "color") {
-          typeResolvers[f.api_key] = (parent: any) => {
+          typeResolvers[f.api_key] = async (parent: any) => {
             let color = parent[f.api_key];
             if (!color) return null;
             if (typeof color === "string") {
@@ -614,7 +614,7 @@ export function buildGraphQLSchema(sqlLayer: any) {
         }
         // LatLon field resolver: parse JSON
         if (f.field_type === "lat_lon") {
-          typeResolvers[f.api_key] = (parent: any) => {
+          typeResolvers[f.api_key] = async (parent: any) => {
             let ll = parent[f.api_key];
             if (!ll) return null;
             if (typeof ll === "string") {
@@ -625,7 +625,7 @@ export function buildGraphQLSchema(sqlLayer: any) {
         }
         // StructuredText resolver: return { value, blocks, links }
         if (f.field_type === "structured_text") {
-          typeResolvers[f.api_key] = (parent: any) => {
+          typeResolvers[f.api_key] = async (parent: any) => {
             let dast = parent[f.api_key];
             if (!dast) return null;
             if (typeof dast === "string") {
@@ -642,7 +642,7 @@ export function buildGraphQLSchema(sqlLayer: any) {
 
             if (blockLevelIds.size > 0 || inlineBlockIdSet.size > 0) {
               for (const bm of blockModels) {
-                const fetched = runSql(
+                const fetched = await runSql(
                   Effect.gen(function* () {
                     const s = yield* SqlClient.SqlClient;
                     const rows = yield* s.unsafe<Record<string, any>>(
@@ -672,7 +672,7 @@ export function buildGraphQLSchema(sqlLayer: any) {
             const linkRecordIds = extractLinkIds(dast);
             const allModelApiKeys = models.map((m) => m.api_key);
             const resolvedLinks = linkRecordIds.length > 0
-              ? batchResolveLinkedRecords(allModelApiKeys, linkRecordIds)
+              ? await batchResolveLinkedRecords(allModelApiKeys, linkRecordIds)
               : new Map();
             const links = linkRecordIds
               .map((id) => resolvedLinks.get(id) ?? null)
@@ -721,11 +721,11 @@ export function buildGraphQLSchema(sqlLayer: any) {
 
       // Query resolvers — push filtering/ordering/pagination to SQL
       // Support includeDrafts via context (from X-Include-Drafts header)
-      function queryWithFilter(
+      async function queryWithFilter(
         args: { filter?: any; orderBy?: string[]; first?: number; skip?: number },
         includeDrafts: boolean
       ) {
-        return runSql(
+        return await runSql(
           Effect.gen(function* () {
             const s = yield* SqlClient.SqlClient;
 
@@ -779,8 +779,8 @@ export function buildGraphQLSchema(sqlLayer: any) {
         );
       }
 
-      function countWithFilter(filter: any, includeDrafts: boolean) {
-        return runSql(
+      async function countWithFilter(filter: any, includeDrafts: boolean) {
+        return await runSql(
           Effect.gen(function* () {
             const s = yield* SqlClient.SqlClient;
 
@@ -816,12 +816,12 @@ export function buildGraphQLSchema(sqlLayer: any) {
         return queryWithFilter(args, includeDrafts);
       };
 
-      resolvers.Query[model.api_key] = (_: any, args: any, context: any) => {
+      resolvers.Query[model.api_key] = async (_: any, args: any, context: any) => {
         const includeDrafts = context?.includeDrafts ?? false;
         if (args.locale) context.locale = args.locale;
         if (args.fallbackLocales) context.fallbackLocales = args.fallbackLocales;
         if (args.id) {
-          return runSql(
+          return await runSql(
             Effect.gen(function* () {
               const s = yield* SqlClient.SqlClient;
               const conditions = [`id = ?`];
@@ -843,7 +843,7 @@ export function buildGraphQLSchema(sqlLayer: any) {
           );
         }
         if (args.filter) {
-          const records = queryWithFilter({ filter: args.filter, first: 1 }, includeDrafts);
+          const records = await queryWithFilter({ filter: args.filter, first: 1 }, includeDrafts);
           return records[0] ?? null;
         }
         return null;
@@ -901,10 +901,10 @@ export function buildGraphQLSchema(sqlLayer: any) {
 
     // SeoField.image resolver: look up asset by ID
     resolvers.SeoField = {
-      image: (seo: any) => {
+      image: async (seo: any) => {
         const assetId = seo?.image;
         if (!assetId) return null;
-        return runSql(
+        return await runSql(
           Effect.gen(function* () {
             const s = yield* SqlClient.SqlClient;
             const rows = yield* s.unsafe<AssetRow>("SELECT * FROM assets WHERE id = ?", [assetId]);

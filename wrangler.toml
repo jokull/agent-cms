@@ -7,7 +7,7 @@ compatibility_flags = ["nodejs_compat"]
 binding = "DB"
 database_name = "agent-cms-db"
 database_id = "local"
-migrations_dir = "drizzle"
+migrations_dir = "migrations"
 
 [vars]
 ENVIRONMENT = "development"
