@@ -7,7 +7,7 @@ import { SqlClient } from "@effect/sql";
 import { compileFilterToSql, compileOrderBy, type FilterCompilerOpts } from "./filter-compiler.js";
 import { computeIsValid } from "../db/validators.js";
 import type { SchemaBuilderContext, ModelQueryMeta, DynamicRow, GqlContext } from "./gql-types.js";
-import { toTypeName, toCamelCase, getRegistryDef, deserializeRecord } from "./gql-utils.js";
+import { toTypeName, toCamelCase, pluralize, getRegistryDef, deserializeRecord } from "./gql-utils.js";
 
 /**
  * Build filter/orderBy type defs and Query resolvers for each content model.
@@ -55,11 +55,12 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
     typeDefs.push(`type ${typeName}Meta { count: Int! }`);
 
     // Queries (camelCase like DatoCMS: blogPost not blog_post)
-    const listName = `all${typeName}s`;
+    const listName = `all${pluralize(typeName)}`;
     const singleName = toCamelCase(model.api_key);
     queryFieldDefs.push(`${listName}(locale: String, fallbackLocales: [String!], filter: ${typeName}Filter, orderBy: [${typeName}OrderBy!], first: Int, skip: Int, excludeInvalid: Boolean): [${typeName}!]!`);
     queryFieldDefs.push(`${singleName}(locale: String, fallbackLocales: [String!], id: ID, filter: ${typeName}Filter): ${typeName}`);
-    queryFieldDefs.push(`_all${typeName}sMeta(filter: ${typeName}Filter, excludeInvalid: Boolean): ${typeName}Meta!`);
+    const metaName = `_all${pluralize(typeName)}Meta`;
+    queryFieldDefs.push(`${metaName}(filter: ${typeName}Filter, excludeInvalid: Boolean): ${typeName}Meta!`);
 
     // Build locale-awareness and camelCase->snake_case mapping for filter/order compilation
     const fieldNameMap = Object.fromEntries(camelToSnake);
@@ -227,7 +228,7 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
       return null;
     };
 
-    (resolvers.Query as Record<string, unknown>)[`_all${typeName}sMeta`] = async (_: unknown, args: DynamicRow, context: GqlContext) => {
+    (resolvers.Query as Record<string, unknown>)[metaName] = async (_: unknown, args: DynamicRow, context: GqlContext) => {
       const includeDrafts = context?.includeDrafts ?? false;
       if (args.excludeInvalid) {
         // Need to fetch all records and filter in JS for accurate count

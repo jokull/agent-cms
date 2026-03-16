@@ -74,5 +74,9 @@ export interface SchemaBuilderContext {
 /** Options for buildGraphQLSchema */
 export interface SchemaBuilderOptions {
   assetBaseUrl?: string;
+  /** Path prefix for asset URLs. Default: "/assets/{id}" which produces /assets/{id}/{filename}.
+   *  Set to "" for flat R2 storage (produces /{filename}).
+   *  Use "{id}" placeholder for the asset ID if needed. */
+  assetPathPrefix?: string;
   isProduction?: boolean;
 }

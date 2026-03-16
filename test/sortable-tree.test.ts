@@ -135,14 +135,14 @@ describe("Sortable and tree models", () => {
 
       // Query parent from child
       const childResult = await gqlQuery(handler, `{
-        allCategorys(filter: { name: { eq: "Phones" } }) {
+        allCategories(filter: { name: { eq: "Phones" } }) {
           name
           _parent { name }
         }
       }`, { includeDrafts: true });
 
       expect(childResult.errors).toBeUndefined();
-      expect(childResult.data.allCategorys[0]._parent.name).toBe("Electronics");
+      expect(childResult.data.allCategories[0]._parent.name).toBe("Electronics");
     });
 
     it("rejects reorder on non-sortable model", async () => {

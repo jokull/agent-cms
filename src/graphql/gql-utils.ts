@@ -12,6 +12,17 @@ export function toTypeName(apiKey: string): string {
     apiKey.slice(1).replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
 }
 
+/** Naive English pluralization for GraphQL query names */
+export function pluralize(word: string): string {
+  if (word.endsWith("y") && !/[aeiou]y$/i.test(word)) {
+    return word.slice(0, -1) + "ies";
+  }
+  if (word.endsWith("s") || word.endsWith("x") || word.endsWith("z") || word.endsWith("ch") || word.endsWith("sh")) {
+    return word + "es";
+  }
+  return word + "s";
+}
+
 /** Convert snake_case api_key to camelCase GraphQL field name (like DatoCMS) */
 export function toCamelCase(snakeCase: string): string {
   return snakeCase.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());

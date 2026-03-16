@@ -30,9 +30,11 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
 
     // Asset URL helpers
     const assetBase = options?.assetBaseUrl ?? "";
+    const pathPrefix = options?.assetPathPrefix ?? "/assets/{id}";
 
     function assetUrl(id: string, filename: string): string {
-      return `${assetBase}/assets/${id}/${filename}`;
+      const prefix = pathPrefix.replace("{id}", id);
+      return prefix ? `${assetBase}${prefix}/${filename}` : `${assetBase}/${filename}`;
     }
 
     function cfImageUrl(assetPath: string, params: Record<string, string | number>): string {

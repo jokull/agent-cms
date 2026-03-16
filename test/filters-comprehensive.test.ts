@@ -131,14 +131,14 @@ describe("Filter compiler — comprehensive", () => {
   describe("string filters", () => {
     it("eq / neq on slug field", async () => {
       // Use category model which has non-localized title → slug
-      const r = await q(`{ allCategorys(filter: { slug: { eq: "technology" } }) { name } }`);
+      const r = await q(`{ allCategories(filter: { slug: { eq: "technology" } }) { name } }`);
       expect(r.errors).toBeUndefined();
-      expect(r.data.allCategorys).toHaveLength(1);
-      expect(r.data.allCategorys[0].name).toBe("Technology");
+      expect(r.data.allCategories).toHaveLength(1);
+      expect(r.data.allCategories[0].name).toBe("Technology");
 
-      const r2 = await q(`{ allCategorys(filter: { slug: { neq: "technology" } }) { name } }`);
-      expect(r2.data.allCategorys).toHaveLength(1);
-      expect(r2.data.allCategorys[0].name).toBe("Food");
+      const r2 = await q(`{ allCategories(filter: { slug: { neq: "technology" } }) { name } }`);
+      expect(r2.data.allCategories).toHaveLength(1);
+      expect(r2.data.allCategories[0].name).toBe("Food");
     });
 
     it("matches (case-insensitive substring)", async () => {
@@ -165,12 +165,12 @@ describe("Filter compiler — comprehensive", () => {
     });
 
     it("in / notIn on slug", async () => {
-      const r = await q(`{ allCategorys(filter: { slug: { in: ["technology", "food"] } }) { name } }`);
-      expect(r.data.allCategorys).toHaveLength(2);
+      const r = await q(`{ allCategories(filter: { slug: { in: ["technology", "food"] } }) { name } }`);
+      expect(r.data.allCategories).toHaveLength(2);
 
-      const r2 = await q(`{ allCategorys(filter: { slug: { notIn: ["technology"] } }) { name } }`);
-      expect(r2.data.allCategorys).toHaveLength(1);
-      expect(r2.data.allCategorys[0].name).toBe("Food");
+      const r2 = await q(`{ allCategories(filter: { slug: { notIn: ["technology"] } }) { name } }`);
+      expect(r2.data.allCategories).toHaveLength(1);
+      expect(r2.data.allCategories[0].name).toBe("Food");
     });
   });
 
@@ -226,8 +226,8 @@ describe("Filter compiler — comprehensive", () => {
   // -----------------------------------------------------------------------
   describe("link filters", () => {
     it("filter by linked record ID (eq)", async () => {
-      const cats = await q(`{ allCategorys { id name } }`, { includeDrafts: true });
-      const techId = cats.data.allCategorys.find((c: any) => c.name === "Technology").id;
+      const cats = await q(`{ allCategories { id name } }`, { includeDrafts: true });
+      const techId = cats.data.allCategories.find((c: any) => c.name === "Technology").id;
 
       const r = await q(`{ allArticles(filter: { category: { eq: "${techId}" } }) { title } }`, { includeDrafts: true });
       expect(r.data.allArticles).toHaveLength(1);
@@ -241,8 +241,8 @@ describe("Filter compiler — comprehensive", () => {
     });
 
     it("filter by link in (multiple IDs)", async () => {
-      const cats = await q(`{ allCategorys { id } }`, { includeDrafts: true });
-      const ids = cats.data.allCategorys.map((c: any) => c.id);
+      const cats = await q(`{ allCategories { id } }`, { includeDrafts: true });
+      const ids = cats.data.allCategories.map((c: any) => c.id);
       const r = await q(`{ allArticles(filter: { category: { in: ${JSON.stringify(ids)} } }) { title } }`, { includeDrafts: true });
       expect(r.data.allArticles).toHaveLength(2);
     });

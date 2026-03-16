@@ -9,6 +9,7 @@ export interface GraphQLContext {
 
 export interface GraphQLHandlerOptions {
   assetBaseUrl?: string;
+  assetPathPrefix?: string;
   isProduction?: boolean;
 }
 
@@ -25,6 +26,7 @@ export function createGraphQLHandler(
     return Effect.runPromise(
       buildGraphQLSchema(sqlLayer, {
         assetBaseUrl: options?.assetBaseUrl,
+        assetPathPrefix: options?.assetPathPrefix,
         isProduction: options?.isProduction,
       }).pipe(Effect.provide(sqlLayer), Effect.orDie)
     );
