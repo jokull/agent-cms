@@ -244,7 +244,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 
 - [x] **P6.1** Meta field filtering + ordering *(done — DateTimeFilter on _createdAt/_updatedAt/_publishedAt/_firstPublishedAt, camelCase→snake_case column mapping in filter compiler, 6 tests)*
 - [ ] **P6.2** N+1 query batching — batch link/links/media resolution using IN queries instead of per-item SELECT. Trip resolves 10+ linked records per tour page.
-- [ ] **P6.3** `_seoMetaTags` auto-generation — auto-generate og:title, og:description, og:image meta tags from record fields + seo field. Trip queries `_seoMetaTags { tag attributes content }` on every page.
+- [x] **P6.3** `_seoMetaTags` auto-generation *(done — generates title, og:title, og:description, og:image, twitter:card, article:modified_time from seo field or heuristic fallback to first string/text/media fields, 4 tests)*
 - [ ] **P6.4** `video` field type — external video embed storing {url, providerUid, provider, width, height, thumbnailUrl}. Trip uses UploadVideoField with streamingUrl/mp4Url.
 - [x] **P6.5** `_modelApiKey` meta field *(done — exposed on every content type, tested)*
 - [ ] **P6.6** responsiveImage imgix params — accept `imgixParams` argument on responsiveImage (auto, fit, crop, w, h, facepad). Trip uses `responsiveImage(imgixParams: { auto: format, fit: crop, w: 1200, h: 800 })`.

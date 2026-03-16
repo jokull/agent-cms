@@ -178,6 +178,12 @@ export function buildGraphQLSchema(sqlLayer: any) {
       type SiteInfo {
         locales: [String!]!
       }
+      """DatoCMS-compatible SEO meta tag"""
+      type Tag {
+        tag: String!
+        attributes: JSON
+        content: String
+      }
       type SeoField {
         title: String
         description: String
@@ -234,7 +240,7 @@ export function buildGraphQLSchema(sqlLayer: any) {
       // Object type
       const fieldDefs = [
         "id: ID!", "_modelApiKey: String!", "_status: String", "_createdAt: String", "_updatedAt: String",
-        "_publishedAt: String", "_firstPublishedAt: String",
+        "_publishedAt: String", "_firstPublishedAt: String", "_seoMetaTags: [Tag!]!",
       ];
       if (model.sortable || model.tree) {
         fieldDefs.push("_position: Int");
@@ -279,6 +285,81 @@ export function buildGraphQLSchema(sqlLayer: any) {
       typeResolvers._updatedAt = (p: any) => p._updated_at;
       typeResolvers._publishedAt = (p: any) => p._published_at;
       typeResolvers._firstPublishedAt = (p: any) => p._first_published_at;
+
+      // _seoMetaTags resolver: auto-generate meta tags from seo field or heuristic field selection
+      const seoField = fields.find((f) => f.field_type === "seo");
+      const firstStringField = fields.find((f) => f.field_type === "string");
+      const firstTextField = fields.find((f) => f.field_type === "text");
+      const firstMediaField = fields.find((f) => f.field_type === "media");
+
+      typeResolvers._seoMetaTags = (parent: any) => {
+        const tags: Array<{ tag: string; attributes: Record<string, string> | null; content: string | null }> = [];
+
+        // Extract SEO data from seo field or heuristic fields
+        let title: string | null = null;
+        let description: string | null = null;
+        let imageUrl: string | null = null;
+        let twitterCard: string | null = null;
+
+        if (seoField) {
+          let seo = parent[seoField.api_key];
+          if (typeof seo === "string") { try { seo = JSON.parse(seo); } catch { seo = null; } }
+          if (seo && typeof seo === "object") {
+            title = seo.title ?? null;
+            description = seo.description ?? null;
+            twitterCard = seo.twitterCard ?? null;
+            if (seo.image) {
+              // Resolve image URL from asset ID
+              const asset = runSql(
+                Effect.gen(function* () {
+                  const s = yield* SqlClient.SqlClient;
+                  const rows = yield* s.unsafe<AssetRow>("SELECT * FROM assets WHERE id = ?", [seo.image]);
+                  return rows.length > 0 ? rows[0] : null;
+                })
+              );
+              if (asset) imageUrl = `/assets/${asset.id}/${asset.filename}`;
+            }
+          }
+        }
+
+        // Fallback to heuristic fields
+        if (!title && firstStringField) title = parent[firstStringField.api_key] ?? null;
+        if (!description && firstTextField) description = parent[firstTextField.api_key] ?? null;
+        if (!imageUrl && firstMediaField && parent[firstMediaField.api_key]) {
+          const assetId = parent[firstMediaField.api_key];
+          const asset = runSql(
+            Effect.gen(function* () {
+              const s = yield* SqlClient.SqlClient;
+              const rows = yield* s.unsafe<AssetRow>("SELECT * FROM assets WHERE id = ?", [assetId]);
+              return rows.length > 0 ? rows[0] : null;
+            })
+          );
+          if (asset) imageUrl = `/assets/${asset.id}/${asset.filename}`;
+        }
+
+        // Generate tags
+        if (title) {
+          tags.push({ tag: "title", attributes: null, content: title });
+          tags.push({ tag: "meta", attributes: { property: "og:title", content: title }, content: null });
+          tags.push({ tag: "meta", attributes: { name: "twitter:title", content: title }, content: null });
+        }
+        if (description) {
+          tags.push({ tag: "meta", attributes: { name: "description", content: description }, content: null });
+          tags.push({ tag: "meta", attributes: { property: "og:description", content: description }, content: null });
+          tags.push({ tag: "meta", attributes: { name: "twitter:description", content: description }, content: null });
+        }
+        if (imageUrl) {
+          tags.push({ tag: "meta", attributes: { property: "og:image", content: imageUrl }, content: null });
+          tags.push({ tag: "meta", attributes: { name: "twitter:image", content: imageUrl }, content: null });
+        }
+        tags.push({ tag: "meta", attributes: { property: "og:type", content: "article" }, content: null });
+        tags.push({ tag: "meta", attributes: { name: "twitter:card", content: twitterCard ?? "summary" }, content: null });
+        if (parent._updated_at) {
+          tags.push({ tag: "meta", attributes: { property: "article:modified_time", content: parent._updated_at }, content: null });
+        }
+
+        return tags;
+      };
       if (model.sortable || model.tree) {
         typeResolvers._position = (p: any) => p._position ?? 0;
       }
