@@ -343,6 +343,24 @@ agent-cms is **not a standalone Worker** — it's a library + CLI that scaffolds
 - **Schema descriptor KV caching** — same rationale. D1 reads are fast enough; no need for a separate KV cache of the schema descriptor.
 - **Blurhash / dominant color extraction** — needs compute Cloudflare doesn't provide natively. Fields exist in schema as nullable for future use.
 
+### Architecture: Typed Field Type Registry
+
+The codebase has a "type sandwich" — top (system tables) and bottom (individual field shapes) are statically known, but field type behavior is scattered across 5+ files with `any` types. A registry would collapse this:
+
+```typescript
+// One definition per field type — SQL, GraphQL, Schema, resolver, filter
+const ColorFieldType = {
+  name: "color",
+  sqlType: "TEXT",
+  graphqlType: "ColorField",
+  schema: ColorInput,        // Effect Schema — validates writes
+  resolve: (raw) => ...,     // typed resolver
+  filterType: null,           // not filterable
+} satisfies FieldTypeDefinition;
+```
+
+This is a refactor, not a feature — no user-facing changes. Benefits: exhaustive compile-time checks when adding field types, eliminates scattered if/switch/any patterns, reuses Effect Schemas for both validation and resolver narrowing.
+
 ### Future (not prioritized)
 
 - [ ] GraphQL subscriptions for real-time updates
