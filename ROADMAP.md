@@ -1,6 +1,52 @@
 # agent-cms
 
-An agent-first headless CMS you deploy to your own Cloudflare account. One Worker + D1 + R2 = one CMS instance. All schema and content editing via MCP tools — no admin UI. Mirrors DatoCMS concepts (models, blocks, StructuredText/DAST, GraphQL). The entire DatoCMS rendering ecosystem (`datocms-structured-text-utils`, `react-datocms <StructuredText>`, etc.) works with our API output because we match the `{ value, blocks, links }` shape.
+**A library and CLI that helps developers set up an agent-first headless CMS on Cloudflare.** Not a hosted service — you own the Worker, D1 database, and R2 bucket in your own Cloudflare account.
+
+`npx create-agent-cms` scaffolds a Worker project. You bring your package manager, configure via prompts (name, R2, observability), deploy with `wrangler deploy`. The MCP server runs inside the Worker at `/mcp` — point Claude Desktop or Claude Code at it, and the agent defines your schema, manages content, uploads assets. No admin UI needed.
+
+Frontends consume the GraphQL CDA at `/graphql`. The entire DatoCMS rendering ecosystem (`datocms-structured-text-utils`, `react-datocms <StructuredText>`, etc.) works with our API output because we match the `{ value, blocks, links }` shape.
+
+## Architecture
+
+```
+Developer runs: npx create-agent-cms
+                    ↓
+         Scaffolded Worker project
+         (wrangler.jsonc, src/index.ts, package.json)
+                    ↓
+         wrangler deploy
+                    ↓
+    ┌───────────────────────────────────┐
+    │  Cloudflare Worker                │
+    │  ├─ /graphql  → GraphQL CDA      │
+    │  ├─ /mcp      → MCP server       │
+    │  ├─ /api/*    → REST admin API   │
+    │  └─ /health   → health check     │
+    │                                   │
+    │  D1 (schema + content)            │
+    │  R2 (asset files)                 │
+    └───────────────────────────────────┘
+                    ↓
+    Agent (Claude) connects to /mcp
+    → defines models, fields, content
+    → uploads assets via wrangler r2 object put
+
+    Frontend (Next.js etc.) queries /graphql
+    → consumes content, renders with react-datocms
+```
+
+## Asset Upload Flow
+
+```bash
+# 1. Upload file to R2 via wrangler CLI
+wrangler r2 object put my-cms/uploads/hero.jpg --file=./hero.jpg --content-type=image/jpeg
+
+# 2. Register asset metadata via MCP or REST
+# MCP: upload_asset tool with r2Key, dimensions, alt text
+# REST: POST /api/assets { filename, mimeType, size, width, height, r2Key }
+
+# 3. Use in content — reference asset ID in media fields
+```
 
 See [CHALLENGES.md](./CHALLENGES.md) for deep dives on technical challenges (referenced as [C1], [C2], etc.).
 See [DECISIONS.md](./DECISIONS.md) for the full canonical record of all product and architecture decisions (40 items). The Key Decisions section below is an excerpt — DECISIONS.md is authoritative.
@@ -246,52 +292,71 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 - [x] **P6.2** N+1 query batching *(done — links/media_gallery use IN queries instead of per-item SELECT, batchFetchAssets/batchFetchRecords/batchResolveLinkedRecords helpers, StructuredText links use same batch path)*
 - [x] **P6.3** `_seoMetaTags` auto-generation *(done — generates title, og:title, og:description, og:image, twitter:card, article:modified_time from seo field or heuristic fallback to first string/text/media fields, 4 tests)*
 - [x] **P6.5** `_modelApiKey` meta field *(done — exposed on every content type, tested)*
-- [ ] **P6.6** responsiveImage with Cloudflare Image Resizing — accept `transforms` argument on responsiveImage (width, height, fit, format, quality). Generate srcSet using `/cdn-cgi/image/` URL pattern with R2 source. Replace imgix references. Trip uses `responsiveImage(imgixParams: { auto: format, fit: crop, w: 1200, h: 800 })`.
+- [x] **P6.6** responsiveImage transforms *(done — accepts `transforms`/`cfImagesParams` with width/height/fit/quality/format/gravity, generates srcSet + webpSrcSet, aspectRatio computed, 4 tests)*
 - [x] **P6.7** StructuredText links resolution *(done — itemLink/inlineItem references resolved across all content tables, returned with __typename in links array, 4 tests)*
-- [ ] **P6.8** R2 asset upload pipeline — actual file upload to R2 (currently metadata-only). Upload via presigned URL or Worker proxy. Store r2Key on asset row for transform URL generation.
-- [ ] **P6.9** Asset upload via MCP — `upload_asset` accepts base64 or URL, stores in R2, returns asset with transform URLs.
 
-### DX & Production Readiness
+### Phase 7: Library & CLI (the product)
 
-Deployment architecture: system tables created via `wrangler d1 migrations apply` (Drizzle CLI). Dynamic content/block tables managed at runtime by the schema engine. Single D1+Worker = single environment; multi-env via wrangler devops.
+agent-cms is **not a standalone Worker** — it's a library + CLI that scaffolds a Worker project. The developer owns the Worker, D1, and R2 in their own Cloudflare account.
 
-#### Done
+#### `create-agent-cms` CLI
 
-- [x] **TypeScript compiles** — zero `tsc --noEmit` errors. Removed `exactOptionalPropertyTypes` (incompatible with Effect/Yoga types). Moved test-only `migrate.ts` out of Worker bundle (uses `fs`).
-- [x] **GraphiQL playground** — enabled at `GET /graphql` via Yoga `landingPage: true`. Schema introspection works out of the box.
-- [x] **CORS** — all responses include `Access-Control-Allow-Origin`, preflight `OPTIONS` handled. Allows `X-Include-Drafts` and `Authorization` headers.
-- [x] **Schema caching** — GraphQL schema built once per Worker instance, not per-request.
-- [x] **Async GraphQL resolvers** — all resolvers use `Effect.runPromise` for D1 async compatibility. Verified working end-to-end on `wrangler dev` with local D1.
-- [x] **Wrangler migrations** — `migrations/` directory with wrangler-compatible `.sql` files. `wrangler d1 migrations apply` works.
-- [x] **Singleton model queries** — models with `singleton: true` return the single record when queried without id/filter arguments (e.g. `homepage { title }`).
-- [x] **responsiveImage transforms** — accepts `transforms` (or `cfImagesParams`) argument with width, height, fit, quality, format, gravity. Generates srcSet + webpSrcSet at standard breakpoints capped at requested dimensions. `aspectRatio` computed.
+- [ ] **Scaffolding CLI** — `npx create-agent-cms` interactive setup:
+  - Prompts: project name, package manager, R2 bucket name, observability (y/n)
+  - Waits for `wrangler` auth if needed
+  - Generates: `wrangler.jsonc`, `src/index.ts`, `package.json`, `migrations/`
+  - Runs: `wrangler d1 create`, `wrangler d1 migrations apply`, `wrangler r2 bucket create`
+  - Verifies: D1 accessible, R2 accessible, Worker deploys
+  - Outputs: MCP server URL for Claude Desktop/Code config
 
-#### Needed for first real project
+- [ ] **Library export** — `agent-cms` npm package exports:
+  - `createCMSHandler(env)` — returns the Worker fetch handler
+  - `createMCPHandler(env)` — returns the MCP HTTP transport handler
+  - Types for Env bindings (DB, R2, etc.)
 
-- [x] **`wrangler dev` local DX** — verified end-to-end: migrations apply, REST creates models/fields/records, GraphQL queries resolve, GraphiQL playground works.
-- [ ] **`wrangler deploy` + D1 setup** — document: `wrangler d1 create`, `wrangler d1 migrations apply`, `wrangler deploy`. Verify first-request builds schema correctly from empty D1.
-- [ ] **Audit log system table** — `audit_log` table tracking schema and content mutations (who, what, when). Essential for CMS trust and debugging.
-- [ ] **R2 asset upload** — presigned URL endpoint for file upload to R2. Asset creation returns upload URL; client uploads directly to R2.
-- [ ] **MCP server registration** — document how to register the MCP server in Claude Desktop / Claude Code for agent-first schema management.
-- [ ] **README** — what this is, how to set up, how to use. Quickstart for both agent (MCP) and developer (REST/GraphQL) workflows.
+- [ ] **Template `src/index.ts`** — minimal Worker entry point:
+  ```typescript
+  import { createCMSHandler } from "agent-cms";
+  export default {
+    fetch: (request, env) => createCMSHandler(env).fetch(request),
+  };
+  ```
 
-#### Nice-to-have DX
+#### MCP over HTTP
 
-- [ ] **GraphQL schema export** — `GET /graphql/schema` returns SDL for codegen integration
-- [ ] **Seed data scripts** — example schemas (blog, e-commerce) for quick testing
-- [ ] **Error messages with guidance** — errors like "Model not found" should suggest `list_models` (MCP) or `GET /api/models` (REST)
-- [ ] **Webhook delivery logs** — track webhook delivery success/failure for debugging
-- [ ] **API key auth** — optional `Authorization: Bearer <key>` for production. Store keys in Workers secrets.
+- [ ] **MCP HTTP transport** — serve MCP at `/mcp` inside the Worker (SSE or Streamable HTTP). Claude Desktop/Code connects directly — no separate process.
+- [ ] **MCP config output** — scaffolding CLI prints the Claude Desktop config JSON to paste into settings.
+
+#### Asset Upload (wrangler CLI flow)
+
+- [ ] **R2 binding in scaffolded project** — `wrangler.jsonc` includes R2 bucket binding
+- [ ] **`upload_asset` MCP tool** — registers asset metadata after `wrangler r2 object put`. Agent tells user: "upload with `wrangler r2 object put <bucket>/<key> --file=<path>`", then registers metadata.
+- [ ] **Production Cloudflare Image Resizing URLs** — responsiveImage resolver generates `/cdn-cgi/image/width=W,fit=F,format=auto/<r2-public-url>` when ENVIRONMENT != "development"
+
+#### Done (DX)
+
+- [x] **TypeScript compiles** — zero `tsc --noEmit` errors
+- [x] **GraphiQL playground** — at `GET /graphql`
+- [x] **CORS** — all responses, preflight handled
+- [x] **Async resolvers** — D1 compatible, verified on `wrangler dev`
+- [x] **Wrangler migrations** — `migrations/` dir, `wrangler d1 migrations apply` works
+- [x] **Singleton queries** — `homepage { title }` without id/filter
+- [x] **`wrangler dev` verified** — full e2e: migrations → REST → GraphQL → GraphiQL
+
+#### Still needed
+
+- [ ] **API key auth** — optional `Authorization: Bearer <key>`. Keys in Workers secrets.
+- [ ] **Audit log** — system table tracking schema + content mutations
+- [ ] **Error messages with guidance** — suggest next action (e.g. "use `list_models`")
 
 ### Future (not prioritized)
 
 - [ ] GraphQL subscriptions for real-time updates
 - [ ] Schema descriptor KV caching for production cold starts
-- [ ] Cloudflare Image Resizing integration (production transform URLs, local dev passthrough)
-- [ ] Blurhash / dominant color extraction on asset upload *(scoped out for now — needs compute Cloudflare doesn't provide natively; fields exist in schema as nullable)*
+- [ ] Blurhash / dominant color extraction *(scoped out — needs compute Cloudflare doesn't provide)*
 - [ ] Per-field locale argument (`title(locale: en)` override)
 - [ ] `_isValid` meta field on records
-- [ ] Cache tag webhook invalidation (production Cloudflare KV)
+- [ ] Cache tag webhook invalidation (Cloudflare KV)
 
 ---
 
