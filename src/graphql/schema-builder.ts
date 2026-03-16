@@ -33,6 +33,7 @@ function fieldToSDL(
     }
     case "media_gallery": return "[Asset!]";
     case "structured_text": return "StructuredText";
+    case "seo": return "SeoField";
     default: return "String";
   }
 }
@@ -171,6 +172,12 @@ export function buildGraphQLSchema(sqlLayer: any) {
       type SiteInfo {
         locales: [String!]!
       }
+      type SeoField {
+        title: String
+        description: String
+        image: Asset
+        twitterCard: String
+      }
     `);
     typeDefs.push(`
       """DatoCMS-compatible StructuredText response"""
@@ -226,7 +233,7 @@ export function buildGraphQLSchema(sqlLayer: any) {
 
       // Localized field resolvers: extract value for requested locale
       for (const f of fields) {
-        if (f.localized && !["link", "links", "media", "media_gallery", "structured_text"].includes(f.field_type)) {
+        if (f.localized && !["link", "links", "media", "media_gallery", "structured_text", "seo"].includes(f.field_type)) {
           typeResolvers[f.api_key] = (parent: any, _args: any, context: any) => {
             const rawValue = parent[f.api_key];
             if (rawValue === null || rawValue === undefined) return null;
@@ -348,6 +355,18 @@ export function buildGraphQLSchema(sqlLayer: any) {
             ).filter(Boolean);
           };
         }
+        // SEO field resolver: return parsed JSON with image asset resolution
+        if (f.field_type === "seo") {
+          typeResolvers[f.api_key] = (parent: any) => {
+            let seo = parent[f.api_key];
+            if (!seo) return null;
+            if (typeof seo === "string") {
+              try { seo = JSON.parse(seo); } catch { return null; }
+            }
+            // Return the object as-is; image is resolved by the SeoField type resolver
+            return seo;
+          };
+        }
         // StructuredText resolver: return { value, blocks, links }
         if (f.field_type === "structured_text") {
           typeResolvers[f.api_key] = (parent: any) => {
@@ -408,7 +427,7 @@ export function buildGraphQLSchema(sqlLayer: any) {
       const filterFields = ["id: StringFilter", "_status: StringFilter"];
       const orderByValues = ["_createdAt_ASC", "_createdAt_DESC", "_updatedAt_ASC", "_updatedAt_DESC"];
       for (const f of fields) {
-        if (!["structured_text", "media_gallery", "links"].includes(f.field_type)) {
+        if (!["structured_text", "media_gallery", "links", "seo"].includes(f.field_type)) {
           filterFields.push(`${f.api_key}: ${filterInputType(f.field_type)}`);
           orderByValues.push(`${f.api_key}_ASC`, `${f.api_key}_DESC`);
         }
@@ -595,6 +614,28 @@ export function buildGraphQLSchema(sqlLayer: any) {
           bgColor: null,
           sizes: `(max-width: ${w}px) 100vw, ${w}px`,
         };
+      },
+    };
+
+    // SeoField.image resolver: look up asset by ID
+    resolvers.SeoField = {
+      image: (seo: any) => {
+        const assetId = seo?.image;
+        if (!assetId) return null;
+        return runSql(
+          Effect.gen(function* () {
+            const s = yield* SqlClient.SqlClient;
+            const rows = yield* s.unsafe<AssetRow>("SELECT * FROM assets WHERE id = ?", [assetId]);
+            if (rows.length === 0) return null;
+            const a = rows[0];
+            return {
+              id: a.id, filename: a.filename, mimeType: a.mime_type,
+              size: a.size, width: a.width, height: a.height,
+              alt: a.alt, title: a.title,
+              url: `/assets/${a.id}/${a.filename}`,
+            };
+          })
+        );
       },
     };
 

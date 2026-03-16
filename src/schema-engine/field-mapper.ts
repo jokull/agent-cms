@@ -32,6 +32,9 @@ export function mapFieldToColumn(fieldType: FieldType, apiKey: string) {
     case "structured_text":
       // DAST JSON document
       return text(apiKey, { mode: "json" });
+    case "seo":
+      // SEO metadata JSON object
+      return text(apiKey, { mode: "json" });
     default: {
       const _exhaustive: never = fieldType;
       throw new Error(`Unknown field type: ${_exhaustive}`);

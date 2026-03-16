@@ -10,6 +10,7 @@ export const FIELD_TYPES = [
   "link",
   "links",
   "structured_text",
+  "seo",
 ] as const;
 
 export type FieldType = (typeof FIELD_TYPES)[number];

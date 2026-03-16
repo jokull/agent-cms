@@ -44,7 +44,7 @@ These are settled. Do not revisit without explicit instruction.
 
 ## Field Types (v1)
 
-`string`, `text`, `boolean`, `integer`, `slug`, `media` (single image), `media_gallery` (multiple images), `link` (single record ref), `links` (multiple record refs), `structured_text`
+`string`, `text`, `boolean`, `integer`, `slug`, `media` (single image), `media_gallery` (multiple images), `link` (single record ref), `links` (multiple record refs), `structured_text`, `seo` (title/description/image/twitterCard composite)
 
 ---
 
@@ -226,7 +226,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 ### Future (not prioritized)
 
 - [x] Webhooks on record/schema changes *(done — CRUD via MCP, fires on record create/update/delete/publish/unpublish, 5 tests)*
-- [ ] SEO composite field type
+- [x] SEO composite field type *(done — `seo` field stores {title, description, image, twitterCard} as JSON, image resolves to Asset in GraphQL, 5 tests)*
 - [ ] Tree/sortable models (position column, parent_id)
 - [ ] GraphQL subscriptions for real-time updates
 - [ ] Schema descriptor KV caching for production cold starts

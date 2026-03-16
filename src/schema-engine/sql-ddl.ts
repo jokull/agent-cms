@@ -17,6 +17,7 @@ function fieldTypeToSQLite(fieldType: FieldType): string {
     case "media_gallery":
     case "links":
     case "structured_text":
+    case "seo":
       return "TEXT"; // JSON stored as TEXT
     default: {
       const _exhaustive: never = fieldType;
