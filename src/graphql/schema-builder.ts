@@ -36,6 +36,10 @@ function fieldToSDL(
     case "seo": return "SeoField";
     case "json": return "JSON";
     case "float": return "Float";
+    case "date": return "String";
+    case "date_time": return "String";
+    case "color": return "ColorField";
+    case "lat_lon": return "LatLonField";
     default: return "String";
   }
 }
@@ -43,6 +47,7 @@ function fieldToSDL(
 function filterInputType(fieldType: string): string {
   switch (fieldType) {
     case "string": case "text": case "slug": case "media": case "link": return "StringFilter";
+    case "date": case "date_time": return "StringFilter";
     case "boolean": return "BooleanFilter";
     case "integer": return "IntFilter";
     case "float": return "FloatFilter";
@@ -181,6 +186,17 @@ export function buildGraphQLSchema(sqlLayer: any) {
         image: Asset
         twitterCard: String
       }
+      type ColorField {
+        red: Int!
+        green: Int!
+        blue: Int!
+        alpha: Int
+        hex: String!
+      }
+      type LatLonField {
+        latitude: Float!
+        longitude: Float!
+      }
     `);
     typeDefs.push(`
       """DatoCMS-compatible StructuredText response"""
@@ -275,7 +291,7 @@ export function buildGraphQLSchema(sqlLayer: any) {
 
       // Localized field resolvers: extract value for requested locale
       for (const f of fields) {
-        if (f.localized && !["link", "links", "media", "media_gallery", "structured_text", "seo", "json"].includes(f.field_type)) {
+        if (f.localized && !["link", "links", "media", "media_gallery", "structured_text", "seo", "json", "color", "lat_lon"].includes(f.field_type)) {
           typeResolvers[f.api_key] = (parent: any, _args: any, context: any) => {
             const rawValue = parent[f.api_key];
             if (rawValue === null || rawValue === undefined) return null;
@@ -409,6 +425,28 @@ export function buildGraphQLSchema(sqlLayer: any) {
             return seo;
           };
         }
+        // Color field resolver: parse JSON, compute hex
+        if (f.field_type === "color") {
+          typeResolvers[f.api_key] = (parent: any) => {
+            let color = parent[f.api_key];
+            if (!color) return null;
+            if (typeof color === "string") {
+              try { color = JSON.parse(color); } catch { return null; }
+            }
+            return color;
+          };
+        }
+        // LatLon field resolver: parse JSON
+        if (f.field_type === "lat_lon") {
+          typeResolvers[f.api_key] = (parent: any) => {
+            let ll = parent[f.api_key];
+            if (!ll) return null;
+            if (typeof ll === "string") {
+              try { ll = JSON.parse(ll); } catch { return null; }
+            }
+            return ll;
+          };
+        }
         // StructuredText resolver: return { value, blocks, links }
         if (f.field_type === "structured_text") {
           typeResolvers[f.api_key] = (parent: any) => {
@@ -472,7 +510,7 @@ export function buildGraphQLSchema(sqlLayer: any) {
         orderByValues.push("_position_ASC", "_position_DESC");
       }
       for (const f of fields) {
-        if (!["structured_text", "media_gallery", "links", "seo", "json"].includes(f.field_type)) {
+        if (!["structured_text", "media_gallery", "links", "seo", "json", "color", "lat_lon"].includes(f.field_type)) {
           filterFields.push(`${f.api_key}: ${filterInputType(f.field_type)}`);
           orderByValues.push(`${f.api_key}_ASC`, `${f.api_key}_DESC`);
         }
@@ -681,6 +719,16 @@ export function buildGraphQLSchema(sqlLayer: any) {
             };
           })
         );
+      },
+    };
+
+    // ColorField.hex resolver: compute hex from RGB
+    resolvers.ColorField = {
+      hex: (color: any) => {
+        const r = color.red ?? 0;
+        const g = color.green ?? 0;
+        const b = color.blue ?? 0;
+        return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
       },
     };
 

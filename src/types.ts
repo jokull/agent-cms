@@ -13,6 +13,10 @@ export const FIELD_TYPES = [
   "seo",
   "json",
   "float",
+  "date",
+  "date_time",
+  "color",
+  "lat_lon",
 ] as const;
 
 export type FieldType = (typeof FIELD_TYPES)[number];

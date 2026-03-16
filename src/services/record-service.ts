@@ -15,7 +15,7 @@ import type { ModelRow, FieldRow, ParsedFieldRow, ContentRow } from "../db/row-t
 import { parseFieldValidators, isContentRow } from "../db/row-types.js";
 import { getSlugSource, getBlockWhitelist, getBlocksOnly, isRequired } from "../db/validators.js";
 import { fireWebhooks } from "./webhook-service.js";
-import { CreateRecordInput, PatchRecordInput } from "./input-schemas.js";
+import { CreateRecordInput, PatchRecordInput, ColorInput, LatLonInput } from "./input-schemas.js";
 import { StructuredTextWriteInput } from "../dast/schema.js";
 
 function getModelByApiKey(apiKey: string) {
@@ -142,6 +142,26 @@ export function createRecord(rawBody: unknown) {
           }
           data[field.api_key] = slug;
         }
+      }
+
+      // Color field: validate with Effect Schema
+      if (field.field_type === "color" && data[field.api_key] !== undefined && data[field.api_key] !== null) {
+        yield* Schema.decodeUnknown(ColorInput)(data[field.api_key]).pipe(
+          Effect.mapError((e) => new ValidationError({
+            message: `Invalid color for field '${field.api_key}': ${e.message}`,
+            field: field.api_key,
+          }))
+        );
+      }
+
+      // LatLon field: validate with Effect Schema
+      if (field.field_type === "lat_lon" && data[field.api_key] !== undefined && data[field.api_key] !== null) {
+        yield* Schema.decodeUnknown(LatLonInput)(data[field.api_key]).pipe(
+          Effect.mapError((e) => new ValidationError({
+            message: `Invalid lat_lon for field '${field.api_key}': ${e.message}`,
+            field: field.api_key,
+          }))
+        );
       }
 
       if (data[field.api_key] !== undefined) {

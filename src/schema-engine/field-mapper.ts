@@ -41,6 +41,16 @@ export function mapFieldToColumn(fieldType: FieldType, apiKey: string) {
     case "float":
       // Floating point number stored as REAL
       return text(apiKey); // SQLite stores as TEXT, parsed to float
+    case "date":
+    case "date_time":
+      // ISO date/datetime string
+      return text(apiKey);
+    case "color":
+      // JSON object {red, green, blue, alpha}
+      return text(apiKey, { mode: "json" });
+    case "lat_lon":
+      // JSON object {latitude, longitude}
+      return text(apiKey, { mode: "json" });
     default: {
       const _exhaustive: never = fieldType;
       throw new Error(`Unknown field type: ${_exhaustive}`);

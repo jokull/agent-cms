@@ -44,7 +44,7 @@ These are settled. Do not revisit without explicit instruction.
 
 ## Field Types (v1)
 
-`string`, `text`, `boolean`, `integer`, `float`, `slug`, `media` (single image), `media_gallery` (multiple images), `link` (single record ref), `links` (multiple record refs), `structured_text`, `seo` (title/description/image/twitterCard composite), `json` (arbitrary JSON)
+`string`, `text`, `boolean`, `integer`, `float`, `date`, `date_time`, `slug`, `media` (single image), `media_gallery` (multiple images), `link` (single record ref), `links` (multiple record refs), `structured_text`, `seo` (title/description/image/twitterCard composite), `json` (arbitrary JSON), `color` ({red,green,blue,alpha} + computed hex), `lat_lon` ({latitude,longitude})
 
 ---
 
@@ -230,6 +230,9 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 - [x] Tree/sortable models *(done — _position auto-increment, _parent_id for tree hierarchy, _parent/_children GraphQL resolvers, reorder_records MCP tool + REST endpoint, 6 tests)*
 - [x] `json` field type *(done — arbitrary JSON storage, GraphQL JSON scalar, 3 tests)*
 - [x] `float` field type *(done — REAL column, Float GraphQL type, FloatFilter, ordering, 4 tests)*
+- [x] `date` + `date_time` field types *(done — ISO string storage, filtering, ordering, 3 tests)*
+- [x] `color` field type *(done — {red,green,blue,alpha} JSON with computed hex in GraphQL, Effect Schema validation, 4 tests)*
+- [x] `lat_lon` field type *(done — {latitude,longitude} JSON, Effect Schema range validation, 4 tests)*
 - [ ] GraphQL subscriptions for real-time updates
 - [ ] Schema descriptor KV caching for production cold starts
 - [ ] Cloudflare Images integration (production only, not local dev)
