@@ -11,7 +11,6 @@ import * as FieldService from "../services/field-service.js";
 import * as RecordService from "../services/record-service.js";
 import * as PublishService from "../services/publish-service.js";
 import * as AssetService from "../services/asset-service.js";
-import * as WebhookService from "../services/webhook-service.js";
 import * as SchemaLifecycle from "../services/schema-lifecycle.js";
 import * as SchemaIO from "../services/schema-io.js";
 import * as SearchService from "../search/search-service.js";
@@ -420,26 +419,6 @@ Flow:
       height: z.number().optional(),
     },
     async ({ assetId, ...rest }) => run(AssetService.replaceAsset(assetId, rest))
-  );
-
-  // --- Webhooks ---
-
-  server.tool("create_webhook", "Register a webhook URL for CMS events",
-    {
-      url: z.string().describe("URL to POST to"),
-      events: z.array(z.string()).describe("Events: record.create, record.update, record.delete, record.publish, record.unpublish, model.create, model.delete"),
-      name: z.string().optional().describe("Optional descriptive name"),
-    },
-    async (args) => run(WebhookService.createWebhook(args))
-  );
-
-  server.tool("list_webhooks", "List all registered webhooks", {},
-    async () => run(WebhookService.listWebhooks())
-  );
-
-  server.tool("delete_webhook", "Delete a webhook",
-    { webhookId: z.string() },
-    async ({ webhookId }) => run(WebhookService.deleteWebhook(webhookId))
   );
 
   // --- Schema Import/Export ---

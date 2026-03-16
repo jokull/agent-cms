@@ -1,7 +1,7 @@
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { SqlClient } from "@effect/sql";
 import { SqliteClient } from "@effect/sql-sqlite-node";
-import { runMigrations } from "./migrate.js";
+import { ensureSchema } from "../src/migrations.js";
 import { createWebHandler } from "../src/http/router.js";
 import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
@@ -19,8 +19,8 @@ export function createTestApp() {
   // Create a shared layer — use the same filename so connections share the database
   const sqlLayer = SqliteClient.layer({ filename: dbPath, disableWAL: true });
 
-  // Run migrations
-  Effect.runSync(runMigrations().pipe(Effect.provide(sqlLayer)));
+  // Run embedded migrations (same as production auto-migration)
+  Effect.runSync(ensureSchema().pipe(Effect.provide(sqlLayer)));
 
   const handler = createWebHandler(sqlLayer);
 

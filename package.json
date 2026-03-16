@@ -1,37 +1,69 @@
 {
   "name": "agent-cms",
   "version": "0.1.0",
-  "private": true,
+  "description": "Agent-first headless CMS for Cloudflare Workers. Schema, content, and assets via MCP. GraphQL delivery.",
   "type": "module",
-  "main": "./src/index.ts",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+    }
   },
+  "files": [
+    "dist",
+    "migrations",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
+    "build": "tsdown",
     "dev": "wrangler dev",
     "test": "vitest",
     "test:run": "vitest run",
     "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build",
     "db:migrate": "wrangler d1 migrations apply agent-cms-db --local"
   },
+  "keywords": [
+    "cms",
+    "headless-cms",
+    "mcp",
+    "cloudflare-workers",
+    "d1",
+    "graphql",
+    "agent",
+    "ai"
+  ],
+  "author": "Jokull Solberg <jokull@solberg.is>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jokull/agent-cms.git"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
   "dependencies": {
     "@effect/experimental": "^0.58.0",
     "@effect/platform": "^0.94.5",
     "@effect/sql": "^0.49.0",
     "@effect/sql-d1": "^0.47.0",
-    "@effect/sql-sqlite-node": "^0.50.1",
-    "@modelcontextprotocol/sdk": "^1.27.1",
     "effect": "^3.19.19",
     "graphql": "^16.13.1",
     "graphql-yoga": "^5.18.1",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "slugify": "^1.6.8",
     "ulidx": "^2.4.1"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260313.1",
+    "@effect/sql-sqlite-node": "^0.50.1",
     "@effect/vitest": "^0.27.0",
     "@types/better-sqlite3": "^7.6.13",
     "better-sqlite3": "^12.8.0",
+    "tsdown": "^0.21.4",
     "typescript": "^5.9.3",
     "vitest": "^4.1.0",
     "wrangler": "^4.73.0"

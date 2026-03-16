@@ -120,12 +120,13 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
     const settings = await runSql(
       Effect.gen(function* () {
         const s = yield* SqlClient.SqlClient;
-        try {
-          const rows = yield* s.unsafe<Record<string, unknown>>('SELECT * FROM "content_site_settings" LIMIT 1');
-          return rows.length > 0 ? rows[0] : null;
-        } catch {
-          return null; // Table doesn't exist yet
-        }
+        const tableRows = yield* s.unsafe<{ name: string }>(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+          ["content_site_settings"]
+        );
+        if (tableRows.length === 0) return null;
+        const rows = yield* s.unsafe<Record<string, unknown>>('SELECT * FROM "content_site_settings" LIMIT 1');
+        return rows.length > 0 ? rows[0] : null;
       })
     );
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execSync } from "child_process";
-import { mkdirSync, writeFileSync, readFileSync, existsSync, cpSync } from "fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync } from "fs";
 import { join, resolve } from "path";
 import { createInterface } from "readline";
 import { parseArgs } from "util";
@@ -31,9 +31,9 @@ if (flags.help) {
     -h, --help          Show this help
 
   Examples:
-    npx create-agent-cms my-blog -y
-    npx create-agent-cms my-blog --local-only
-    npx create-agent-cms --name my-blog --db-name blog-db -y
+    npm create agent-cms my-blog
+    npm create agent-cms my-blog -y
+    npm create agent-cms --name my-blog --local-only
 `);
   process.exit(0);
 }
@@ -67,8 +67,8 @@ function run(cmd, opts = {}) {
 
 async function main() {
   console.log("\n  create-agent-cms\n");
-  console.log("  Set up an agent-first headless CMS on your Cloudflare account.");
-  console.log("  Worker + D1 + R2. Schema managed via MCP. No admin UI.\n");
+  console.log("  Agent-first headless CMS on Cloudflare Workers.");
+  console.log("  D1 + R2. Schema and content managed via MCP. No admin UI.\n");
 
   const { ask, close } = createAsker();
 
@@ -90,7 +90,6 @@ async function main() {
   console.log(`\n  Scaffolding ./${name}...\n`);
 
   mkdirSync(join(dir, "src"), { recursive: true });
-  mkdirSync(join(dir, "migrations"), { recursive: true });
 
   writeFileSync(
     join(dir, "package.json"),
@@ -103,12 +102,9 @@ async function main() {
         scripts: {
           dev: "wrangler dev",
           deploy: "wrangler deploy",
-          "db:migrate": `wrangler d1 migrations apply ${dbName} --local`,
-          "db:migrate:remote": `wrangler d1 migrations apply ${dbName} --remote`,
         },
         dependencies: {
-          // For local dev: resolve to agent-cms repo. After npm publish: "agent-cms": "^0.1.0"
-          "agent-cms": `file:${join(new URL(".", import.meta.url).pathname, "..", "..", "..")}`,
+          "agent-cms": "^0.1.0",
           wrangler: "^4.73.0",
         },
       },
@@ -132,7 +128,6 @@ async function main() {
             binding: "DB",
             database_name: dbName,
             database_id: "LOCAL_PLACEHOLDER",
-            migrations_dir: "migrations",
           },
         ],
         r2_buckets: [
@@ -152,10 +147,10 @@ async function main() {
 
   writeFileSync(
     join(dir, "src/index.ts"),
-    `import { createCMSHandler } from "agent-cms";
+    `import { createCMSHandler, type CmsEnv } from "agent-cms";
 
 export default {
-  fetch(request: Request, env: { DB: D1Database; ASSETS: R2Bucket; ENVIRONMENT?: string; CMS_READ_KEY?: string; CMS_WRITE_KEY?: string }) {
+  fetch(request: Request, env: CmsEnv): Promise<Response> {
     return createCMSHandler(env).fetch(request);
   },
 };
@@ -184,11 +179,6 @@ export default {
     )
   );
 
-  const migrationSrc = join(new URL(".", import.meta.url).pathname, "..", "templates", "0001_create_system_tables.sql");
-  if (existsSync(migrationSrc)) {
-    cpSync(migrationSrc, join(dir, "migrations/0001_create_system_tables.sql"));
-  }
-
   console.log("  Files created.\n");
 
   // --- Install dependencies ---
@@ -205,47 +195,35 @@ export default {
     // Create D1 database
     try {
       const d1Output = run(`npx wrangler d1 create ${dbName}`, { cwd: dir });
-      // Extract database_id from output
-      // Match both TOML (database_id = "...") and JSON ("database_id": "...") output formats
       const idMatch = d1Output.match(/database_id["\s:=]+["']?([0-9a-f-]{36})["']?/);
       if (idMatch) {
         const databaseId = idMatch[1];
         console.log(`  D1 database created: ${databaseId}\n`);
-        // Patch wrangler.jsonc with real database_id
         const wranglerPath = join(dir, "wrangler.jsonc");
         const wranglerContent = readFileSync(wranglerPath, "utf-8");
         writeFileSync(wranglerPath, wranglerContent.replace("LOCAL_PLACEHOLDER", databaseId));
       }
-    } catch (e) {
-      console.log(`  Warning: Could not create D1 database. You may need to create it manually.\n`);
+    } catch {
+      console.log(`  Warning: Could not create D1 database. Create it manually with:\n`);
+      console.log(`    npx wrangler d1 create ${dbName}\n`);
     }
 
     // Create R2 bucket
     try {
       run(`npx wrangler r2 bucket create ${bucketName}`, { cwd: dir });
       console.log(`  R2 bucket created.\n`);
-    } catch (e) {
-      console.log(`  Warning: Could not create R2 bucket. It may already exist or you can create it manually.\n`);
+    } catch {
+      console.log(`  Warning: Could not create R2 bucket. It may already exist.\n`);
     }
-  }
-
-  // --- Apply local migrations ---
-
-  console.log("  Applying local D1 migrations...\n");
-  try {
-    run(`npx wrangler d1 migrations apply ${dbName} --local`, { cwd: dir });
-    console.log("");
-  } catch (e) {
-    console.log(`  Warning: Local migration failed. Run 'npm run db:migrate' manually.\n`);
   }
 
   // --- Done ---
 
-  console.log(`  ✓ Project ready!\n`);
+  console.log(`  Ready!\n`);
   console.log(`  cd ${name}`);
   console.log(`  npm run dev\n`);
-  console.log(`  Then open http://localhost:8787/graphql\n`);
-  console.log(`  Connect Claude to the MCP server:\n`);
+  console.log(`  The database schema is created automatically on first request.\n`);
+  console.log(`  Connect an MCP client:\n`);
   console.log(`  {`);
   console.log(`    "mcpServers": {`);
   console.log(`      "${name}": { "url": "http://localhost:8787/mcp" }`);
@@ -253,11 +231,8 @@ export default {
   console.log(`  }\n`);
 
   if (!flags["local-only"]) {
-    console.log(`  Set API keys (required for production):\n`);
-    console.log(`    npx wrangler secret put CMS_READ_KEY    # for GraphQL reads`);
-    console.log(`    npx wrangler secret put CMS_WRITE_KEY   # for REST/MCP writes\n`);
     console.log(`  Deploy to production:\n`);
-    console.log(`    npm run db:migrate:remote`);
+    console.log(`    npx wrangler secret put CMS_WRITE_KEY`);
     console.log(`    npm run deploy\n`);
   }
 }

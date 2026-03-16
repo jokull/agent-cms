@@ -43,7 +43,7 @@ npm run deploy
 
 ### `/mcp` — Agent interface
 
-MCP server with tools for schema management (create models, add fields, configure block types), content operations (CRUD, bulk insert, publish/unpublish, reorder), asset uploads, schema import/export, and webhooks. This is the primary interface.
+MCP server with tools for schema management (create models, add fields, configure block types), content operations (CRUD, bulk insert, publish/unpublish, reorder), asset uploads, and schema import/export. This is the primary interface.
 
 ### `/graphql` — Content delivery
 
@@ -193,6 +193,27 @@ Search is always available via FTS5 (built into D1). When `AI` + `VECTORIZE` bin
 - **`hybrid`** (default when Vectorize available) — Reciprocal rank fusion of keyword + semantic results. Records appearing in both sets get boosted.
 
 All fields are indexed by default. Opt a field out with `{"searchable": false}` in its validators.
+
+## Reacting to content events
+
+There is no built-in webhook system. Since you own the Worker, add event-driven logic directly in your code — trigger deploys, invalidate caches, sync to external services, or send notifications by composing your handler:
+
+```typescript
+import { createCMSHandler, type CmsEnv } from "agent-cms";
+
+export default {
+  async fetch(request: Request, env: CmsEnv) {
+    const response = await createCMSHandler(env).fetch(request);
+    // Example: trigger a Vercel deploy on publish
+    if (request.method === "POST" && new URL(request.url).pathname.includes("/publish")) {
+      await fetch(env.DEPLOY_HOOK_URL);
+    }
+    return response;
+  },
+};
+```
+
+This is simpler and more reliable than webhooks — no HTTP round-trips to yourself, no webhook table to manage, and full access to your env bindings.
 
 ## Stack
 

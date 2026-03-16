@@ -14,7 +14,6 @@ import { writeStructuredText, deleteBlocksForField } from "./structured-text-ser
 import type { ModelRow, FieldRow, ParsedFieldRow, ContentRow } from "../db/row-types.js";
 import { parseFieldValidators, isContentRow } from "../db/row-types.js";
 import { getSlugSource, getBlockWhitelist, getBlocksOnly, isRequired } from "../db/validators.js";
-import { fireWebhooks } from "./webhook-service.js";
 import * as SearchService from "../search/search-service.js";
 import { CreateRecordInput, PatchRecordInput } from "./input-schemas.js";
 import { getFieldTypeDef } from "../field-types.js";
@@ -174,9 +173,6 @@ export function createRecord(rawBody: unknown) {
     // Index for search
     yield* SearchService.indexRecord(body.modelApiKey, id, record, modelFields).pipe(Effect.ignore);
 
-    // Fire webhook (non-blocking)
-    yield* fireWebhooks("record.create", { modelApiKey: body.modelApiKey, recordId: id });
-
     return { id, ...record };
   });
 }
@@ -315,7 +311,6 @@ export function patchRecord(id: string, rawBody: unknown) {
 
     yield* sqlUpdateRecord(tableName, id, updates);
     yield* SearchService.reindexRecord(body.modelApiKey, id, modelFields).pipe(Effect.ignore);
-    yield* fireWebhooks("record.update", { modelApiKey: body.modelApiKey, recordId: id });
     return yield* selectById(tableName, id);
   });
 }
@@ -344,7 +339,6 @@ export function removeRecord(modelApiKey: string, id: string) {
 
     yield* sqlDeleteRecord(tableName, id);
     yield* SearchService.deindexRecord(modelApiKey, id).pipe(Effect.ignore);
-    yield* fireWebhooks("record.delete", { modelApiKey, recordId: id });
     return { deleted: true };
   });
 }
@@ -488,9 +482,6 @@ export function bulkCreateRecords(rawBody: unknown) {
       yield* SearchService.indexRecord(modelApiKey, id, record, modelFields).pipe(Effect.ignore);
       created.push({ id });
     }
-
-    // Fire a single webhook for the batch
-    yield* fireWebhooks("record.create", { modelApiKey, recordIds: created.map((r) => r.id), bulk: true });
 
     return { created: created.length, records: created };
   });

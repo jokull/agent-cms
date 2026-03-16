@@ -5,7 +5,6 @@ import { selectById } from "../schema-engine/sql-records.js";
 import type { ModelRow, ContentRow, FieldRow } from "../db/row-types.js";
 import { parseFieldValidators } from "../db/row-types.js";
 import { computeIsValid } from "../db/validators.js";
-import { fireWebhooks } from "./webhook-service.js";
 import { materializeRecordStructuredTextFields } from "./structured-text-service.js";
 
 export function publishRecord(modelApiKey: string, recordId: string) {
@@ -60,7 +59,6 @@ export function publishRecord(modelApiKey: string, recordId: string) {
       [now, now, JSON.stringify(snapshot), now, recordId]
     );
 
-    yield* fireWebhooks("record.publish", { modelApiKey, recordId });
     return yield* selectById(tableName, recordId);
   });
 }
@@ -85,7 +83,6 @@ export function unpublishRecord(modelApiKey: string, recordId: string) {
       [now, recordId]
     );
 
-    yield* fireWebhooks("record.unpublish", { modelApiKey, recordId });
     return yield* selectById(tableName, recordId);
   });
 }
