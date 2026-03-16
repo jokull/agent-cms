@@ -6,4 +6,3 @@ dist/
 .astro/
 package-lock.json
 .claude/
-wrangler.jsonc
