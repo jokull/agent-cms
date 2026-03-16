@@ -285,9 +285,121 @@ export function removeRecord(modelApiKey: string, id: string) {
     const existing = yield* selectById(tableName, id);
     if (!existing) return yield* new NotFoundError({ entity: "Record", id });
 
+    // Clean up orphan blocks owned by this record (across all block tables)
+    const sql = yield* SqlClient.SqlClient;
+    const blockModels = yield* sql.unsafe<{ api_key: string }>(
+      "SELECT api_key FROM models WHERE is_block = 1"
+    );
+    for (const bm of blockModels) {
+      yield* sql.unsafe(
+        `DELETE FROM "block_${bm.api_key}" WHERE _root_record_id = ?`, [id]
+      );
+    }
+
     yield* sqlDeleteRecord(tableName, id);
     yield* fireWebhooks("record.delete", { modelApiKey, recordId: id });
     return { deleted: true };
+  });
+}
+
+/**
+ * Bulk create records in a single operation.
+ * All records must belong to the same model. Runs in a logical batch
+ * (individual inserts, but avoids per-record overhead of schema lookups).
+ */
+export function bulkCreateRecords(rawBody: unknown) {
+  return Effect.gen(function* () {
+    if (typeof rawBody !== "object" || rawBody === null || !("modelApiKey" in rawBody) || !("records" in rawBody)) {
+      return yield* new ValidationError({ message: "Expected { modelApiKey: string, records: Array<Record<string, unknown>> }" });
+    }
+    const { modelApiKey, records } = rawBody as { modelApiKey: string; records: unknown[] };
+
+    if (!modelApiKey || typeof modelApiKey !== "string")
+      return yield* new ValidationError({ message: "modelApiKey is required" });
+    if (!Array.isArray(records) || records.length === 0)
+      return yield* new ValidationError({ message: "records must be a non-empty array" });
+    if (records.length > 1000)
+      return yield* new ValidationError({ message: "Maximum 1000 records per bulk operation" });
+
+    const model = yield* getModelByApiKey(modelApiKey);
+    if (!model) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
+    if (model.is_block)
+      return yield* new ValidationError({ message: "Cannot create records for block types directly" });
+    if (model.singleton)
+      return yield* new ValidationError({ message: "Cannot bulk create on singleton models" });
+
+    const tableName = `content_${model.api_key}`;
+    const modelFields = yield* getModelFields(model.id);
+    const sql = yield* SqlClient.SqlClient;
+    const now = new Date().toISOString();
+    const initialStatus = model.has_draft ? "draft" : "published";
+    const created: Array<{ id: string }> = [];
+
+    // Get current max position for sortable models
+    let nextPosition = 0;
+    if (model.sortable || model.tree) {
+      const maxPos = yield* sql.unsafe<{ max_pos: number | null }>(
+        `SELECT MAX("_position") as max_pos FROM "${tableName}"`
+      );
+      nextPosition = (maxPos[0]?.max_pos ?? -1) + 1;
+    }
+
+    for (const rawRecord of records) {
+      if (typeof rawRecord !== "object" || rawRecord === null) continue;
+      const data: Record<string, unknown> = { ...(rawRecord as Record<string, unknown>) };
+
+      const id = ulid();
+      const record: Record<string, unknown> = {
+        id,
+        _status: initialStatus,
+        _created_at: now,
+        _updated_at: now,
+        ...(!model.has_draft ? { _published_at: now, _first_published_at: now } : {}),
+      };
+
+      if (model.sortable || model.tree) {
+        record._position = nextPosition++;
+      }
+
+      // Process slug fields
+      for (const field of modelFields) {
+        if (field.field_type === "slug") {
+          const sourceFieldKey = getSlugSource(field.validators);
+          if (!data[field.api_key] && sourceFieldKey && data[sourceFieldKey]) {
+            data[field.api_key] = generateSlug(String(data[sourceFieldKey]));
+          } else if (data[field.api_key]) {
+            data[field.api_key] = generateSlug(String(data[field.api_key]));
+          }
+          // Uniqueness enforcement
+          if (data[field.api_key]) {
+            let slug = String(data[field.api_key]);
+            const baseSlug = slug;
+            let suffix = 1;
+            while (true) {
+              const existing = yield* sql.unsafe<{ id: string }>(
+                `SELECT id FROM "${tableName}" WHERE "${field.api_key}" = ?`, [slug]
+              );
+              if (existing.length === 0) break;
+              suffix++;
+              slug = `${baseSlug}-${suffix}`;
+            }
+            data[field.api_key] = slug;
+          }
+        }
+
+        if (data[field.api_key] !== undefined) {
+          record[field.api_key] = data[field.api_key];
+        }
+      }
+
+      yield* insertRecord(tableName, record);
+      created.push({ id });
+    }
+
+    // Fire a single webhook for the batch
+    yield* fireWebhooks("record.create", { modelApiKey, recordIds: created.map((r) => r.id), bulk: true });
+
+    return { created: created.length, records: created };
   });
 }
 

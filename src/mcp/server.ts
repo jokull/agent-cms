@@ -271,6 +271,16 @@ Field value formats:
     async ({ modelApiKey }) => run(RecordService.listRecords(modelApiKey))
   );
 
+  server.tool("bulk_create_records", `Create multiple records in one operation (up to 1000). Much faster than calling create_record in a loop.
+
+All records must belong to the same model. Slugs are auto-generated. Returns array of created record IDs.`,
+    {
+      modelApiKey: z.string().describe("The model's api_key"),
+      records: z.array(z.record(z.string(), z.unknown())).describe("Array of record data objects (field values keyed by api_key)"),
+    },
+    async ({ modelApiKey, records }) => run(RecordService.bulkCreateRecords({ modelApiKey, records }))
+  );
+
   server.tool("publish_record", "Publish a record",
     { recordId: z.string(), modelApiKey: z.string() },
     async ({ recordId, modelApiKey }) => run(PublishService.publishRecord(modelApiKey, recordId))

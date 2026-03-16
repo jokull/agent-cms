@@ -135,6 +135,15 @@ const fieldsRouter = HttpRouter.empty.pipe(
 // --- Records ---
 const recordsRouter = HttpRouter.empty.pipe(
   HttpRouter.post(
+    "/records/bulk",
+    Effect.gen(function* () {
+      const req = yield* HttpServerRequest.HttpServerRequest;
+      const body = yield* req.json;
+      return yield* handle(RecordService.bulkCreateRecords(body), 201);
+    })
+  ),
+
+  HttpRouter.post(
     "/records",
     Effect.gen(function* () {
       const req = yield* HttpServerRequest.HttpServerRequest;

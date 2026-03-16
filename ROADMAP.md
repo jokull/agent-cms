@@ -348,6 +348,15 @@ agent-cms is **not a standalone Worker** — it's a library + CLI that scaffolds
 - [ ] **Example: blog** — `./examples/blog/` with documented schema, seed script, and vinext frontend. Demonstrates: singleton queries, responsive images with transforms, _seoMetaTags, color fields, lat_lon, auto-slugs, category relationships.
 - [ ] **Schema lifecycle demo** — test adding/removing block types, fields, models on a live CMS and verify auto-migration (column add/drop) works correctly. Show elegant DAST cleanup when block types are removed.
 
+### Phase 8: Beyond Parity (vetted from DatoCMS community pain points + feature requests)
+
+These features outpace DatoCMS — possible because of Cloudflare edge colocation, no CDN cache layer, and direct D1 access.
+
+- [x] **P8.1** Bulk insert/upsert *(done — `POST /api/records/bulk` + MCP `bulk_create_records`. Up to 1000 records per call, auto-slugs, auto-positions. 9 tests)*
+- [x] **P8.2** Dangling link safety *(done — audited all link/asset resolution paths. All already return null/filter gracefully. Fixed block orphan cleanup on record deletion. 8 tests proving safety across link, links, media, gallery, blocks, cross-references)*
+- [ ] **P8.3** Asset URL stability on replace — Replace an asset's file (new R2 object) while keeping the same asset ID and URL. DatoCMS can't do this (imgix generates new URLs). 21 replies, 3,555 views.
+- [ ] **P8.4** HTML tables in StructuredText — DAST `table`/`tableRow`/`tableCell` node types in validation + rendering. Parity with markdown tables. Consider markdown table syntax as input shorthand.
+
 ### Future (not prioritized)
 
 - [ ] GraphQL subscriptions for real-time updates
