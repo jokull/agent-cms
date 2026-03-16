@@ -342,6 +342,12 @@ agent-cms is **not a standalone Worker** — it's a library + CLI that scaffolds
 
 `src/field-types.ts` — `FIELD_TYPE_REGISTRY` maps every `FieldType` to `FieldTypeDefinition` (sqliteType, graphqlType, filterType, localizable, multiLocaleType, inputSchema, jsonStored, hasCustomResolver). Adding a field type = add to `FIELD_TYPES` array + add one registry entry. TypeScript enforces completeness.
 
+### Next up
+
+- [ ] **Schema import/export** — export full schema as JSON (`schema_info` output), import to hydrate a fresh CMS. Enables `./examples/blog/schema.json` that agents can load.
+- [ ] **Example: blog** — `./examples/blog/` with documented schema, seed script, and vinext frontend. Demonstrates: singleton queries, responsive images with transforms, _seoMetaTags, color fields, lat_lon, auto-slugs, category relationships.
+- [ ] **Schema lifecycle demo** — test adding/removing block types, fields, models on a live CMS and verify auto-migration (column add/drop) works correctly. Show elegant DAST cleanup when block types are removed.
+
 ### Future (not prioritized)
 
 - [ ] GraphQL subscriptions for real-time updates
