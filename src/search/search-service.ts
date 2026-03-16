@@ -142,6 +142,75 @@ export function dropIndex(modelApiKey: string) {
   return dropFtsTable(modelApiKey);
 }
 
+/**
+ * Rebuild search indexes for all content models (or a specific one).
+ * Use after deploying search to a CMS with existing content,
+ * or to recover from Vectorize drift.
+ */
+export function reindexAll(modelApiKey?: string) {
+  return Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+
+    // Get content models to reindex
+    let modelRows: Array<{ id: string; api_key: string }>;
+    if (modelApiKey) {
+      modelRows = yield* sql.unsafe<{ id: string; api_key: string }>(
+        "SELECT id, api_key FROM models WHERE api_key = ? AND is_block = 0",
+        [modelApiKey]
+      );
+      if (modelRows.length === 0) {
+        return yield* new ValidationError({ message: `Model '${modelApiKey}' not found or is a block type` });
+      }
+    } else {
+      modelRows = yield* sql.unsafe<{ id: string; api_key: string }>(
+        "SELECT id, api_key FROM models WHERE is_block = 0"
+      );
+    }
+
+    let totalRecords = 0;
+    let totalIndexed = 0;
+
+    for (const model of modelRows) {
+      // Drop and recreate FTS table
+      yield* dropFtsTable(model.api_key);
+      yield* _createFtsTable(model.api_key);
+
+      // Get fields
+      const fieldRows = yield* sql.unsafe<FieldRow>(
+        "SELECT * FROM fields WHERE model_id = ? ORDER BY position",
+        [model.id]
+      );
+      const fields = fieldRows.map(parseFieldValidators);
+
+      // Fetch all records
+      const records = yield* sql.unsafe<Record<string, unknown>>(
+        `SELECT * FROM "content_${model.api_key}"`
+      );
+      totalRecords += records.length;
+
+      for (const record of records) {
+        const { title, body } = extractRecordText(record, fields);
+        if (title || body) {
+          yield* ftsIndex(model.api_key, String(record.id), title, body);
+          if (_ai && _vectorize) {
+            yield* Effect.promise(() =>
+              vectorizeIndex(_ai!, _vectorize!, model.api_key, String(record.id), title, body)
+            ).pipe(Effect.ignore);
+          }
+          totalIndexed++;
+        }
+      }
+    }
+
+    return {
+      models: modelRows.length,
+      records: totalRecords,
+      indexed: totalIndexed,
+      vectorize: hasVectorize(),
+    };
+  });
+}
+
 export type SearchMode = "keyword" | "semantic" | "hybrid";
 
 /**

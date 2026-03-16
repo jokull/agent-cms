@@ -310,6 +310,18 @@ const searchRouter = HttpRouter.empty.pipe(
       const body = yield* req.json;
       return yield* handle(SearchService.search(body as any));
     })
+  ),
+
+  HttpRouter.post(
+    "/reindex",
+    Effect.gen(function* () {
+      const req = yield* HttpServerRequest.HttpServerRequest;
+      const body = yield* req.json;
+      const modelApiKey = typeof body === "object" && body !== null && "modelApiKey" in body
+        ? (body as Record<string, unknown>).modelApiKey as string | undefined
+        : undefined;
+      return yield* handle(SearchService.reindexAll(modelApiKey));
+    })
   )
 );
 

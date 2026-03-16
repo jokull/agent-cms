@@ -470,5 +470,13 @@ Hybrid mode (default when Vectorize available): combines both for best results.`
     async (args) => run(SearchService.search(args))
   );
 
+  server.tool("reindex_search",
+    "Rebuild FTS5 + Vectorize search indexes. Use after deploying search to a CMS with existing content, or to recover from index drift. Scoped to a single model or all content models.",
+    {
+      modelApiKey: z.string().optional().describe("Reindex a specific model (omit for all content models)"),
+    },
+    async (args) => run(SearchService.reindexAll(args.modelApiKey))
+  );
+
   return server;
 }

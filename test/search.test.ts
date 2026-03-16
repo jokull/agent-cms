@@ -447,4 +447,57 @@ describe("FTS5 Search Integration", () => {
     const page2Data = await page2.json();
     expect(page2Data.results).toHaveLength(2);
   });
+
+  it("reindexes all models via POST /api/search/reindex", async () => {
+    // Create records first
+    await jsonRequest(handler, "POST", "/api/records", {
+      modelApiKey: "post",
+      data: { title: "Reindex Test", body: "Content to reindex" },
+    });
+
+    // Reindex all
+    const res = await jsonRequest(handler, "POST", "/api/search/reindex", {});
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.models).toBeGreaterThanOrEqual(1);
+    expect(data.records).toBeGreaterThanOrEqual(1);
+    expect(data.indexed).toBeGreaterThanOrEqual(1);
+
+    // Verify search still works after reindex
+    const searchRes = await jsonRequest(handler, "POST", "/api/search", { query: "reindex", modelApiKey: "post" });
+    const searchData = await searchRes.json();
+    expect(searchData.results).toHaveLength(1);
+  });
+
+  it("reindexes a specific model", async () => {
+    // Create a second model
+    const model2Res = await jsonRequest(handler, "POST", "/api/models", { name: "Page", apiKey: "page" });
+    const model2 = await model2Res.json();
+    await jsonRequest(handler, "POST", `/api/models/${model2.id}/fields`, { label: "Title", apiKey: "title", fieldType: "string" });
+
+    await jsonRequest(handler, "POST", "/api/records", {
+      modelApiKey: "post",
+      data: { title: "Post Alpha", body: "Alpha content" },
+    });
+    await jsonRequest(handler, "POST", "/api/records", {
+      modelApiKey: "page",
+      data: { title: "Page Beta" },
+    });
+
+    // Reindex only "page" model
+    const res = await jsonRequest(handler, "POST", "/api/search/reindex", { modelApiKey: "page" });
+    const data = await res.json();
+    expect(data.models).toBe(1);
+    expect(data.indexed).toBeGreaterThanOrEqual(1);
+
+    // Page should be searchable after reindex
+    const searchRes = await jsonRequest(handler, "POST", "/api/search", { query: "Beta", modelApiKey: "page" });
+    const searchData = await searchRes.json();
+    expect(searchData.results).toHaveLength(1);
+  });
+
+  it("rejects reindex for non-existent model", async () => {
+    const res = await jsonRequest(handler, "POST", "/api/search/reindex", { modelApiKey: "nonexistent" });
+    expect(res.status).toBe(400);
+  });
 });
