@@ -213,6 +213,7 @@ export function buildGraphQLSchema(sqlLayer: any) {
       input IntFilter { eq: Int, neq: Int, gt: Int, lt: Int, gte: Int, lte: Int, exists: Boolean }
       input FloatFilter { eq: Float, neq: Float, gt: Float, lt: Float, gte: Float, lte: Float, exists: Boolean }
       input BooleanFilter { eq: Boolean, exists: Boolean }
+      input DateTimeFilter { eq: String, neq: String, gt: String, lt: String, gte: String, lte: String, exists: Boolean }
     `);
 
     // Load locales for default locale resolution
@@ -232,7 +233,7 @@ export function buildGraphQLSchema(sqlLayer: any) {
 
       // Object type
       const fieldDefs = [
-        "id: ID!", "_status: String", "_createdAt: String", "_updatedAt: String",
+        "id: ID!", "_modelApiKey: String!", "_status: String", "_createdAt: String", "_updatedAt: String",
         "_publishedAt: String", "_firstPublishedAt: String",
       ];
       if (model.sortable || model.tree) {
@@ -273,6 +274,7 @@ export function buildGraphQLSchema(sqlLayer: any) {
       // Link resolvers
       const typeResolvers: Record<string, any> = {};
       // Map _created_at → _createdAt etc.
+      typeResolvers._modelApiKey = () => model.api_key;
       typeResolvers._createdAt = (p: any) => p._created_at;
       typeResolvers._updatedAt = (p: any) => p._updated_at;
       typeResolvers._publishedAt = (p: any) => p._published_at;
@@ -564,8 +566,15 @@ export function buildGraphQLSchema(sqlLayer: any) {
       resolvers[typeName] = typeResolvers;
 
       // Filter/OrderBy/Meta types
-      const filterFields = ["id: StringFilter", "_status: StringFilter"];
-      const orderByValues = ["_createdAt_ASC", "_createdAt_DESC", "_updatedAt_ASC", "_updatedAt_DESC"];
+      const filterFields = [
+        "id: StringFilter", "_status: StringFilter",
+        "_createdAt: DateTimeFilter", "_updatedAt: DateTimeFilter",
+        "_publishedAt: DateTimeFilter", "_firstPublishedAt: DateTimeFilter",
+      ];
+      const orderByValues = [
+        "_createdAt_ASC", "_createdAt_DESC", "_updatedAt_ASC", "_updatedAt_DESC",
+        "_publishedAt_ASC", "_publishedAt_DESC", "_firstPublishedAt_ASC", "_firstPublishedAt_DESC",
+      ];
       if (model.sortable || model.tree) {
         orderByValues.push("_position_ASC", "_position_DESC");
       }

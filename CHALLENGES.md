@@ -223,19 +223,30 @@ Changing a field's type (e.g., `string` → `integer`, or `string` → `structur
 
 **Problem:** Link, links, and media field resolvers each make a separate SQL query per linked record. A query like `allTours { guide { name } category { name } photos { url } }` for 100 tours with 5 photos each = 1 + 100 + 100 + 500 = 701 queries.
 
-**Impact:** Real-world schemas like ~/Code/trip resolve 10+ linked records per tour page. This is the main performance bottleneck.
+**The D1 twist:** The blog-post argument that "N+1 is fine in SQLite because it's in-process with zero network latency" does NOT apply to D1. D1 is a remote service — each `sql.unsafe()` call is a network round trip to the D1 instance. Cloudflare improved latency 40-60% in Jan 2025, but each query still costs real milliseconds. Critically:
 
-**Current architecture constraint:** `runSql()` uses `Effect.runSync` inside GraphQL resolvers, which is synchronous and prevents DataLoader-style batching.
+- **50 queries per Worker invocation** (free tier), **1000 on paid** — a single GraphQL query resolving 100 posts with 3 link fields would exhaust the free tier limit.
+- **100 bound parameters per query** — limits `IN (?, ?, ...)` clause to 100 IDs per batch.
+- **`db.batch()`** sends multiple prepared statements in ONE round trip — this is the prescribed D1 optimization.
 
-**Possible solutions:**
+However, in **test** (using `@effect/sql-sqlite-node` with `:memory:` SQLite) the N+1 is genuinely fine — zero network overhead. So optimizing is only critical for the D1 production path.
 
-1. **SQL IN-batching** (recommended for v1): After fetching parent records, collect all linked IDs per field, batch-fetch with `SELECT * FROM table WHERE id IN (?, ?, ...)`, then distribute results back to parents. No resolver architecture change needed — just smarter resolution at the query level.
+**Current architecture:** `runSql()` uses `Effect.runSync` inside GraphQL resolvers. This is synchronous and works with both sqlite-node and D1, but each call is a separate round trip on D1.
 
-2. **DataLoader pattern**: Accumulate resolver calls, dedupe IDs, batch-fetch. Requires async resolvers, meaning `runSql` must change to `Effect.runPromise`. Harder to implement with Effect + Yoga's sync resolver model.
+**Recommended approach — IN-batch at the list resolver level:**
 
-3. **SQL JOINs**: For single-link fields, join at query time (`SELECT p.*, a.* FROM content_post p LEFT JOIN content_author a ON p.author = a.id`). Best perf but complex DDL generation.
+Instead of resolving links per-record in field resolvers, resolve them in the list query:
 
-**Risk:** Medium — the IN-batching approach is straightforward but requires restructuring the resolver builder to work per-query rather than per-field.
+1. Fetch all parent records: `SELECT * FROM content_post LIMIT 100`
+2. Collect all linked IDs: `{author: ["id1", "id2"], category: ["id3", "id4"]}`
+3. Batch-fetch: `SELECT * FROM content_author WHERE id IN (?, ?)` (one query per link target table)
+4. Build lookup maps, distribute to parent records before returning
+
+This changes resolution from O(N*M) queries to O(M) where M = number of link fields. Fits within D1's 100-parameter limit for typical workloads.
+
+For D1 specifically, these batch queries could use `db.batch()` to send them all in a single round trip, though `@effect/sql-d1` may not expose this directly.
+
+**Risk:** Medium — the approach is straightforward but requires restructuring the list resolver to eagerly resolve links rather than deferring to per-field resolvers.
 
 ## C13: _seoMetaTags Auto-Generation
 

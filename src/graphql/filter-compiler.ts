@@ -118,11 +118,21 @@ function buildSqlConditions(
 
     if (typeof value !== "object" || value === null) continue;
 
+    // Map GraphQL camelCase meta fields to snake_case DB columns
+    const META_COLUMN_MAP: Record<string, string> = {
+      _createdAt: "_created_at",
+      _updatedAt: "_updated_at",
+      _publishedAt: "_published_at",
+      _firstPublishedAt: "_first_published_at",
+      _status: "_status",
+    };
+    const dbKey = META_COLUMN_MAP[key] ?? key;
+
     // Determine the column expression
     const col =
       fieldIsLocalized?.(key) && locale
-        ? `json_extract("${key}", '$.${locale}')`
-        : `"${key}"`;
+        ? `json_extract("${dbKey}", '$.${locale}')`
+        : `"${dbKey}"`;
 
     // value is already narrowed to non-null object by the check above
     for (const [op, expected] of Object.entries(value)) {
@@ -230,10 +240,20 @@ export function compileOrderBy(
       if (!match) return null;
       const [, field, dir] = match;
 
+      // Map camelCase meta fields to snake_case DB columns
+      const META_ORDER_MAP: Record<string, string> = {
+        _createdAt: "_created_at",
+        _updatedAt: "_updated_at",
+        _publishedAt: "_published_at",
+        _firstPublishedAt: "_first_published_at",
+        _position: "_position",
+      };
+      const dbField = META_ORDER_MAP[field] ?? field;
+
       const col =
-        opts?.fieldIsLocalized?.(field) && opts?.locale
-          ? `json_extract("${field}", '$.${opts.locale}')`
-          : `"${field}"`;
+        opts?.fieldIsLocalized?.(dbField) && opts?.locale
+          ? `json_extract("${dbField}", '$.${opts.locale}')`
+          : `"${dbField}"`;
 
       return `${col} ${dir}`;
     })
