@@ -3,3 +3,5 @@ dist/
 .wrangler/
 .dev.vars
 *.local
+.astro/
+package-lock.json
