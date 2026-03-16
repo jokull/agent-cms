@@ -235,6 +235,8 @@ export function patchRecord(id: string, rawBody: unknown) {
       delete data._position;
     }
 
+    const sql = yield* SqlClient.SqlClient;
+
     for (const field of modelFields) {
       // StructuredText update: delete old blocks, write new ones
       if (field.field_type === "structured_text" && data[field.api_key] !== undefined) {
@@ -264,6 +266,43 @@ export function patchRecord(id: string, rawBody: unknown) {
           });
 
           data[field.api_key] = dast;
+        }
+      }
+
+      // Slug field: normalize and enforce uniqueness (excluding current record)
+      if (field.field_type === "slug" && data[field.api_key] !== undefined && data[field.api_key] !== null) {
+        const sourceFieldKey = getSlugSource(field.validators);
+        if (sourceFieldKey && data[sourceFieldKey] && !data[field.api_key]) {
+          data[field.api_key] = generateSlug(String(data[sourceFieldKey]));
+        } else {
+          data[field.api_key] = generateSlug(String(data[field.api_key]));
+        }
+        // Enforce uniqueness (exclude current record)
+        let slug = String(data[field.api_key]);
+        const baseSlug = slug;
+        let suffix = 1;
+        while (true) {
+          const existing = yield* sql.unsafe<{ id: string }>(
+            `SELECT id FROM "${tableName}" WHERE "${field.api_key}" = ? AND id != ?`,
+            [slug, id]
+          );
+          if (existing.length === 0) break;
+          suffix++;
+          slug = `${baseSlug}-${suffix}`;
+        }
+        data[field.api_key] = slug;
+      }
+
+      // Validate composite field types using registry schemas
+      if (isFieldType(field.field_type) && data[field.api_key] !== undefined && data[field.api_key] !== null) {
+        const fieldDef = getFieldTypeDef(field.field_type);
+        if (fieldDef.inputSchema) {
+          yield* Schema.decodeUnknown(fieldDef.inputSchema)(data[field.api_key]).pipe(
+            Effect.mapError((e) => new ValidationError({
+              message: `Invalid ${field.field_type} for field '${field.api_key}': ${e.message}`,
+              field: field.api_key,
+            }))
+          );
         }
       }
 
@@ -350,9 +389,16 @@ export function bulkCreateRecords(rawBody: unknown) {
       nextPosition = (maxPos[0]?.max_pos ?? -1) + 1;
     }
 
-    for (const rawRecord of records) {
+    for (let idx = 0; idx < records.length; idx++) {
+      const rawRecord = records[idx];
       if (typeof rawRecord !== "object" || rawRecord === null) continue;
       const data: Record<string, unknown> = { ...(rawRecord as Record<string, unknown>) };
+
+      // Validate required fields
+      for (const field of modelFields) {
+        if (isRequired(field.validators) && (data[field.api_key] === undefined || data[field.api_key] === null || data[field.api_key] === ""))
+          return yield* new ValidationError({ message: `Record ${idx}: field '${field.api_key}' is required`, field: field.api_key });
+      }
 
       const id = ulid();
       const record: Record<string, unknown> = {
@@ -367,8 +413,32 @@ export function bulkCreateRecords(rawBody: unknown) {
         record._position = nextPosition++;
       }
 
-      // Process slug fields
+      // Process fields: slug, structured_text, composite validation
       for (const field of modelFields) {
+        // StructuredText: validate DAST + write blocks
+        if (field.field_type === "structured_text" && data[field.api_key] !== undefined && data[field.api_key] !== null) {
+          const stInput = yield* Schema.decodeUnknown(StructuredTextWriteInput)(data[field.api_key]).pipe(
+            Effect.mapError((e) => new ValidationError({
+              message: `Record ${idx}: invalid StructuredText for field '${field.api_key}': ${e.message}`,
+              field: field.api_key,
+            }))
+          );
+
+          const allowedBlockTypes = getBlockWhitelist(field.validators);
+          const blocksOnly = getBlocksOnly(field.validators);
+
+          const dast = yield* writeStructuredText({
+            fieldApiKey: field.api_key,
+            rootRecordId: id,
+            value: stInput.value,
+            blocks: stInput.blocks,
+            allowedBlockTypes: allowedBlockTypes ?? [],
+            blocksOnly,
+          });
+
+          data[field.api_key] = dast;
+        }
+
         if (field.field_type === "slug") {
           const sourceFieldKey = getSlugSource(field.validators);
           if (!data[field.api_key] && sourceFieldKey && data[sourceFieldKey]) {
@@ -390,6 +460,19 @@ export function bulkCreateRecords(rawBody: unknown) {
               slug = `${baseSlug}-${suffix}`;
             }
             data[field.api_key] = slug;
+          }
+        }
+
+        // Validate composite field types using registry schemas
+        if (isFieldType(field.field_type) && data[field.api_key] !== undefined && data[field.api_key] !== null) {
+          const fieldDef = getFieldTypeDef(field.field_type);
+          if (fieldDef.inputSchema) {
+            yield* Schema.decodeUnknown(fieldDef.inputSchema)(data[field.api_key]).pipe(
+              Effect.mapError((e) => new ValidationError({
+                message: `Record ${idx}: invalid ${field.field_type} for field '${field.api_key}': ${e.message}`,
+                field: field.api_key,
+              }))
+            );
           }
         }
 
