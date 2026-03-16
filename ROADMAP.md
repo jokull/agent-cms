@@ -194,7 +194,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 
 ### Phase 2: Media & Assets
 
-- [ ] **P2.1** Asset system table + REST CRUD: `POST /assets` (upload to R2), `GET /assets`, `GET /assets/:id`, `DELETE /assets/:id`. Store metadata in `assets` table. For local dev, store files on local filesystem (wrangler R2 emulation). Test upload + retrieval.
+- [x] **P2.1** Asset REST CRUD *(done — 10 tests)*
 - [x] **P2.2** `media` field GraphQL resolution *(done — resolves to Asset object, 4 tests)*
 - [x] **P2.3** `media_gallery` field GraphQL resolution *(done — resolves to [Asset!], included in P2.2 tests)*
 - [ ] **P2.4** Responsive image metadata in GraphQL: `responsiveImage` field on media assets returning `src`, `srcSet`, `width`, `height`, `alt`. For local dev, generate basic srcSet from stored dimensions. Cloudflare Images integration is deployment-time only.
@@ -207,7 +207,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 
 ### Phase 4: Schema Lifecycle
 
-- [ ] **P4.1** Field type change: Reject if field has data (v1 simplification). Test: try changing a string field with existing records → error. Change on empty model → success. → [C11]
+- [x] **P4.1** Field type change rejection *(done — 4 tests)*
 - [ ] **P4.2** Required field with existing records: Require `default_value` in field config. Apply default to all existing records on migration. Test. → [C11]
 - [ ] **P4.3** Model/field rename (`api_key` change): Rename table/column, update `_root_field_api_key` in block rows, invalidate schema cache. Test. → [C11]
 - [ ] **P4.4** Block type removal: Scan all StructuredText fields, clean DAST trees, delete block rows, drop table. Test with a block type used across multiple models. → [C11]

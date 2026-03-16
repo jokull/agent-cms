@@ -106,6 +106,30 @@ export function updateField(fieldId: string, body: Record<string, unknown>) {
     const fields = yield* sql.unsafe<FieldRow>("SELECT * FROM fields WHERE id = ?", [fieldId]);
     if (fields.length === 0) return yield* new NotFoundError({ entity: "Field", id: fieldId });
 
+    const field = fields[0];
+
+    // Reject field type changes if field has data
+    if (body.fieldType !== undefined && body.fieldType !== field.field_type) {
+      const model = yield* sql.unsafe<{ api_key: string; is_block: number }>(
+        "SELECT api_key, is_block FROM models WHERE id = ?",
+        [field.model_id]
+      );
+      if (model.length > 0) {
+        const tableName = model[0].is_block ? `block_${model[0].api_key}` : `content_${model[0].api_key}`;
+        const rows = yield* sql.unsafe<{ c: number }>(
+          `SELECT COUNT(*) as c FROM "${tableName}" WHERE "${field.api_key}" IS NOT NULL`,
+        );
+        if (rows[0]?.c > 0) {
+          return yield* new ValidationError({
+            message: `Cannot change field type of '${field.api_key}' from '${field.field_type}' to '${body.fieldType}': field has data in ${rows[0].c} record(s). Clear the field data first.`,
+            field: field.api_key,
+          });
+        }
+      }
+      // If no data, allow the type change
+      // (Would need DDL column type change in a full implementation, but v1 simplification)
+    }
+
     const now = new Date().toISOString();
     const sets: string[] = ["updated_at = ?"];
     const values: unknown[] = [now];
