@@ -199,11 +199,19 @@ All fields are indexed by default. Opt a field out with `{"searchable": false}` 
 React to content events with hooks passed to `createCMSHandler`. Hooks fire in the service layer after the operation completes — use them to trigger deploys, invalidate caches, or sync to external services.
 
 ```typescript
-import { createCMSHandler, type CmsEnv } from "agent-cms";
+import { createCMSHandler } from "agent-cms";
 
 export default {
-  fetch(request: Request, env: CmsEnv) {
-    return createCMSHandler(env, {
+  fetch(request: Request, env: Env) {
+    return createCMSHandler({
+      bindings: {
+        db: env.DB,
+        assets: env.ASSETS,
+        environment: env.ENVIRONMENT,
+        assetBaseUrl: env.ASSET_BASE_URL,
+        readKey: env.CMS_READ_KEY,
+        writeKey: env.CMS_WRITE_KEY,
+      },
       hooks: {
         onPublish: ({ modelApiKey, recordId }) => {
           // Trigger a static site rebuild
@@ -216,6 +224,16 @@ export default {
     }).fetch(request);
   },
 };
+
+interface Env {
+  DB: D1Database;
+  ASSETS?: R2Bucket;
+  ENVIRONMENT?: string;
+  ASSET_BASE_URL?: string;
+  CMS_READ_KEY?: string;
+  CMS_WRITE_KEY?: string;
+  DEPLOY_HOOK_URL: string;
+}
 ```
 
 Available hooks: `onRecordCreate`, `onRecordUpdate`, `onRecordDelete`, `onPublish`, `onUnpublish`. All receive `{ modelApiKey, recordId }`. Hooks are fire-and-forget — errors are logged, not propagated to the caller.

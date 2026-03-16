@@ -7,26 +7,27 @@ import type { CmsHooks } from "./hooks.js";
 
 export type { CmsHooks } from "./hooks.js";
 
-/** Cloudflare Worker environment bindings for agent-cms */
-export interface CmsEnv {
-  DB: D1Database;
-  ASSETS?: R2Bucket;
-  ENVIRONMENT?: string;
+/** Explicit runtime bindings/config passed to agent-cms */
+export interface CmsBindings {
+  db: D1Database;
+  assets?: R2Bucket;
+  environment?: string;
   /** Public URL base for assets (e.g. "https://my-cms.workers.dev") */
-  ASSET_BASE_URL?: string;
+  assetBaseUrl?: string;
   /** Read API key — required for GraphQL reads. Like DatoCMS CDA token.
-   *  Set via: wrangler secret put CMS_READ_KEY */
-  CMS_READ_KEY?: string;
+   *  Pass from your secret/binding of choice. */
+  readKey?: string;
   /** Write API key — required for REST writes, MCP, publish/unpublish.
-   *  Like DatoCMS CMA token. Set via: wrangler secret put CMS_WRITE_KEY */
-  CMS_WRITE_KEY?: string;
+   *  Like DatoCMS CMA token. Pass from your secret/binding of choice. */
+  writeKey?: string;
   /** Workers AI binding for embedding generation (optional — enables vector search) */
-  AI?: AiBinding;
+  ai?: AiBinding;
   /** Vectorize index binding (optional — enables semantic search) */
-  VECTORIZE?: VectorizeBinding;
+  vectorize?: VectorizeBinding;
 }
 
-export interface CmsHandlerOptions {
+export interface CmsHandlerConfig {
+  bindings: CmsBindings;
   /** Lifecycle hooks fired on content events */
   hooks?: CmsHooks;
 }
@@ -40,21 +41,33 @@ export interface CmsHandlerOptions {
  * import { createCMSHandler } from "agent-cms";
  *
  * export default {
- *   fetch: (request, env) => createCMSHandler(env).fetch(request),
+ *   fetch: (request, env) => createCMSHandler({
+ *     bindings: {
+ *       db: env.DB,
+ *       assets: env.ASSETS,
+ *       environment: env.ENVIRONMENT,
+ *       assetBaseUrl: env.ASSET_BASE_URL,
+ *       readKey: env.CMS_READ_KEY,
+ *       writeKey: env.CMS_WRITE_KEY,
+ *       ai: env.AI,
+ *       vectorize: env.VECTORIZE,
+ *     },
+ *   }).fetch(request),
  * };
  * ```
  */
-export function createCMSHandler(env: CmsEnv, options?: CmsHandlerOptions) {
-  const sqlLayer = D1Client.layer({ db: env.DB });
+export function createCMSHandler(config: CmsHandlerConfig) {
+  const { bindings, hooks } = config;
+  const sqlLayer = D1Client.layer({ db: bindings.db });
   const handler = createWebHandler(sqlLayer, {
-    assetBaseUrl: env.ASSET_BASE_URL,
-    isProduction: env.ENVIRONMENT === "production",
-    readKey: env.CMS_READ_KEY,
-    writeKey: env.CMS_WRITE_KEY,
-    r2Bucket: env.ASSETS,
-    ai: env.AI,
-    vectorize: env.VECTORIZE,
-    hooks: options?.hooks,
+    assetBaseUrl: bindings.assetBaseUrl,
+    isProduction: bindings.environment === "production",
+    readKey: bindings.readKey,
+    writeKey: bindings.writeKey,
+    r2Bucket: bindings.assets,
+    ai: bindings.ai,
+    vectorize: bindings.vectorize,
+    hooks,
   });
 
   // Auto-migrate: once per isolate (persists across requests in the same Worker instance)
@@ -70,10 +83,3 @@ export function createCMSHandler(env: CmsEnv, options?: CmsHandlerOptions) {
     },
   };
 }
-
-// Default export for direct wrangler dev usage
-export default {
-  async fetch(request: Request, env: CmsEnv): Promise<Response> {
-    return createCMSHandler(env).fetch(request);
-  },
-};

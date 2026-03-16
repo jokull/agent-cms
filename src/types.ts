@@ -30,4 +30,4 @@ export function isFieldType(value: string): value is FieldType {
 export const RECORD_STATUSES = ["draft", "published", "updated"] as const;
 export type RecordStatus = (typeof RECORD_STATUSES)[number];
 
-// CmsEnv is exported from src/index.ts
+// CmsBindings is exported from src/index.ts
