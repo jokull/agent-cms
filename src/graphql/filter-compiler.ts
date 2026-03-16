@@ -153,12 +153,21 @@ function buildSqlConditions(
           conditions.push({ sql: `${col} <= ?`, params: [expected] });
           break;
         case "matches":
-          // DatoCMS uses { pattern, caseSensitive } but we also accept plain string
+          // Plain string matches (case-insensitive LIKE)
           if (typeof expected === "string") {
             conditions.push({ sql: `${col} LIKE ?`, params: [`%${expected}%`] });
-          } else if (expected?.pattern) {
-            // TODO: implement caseSensitive via COLLATE
-            conditions.push({ sql: `${col} LIKE ?`, params: [`%${expected.pattern}%`] });
+          }
+          break;
+        case "matchesObject":
+          // DatoCMS-style { pattern, caseSensitive } object
+          if (typeof expected === "object" && expected !== null && "pattern" in expected) {
+            const obj = expected as { pattern: string; caseSensitive?: boolean };
+            if (obj.caseSensitive) {
+              // SQLite GLOB is case-sensitive
+              conditions.push({ sql: `${col} GLOB ?`, params: [`*${obj.pattern}*`] });
+            } else {
+              conditions.push({ sql: `${col} LIKE ?`, params: [`%${obj.pattern}%`] });
+            }
           }
           break;
         case "isBlank":

@@ -204,7 +204,12 @@ export function buildGraphQLSchema(sqlLayer: any) {
         inlineBlocks: [JSON!]!
         links: [JSON!]!
       }
-      input StringFilter { eq: String, neq: String, matches: String, isBlank: Boolean, exists: Boolean }
+      type StringMultiLocaleField { locale: String!, value: String }
+      type IntMultiLocaleField { locale: String!, value: Int }
+      type FloatMultiLocaleField { locale: String!, value: Float }
+      type BooleanMultiLocaleField { locale: String!, value: Boolean }
+      input MatchesFilter { pattern: String!, caseSensitive: Boolean }
+      input StringFilter { eq: String, neq: String, in: [String!], notIn: [String!], matches: String, matchesObject: MatchesFilter, isBlank: Boolean, isPresent: Boolean, exists: Boolean }
       input IntFilter { eq: Int, neq: Int, gt: Int, lt: Int, gte: Int, lte: Int, exists: Boolean }
       input FloatFilter { eq: Float, neq: Float, gt: Float, lt: Float, gte: Float, lte: Float, exists: Boolean }
       input BooleanFilter { eq: Boolean, exists: Boolean }
@@ -249,6 +254,18 @@ export function buildGraphQLSchema(sqlLayer: any) {
       }
       if (localizedFieldKeys.size > 0) {
         fieldDefs.push("_locales: [String!]!");
+      }
+
+      // _all<Field>Locales for each localized field
+      for (const f of fields) {
+        if (!f.localized) continue;
+        const camelKey = f.api_key.charAt(0).toUpperCase() +
+          f.api_key.slice(1).replace(/_([a-z])/g, (_: string, c: string) => c.toUpperCase());
+        const multiLocaleType = f.field_type === "integer" ? "IntMultiLocaleField"
+          : f.field_type === "float" ? "FloatMultiLocaleField"
+          : f.field_type === "boolean" ? "BooleanMultiLocaleField"
+          : "StringMultiLocaleField";
+        fieldDefs.push(`_all${camelKey}Locales: [${multiLocaleType}!]!`);
       }
 
       typeDefs.push(`type ${typeName} {\n  ${fieldDefs.join("\n  ")}\n}`);
@@ -310,6 +327,25 @@ export function buildGraphQLSchema(sqlLayer: any) {
             }
           }
           return [...foundLocales];
+        };
+      }
+
+      // _all<Field>Locales resolvers
+      for (const f of fields) {
+        if (!f.localized) continue;
+        const camelKey = f.api_key.charAt(0).toUpperCase() +
+          f.api_key.slice(1).replace(/_([a-z])/g, (_: string, c: string) => c.toUpperCase());
+        const resolverName = `_all${camelKey}Locales`;
+        typeResolvers[resolverName] = (parent: any) => {
+          let localeMap = parent[f.api_key];
+          if (!localeMap) return [];
+          if (typeof localeMap === "string") {
+            try { localeMap = JSON.parse(localeMap); } catch { return []; }
+          }
+          if (typeof localeMap !== "object" || localeMap === null) return [];
+          return Object.entries(localeMap)
+            .filter(([, value]) => value !== null && value !== undefined)
+            .map(([locale, value]) => ({ locale, value }));
         };
       }
 
