@@ -346,28 +346,40 @@ export function buildGraphQLSchema(sqlLayer: any) {
       queryFieldDefs.push(`_all${typeName}sMeta(filter: ${typeName}Filter): ${typeName}Meta!`);
 
       // Query resolvers — push filtering/ordering/pagination to SQL
-      function queryWithFilter(args: { filter?: any; orderBy?: string[]; first?: number; skip?: number }) {
+      // Support includeDrafts via context (from X-Include-Drafts header)
+      function queryWithFilter(
+        args: { filter?: any; orderBy?: string[]; first?: number; skip?: number },
+        includeDrafts: boolean
+      ) {
         return runSql(
           Effect.gen(function* () {
             const s = yield* SqlClient.SqlClient;
 
             let query = `SELECT * FROM "${tableName}"`;
+            const conditions: string[] = [];
             let params: any[] = [];
 
-            // Compile filter to SQL WHERE clause
+            // Draft filtering: without includeDrafts, only show published/updated
+            if (!includeDrafts) {
+              conditions.push(`"_status" IN ('published', 'updated')`);
+            }
+
+            // Compile user filter to SQL WHERE clause
             const compiled = compileFilterToSql(args.filter);
             if (compiled) {
-              query += ` WHERE ${compiled.where}`;
+              conditions.push(compiled.where);
               params = compiled.params;
             }
 
-            // Compile ORDER BY
+            if (conditions.length > 0) {
+              query += ` WHERE ${conditions.join(" AND ")}`;
+            }
+
             const orderBy = compileOrderBy(args.orderBy);
             if (orderBy) {
               query += ` ORDER BY ${orderBy}`;
             }
 
-            // Pagination
             const limit = args.first ?? 500;
             query += ` LIMIT ?`;
             params.push(limit);
@@ -378,23 +390,42 @@ export function buildGraphQLSchema(sqlLayer: any) {
             }
 
             const rows = yield* s.unsafe<Record<string, any>>(query, params);
-            return rows.map(deserializeRecord);
+            return rows.map((row) => {
+              const deserialized = deserializeRecord(row);
+              // When not including drafts, overlay published snapshot values
+              if (!includeDrafts && deserialized._published_snapshot) {
+                const snapshot = typeof deserialized._published_snapshot === "string"
+                  ? JSON.parse(deserialized._published_snapshot)
+                  : deserialized._published_snapshot;
+                return { ...deserialized, ...snapshot };
+              }
+              return deserialized;
+            });
           })
         );
       }
 
-      function countWithFilter(filter?: any) {
+      function countWithFilter(filter: any, includeDrafts: boolean) {
         return runSql(
           Effect.gen(function* () {
             const s = yield* SqlClient.SqlClient;
 
             let query = `SELECT COUNT(*) as count FROM "${tableName}"`;
+            const conditions: string[] = [];
             let params: any[] = [];
+
+            if (!includeDrafts) {
+              conditions.push(`"_status" IN ('published', 'updated')`);
+            }
 
             const compiled = compileFilterToSql(filter);
             if (compiled) {
-              query += ` WHERE ${compiled.where}`;
+              conditions.push(compiled.where);
               params = compiled.params;
+            }
+
+            if (conditions.length > 0) {
+              query += ` WHERE ${conditions.join(" AND ")}`;
             }
 
             const rows = yield* s.unsafe<{ count: number }>(query, params);
@@ -403,29 +434,45 @@ export function buildGraphQLSchema(sqlLayer: any) {
         );
       }
 
-      resolvers.Query[listName] = (_: any, args: any) => {
-        return queryWithFilter(args);
+      resolvers.Query[listName] = (_: any, args: any, context: any) => {
+        const includeDrafts = context?.includeDrafts ?? false;
+        return queryWithFilter(args, includeDrafts);
       };
 
-      resolvers.Query[model.api_key] = (_: any, args: any) => {
+      resolvers.Query[model.api_key] = (_: any, args: any, context: any) => {
+        const includeDrafts = context?.includeDrafts ?? false;
         if (args.id) {
           return runSql(
             Effect.gen(function* () {
               const s = yield* SqlClient.SqlClient;
-              const rows = yield* s.unsafe<Record<string, any>>(`SELECT * FROM "${tableName}" WHERE id = ?`, [args.id]);
-              return rows.length > 0 ? deserializeRecord(rows[0]) : null;
+              const conditions = [`id = ?`];
+              if (!includeDrafts) conditions.push(`"_status" IN ('published', 'updated')`);
+              const rows = yield* s.unsafe<Record<string, any>>(
+                `SELECT * FROM "${tableName}" WHERE ${conditions.join(" AND ")}`,
+                [args.id]
+              );
+              if (rows.length === 0) return null;
+              const deserialized = deserializeRecord(rows[0]);
+              if (!includeDrafts && deserialized._published_snapshot) {
+                const snapshot = typeof deserialized._published_snapshot === "string"
+                  ? JSON.parse(deserialized._published_snapshot)
+                  : deserialized._published_snapshot;
+                return { ...deserialized, ...snapshot };
+              }
+              return deserialized;
             })
           );
         }
         if (args.filter) {
-          const records = queryWithFilter({ filter: args.filter, first: 1 });
+          const records = queryWithFilter({ filter: args.filter, first: 1 }, includeDrafts);
           return records[0] ?? null;
         }
         return null;
       };
 
-      resolvers.Query[`_all${typeName}sMeta`] = (_: any, args: any) => {
-        return { count: countWithFilter(args.filter) };
+      resolvers.Query[`_all${typeName}sMeta`] = (_: any, args: any, context: any) => {
+        const includeDrafts = context?.includeDrafts ?? false;
+        return { count: countWithFilter(args.filter, includeDrafts) };
       };
     }
 

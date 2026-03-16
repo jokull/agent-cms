@@ -27,16 +27,26 @@ export function createTestApp() {
   return { handler, sqlLayer };
 }
 
-/** Execute a GraphQL query */
+/**
+ * Execute a GraphQL query.
+ * By default, includes drafts (X-Include-Drafts: true) for test convenience.
+ * Set includeDrafts: false to test published-only behavior.
+ */
 export async function gqlQuery(
   handler: (req: Request) => Promise<Response>,
   query: string,
-  variables?: Record<string, any>
+  variables?: Record<string, any>,
+  options?: { includeDrafts?: boolean }
 ) {
+  const includeDrafts = options?.includeDrafts ?? true; // Default to true for tests
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (includeDrafts) {
+    headers["X-Include-Drafts"] = "true";
+  }
   const res = await handler(
     new Request("http://localhost/graphql", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify({ query, variables }),
     })
   );

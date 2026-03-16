@@ -189,7 +189,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 - [ ] **P1.7** StructuredText validators: `structured_text_blocks` (whitelist block types), `structured_text_links` (whitelist linkable model types). Reject writes with block types or link targets not in the whitelist. Test both acceptance and rejection.
 - [x] **P1.8** Block-only StructuredText / modular content *(done — 8 tests)*
 - [x] **P1.9** Draft/publish lifecycle *(done — 6 tests)*
-- [ ] **P1.10** GraphQL meta fields: `_createdAt`, `_updatedAt`, `_publishedAt`, `_firstPublishedAt`, `_status`, `_isValid` on all record types.
+- [x] **P1.10** includeDrafts + GraphQL meta fields *(done — X-Include-Drafts header, published snapshot overlay, 7 tests)*
 - [x] **P1.11** `[SCHEMA:marketing]` *(done — 110 tests total)*
 
 ### Phase 2: Media & Assets
