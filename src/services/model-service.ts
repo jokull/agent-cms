@@ -8,6 +8,7 @@ import {
   ReferenceConflictError,
 } from "../errors.js";
 import { migrateContentTable, dropTableSql } from "../schema-engine/sql-ddl.js";
+import * as SearchService from "../search/search-service.js";
 import type { ModelRow, FieldRow } from "../db/row-types.js";
 import { parseFieldValidators } from "../db/row-types.js";
 import { CreateModelInput } from "./input-schemas.js";
@@ -80,6 +81,11 @@ export function createModel(rawBody: unknown) {
       tree: body.tree,
     });
 
+    // Create FTS5 table for content models (not block types)
+    if (!body.isBlock) {
+      yield* SearchService.createFtsTable(body.apiKey).pipe(Effect.ignore);
+    }
+
     return {
       id, name: body.name, apiKey: body.apiKey,
       isBlock: body.isBlock, singleton: body.singleton,
@@ -125,12 +131,19 @@ export function updateModel(id: string, body: Record<string, unknown>) {
       // Rename the table
       yield* sql.unsafe(`ALTER TABLE "${oldTableName}" RENAME TO "${newTableName}"`);
 
+      // Rename FTS table if it exists (content models only)
+      if (!model.is_block) {
+        yield* SearchService.dropIndex(model.api_key).pipe(Effect.ignore);
+        yield* SearchService.createFtsTable(newApiKey).pipe(Effect.ignore);
+      }
+
       // Update _root_field_api_key won't change since that tracks the field, not the model
       // But we need to update validators in other models that reference this model by api_key
-      const allFields = yield* sql.unsafe<FieldRow>("SELECT * FROM fields WHERE field_type IN ('link', 'links')");
+      const allFields = yield* sql.unsafe<FieldRow>("SELECT * FROM fields WHERE field_type IN ('link', 'links', 'structured_text')");
       for (const f of allFields) {
         const validators = JSON.parse(f.validators || "{}");
         let changed = false;
+        // Update link/links validators
         for (const key of ["item_item_type", "items_item_type"]) {
           if (Array.isArray(validators[key])) {
             const idx = validators[key].indexOf(model.api_key);
@@ -138,6 +151,14 @@ export function updateModel(id: string, body: Record<string, unknown>) {
               validators[key][idx] = newApiKey;
               changed = true;
             }
+          }
+        }
+        // Update structured_text block whitelists
+        if (Array.isArray(validators.structured_text_blocks)) {
+          const idx = validators.structured_text_blocks.indexOf(model.api_key);
+          if (idx !== -1) {
+            validators.structured_text_blocks[idx] = newApiKey;
+            changed = true;
           }
         }
         if (changed) {
@@ -150,6 +171,11 @@ export function updateModel(id: string, body: Record<string, unknown>) {
     }
 
     yield* sql.unsafe(`UPDATE models SET ${sets.join(", ")} WHERE id = ?`, [...values, id]);
+
+    // Rebuild FTS index if apiKey was renamed (model row now has the new apiKey)
+    if (typeof body.apiKey === "string" && body.apiKey !== model.api_key && !model.is_block) {
+      yield* SearchService.rebuildIndex(body.apiKey).pipe(Effect.ignore);
+    }
 
     const updated = yield* sql.unsafe<ModelRow>("SELECT * FROM models WHERE id = ?", [id]);
     return updated[0];
@@ -217,9 +243,20 @@ export function deleteModel(id: string) {
     }
 
     const tableName = model.is_block ? `block_${model.api_key}` : `content_${model.api_key}`;
+
+    // Count records before dropping
+    const countResult = yield* sql.unsafe<{ c: number }>(
+      `SELECT COUNT(*) as c FROM "${tableName}"`
+    );
+    const recordsDestroyed = countResult[0]?.c ?? 0;
+
+    // Delete associated fields first
+    yield* sql.unsafe("DELETE FROM fields WHERE model_id = ?", [id]);
+
     yield* dropTableSql(tableName);
+    yield* SearchService.dropIndex(model.api_key).pipe(Effect.ignore);
     yield* sql.unsafe("DELETE FROM models WHERE id = ?", [id]);
 
-    return { deleted: true };
+    return { deleted: true, recordsDestroyed };
   });
 }

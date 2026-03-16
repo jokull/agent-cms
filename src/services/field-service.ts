@@ -2,7 +2,7 @@ import { Effect, Schema } from "effect";
 import { SqlClient } from "@effect/sql";
 import { ulid } from "ulidx";
 import { FIELD_TYPES, isFieldType, type FieldType } from "../types.js";
-import { NotFoundError, ValidationError, DuplicateError } from "../errors.js";
+import { NotFoundError, ValidationError, DuplicateError, ReferenceConflictError } from "../errors.js";
 import { migrateContentTable } from "../schema-engine/sql-ddl.js";
 import type { ModelRow, FieldRow } from "../db/row-types.js";
 import { parseFieldValidators } from "../db/row-types.js";
@@ -229,10 +229,71 @@ export function updateField(fieldId: string, body: Record<string, unknown>) {
 export function deleteField(fieldId: string) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const fields = yield* sql.unsafe<{ model_id: string }>("SELECT model_id FROM fields WHERE id = ?", [fieldId]);
+    const fields = yield* sql.unsafe<FieldRow>("SELECT * FROM fields WHERE id = ?", [fieldId]);
     if (fields.length === 0) return yield* new NotFoundError({ entity: "Field", id: fieldId });
 
-    const modelId = fields[0].model_id;
+    const field = fields[0];
+    const modelId = field.model_id;
+
+    // Check if any slug field in the same model depends on this field via slug_source
+    const siblingFields = yield* sql.unsafe<FieldRow>(
+      "SELECT * FROM fields WHERE model_id = ? AND field_type = 'slug' AND id != ?",
+      [modelId, fieldId]
+    );
+    for (const slugField of siblingFields) {
+      const validators = JSON.parse(slugField.validators || "{}");
+      if (validators.slug_source === field.api_key) {
+        return yield* new ReferenceConflictError({
+          message: `Cannot delete field '${field.api_key}': slug field '${slugField.api_key}' depends on it via slug_source`,
+          references: [`${slugField.api_key}.slug_source`],
+        });
+      }
+    }
+
+    // Get model info for table operations
+    const modelInfo = yield* sql.unsafe<ModelRow>(
+      "SELECT * FROM models WHERE id = ?", [modelId]
+    );
+
+    if (modelInfo.length > 0) {
+      const tableName = modelInfo[0].is_block ? `block_${modelInfo[0].api_key}` : `content_${modelInfo[0].api_key}`;
+
+      // Strip deleted field from all published snapshots
+      const publishedRecords = yield* sql.unsafe<{ id: string; _published_snapshot: string }>(
+        `SELECT id, _published_snapshot FROM "${tableName}" WHERE _published_snapshot IS NOT NULL`
+      );
+      for (const record of publishedRecords) {
+        let snapshot: Record<string, unknown>;
+        try { snapshot = JSON.parse(record._published_snapshot); } catch { continue; }
+        if (field.api_key in snapshot) {
+          delete snapshot[field.api_key];
+          yield* sql.unsafe(
+            `UPDATE "${tableName}" SET _published_snapshot = ? WHERE id = ?`,
+            [JSON.stringify(snapshot), record.id]
+          );
+        }
+      }
+
+      // Clean up orphaned block rows if this is a structured_text field
+      if (field.field_type === "structured_text") {
+        const validators = JSON.parse(field.validators || "{}");
+        const blockTypes: string[] = validators.structured_text_blocks ?? [];
+        for (const blockApiKey of blockTypes) {
+          // Check block table exists before querying
+          const tableExists = yield* sql.unsafe<{ name: string }>(
+            `SELECT name FROM sqlite_master WHERE type='table' AND name=?`,
+            [`block_${blockApiKey}`]
+          );
+          if (tableExists.length > 0) {
+            yield* sql.unsafe(
+              `DELETE FROM "block_${blockApiKey}" WHERE _root_field_api_key = ? AND _root_record_id IN (SELECT id FROM "${tableName}")`,
+              [field.api_key]
+            );
+          }
+        }
+      }
+    }
+
     yield* sql.unsafe("DELETE FROM fields WHERE id = ?", [fieldId]);
     yield* syncTable(modelId);
 

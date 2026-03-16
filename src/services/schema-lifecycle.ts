@@ -35,7 +35,7 @@ export function removeBlockType(blockApiKey: string) {
       return Array.isArray(allowedBlocks) && allowedBlocks.includes(blockApiKey);
     });
 
-    // For each affected field, clean DAST trees in all records
+    // For each affected field, clean DAST trees in all records (draft + published snapshot)
     for (const field of affectedFields) {
       const model = yield* sql.unsafe<ModelRow>(
         "SELECT * FROM models WHERE id = ?", [field.model_id]
@@ -44,16 +44,10 @@ export function removeBlockType(blockApiKey: string) {
 
       const tableName = model[0].is_block ? `block_${model[0].api_key}` : `content_${model[0].api_key}`;
       const records = yield* sql.unsafe<{ id: string; [key: string]: any }>(
-        `SELECT id, "${field.api_key}" FROM "${tableName}" WHERE "${field.api_key}" IS NOT NULL`
+        `SELECT id, "${field.api_key}", _published_snapshot FROM "${tableName}" WHERE "${field.api_key}" IS NOT NULL OR _published_snapshot IS NOT NULL`
       );
 
       for (const record of records) {
-        let dast = record[field.api_key];
-        if (typeof dast === "string") {
-          try { dast = JSON.parse(dast); } catch { continue; }
-        }
-        if (!dast?.document?.children) continue;
-
         // Remove block nodes referencing this block type
         const blockIds = yield* sql.unsafe<{ id: string }>(
           `SELECT id FROM "block_${blockApiKey}" WHERE _root_record_id = ? AND _root_field_api_key = ?`,
@@ -62,11 +56,21 @@ export function removeBlockType(blockApiKey: string) {
         const blockIdSet = new Set(blockIds.map((b) => b.id));
 
         if (blockIdSet.size > 0) {
-          const cleaned = removeBlockNodesFromDast(dast, blockIdSet);
-          yield* sql.unsafe(
-            `UPDATE "${tableName}" SET "${field.api_key}" = ? WHERE id = ?`,
-            [JSON.stringify(cleaned), record.id]
-          );
+          // Clean draft DAST
+          let dast = record[field.api_key];
+          if (typeof dast === "string") {
+            try { dast = JSON.parse(dast); } catch { dast = null; }
+          }
+          if (dast?.document?.children) {
+            const cleaned = removeBlockNodesFromDast(dast, blockIdSet);
+            yield* sql.unsafe(
+              `UPDATE "${tableName}" SET "${field.api_key}" = ? WHERE id = ?`,
+              [JSON.stringify(cleaned), record.id]
+            );
+          }
+
+          // Clean published snapshot DAST
+          yield* cleanPublishedSnapshot(sql, tableName, record.id, field.api_key, blockIdSet);
         }
       }
 
@@ -133,23 +137,26 @@ export function removeBlockFromWhitelist(params: {
     );
     const blockIdSet = new Set(blockIds.map((b) => b.id));
 
-    // Clean DAST trees if there are blocks to remove
+    // Clean DAST trees (draft + published snapshot) if there are blocks to remove
     let cleanedRecords = 0;
     if (blockIdSet.size > 0) {
       const records = yield* sql.unsafe<{ id: string; [key: string]: any }>(
-        `SELECT id, "${field.api_key}" FROM "${tableName}" WHERE "${field.api_key}" IS NOT NULL`
+        `SELECT id, "${field.api_key}", _published_snapshot FROM "${tableName}" WHERE "${field.api_key}" IS NOT NULL OR _published_snapshot IS NOT NULL`
       );
       for (const record of records) {
         let dast = record[field.api_key];
-        if (typeof dast === "string") { try { dast = JSON.parse(dast); } catch { continue; } }
-        if (!dast?.document?.children) continue;
+        if (typeof dast === "string") { try { dast = JSON.parse(dast); } catch { dast = null; } }
+        if (dast?.document?.children) {
+          const cleaned = removeBlockNodesFromDast(dast, blockIdSet);
+          yield* sql.unsafe(
+            `UPDATE "${tableName}" SET "${field.api_key}" = ? WHERE id = ?`,
+            [JSON.stringify(cleaned), record.id]
+          );
+          cleanedRecords++;
+        }
 
-        const cleaned = removeBlockNodesFromDast(dast, blockIdSet);
-        yield* sql.unsafe(
-          `UPDATE "${tableName}" SET "${field.api_key}" = ? WHERE id = ?`,
-          [JSON.stringify(cleaned), record.id]
-        );
-        cleanedRecords++;
+        // Clean published snapshot
+        yield* cleanPublishedSnapshot(sql, tableName, record.id, field.api_key, blockIdSet);
       }
 
       // Delete the block rows (scoped to this model's records)
@@ -221,6 +228,37 @@ export function removeLocale(localeId: string) {
     yield* sql.unsafe("DELETE FROM locales WHERE id = ?", [localeId]);
 
     return { deleted: localeCode, updatedRecords, fieldsScanned: localizedFields.length };
+  });
+}
+
+/** Clean DAST inside a record's _published_snapshot for a given field */
+function cleanPublishedSnapshot(
+  sql: SqlClient.SqlClient,
+  tableName: string,
+  recordId: string,
+  fieldApiKey: string,
+  blockIds: Set<string>,
+) {
+  return Effect.gen(function* () {
+    const rows = yield* sql.unsafe<{ _published_snapshot: string | null }>(
+      `SELECT _published_snapshot FROM "${tableName}" WHERE id = ?`, [recordId]
+    );
+    if (!rows[0]?._published_snapshot) return;
+
+    let snapshot: Record<string, any>;
+    try { snapshot = JSON.parse(rows[0]._published_snapshot); } catch { return; }
+
+    let dast = snapshot[fieldApiKey];
+    if (typeof dast === "string") {
+      try { dast = JSON.parse(dast); } catch { return; }
+    }
+    if (!dast?.document?.children) return;
+
+    snapshot[fieldApiKey] = removeBlockNodesFromDast(dast, blockIds);
+    yield* sql.unsafe(
+      `UPDATE "${tableName}" SET _published_snapshot = ? WHERE id = ?`,
+      [JSON.stringify(snapshot), recordId]
+    );
   });
 }
 
