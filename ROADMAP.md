@@ -220,8 +220,8 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 - [x] **P5.2** Schema tools *(done — create_model, create_field, delete_model, delete_field)*
 - [x] **P5.3** Content tools *(done — create_record, update_record, delete_record, query_records, publish, unpublish)*
 - [ ] **P5.4** StructuredText tools: Helper tool for building DAST documents — agent provides prose and block data, tool assembles valid DAST with ULIDs assigned.
-- [ ] **P5.5** Asset tools: `upload_asset`, `list_assets`.
-- [ ] **P5.6** End-to-end MCP test: Use the MCP tools to create the blog schema, insert content, and query via GraphQL. Verify the full loop works.
+- [x] **P5.5** Asset MCP tools *(done — upload_asset, list_assets)*
+- [x] **P5.6** End-to-end MCP test *(done — full agent workflow: schema → content → publish → GraphQL query)*
 
 ### Future (not prioritized)
 

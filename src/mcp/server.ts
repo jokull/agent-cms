@@ -10,6 +10,7 @@ import * as ModelService from "../services/model-service.js";
 import * as FieldService from "../services/field-service.js";
 import * as RecordService from "../services/record-service.js";
 import * as PublishService from "../services/publish-service.js";
+import * as AssetService from "../services/asset-service.js";
 import type { CmsError } from "../errors.js";
 
 export function createMcpServer(sqlLayer: Layer.Layer<SqlClient.SqlClient>) {
@@ -146,6 +147,22 @@ export function createMcpServer(sqlLayer: Layer.Layer<SqlClient.SqlClient>) {
   server.tool("unpublish_record", "Unpublish a record",
     { recordId: z.string(), modelApiKey: z.string() },
     async ({ recordId, modelApiKey }) => run(PublishService.unpublishRecord(modelApiKey, recordId))
+  );
+
+  // --- Assets ---
+
+  server.tool("upload_asset", "Register an asset (metadata only — actual file upload is separate)",
+    {
+      filename: z.string(), mimeType: z.string(),
+      size: z.number().optional(), width: z.number().optional(), height: z.number().optional(),
+      alt: z.string().optional(), title: z.string().optional(),
+    },
+    async (args) => run(AssetService.createAsset(args))
+  );
+
+  server.tool("list_assets", "List all assets",
+    {},
+    async () => run(AssetService.listAssets())
   );
 
   return server;
