@@ -324,15 +324,13 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
     }
 
     // --- Generate GraphQL types for block models ---
+    // Note: SDL generation is deferred until after per-field union types are computed,
+    // so structured_text fields on block models can reference their typed unions.
+    const deferredBlockModelSDL: Array<{ bmApiKey: string; bmTypeName: string; bmFields: ReturnType<typeof parseFieldValidators>[] }> = [];
     for (const bm of blockModels) {
       const bmTypeName = blockTypeNames.get(bm.api_key)!;
       const bmFields = fieldsByModelId.get(bm.id) ?? [];
-
-      const bmFieldDefs = ["id: ID!", "_modelApiKey: String!"];
-      for (const f of bmFields) {
-        bmFieldDefs.push(`${toCamelCase(f.api_key)}: ${fieldToSDL(f.field_type, f.validators, typeNames)}`);
-      }
-      typeDefs.push(`type ${bmTypeName} {\n  ${bmFieldDefs.join("\n  ")}\n}`);
+      deferredBlockModelSDL.push({ bmApiKey: bm.api_key, bmTypeName, bmFields });
 
       // Resolvers for block model types
       const bmResolvers: Record<string, any> = {};
@@ -388,11 +386,16 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
           }
         } else if (f.field_type === "structured_text") {
           bmResolvers[gqlName] = async (parent: any) => {
-            let dast = parent[f.api_key];
-            if (!dast) return null;
-            if (typeof dast === "string") {
-              try { dast = JSON.parse(dast); } catch { return null; }
+            let raw = parent[f.api_key];
+            if (!raw) return null;
+            if (typeof raw === "string") {
+              try { raw = JSON.parse(raw); } catch { return null; }
             }
+
+            // Block ST fields store the full envelope {value: {schema,document}, blocks: {...}}
+            // Unwrap to get the DAST document and any embedded block data
+            const dast = raw.document ? raw : (raw.value ?? raw);
+            const embeddedBlocks: Record<string, any> = raw.blocks ?? {};
 
             // Extract block IDs from the DAST
             const blockLevelIds = new Set(extractBlockIds(dast));
@@ -403,28 +406,43 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
 
             if (blockLevelIds.size > 0 || inlineBlockIdSet.size > 0) {
               const allIds = [...blockLevelIds, ...inlineBlockIdSet];
-              for (const innerBm of blockModels) {
-                const placeholders = allIds.map(() => "?").join(", ");
-                const fetched = await runSql(
-                  Effect.gen(function* () {
-                    const s = yield* SqlClient.SqlClient;
-                    const rows = yield* s.unsafe<Record<string, any>>(
-                      `SELECT * FROM "block_${innerBm.api_key}" WHERE id IN (${placeholders})`,
-                      allIds
-                    );
-                    return rows.map((r: Record<string, any>) => {
-                      const deserialized = deserializeRecord(r);
-                      return { id: String(deserialized.id ?? ""), ...deserialized, __typename: `${toTypeName(innerBm.api_key)}Record` };
-                    });
-                  })
-                );
-                for (const record of fetched) {
-                  if (blockLevelIds.has(record.id)) {
-                    blocks.push(record);
-                  } else if (inlineBlockIdSet.has(record.id)) {
-                    inlineBlocks.push(record);
-                  } else {
-                    blocks.push(record);
+
+              // First: resolve from embedded block data (nested blocks stored as JSON inside parent)
+              for (const id of allIds) {
+                const embedded = embeddedBlocks[id];
+                if (embedded && typeof embedded === "object") {
+                  const blockType = embedded._type;
+                  const bmtn = blockType ? `${toTypeName(blockType)}Record` : undefined;
+                  const resolved = { id, ...embedded, __typename: bmtn };
+                  if (blockLevelIds.has(id)) blocks.push(resolved);
+                  else inlineBlocks.push(resolved);
+                }
+              }
+
+              // Fallback: try block tables for any IDs not found in embedded data
+              const resolvedIds = new Set([...blocks.map((b) => b.id), ...inlineBlocks.map((b) => b.id)]);
+              const unresolvedIds = allIds.filter((id) => !resolvedIds.has(id));
+
+              if (unresolvedIds.length > 0) {
+                for (const innerBm of blockModels) {
+                  const placeholders = unresolvedIds.map(() => "?").join(", ");
+                  const fetched = await runSql(
+                    Effect.gen(function* () {
+                      const s = yield* SqlClient.SqlClient;
+                      const rows = yield* s.unsafe<Record<string, any>>(
+                        `SELECT * FROM "block_${innerBm.api_key}" WHERE id IN (${placeholders})`,
+                        unresolvedIds
+                      );
+                      return rows.map((r: Record<string, any>) => {
+                        const deserialized = deserializeRecord(r);
+                        return { id: String(deserialized.id ?? ""), ...deserialized, __typename: `${toTypeName(innerBm.api_key)}Record` };
+                      });
+                    })
+                  );
+                  for (const record of fetched) {
+                    if (blockLevelIds.has(record.id)) blocks.push(record);
+                    else if (inlineBlockIdSet.has(record.id)) inlineBlocks.push(record);
+                    else blocks.push(record);
                   }
                 }
               }
@@ -505,9 +523,13 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
     // Maps model api_key + field api_key → union type name (only for fields with block whitelists)
     const structuredTextFieldTypes = new Map<string, string>(); // key: `${model.api_key}.${field.api_key}` → field type name
 
-    for (const model of models) {
+    // Iterate both content models and block models — block models can have
+    // structured_text fields with block whitelists too (nested blocks)
+    for (const model of [...models, ...blockModels]) {
       const fields = fieldsByModelId.get(model.id) ?? [];
-      const modelTypeName = typeNames.get(model.api_key)!;
+      // Content models use typeNames, block models use blockTypeNames
+      const modelTypeName = typeNames.get(model.api_key) ?? blockTypeNames.get(model.api_key);
+      if (!modelTypeName) continue;
 
       for (const f of fields) {
         if (f.field_type !== "structured_text") continue;
@@ -535,9 +557,21 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
         // __resolveType for the union
         resolvers[unionName] = { __resolveType: (obj: any) => obj.__typename };
 
-        // Store mapping so the content model field uses this type instead of generic StructuredText
+        // Store mapping so the content/block model field uses this type
         structuredTextFieldTypes.set(`${model.api_key}.${f.api_key}`, fieldTypeName);
       }
+    }
+
+    // Now emit block model SDL (deferred so structured_text fields can use typed unions)
+    for (const { bmApiKey, bmTypeName, bmFields } of deferredBlockModelSDL) {
+      const bmFieldDefs = ["id: ID!", "_modelApiKey: String!"];
+      for (const f of bmFields) {
+        const stKey = `${bmApiKey}.${f.api_key}`;
+        const stFieldType = structuredTextFieldTypes.get(stKey);
+        const gqlType = stFieldType ?? fieldToSDL(f.field_type, f.validators, typeNames);
+        bmFieldDefs.push(`${toCamelCase(f.api_key)}: ${gqlType}`);
+      }
+      typeDefs.push(`type ${bmTypeName} {\n  ${bmFieldDefs.join("\n  ")}\n}`);
     }
 
     for (const model of models) {
