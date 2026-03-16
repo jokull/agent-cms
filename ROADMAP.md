@@ -301,13 +301,8 @@ agent-cms is **not a standalone Worker** — it's a library + CLI that scaffolds
 
 #### `create-agent-cms` CLI
 
-- [ ] **Scaffolding CLI** — `npx create-agent-cms` interactive setup:
-  - Prompts: project name, package manager, R2 bucket name, observability (y/n)
-  - Waits for `wrangler` auth if needed
-  - Generates: `wrangler.jsonc`, `src/index.ts`, `package.json`, `migrations/`
-  - Runs: `wrangler d1 create`, `wrangler d1 migrations apply`, `wrangler r2 bucket create`
-  - Verifies: D1 accessible, R2 accessible, Worker deploys
-  - Outputs: MCP server URL for Claude Desktop/Code config
+- [x] **Scaffolding CLI** *(done — `npx create-agent-cms my-blog -y` generates wrangler.jsonc, src/index.ts, package.json, tsconfig.json, migrations/. All prompts have --flag equivalents for non-interactive use.)*
+- [ ] **Automated resource creation** — CLI runs `wrangler d1 create`, `wrangler r2 bucket create`, patches database_id into wrangler.jsonc, applies migrations. Currently outputs instructions instead.
 
 - [x] **Library export** *(done — `createCMSHandler(env)` exported, `CmsEnv` type, default export for direct wrangler dev)*
 
@@ -343,23 +338,9 @@ agent-cms is **not a standalone Worker** — it's a library + CLI that scaffolds
 - **Schema descriptor KV caching** — same rationale. D1 reads are fast enough; no need for a separate KV cache of the schema descriptor.
 - **Blurhash / dominant color extraction** — needs compute Cloudflare doesn't provide natively. Fields exist in schema as nullable for future use.
 
-### Architecture: Typed Field Type Registry
+### Architecture: Typed Field Type Registry *(done)*
 
-The codebase has a "type sandwich" — top (system tables) and bottom (individual field shapes) are statically known, but field type behavior is scattered across 5+ files with `any` types. A registry would collapse this:
-
-```typescript
-// One definition per field type — SQL, GraphQL, Schema, resolver, filter
-const ColorFieldType = {
-  name: "color",
-  sqlType: "TEXT",
-  graphqlType: "ColorField",
-  schema: ColorInput,        // Effect Schema — validates writes
-  resolve: (raw) => ...,     // typed resolver
-  filterType: null,           // not filterable
-} satisfies FieldTypeDefinition;
-```
-
-This is a refactor, not a feature — no user-facing changes. Benefits: exhaustive compile-time checks when adding field types, eliminates scattered if/switch/any patterns, reuses Effect Schemas for both validation and resolver narrowing.
+`src/field-types.ts` — `FIELD_TYPE_REGISTRY` maps every `FieldType` to `FieldTypeDefinition` (sqliteType, graphqlType, filterType, localizable, multiLocaleType, inputSchema, jsonStored, hasCustomResolver). Adding a field type = add to `FIELD_TYPES` array + add one registry entry. TypeScript enforces completeness.
 
 ### Future (not prioritized)
 
