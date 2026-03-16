@@ -138,9 +138,9 @@ export function buildGraphQLSchema(sqlLayer: any, options?: SchemaBuilderOptions
         const opts = Object.entries(params).map(([k, v]) => `${k}=${v}`).join(",");
         return `${assetBase}/cdn-cgi/image/${opts}${assetPath}`;
       }
-      // Development: pass as query params
+      // Development / non-CDN: pass as query params with base URL
       const qs = Object.entries(params).map(([k, v]) => `${k}=${v}`).join("&");
-      return `${assetPath}?${qs}`;
+      return `${assetBase}${assetPath}?${qs}`;
     }
 
     // Load all models and fields with typed rows

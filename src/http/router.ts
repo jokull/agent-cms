@@ -286,6 +286,8 @@ export interface WebHandlerOptions {
   readKey?: string;
   /** Write API key — if set, required for REST writes, MCP, publish/unpublish (like DatoCMS CMA token) */
   writeKey?: string;
+  /** R2 bucket for serving asset files */
+  r2Bucket?: R2Bucket;
 }
 
 export function createWebHandler(sqlLayer: any, options?: WebHandlerOptions) {
@@ -363,6 +365,35 @@ export function createWebHandler(sqlLayer: any, options?: WebHandlerOptions) {
     }
 
     const url = new URL(request.url);
+
+    // /assets/{id}/{filename} — serve files from R2 (no auth, public, immutable cache)
+    if (url.pathname.startsWith("/assets/") && options?.r2Bucket) {
+      // Extract asset ID from path, look up r2Key from DB
+      const pathParts = url.pathname.replace("/assets/", "").split("/");
+      const assetId = pathParts[0];
+      if (assetId) {
+        // Look up the r2Key from the assets table
+        const r2Key = await Effect.runPromise(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient;
+            const rows = yield* sql.unsafe<{ r2_key: string }>(
+              "SELECT r2_key FROM assets WHERE id = ?", [assetId]
+            );
+            return rows[0]?.r2_key ?? null;
+          }).pipe(Effect.provide(sqlLayer)) as Effect.Effect<string | null, never, never>
+        );
+        if (r2Key) {
+          const object = await options.r2Bucket.get(r2Key);
+          if (object) {
+            const headers = new Headers();
+            headers.set("Content-Type", object.httpMetadata?.contentType || "application/octet-stream");
+            headers.set("Cache-Control", "public, max-age=31536000, immutable");
+            return withCors(new Response(object.body, { headers }), request);
+          }
+        }
+      }
+      return withCors(new Response("Not found", { status: 404 }), request);
+    }
 
     // /health — no auth
     if (url.pathname === "/health") {

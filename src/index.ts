@@ -35,6 +35,7 @@ export function createCMSHandler(env: CmsEnv) {
     isProduction: env.ENVIRONMENT === "production",
     readKey: env.CMS_READ_KEY,
     writeKey: env.CMS_WRITE_KEY,
+    r2Bucket: env.ASSETS,
   });
 
   return {
