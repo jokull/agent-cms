@@ -664,7 +664,7 @@ export function buildGraphQLSchema(sqlLayer: any) {
                     );
                     return rows.map((r: Record<string, any>) => {
                       const deserialized = deserializeRecord(r);
-                      return { id: deserialized.id as string, ...deserialized, __typename: `${toTypeName(bm.api_key)}Record` };
+                      return { id: String(deserialized.id ?? ""), ...deserialized, __typename: `${toTypeName(bm.api_key)}Record` };
                     });
                   })
                 );

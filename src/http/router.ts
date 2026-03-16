@@ -77,7 +77,7 @@ const modelsRouter = HttpRouter.empty.pipe(
       const params = yield* HttpRouter.params;
       const req = yield* HttpServerRequest.HttpServerRequest;
       const body = yield* req.json;
-      return yield* handle(ModelService.updateModel(param(params, "id"), body as Record<string, unknown>));
+      return yield* handle(ModelService.updateModel(param(params, "id"), typeof body === "object" && body !== null ? Object.fromEntries(Object.entries(body)) : {}));
     })
   ),
 
@@ -116,7 +116,7 @@ const fieldsRouter = HttpRouter.empty.pipe(
       const params = yield* HttpRouter.params;
       const req = yield* HttpServerRequest.HttpServerRequest;
       const body = yield* req.json;
-      return yield* handle(FieldService.updateField(param(params, "fieldId"), body as Record<string, unknown>));
+      return yield* handle(FieldService.updateField(param(params, "fieldId"), typeof body === "object" && body !== null ? Object.fromEntries(Object.entries(body)) : {}));
     })
   ),
 
