@@ -14,6 +14,11 @@ function toTypeName(apiKey: string): string {
     apiKey.slice(1).replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
 }
 
+/** Convert snake_case api_key to camelCase GraphQL field name (like DatoCMS) */
+function toCamelCase(snakeCase: string): string {
+  return snakeCase.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+}
+
 function fieldToSDL(
   fieldType: string,
   validators: Record<string, unknown>,
@@ -260,6 +265,12 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
       const typeName = typeNames.get(model.api_key)!;
       const tableName = `content_${model.api_key}`;
 
+      // Build camelCase ↔ snake_case mappings for this model's fields
+      const camelToSnake = new Map<string, string>();
+      for (const f of fields) {
+        camelToSnake.set(toCamelCase(f.api_key), f.api_key);
+      }
+
       // Object type
       const fieldDefs = [
         "id: ID!", "_modelApiKey: String!", "_status: String", "_createdAt: String", "_updatedAt: String",
@@ -274,26 +285,25 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
         fieldDefs.push(`_children: [${typeName}!]!`);
       }
       for (const f of fields) {
-        fieldDefs.push(`${f.api_key}: ${fieldToSDL(f.field_type, f.validators, typeNames)}`);
+        fieldDefs.push(`${toCamelCase(f.api_key)}: ${fieldToSDL(f.field_type, f.validators, typeNames)}`);
       }
 
-      // Track localized fields early so we can add _locales to the type def
-      const localizedFieldKeys = new Set<string>();
+      // Track localized fields by camelCase name (for filter compilation)
+      const localizedCamelKeys = new Set<string>();
       for (const f of fields) {
-        if (f.localized) localizedFieldKeys.add(f.api_key);
+        if (f.localized) localizedCamelKeys.add(toCamelCase(f.api_key));
       }
-      if (localizedFieldKeys.size > 0) {
+      if (localizedCamelKeys.size > 0) {
         fieldDefs.push("_locales: [String!]!");
       }
 
       // _all<Field>Locales for each localized field
       for (const f of fields) {
         if (!f.localized) continue;
-        const camelKey = f.api_key.charAt(0).toUpperCase() +
-          f.api_key.slice(1).replace(/_([a-z])/g, (_: string, c: string) => c.toUpperCase());
+        const pascalKey = toTypeName(f.api_key);
         const mlDef = getRegistryDef(f.field_type);
         const multiLocaleType = mlDef?.multiLocaleType ?? "StringMultiLocaleField";
-        fieldDefs.push(`_all${camelKey}Locales: [${multiLocaleType}!]!`);
+        fieldDefs.push(`_all${pascalKey}Locales: [${multiLocaleType}!]!`);
       }
 
       typeDefs.push(`type ${typeName} {\n  ${fieldDefs.join("\n  ")}\n}`);
@@ -413,11 +423,12 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
       }
 
       // _locales resolver: returns locale codes where record has content
-      if (localizedFieldKeys.size > 0) {
+      if (localizedCamelKeys.size > 0) {
         typeResolvers._locales = (parent: any) => {
           const foundLocales = new Set<string>();
-          for (const key of localizedFieldKeys) {
-            let localeMap = parent[key];
+          for (const camelKey of localizedCamelKeys) {
+            const dbKey = camelToSnake.get(camelKey) ?? camelKey;
+            let localeMap = parent[dbKey];
             if (!localeMap) continue;
             if (typeof localeMap === "string") {
               try { localeMap = JSON.parse(localeMap); } catch { continue; }
@@ -437,9 +448,8 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
       // _all<Field>Locales resolvers
       for (const f of fields) {
         if (!f.localized) continue;
-        const camelKey = f.api_key.charAt(0).toUpperCase() +
-          f.api_key.slice(1).replace(/_([a-z])/g, (_: string, c: string) => c.toUpperCase());
-        const resolverName = `_all${camelKey}Locales`;
+        const pascalKey = toTypeName(f.api_key);
+        const resolverName = `_all${pascalKey}Locales`;
         typeResolvers[resolverName] = (parent: any) => {
           let localeMap = parent[f.api_key];
           if (!localeMap) return [];
@@ -457,7 +467,7 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
       for (const f of fields) {
         const locDef = getRegistryDef(f.field_type);
         if (f.localized && locDef?.localizable) {
-          typeResolvers[f.api_key] = (parent: any, _args: any, context: any) => {
+          typeResolvers[toCamelCase(f.api_key)] = (parent: any, _args: any, context: any) => {
             const rawValue = parent[f.api_key];
             if (rawValue === null || rawValue === undefined) return null;
 
@@ -565,10 +575,12 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
       }
 
       for (const f of fields) {
+        const gqlName = toCamelCase(f.api_key);
+
         if (f.field_type === "link") {
           const targets = getLinkTargets(f.validators);
           if (targets && targets.length > 0) {
-            typeResolvers[f.api_key] = async (parent: any) => {
+            typeResolvers[gqlName] = async (parent: any) => {
               const linkedId = parent[f.api_key];
               if (!linkedId) return null;
               return await resolveLinkedRecord(targets, linkedId);
@@ -578,7 +590,7 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
         if (f.field_type === "links") {
           const targets = getLinksTargets(f.validators);
           if (targets && targets.length > 0) {
-            typeResolvers[f.api_key] = async (parent: any) => {
+            typeResolvers[gqlName] = async (parent: any) => {
               let linkedIds = parent[f.api_key];
               if (typeof linkedIds === "string") {
                 try { linkedIds = JSON.parse(linkedIds); } catch { return []; }
@@ -593,7 +605,7 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
         }
         // Media field resolver: batch-fetch single asset
         if (f.field_type === "media") {
-          typeResolvers[f.api_key] = async (parent: any) => {
+          typeResolvers[gqlName] = async (parent: any) => {
             const assetId = parent[f.api_key];
             if (!assetId) return null;
             const map = await batchFetchAssets([assetId]);
@@ -602,7 +614,7 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
         }
         // Media gallery resolver: batch-fetch all assets in one IN query
         if (f.field_type === "media_gallery") {
-          typeResolvers[f.api_key] = async (parent: any) => {
+          typeResolvers[gqlName] = async (parent: any) => {
             let ids = parent[f.api_key];
             if (typeof ids === "string") { try { ids = JSON.parse(ids); } catch { return []; } }
             if (!Array.isArray(ids)) return [];
@@ -613,7 +625,7 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
         }
         // SEO field resolver: return parsed JSON with image asset resolution
         if (f.field_type === "seo") {
-          typeResolvers[f.api_key] = async (parent: any) => {
+          typeResolvers[gqlName] = async (parent: any) => {
             let seo = parent[f.api_key];
             if (!seo) return null;
             if (typeof seo === "string") {
@@ -625,7 +637,7 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
         }
         // Color field resolver: parse JSON, compute hex
         if (f.field_type === "color") {
-          typeResolvers[f.api_key] = async (parent: any) => {
+          typeResolvers[gqlName] = async (parent: any) => {
             let color = parent[f.api_key];
             if (!color) return null;
             if (typeof color === "string") {
@@ -636,7 +648,7 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
         }
         // LatLon field resolver: parse JSON
         if (f.field_type === "lat_lon") {
-          typeResolvers[f.api_key] = async (parent: any) => {
+          typeResolvers[gqlName] = async (parent: any) => {
             let ll = parent[f.api_key];
             if (!ll) return null;
             if (typeof ll === "string") {
@@ -647,7 +659,7 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
         }
         // StructuredText resolver: return { value, blocks, links }
         if (f.field_type === "structured_text") {
-          typeResolvers[f.api_key] = async (parent: any) => {
+          typeResolvers[gqlName] = async (parent: any) => {
             let dast = parent[f.api_key];
             if (!dast) return null;
             if (typeof dast === "string") {
@@ -709,9 +721,17 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
           };
         }
       }
+      // Add default camelCase → snake_case resolvers for simple fields without custom resolvers
+      for (const f of fields) {
+        const gqlName = toCamelCase(f.api_key);
+        if (!typeResolvers[gqlName]) {
+          typeResolvers[gqlName] = (parent: any) => parent[f.api_key];
+        }
+      }
+
       resolvers[typeName] = typeResolvers;
 
-      // Filter/OrderBy/Meta types
+      // Filter/OrderBy/Meta types (all use camelCase field names)
       const filterFields = [
         "id: StringFilter", "_status: StringFilter",
         "_createdAt: DateTimeFilter", "_updatedAt: DateTimeFilter",
@@ -727,8 +747,9 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
       for (const f of fields) {
         const def = getRegistryDef(f.field_type);
         if (def?.filterType) {
-          filterFields.push(`${f.api_key}: ${def.filterType}`);
-          orderByValues.push(`${f.api_key}_ASC`, `${f.api_key}_DESC`);
+          const gqlName = toCamelCase(f.api_key);
+          filterFields.push(`${gqlName}: ${def.filterType}`);
+          orderByValues.push(`${gqlName}_ASC`, `${gqlName}_DESC`);
         }
       }
       filterFields.push(`AND: [${typeName}Filter!]`, `OR: [${typeName}Filter!]`);
@@ -736,16 +757,18 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
       typeDefs.push(`enum ${typeName}OrderBy { ${orderByValues.join(" ")} }`);
       typeDefs.push(`type ${typeName}Meta { count: Int! }`);
 
-      // Queries
+      // Queries (camelCase like DatoCMS: blogPost not blog_post)
       const listName = `all${typeName}s`;
+      const singleName = toCamelCase(model.api_key);
       queryFieldDefs.push(`${listName}(locale: String, fallbackLocales: [String!], filter: ${typeName}Filter, orderBy: [${typeName}OrderBy!], first: Int, skip: Int): [${typeName}!]!`);
-      queryFieldDefs.push(`${model.api_key}(locale: String, fallbackLocales: [String!], id: ID, filter: ${typeName}Filter): ${typeName}`);
+      queryFieldDefs.push(`${singleName}(locale: String, fallbackLocales: [String!], id: ID, filter: ${typeName}Filter): ${typeName}`);
       queryFieldDefs.push(`_all${typeName}sMeta(filter: ${typeName}Filter): ${typeName}Meta!`);
 
       // Query resolvers — push filtering/ordering/pagination to SQL
       // Support includeDrafts via context (from X-Include-Drafts header)
-      // Build locale-awareness for filter/order compilation
-      const fieldIsLocalized = (fieldName: string) => localizedFieldKeys.has(fieldName);
+      // Build locale-awareness and camelCase→snake_case mapping for filter/order compilation
+      const fieldNameMap = Object.fromEntries(camelToSnake);
+      const fieldIsLocalized = (fieldName: string) => localizedCamelKeys.has(fieldName);
 
       async function queryWithFilter(
         args: { filter?: any; orderBy?: string[]; first?: number; skip?: number },
@@ -755,6 +778,7 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
         const filterLocale = locale ?? defaultLocale ?? undefined;
         const filterOpts = {
           fieldIsLocalized,
+          fieldNameMap,
           locale: filterLocale,
         };
 
@@ -850,7 +874,7 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
         return queryWithFilter(args, includeDrafts, locale);
       };
 
-      resolvers.Query[model.api_key] = async (_: any, args: any, context: any) => {
+      resolvers.Query[singleName] = async (_: any, args: any, context: any) => {
         const includeDrafts = context?.includeDrafts ?? false;
         const locale = args.locale ?? context?.locale ?? defaultLocale;
         if (args.locale) context.locale = args.locale;

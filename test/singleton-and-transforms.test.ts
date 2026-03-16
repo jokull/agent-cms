@@ -27,19 +27,19 @@ describe("Singleton models", () => {
 
     // DatoCMS-style singleton query: just `homepage { ... }` — no id, no filter
     const result = await gqlQuery(handler, `{
-      homepage { hero_title hero_subtitle _modelApiKey }
+      homepage { heroTitle heroSubtitle _modelApiKey }
     }`, { includeDrafts: true });
 
     expect(result.errors).toBeUndefined();
     expect(result.data.homepage).not.toBeNull();
-    expect(result.data.homepage.hero_title).toBe("Welcome");
-    expect(result.data.homepage.hero_subtitle).toBe("To our site");
+    expect(result.data.homepage.heroTitle).toBe("Welcome");
+    expect(result.data.homepage.heroSubtitle).toBe("To our site");
     expect(result.data.homepage._modelApiKey).toBe("homepage");
   });
 
   it("returns null when singleton has no record", async () => {
     const result = await gqlQuery(handler, `{
-      homepage { hero_title }
+      homepage { heroTitle }
     }`, { includeDrafts: true });
 
     expect(result.errors).toBeUndefined();
@@ -53,11 +53,11 @@ describe("Singleton models", () => {
     })).json();
 
     const result = await gqlQuery(handler, `{
-      homepage(id: "${record.id}") { hero_title }
+      homepage(id: "${record.id}") { heroTitle }
     }`, { includeDrafts: true });
 
     expect(result.errors).toBeUndefined();
-    expect(result.data.homepage.hero_title).toBe("Hello");
+    expect(result.data.homepage.heroTitle).toBe("Hello");
   });
 });
 

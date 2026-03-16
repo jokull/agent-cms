@@ -31,13 +31,13 @@ describe("Date, DateTime, Color, and LatLon field types", () => {
       });
 
       const result = await gqlQuery(handler, `{
-        allEvents { title event_date start_time }
+        allEvents { title eventDate startTime }
       }`, { includeDrafts: true });
 
       expect(result.errors).toBeUndefined();
       const event = result.data.allEvents[0];
-      expect(event.event_date).toBe("2025-03-20");
-      expect(event.start_time).toBe("2025-03-20T18:30:00Z");
+      expect(event.eventDate).toBe("2025-03-20");
+      expect(event.startTime).toBe("2025-03-20T18:30:00Z");
     });
 
     it("supports date filtering and ordering", async () => {
@@ -45,7 +45,7 @@ describe("Date, DateTime, Color, and LatLon field types", () => {
       await jsonRequest(handler, "POST", "/api/records", { modelApiKey: "event", data: { title: "Late", event_date: "2025-12-31" } });
 
       const result = await gqlQuery(handler, `{
-        allEvents(orderBy: [event_date_ASC]) { title event_date }
+        allEvents(orderBy: [eventDate_ASC]) { title eventDate }
       }`, { includeDrafts: true });
 
       expect(result.data.allEvents[0].title).toBe("Early");
@@ -69,11 +69,11 @@ describe("Date, DateTime, Color, and LatLon field types", () => {
       });
 
       const result = await gqlQuery(handler, `{
-        allThemes { name primary_color { red green blue alpha hex } }
+        allThemes { name primaryColor { red green blue alpha hex } }
       }`, { includeDrafts: true });
 
       expect(result.errors).toBeUndefined();
-      const color = result.data.allThemes[0].primary_color;
+      const color = result.data.allThemes[0].primaryColor;
       expect(color.red).toBe(0);
       expect(color.green).toBe(119);
       expect(color.blue).toBe(204);
@@ -88,11 +88,11 @@ describe("Date, DateTime, Color, and LatLon field types", () => {
       });
 
       const result = await gqlQuery(handler, `{
-        allThemes { primary_color { red green blue alpha hex } }
+        allThemes { primaryColor { red green blue alpha hex } }
       }`, { includeDrafts: true });
 
-      expect(result.data.allThemes[0].primary_color.alpha).toBe(128);
-      expect(result.data.allThemes[0].primary_color.hex).toBe("#ffffff");
+      expect(result.data.allThemes[0].primaryColor.alpha).toBe(128);
+      expect(result.data.allThemes[0].primaryColor.hex).toBe("#ffffff");
     });
 
     it("rejects invalid color values via Effect Schema", async () => {
@@ -109,10 +109,10 @@ describe("Date, DateTime, Color, and LatLon field types", () => {
       });
 
       const result = await gqlQuery(handler, `{
-        allThemes { primary_color { hex } }
+        allThemes { primaryColor { hex } }
       }`, { includeDrafts: true });
 
-      expect(result.data.allThemes[0].primary_color).toBeNull();
+      expect(result.data.allThemes[0].primaryColor).toBeNull();
     });
   });
 

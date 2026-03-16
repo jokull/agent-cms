@@ -39,12 +39,13 @@ export function compileFilterToSql(
   filter: FilterInput | undefined,
   opts?: {
     fieldIsLocalized?: (field: string) => boolean;
+    fieldNameMap?: Record<string, string>;
     locale?: string;
   }
 ): { where: string; params: any[] } | null {
   if (!filter || Object.keys(filter).length === 0) return null;
 
-  const conditions = buildSqlConditions(filter, opts?.fieldIsLocalized, opts?.locale);
+  const conditions = buildSqlConditions(filter, opts?.fieldIsLocalized, opts?.fieldNameMap, opts?.locale);
   if (conditions.length === 0) return null;
 
   const where = conditions.map((c) => c.sql).join(" AND ");
@@ -55,6 +56,7 @@ export function compileFilterToSql(
 function buildSqlConditions(
   filter: FilterInput,
   fieldIsLocalized?: (field: string) => boolean,
+  fieldNameMap?: Record<string, string>,
   locale?: string
 ): SqlCondition[] {
   const conditions: SqlCondition[] = [];
@@ -63,7 +65,7 @@ function buildSqlConditions(
     if (value === undefined) continue;
 
     if (key === "AND" && Array.isArray(value)) {
-      const subConditions = value.map((f) => buildSqlConditions(f, fieldIsLocalized, locale));
+      const subConditions = value.map((f) => buildSqlConditions(f, fieldIsLocalized, fieldNameMap, locale));
       const parts = subConditions
         .map((sc) => {
           if (sc.length === 0) return null;
@@ -83,7 +85,7 @@ function buildSqlConditions(
     }
 
     if (key === "OR" && Array.isArray(value)) {
-      const subConditions = value.map((f) => buildSqlConditions(f, fieldIsLocalized, locale));
+      const subConditions = value.map((f) => buildSqlConditions(f, fieldIsLocalized, fieldNameMap, locale));
       const parts = subConditions
         .map((sc) => {
           if (sc.length === 0) return null;
@@ -104,7 +106,7 @@ function buildSqlConditions(
 
     if (typeof value !== "object" || value === null) continue;
 
-    // Map GraphQL camelCase meta fields to snake_case DB columns
+    // Map GraphQL camelCase fields to snake_case DB columns
     const META_COLUMN_MAP: Record<string, string> = {
       _createdAt: "_created_at",
       _updatedAt: "_updated_at",
@@ -112,7 +114,7 @@ function buildSqlConditions(
       _firstPublishedAt: "_first_published_at",
       _status: "_status",
     };
-    const dbKey = META_COLUMN_MAP[key] ?? key;
+    const dbKey = META_COLUMN_MAP[key] ?? fieldNameMap?.[key] ?? key;
 
     // Determine the column expression
     const col =
@@ -215,6 +217,7 @@ export function compileOrderBy(
   orderBy: string[] | undefined,
   opts?: {
     fieldIsLocalized?: (field: string) => boolean;
+    fieldNameMap?: Record<string, string>;
     locale?: string;
   }
 ): string | null {
@@ -226,7 +229,7 @@ export function compileOrderBy(
       if (!match) return null;
       const [, field, dir] = match;
 
-      // Map camelCase meta fields to snake_case DB columns
+      // Map camelCase fields to snake_case DB columns
       const META_ORDER_MAP: Record<string, string> = {
         _createdAt: "_created_at",
         _updatedAt: "_updated_at",
@@ -234,10 +237,10 @@ export function compileOrderBy(
         _firstPublishedAt: "_first_published_at",
         _position: "_position",
       };
-      const dbField = META_ORDER_MAP[field] ?? field;
+      const dbField = META_ORDER_MAP[field] ?? opts?.fieldNameMap?.[field] ?? field;
 
       const col =
-        opts?.fieldIsLocalized?.(dbField) && opts?.locale
+        opts?.fieldIsLocalized?.(field) && opts?.locale
           ? `json_extract("${dbField}", '$.${opts.locale}')`
           : `"${dbField}"`;
 

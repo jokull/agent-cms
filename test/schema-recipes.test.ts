@@ -152,8 +152,8 @@ describe("[SCHEMA:recipes] Recipe Site", () => {
       allRecipes {
         title
         slug
-        prep_time
-        cook_time
+        prepTime
+        cookTime
         servings
         cuisine { name slug }
         cover { filename mimeType width height }
@@ -168,8 +168,8 @@ describe("[SCHEMA:recipes] Recipe Site", () => {
     expect(result.errors).toBeUndefined();
     const r = result.data.allRecipes[0];
     expect(r.title).toBe("Pasta Primavera");
-    expect(r.prep_time).toBe(15);
-    expect(r.cook_time).toBe(20);
+    expect(r.prepTime).toBe(15);
+    expect(r.cookTime).toBe(20);
     expect(r.servings).toBe(4);
     expect(r.cuisine.name).toBe("Italian");
     expect(r.cuisine.slug).toBe("italian");
@@ -192,7 +192,7 @@ describe("[SCHEMA:recipes] Recipe Site", () => {
     });
 
     const quickMeals = await gqlQuery(handler, `{
-      allRecipes(filter: { cook_time: { lte: 30 } }) { title }
+      allRecipes(filter: { cookTime: { lte: 30 } }) { title }
     }`);
     expect(quickMeals.data.allRecipes).toHaveLength(1);
     expect(quickMeals.data.allRecipes[0].title).toBe("Quick Salad");
