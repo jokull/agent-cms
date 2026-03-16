@@ -5,6 +5,7 @@
 import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
 import { compileFilterToSql, compileOrderBy, type FilterCompilerOpts } from "./filter-compiler.js";
+import { computeIsValid } from "../db/validators.js";
 import type { SchemaBuilderContext, ModelQueryMeta, DynamicRow, GqlContext } from "./gql-types.js";
 import { toTypeName, toCamelCase, getRegistryDef, deserializeRecord } from "./gql-utils.js";
 
@@ -56,9 +57,9 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
     // Queries (camelCase like DatoCMS: blogPost not blog_post)
     const listName = `all${typeName}s`;
     const singleName = toCamelCase(model.api_key);
-    queryFieldDefs.push(`${listName}(locale: String, fallbackLocales: [String!], filter: ${typeName}Filter, orderBy: [${typeName}OrderBy!], first: Int, skip: Int): [${typeName}!]!`);
+    queryFieldDefs.push(`${listName}(locale: String, fallbackLocales: [String!], filter: ${typeName}Filter, orderBy: [${typeName}OrderBy!], first: Int, skip: Int, excludeInvalid: Boolean): [${typeName}!]!`);
     queryFieldDefs.push(`${singleName}(locale: String, fallbackLocales: [String!], id: ID, filter: ${typeName}Filter): ${typeName}`);
-    queryFieldDefs.push(`_all${typeName}sMeta(filter: ${typeName}Filter): ${typeName}Meta!`);
+    queryFieldDefs.push(`_all${typeName}sMeta(filter: ${typeName}Filter, excludeInvalid: Boolean): ${typeName}Meta!`);
 
     // Build locale-awareness and camelCase->snake_case mapping for filter/order compilation
     const fieldNameMap = Object.fromEntries(camelToSnake);
@@ -166,17 +167,21 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
       );
     }
 
-    (resolvers.Query as Record<string, unknown>)[listName] = (_: unknown, args: DynamicRow, context: GqlContext) => {
+    (resolvers.Query as Record<string, unknown>)[listName] = async (_: unknown, args: DynamicRow, context: GqlContext) => {
       const includeDrafts = context?.includeDrafts ?? false;
       const locale = (args.locale as string) ?? context?.locale ?? defaultLocale;
       // Store locale for nested field resolvers (per-query, not shared across root fields)
       if (args.locale) context.locale = args.locale as string;
       if (args.fallbackLocales) context.fallbackLocales = args.fallbackLocales as string[];
-      return queryWithFilter(
+      let results = await queryWithFilter(
         args as { filter?: DynamicRow; orderBy?: string[]; first?: number; skip?: number },
         includeDrafts,
         locale ?? undefined
       );
+      if (args.excludeInvalid) {
+        results = results.filter(r => computeIsValid(r, fields, defaultLocale).valid);
+      }
+      return results;
     };
 
     (resolvers.Query as Record<string, unknown>)[singleName] = async (_: unknown, args: DynamicRow, context: GqlContext) => {
@@ -222,8 +227,17 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
       return null;
     };
 
-    (resolvers.Query as Record<string, unknown>)[`_all${typeName}sMeta`] = (_: unknown, args: DynamicRow, context: GqlContext) => {
+    (resolvers.Query as Record<string, unknown>)[`_all${typeName}sMeta`] = async (_: unknown, args: DynamicRow, context: GqlContext) => {
       const includeDrafts = context?.includeDrafts ?? false;
+      if (args.excludeInvalid) {
+        // Need to fetch all records and filter in JS for accurate count
+        const allRecords = await queryWithFilter(
+          { filter: args.filter as DynamicRow, first: 500 },
+          includeDrafts
+        );
+        const validCount = allRecords.filter(r => computeIsValid(r, fields, defaultLocale).valid).length;
+        return { count: validCount };
+      }
       return { count: countWithFilter(args.filter as DynamicRow | undefined, includeDrafts) };
     };
   }

@@ -42,3 +42,40 @@ export function getLinksTargets(validators: Record<string, unknown>): string[] |
 export function isSearchable(validators: Record<string, unknown>): boolean {
   return validators.searchable !== false;
 }
+
+/**
+ * Compute whether a record is valid (all required fields have values).
+ * For localized required fields, checks the default locale key in the JSON map.
+ * Returns { valid, missingFields } where missingFields lists api_keys that are missing.
+ */
+export function computeIsValid(
+  record: Record<string, unknown>,
+  fields: ReadonlyArray<{ api_key: string; localized: number; validators: Record<string, unknown> }>,
+  defaultLocale: string | null
+): { valid: boolean; missingFields: string[] } {
+  const missingFields: string[] = [];
+  for (const field of fields) {
+    if (!isRequired(field.validators)) continue;
+    const value = record[field.api_key];
+    if (field.localized && defaultLocale) {
+      // Localized field: check default locale key in JSON map
+      let localeMap = value;
+      if (typeof localeMap === "string") {
+        try { localeMap = JSON.parse(localeMap); } catch { missingFields.push(field.api_key); continue; }
+      }
+      if (typeof localeMap !== "object" || localeMap === null) {
+        missingFields.push(field.api_key);
+        continue;
+      }
+      const locValue = (localeMap as Record<string, unknown>)[defaultLocale];
+      if (locValue === null || locValue === undefined || locValue === "") {
+        missingFields.push(field.api_key);
+      }
+    } else {
+      if (value === null || value === undefined || value === "") {
+        missingFields.push(field.api_key);
+      }
+    }
+  }
+  return { valid: missingFields.length === 0, missingFields };
+}

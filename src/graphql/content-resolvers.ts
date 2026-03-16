@@ -4,7 +4,7 @@
 import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
 import type { AssetRow } from "../db/row-types.js";
-import { getLinkTargets, getLinksTargets } from "../db/validators.js";
+import { getLinkTargets, getLinksTargets, computeIsValid } from "../db/validators.js";
 import { extractBlockIds, extractInlineBlockIds, extractLinkIds } from "../dast/index.js";
 import type { SchemaBuilderContext, ModelQueryMeta, DynamicRow, GqlContext, AssetObject, DastDocInput } from "./gql-types.js";
 import { toTypeName, toCamelCase, fieldToSDL, getRegistryDef, deserializeRecord } from "./gql-utils.js";
@@ -37,7 +37,7 @@ export function buildContentModelResolvers(
 
     // Object type
     const fieldDefs = [
-      "id: ID!", "_modelApiKey: String!", "_status: String", "_createdAt: String", "_updatedAt: String",
+      "id: ID!", "_modelApiKey: String!", "_status: String", "_isValid: Boolean!", "_createdAt: String", "_updatedAt: String",
       "_publishedAt: String", "_firstPublishedAt: String", "_seoMetaTags: [Tag!]!",
     ];
     if (model.sortable || model.tree) {
@@ -84,6 +84,7 @@ export function buildContentModelResolvers(
     typeResolvers._updatedAt = (p: DynamicRow) => p._updated_at;
     typeResolvers._publishedAt = (p: DynamicRow) => p._published_at;
     typeResolvers._firstPublishedAt = (p: DynamicRow) => p._first_published_at;
+    typeResolvers._isValid = (parent: DynamicRow) => computeIsValid(parent, fields, defaultLocale).valid;
 
     // _seoMetaTags resolver: auto-generate meta tags from seo field or heuristic field selection
     const seoField = fields.find((f) => f.field_type === "seo");

@@ -1,8 +1,10 @@
 import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
-import { NotFoundError } from "../errors.js";
+import { NotFoundError, ValidationError } from "../errors.js";
 import { selectById } from "../schema-engine/sql-records.js";
-import type { ModelRow, ContentRow } from "../db/row-types.js";
+import type { ModelRow, ContentRow, FieldRow } from "../db/row-types.js";
+import { parseFieldValidators } from "../db/row-types.js";
+import { computeIsValid } from "../db/validators.js";
 import { fireWebhooks } from "./webhook-service.js";
 
 export function publishRecord(modelApiKey: string, recordId: string) {
@@ -15,9 +17,27 @@ export function publishRecord(modelApiKey: string, recordId: string) {
     );
     if (models.length === 0) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
 
-    const tableName = `content_${models[0].api_key}`;
+    const model = models[0];
+    const tableName = `content_${model.api_key}`;
     const record = yield* selectById(tableName, recordId);
     if (!record) return yield* new NotFoundError({ entity: "Record", id: recordId });
+
+    // Validate required fields before publishing
+    const fieldRows = yield* sql.unsafe<FieldRow>(
+      "SELECT * FROM fields WHERE model_id = ? ORDER BY position", [model.id]
+    );
+    const parsedFields = fieldRows.map(parseFieldValidators);
+    // Get default locale for localized field validation
+    const localeRows = yield* sql.unsafe<{ code: string }>(
+      "SELECT code FROM locales ORDER BY position LIMIT 1", []
+    );
+    const defaultLocale = localeRows.length > 0 ? localeRows[0].code : null;
+    const { valid, missingFields } = computeIsValid(record, parsedFields, defaultLocale);
+    if (!valid) {
+      return yield* new ValidationError({
+        message: `Cannot publish: missing required fields: ${missingFields.join(", ")}`,
+      });
+    }
 
     // Build snapshot from current field values (exclude system columns)
     const snapshot: Record<string, unknown> = {};
