@@ -173,7 +173,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 - [x] **P0.9** Slug field with diacritics and uniqueness *(done)*
 - [x] **P0.10** GraphQL foundation *(done — SDL-based, working)*
 - [x] **P0.10** GraphQL foundation *(done)*
-- [ ] **P0.10a** **@effect/sql migration**: Replace Drizzle for dynamic tables with `@effect/sql` template literals. Keep Drizzle for system tables only. Use `@effect/sql-sqlite-node` for tests (`SqlClient.SqlClient` injected via Layer). Hono stays as HTTP shell (HttpRouter deferred to Effect 4). Schema engine DDL, record CRUD, and GraphQL resolvers all use `@effect/sql` for dynamic table operations. See D43-D48.
+- [x] **P0.10a** @effect/sql migration *(done — Effect platform + @effect/sql fully integrated)*
 - [x] **P0.11** GraphQL filtering + ordering *(done)*
 - [x] **P0.12** Link fields with GraphQL resolution *(done)*
 - [x] **P0.13** `[SCHEMA:blog]` integration test *(done — 100 tests passing)*
@@ -185,7 +185,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 - [x] **P1.3** StructuredText write orchestration *(done — 5 tests)*
 - [x] **P1.4** StructuredText update + orphan cleanup *(done — 3 tests)*
 - [x] **P1.5** GraphQL StructuredText resolution *(done — { value, blocks, links }, 3 tests)*
-- [ ] **P1.6** Nested blocks: A block type with a StructuredText field that itself allows blocks. Test recursive resolution: content record → block A (has ST field) → block B (inside A's ST). Verify GraphQL returns the full nested `{ value, blocks }` structure.
+- [x] **P1.6** Nested blocks *(done — page→feature_grid→feature_cards, 2 tests)*
 - [x] **P1.7** StructuredText validators *(done — block whitelist tested in P1.3, blocks_only in P1.8)*
 - [x] **P1.8** Block-only StructuredText / modular content *(done — 8 tests)*
 - [x] **P1.9** Draft/publish lifecycle *(done — 6 tests)*

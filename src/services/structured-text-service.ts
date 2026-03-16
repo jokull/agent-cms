@@ -73,7 +73,8 @@ export function writeStructuredText(params: {
       }
     }
 
-    // 3. Validate block types against whitelist
+    // 3. Validate block types against whitelist — ONLY for blocks directly referenced by this DAST
+    const referencedBlockIdSet = new Set(referencedBlockIds);
     for (const [blockId, blockData] of Object.entries(blocks)) {
       if (!blockData._type || typeof blockData._type !== "string") {
         return yield* new ValidationError({
@@ -82,11 +83,15 @@ export function writeStructuredText(params: {
         });
       }
 
-      if (allowedBlockTypes && !allowedBlockTypes.includes(blockData._type)) {
-        return yield* new ValidationError({
-          message: `Block type '${blockData._type}' is not allowed in field '${fieldApiKey}'. Allowed: ${allowedBlockTypes.join(", ")}`,
-          field: fieldApiKey,
-        });
+      // Only validate whitelist for blocks directly in THIS field's DAST
+      // (nested blocks inside block ST fields have their own whitelists)
+      if (referencedBlockIdSet.has(blockId)) {
+        if (allowedBlockTypes && !allowedBlockTypes.includes(blockData._type)) {
+          return yield* new ValidationError({
+            message: `Block type '${blockData._type}' is not allowed in field '${fieldApiKey}'. Allowed: ${allowedBlockTypes.join(", ")}`,
+            field: fieldApiKey,
+          });
+        }
       }
 
       // Verify block type exists in models
