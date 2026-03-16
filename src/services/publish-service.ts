@@ -6,6 +6,7 @@ import type { ModelRow, ContentRow, FieldRow } from "../db/row-types.js";
 import { parseFieldValidators } from "../db/row-types.js";
 import { computeIsValid } from "../db/validators.js";
 import { fireWebhooks } from "./webhook-service.js";
+import { materializeRecordStructuredTextFields } from "./structured-text-service.js";
 
 export function publishRecord(modelApiKey: string, recordId: string) {
   return Effect.gen(function* () {
@@ -39,9 +40,15 @@ export function publishRecord(modelApiKey: string, recordId: string) {
       });
     }
 
+    const materialized = yield* materializeRecordStructuredTextFields({
+      modelApiKey,
+      record,
+      fields: parsedFields,
+    });
+
     // Build snapshot from current field values (exclude system columns)
     const snapshot: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(record)) {
+    for (const [key, value] of Object.entries(materialized)) {
       if (!key.startsWith("_") && key !== "id") {
         snapshot[key] = value;
       }

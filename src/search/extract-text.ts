@@ -114,8 +114,13 @@ function extractFieldText(field: ParsedFieldRow, value: unknown): string[] {
       const parsed = typeof value === "string" ? safeParse(value) : value;
       if (!isRecord(parsed)) return [];
       const dast = isRecord(parsed.value) ? parsed.value : parsed;
+      const parts: string[] = [];
       const text = extractDastText(dast);
-      return text ? [text] : [];
+      if (text) parts.push(text);
+      if (isRecord(parsed.blocks)) {
+        parts.push(...extractGenericText(parsed.blocks));
+      }
+      return parts;
     }
 
     case "seo": {
@@ -154,7 +159,8 @@ function extractGenericText(value: unknown): string[] {
   if (isRecord(value)) {
     // JSON objects — extract string values recursively
     const texts: string[] = [];
-    for (const v of Object.values(value)) {
+    for (const [key, v] of Object.entries(value)) {
+      if (key.startsWith("_")) continue;
       texts.push(...extractGenericText(v));
     }
     return texts;

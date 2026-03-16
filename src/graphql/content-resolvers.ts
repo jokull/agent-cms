@@ -5,9 +5,9 @@ import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
 import type { AssetRow } from "../db/row-types.js";
 import { getLinkTargets, getLinksTargets, computeIsValid } from "../db/validators.js";
-import { extractBlockIds, extractInlineBlockIds, extractLinkIds } from "../dast/index.js";
-import type { SchemaBuilderContext, ModelQueryMeta, DynamicRow, GqlContext, AssetObject, DastDocInput } from "./gql-types.js";
+import type { SchemaBuilderContext, ModelQueryMeta, DynamicRow, GqlContext, AssetObject } from "./gql-types.js";
 import { toTypeName, toCamelCase, fieldToSDL, getRegistryDef, deserializeRecord } from "./gql-utils.js";
+import { batchFetchRecords, batchResolveLinkedRecords, resolveStructuredTextValue } from "./structured-text-resolver.js";
 
 /**
  * Build content model types and field resolvers.
@@ -302,48 +302,27 @@ export function buildContentModelResolvers(
     }
 
     /** Batch-fetch records from a content table by IDs, return map of id -> record */
-    async function batchFetchRecords(tableApiKey: string, ids: string[]): Promise<Map<string, DynamicRow>> {
-      if (ids.length === 0) return new Map();
-      const tName = typeNames.get(tableApiKey);
-      const placeholders = ids.map(() => "?").join(", ");
-      const rows = await runSql(
-        Effect.gen(function* () {
-          const s = yield* SqlClient.SqlClient;
-          return yield* s.unsafe<DynamicRow>(
-            `SELECT * FROM "content_${tableApiKey}" WHERE id IN (${placeholders})`, ids
-          );
-        })
-      );
-      const map = new Map<string, DynamicRow>();
-      for (const row of rows) {
-        map.set(row.id as string, { ...deserializeRecord(row), __typename: tName ? `${tName}Record` : undefined });
-      }
-      return map;
-    }
-
     /** Resolve a single record ID across target tables (for single link fields) */
-    async function resolveLinkedRecord(targetApiKeys: string[], id: string): Promise<DynamicRow | null> {
-      for (const apiKey of targetApiKeys) {
-        const map = await batchFetchRecords(apiKey, [id]);
-        const found = map.get(id);
-        if (found) return found;
-      }
-      return null;
+    async function resolveLinkedRecord(targetApiKeys: string[], id: string, includeDrafts: boolean): Promise<DynamicRow | null> {
+      const resolved = await batchResolveLinkedRecords({
+        runSql,
+        targetApiKeys,
+        ids: [id],
+        typeNames,
+        includeDrafts,
+      });
+      return resolved.get(id) ?? null;
     }
 
     /** Batch-resolve multiple record IDs across target tables (for links fields) */
-    async function batchResolveLinkedRecords(targetApiKeys: string[], ids: string[]): Promise<Map<string, DynamicRow>> {
-      const result = new Map<string, DynamicRow>();
-      const remaining = new Set(ids);
-      for (const apiKey of targetApiKeys) {
-        if (remaining.size === 0) break;
-        const map = await batchFetchRecords(apiKey, [...remaining]);
-        for (const [id, record] of map) {
-          result.set(id, record);
-          remaining.delete(id);
-        }
-      }
-      return result;
+    async function resolveLinkedRecords(targetApiKeys: string[], ids: string[], includeDrafts: boolean): Promise<Map<string, DynamicRow>> {
+      return await batchResolveLinkedRecords({
+        runSql,
+        targetApiKeys,
+        ids,
+        typeNames,
+        includeDrafts,
+      });
     }
 
     for (const f of fields) {
@@ -352,24 +331,24 @@ export function buildContentModelResolvers(
       if (f.field_type === "link") {
         const targets = getLinkTargets(f.validators);
         if (targets && targets.length > 0) {
-          typeResolvers[gqlName] = async (parent: DynamicRow) => {
+          typeResolvers[gqlName] = async (parent: DynamicRow, _args: unknown, context: GqlContext) => {
             const linkedId = parent[f.api_key];
             if (!linkedId) return null;
-            return await resolveLinkedRecord(targets, linkedId as string);
+            return await resolveLinkedRecord(targets, linkedId as string, context?.includeDrafts ?? false);
           };
         }
       }
       if (f.field_type === "links") {
         const targets = getLinksTargets(f.validators);
         if (targets && targets.length > 0) {
-          typeResolvers[gqlName] = async (parent: DynamicRow) => {
+          typeResolvers[gqlName] = async (parent: DynamicRow, _args: unknown, context: GqlContext) => {
             let linkedIds = parent[f.api_key];
             if (typeof linkedIds === "string") {
               try { linkedIds = JSON.parse(linkedIds); } catch { return []; }
             }
             if (!Array.isArray(linkedIds)) return [];
             // Batch-fetch all linked records in one IN query per target table
-            const resolved = await batchResolveLinkedRecords(targets, linkedIds as string[]);
+            const resolved = await resolveLinkedRecords(targets, linkedIds as string[], context?.includeDrafts ?? false);
             // Return in original order, preserving insertion order
             return (linkedIds as string[]).map((id: string) => resolved.get(id) ?? null).filter(Boolean);
           };
@@ -431,64 +410,22 @@ export function buildContentModelResolvers(
       }
       // StructuredText resolver: return { value, blocks, links }
       if (f.field_type === "structured_text") {
-        typeResolvers[gqlName] = async (parent: DynamicRow) => {
+        typeResolvers[gqlName] = async (parent: DynamicRow, _args: unknown, context: GqlContext) => {
           let dast = parent[f.api_key];
           if (!dast) return null;
-          if (typeof dast === "string") {
-            try { dast = JSON.parse(dast); } catch { return null; }
-          }
-
-          // Extract block IDs and inline block IDs separately
-          const blockLevelIds = new Set(extractBlockIds(dast as DastDocInput));
-          const inlineBlockIdSet = new Set(extractInlineBlockIds(dast as DastDocInput));
-
-          // Fetch all blocks for this field, then categorize
-          const blocks: DynamicRow[] = [];
-          const inlineBlocks: DynamicRow[] = [];
-
-          if (blockLevelIds.size > 0 || inlineBlockIdSet.size > 0) {
-            for (const bm of blockModels) {
-              const fetched = await runSql(
-                Effect.gen(function* () {
-                  const s = yield* SqlClient.SqlClient;
-                  const rows = yield* s.unsafe<DynamicRow>(
-                    `SELECT * FROM "block_${bm.api_key}" WHERE _root_record_id = ? AND _root_field_api_key = ?`,
-                    [parent.id, f.api_key]
-                  );
-                  return rows.map((r: DynamicRow) => {
-                    const deserialized = deserializeRecord(r);
-                    return { id: String(deserialized.id ?? ""), ...deserialized, __typename: `${toTypeName(bm.api_key)}Record` };
-                  });
-                })
-              );
-              for (const record of fetched) {
-                if (blockLevelIds.has(record.id as string)) {
-                  blocks.push(record);
-                } else if (inlineBlockIdSet.has(record.id as string)) {
-                  inlineBlocks.push(record);
-                }
-                // Skip blocks not referenced in this DAST (e.g., nested blocks
-                // belonging to a child block's structured_text field)
-              }
-            }
-          }
-
-          // Resolve itemLink/inlineItem record references using batch helper
-          const linkRecordIds = extractLinkIds(dast as DastDocInput);
-          const allModelApiKeys = models.map((m) => m.api_key);
-          const resolvedLinks = linkRecordIds.length > 0
-            ? await batchResolveLinkedRecords(allModelApiKeys, linkRecordIds)
-            : new Map();
-          const links = linkRecordIds
-            .map((id) => resolvedLinks.get(id) ?? null)
-            .filter(Boolean);
-
-          return {
-            value: dast,
-            blocks,
-            inlineBlocks,
-            links,
-          };
+          return await resolveStructuredTextValue({
+            runSql,
+            rawValue: dast,
+            rootRecordId: String(parent.id),
+            rootFieldApiKey: f.api_key,
+            parentContainerModelApiKey: model.api_key,
+            parentBlockId: null,
+            parentFieldApiKey: f.api_key,
+            models,
+            blockModels,
+            typeNames,
+            includeDrafts: context?.includeDrafts ?? false,
+          });
         };
       }
     }

@@ -69,20 +69,22 @@ describe("P1.6: Nested blocks", () => {
               _type: "feature_grid",
               heading: "Our Features",
               features: {
-                schema: "dast",
-                document: {
-                  type: "root",
-                  children: [
-                    { type: "block", item: card1Id },
-                    { type: "block", item: card2Id },
-                  ],
+                value: {
+                  schema: "dast",
+                  document: {
+                    type: "root",
+                    children: [
+                      { type: "block", item: card1Id },
+                      { type: "block", item: card2Id },
+                    ],
+                  },
+                },
+                blocks: {
+                  [card1Id]: { _type: "feature_card", title: "Fast", description: "Lightning speed" },
+                  [card2Id]: { _type: "feature_card", title: "Secure", description: "Bank-grade security" },
                 },
               },
             },
-            // Note: inner blocks (feature_cards) are siblings in the blocks map,
-            // not nested inside the grid block. They share the same _root_record_id.
-            [card1Id]: { _type: "feature_card", title: "Fast", description: "Lightning speed" },
-            [card2Id]: { _type: "feature_card", title: "Secure", description: "Bank-grade security" },
           },
         },
       },
@@ -138,18 +140,22 @@ describe("P1.6: Nested blocks", () => {
               _type: "feature_grid",
               heading: "Why Choose Us",
               features: {
-                schema: "dast",
-                document: {
-                  type: "root",
-                  children: [
-                    { type: "block", item: card1Id },
-                    { type: "block", item: card2Id },
-                  ],
+                value: {
+                  schema: "dast",
+                  document: {
+                    type: "root",
+                    children: [
+                      { type: "block", item: card1Id },
+                      { type: "block", item: card2Id },
+                    ],
+                  },
+                },
+                blocks: {
+                  [card1Id]: { _type: "feature_card", title: "Fast", description: "Speed" },
+                  [card2Id]: { _type: "feature_card", title: "Easy", description: "Simple" },
                 },
               },
             },
-            [card1Id]: { _type: "feature_card", title: "Fast", description: "Speed" },
-            [card2Id]: { _type: "feature_card", title: "Easy", description: "Simple" },
           },
         },
       },
@@ -162,7 +168,15 @@ describe("P1.6: Nested blocks", () => {
           value
           blocks {
             __typename
-            ... on FeatureGridRecord { heading features { value } }
+            ... on FeatureGridRecord {
+              heading
+              features {
+                value
+                blocks {
+                  ... on FeatureCardRecord { title description }
+                }
+              }
+            }
           }
           inlineBlocks { __typename }
           links
@@ -180,8 +194,8 @@ describe("P1.6: Nested blocks", () => {
     expect(gridBlock).toBeDefined();
     expect(gridBlock.heading).toBe("Why Choose Us");
 
-    // The feature_grid's "features" field should contain the nested DAST
-    // (it's stored as JSON on the block row)
+    // The feature_grid's "features" field resolves nested typed blocks from normalized storage
     expect(gridBlock.features).toBeDefined();
+    expect(gridBlock.features.blocks).toHaveLength(2);
   });
 });

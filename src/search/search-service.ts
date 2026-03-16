@@ -8,6 +8,7 @@ import { parseFieldValidators } from "../db/row-types.js";
 import { ValidationError } from "../errors.js";
 import { vectorizeIndex, vectorizeDeindex, vectorizeSearch, reciprocalRankFusion } from "./vectorize.js";
 import { VectorizeContext } from "./vectorize-context.js";
+import { materializeRecordStructuredTextFields } from "../services/structured-text-service.js";
 
 /**
  * Index a record after creation.
@@ -19,7 +20,12 @@ export function indexRecord(
   fields: ParsedFieldRow[]
 ) {
   return Effect.gen(function* () {
-    const { title, body } = extractRecordText(data, fields);
+    const materialized = yield* materializeRecordStructuredTextFields({
+      modelApiKey,
+      record: data,
+      fields,
+    });
+    const { title, body } = extractRecordText(materialized, fields);
     if (!title && !body) return;
     yield* ftsIndex(modelApiKey, recordId, title, body);
     const bindings = yield* VectorizeContext;
@@ -45,7 +51,12 @@ export function reindexRecord(
       [recordId]
     );
     if (rows.length === 0) return;
-    const { title, body } = extractRecordText(rows[0], fields);
+    const materialized = yield* materializeRecordStructuredTextFields({
+      modelApiKey,
+      record: rows[0],
+      fields,
+    });
+    const { title, body } = extractRecordText(materialized, fields);
     if (!title && !body) return;
     yield* ftsIndex(modelApiKey, recordId, title, body);
     const bindings = yield* VectorizeContext;
@@ -91,7 +102,12 @@ export function rebuildIndex(modelApiKey: string) {
     );
     const bindings = yield* VectorizeContext;
     for (const record of records) {
-      const { title, body } = extractRecordText(record, fields);
+      const materialized = yield* materializeRecordStructuredTextFields({
+        modelApiKey,
+        record,
+        fields,
+      });
+      const { title, body } = extractRecordText(materialized, fields);
       if (title || body) {
         yield* ftsIndex(modelApiKey, String(record.id), title, body);
         if (Option.isSome(bindings)) {
@@ -123,7 +139,7 @@ export function reindexAll(modelApiKey?: string) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
 
-    let modelRows: Array<{ id: string; api_key: string }>;
+    let modelRows: ReadonlyArray<{ id: string; api_key: string }>;
     if (modelApiKey) {
       modelRows = yield* sql.unsafe<{ id: string; api_key: string }>(
         "SELECT id, api_key FROM models WHERE api_key = ? AND is_block = 0",
@@ -158,7 +174,12 @@ export function reindexAll(modelApiKey?: string) {
       totalRecords += records.length;
 
       for (const record of records) {
-        const { title, body } = extractRecordText(record, fields);
+        const materialized = yield* materializeRecordStructuredTextFields({
+          modelApiKey: model.api_key,
+          record,
+          fields,
+        });
+        const { title, body } = extractRecordText(materialized, fields);
         if (title || body) {
           yield* ftsIndex(model.api_key, String(record.id), title, body);
           if (Option.isSome(bindings)) {

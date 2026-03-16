@@ -98,8 +98,6 @@ describe("[SCHEMA:recipes] Recipe Site", () => {
 
     // Create recipe with nested StructuredText blocks
     const stepBlockId = "01HRCP_STEP_001";
-    const ingredientBlockId = "01HRCP_INGR_001";
-
     // The recipe_step block has a structured_text field "instruction"
     // which itself contains an ingredient_callout inline block
     const recipeRes = await jsonRequest(handler, "POST", "/api/records", {
@@ -126,16 +124,19 @@ describe("[SCHEMA:recipes] Recipe Site", () => {
             [stepBlockId]: {
               _type: "recipe_step",
               instruction: {
-                schema: "dast",
-                document: {
-                  type: "root",
-                  children: [
-                    {
-                      type: "paragraph",
-                      children: [{ type: "span", value: "Boil the pasta according to package directions" }],
-                    },
-                  ],
+                value: {
+                  schema: "dast",
+                  document: {
+                    type: "root",
+                    children: [
+                      {
+                        type: "paragraph",
+                        children: [{ type: "span", value: "Boil the pasta according to package directions" }],
+                      },
+                    ],
+                  },
                 },
+                blocks: {},
               },
             },
           },

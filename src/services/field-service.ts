@@ -7,6 +7,7 @@ import { migrateContentTable } from "../schema-engine/sql-ddl.js";
 import type { ModelRow, FieldRow } from "../db/row-types.js";
 import { parseFieldValidators } from "../db/row-types.js";
 import { CreateFieldInput } from "./input-schemas.js";
+import { deleteBlockSubtrees } from "./structured-text-service.js";
 
 function syncTable(modelId: string) {
   return Effect.gen(function* () {
@@ -208,10 +209,27 @@ export function updateField(fieldId: string, body: Record<string, unknown>) {
       if (field.field_type === "structured_text") {
         const blockModels = yield* sql.unsafe<{ api_key: string }>("SELECT api_key FROM models WHERE is_block = 1");
         for (const bm of blockModels) {
-          yield* sql.unsafe(
-            `UPDATE "block_${bm.api_key}" SET _root_field_api_key = ? WHERE _root_field_api_key = ?`,
-            [newApiKey, field.api_key]
-          );
+          if (modelInfo[0].is_block) {
+            yield* sql.unsafe(
+              `UPDATE "block_${bm.api_key}"
+               SET _parent_field_api_key = ?
+               WHERE _parent_container_model_api_key = ? AND _parent_field_api_key = ?`,
+              [newApiKey, modelInfo[0].api_key, field.api_key]
+            );
+          } else {
+            yield* sql.unsafe(
+              `UPDATE "block_${bm.api_key}"
+               SET _root_field_api_key = ?
+               WHERE _root_field_api_key = ?`,
+              [newApiKey, field.api_key]
+            );
+            yield* sql.unsafe(
+              `UPDATE "block_${bm.api_key}"
+               SET _parent_field_api_key = ?
+               WHERE _parent_container_model_api_key = ? AND _parent_block_id IS NULL AND _parent_field_api_key = ?`,
+              [newApiKey, modelInfo[0].api_key, field.api_key]
+            );
+          }
         }
       }
 
@@ -276,17 +294,24 @@ export function deleteField(fieldId: string) {
 
       // Clean up orphaned block rows if this is a structured_text field
       if (field.field_type === "structured_text") {
-        const validators = JSON.parse(field.validators || "{}");
-        const blockTypes: string[] = validators.structured_text_blocks ?? [];
-        for (const blockApiKey of blockTypes) {
-          // Check block table exists before querying
-          const tableExists = yield* sql.unsafe<{ name: string }>(
-            `SELECT name FROM sqlite_master WHERE type='table' AND name=?`,
-            [`block_${blockApiKey}`]
-          );
-          if (tableExists.length > 0) {
+        const blockModels = yield* sql.unsafe<{ api_key: string }>("SELECT api_key FROM models WHERE is_block = 1");
+        if (modelInfo[0].is_block) {
+          const directChildIds: string[] = [];
+          for (const bm of blockModels) {
+            const rows = yield* sql.unsafe<{ id: string }>(
+              `SELECT id FROM "block_${bm.api_key}"
+               WHERE _parent_container_model_api_key = ?
+                 AND _parent_field_api_key = ?
+                 AND _parent_block_id IN (SELECT id FROM "${tableName}")`,
+              [modelInfo[0].api_key, field.api_key]
+            );
+            directChildIds.push(...rows.map((r) => r.id));
+          }
+          yield* deleteBlockSubtrees({ blockIds: directChildIds });
+        } else {
+          for (const bm of blockModels) {
             yield* sql.unsafe(
-              `DELETE FROM "block_${blockApiKey}" WHERE _root_field_api_key = ? AND _root_record_id IN (SELECT id FROM "${tableName}")`,
+              `DELETE FROM "block_${bm.api_key}" WHERE _root_field_api_key = ? AND _root_record_id IN (SELECT id FROM "${tableName}")`,
               [field.api_key]
             );
           }

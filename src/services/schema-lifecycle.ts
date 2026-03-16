@@ -255,10 +255,7 @@ function cleanPublishedSnapshot(
     if (typeof dast === "string") {
       try { dast = JSON.parse(dast); } catch { return; }
     }
-    const dastObj = dast as DastLike | null;
-    if (!dastObj?.document?.children) return;
-
-    snapshot[fieldApiKey] = removeBlockNodesFromDast(dastObj, blockIds);
+    snapshot[fieldApiKey] = removeBlockNodesFromStructuredTextValue(dast, blockIds);
     yield* sql.unsafe(
       `UPDATE "${tableName}" SET _published_snapshot = ? WHERE id = ?`,
       [JSON.stringify(snapshot), recordId]
@@ -267,6 +264,8 @@ function cleanPublishedSnapshot(
 }
 
 interface DastLike {
+  value?: DastLike;
+  blocks?: Record<string, unknown>;
   document?: { children?: DastNode[] };
   [key: string]: unknown;
 }
@@ -289,6 +288,27 @@ function removeBlockNodesFromDast(dast: DastLike, blockIds: Set<string>): DastLi
       children: filterNodes(dast.document.children, blockIds),
     },
   };
+}
+
+function removeBlockNodesFromStructuredTextValue(value: unknown, blockIds: Set<string>): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const obj = value as DastLike;
+
+  if (obj.value && typeof obj.value === "object" && obj.blocks && typeof obj.blocks === "object") {
+    const cleanedBlocks = { ...(obj.blocks as Record<string, unknown>) };
+    for (const blockId of blockIds) delete cleanedBlocks[blockId];
+    return {
+      ...obj,
+      value: removeBlockNodesFromDast(obj.value as DastLike, blockIds),
+      blocks: cleanedBlocks,
+    };
+  }
+
+  if (obj.document?.children) {
+    return removeBlockNodesFromDast(obj, blockIds);
+  }
+
+  return value;
 }
 
 function filterNodes(nodes: DastNode[], blockIds: Set<string>): DastNode[] {

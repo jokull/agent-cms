@@ -81,6 +81,10 @@ export interface BlockRow {
   readonly id: string;
   readonly _root_record_id: string;
   readonly _root_field_api_key: string;
+  readonly _parent_container_model_api_key: string;
+  readonly _parent_block_id: string | null;
+  readonly _parent_field_api_key: string;
+  readonly _depth: number;
   readonly [fieldKey: string]: unknown;
 }
 

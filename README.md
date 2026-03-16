@@ -203,6 +203,7 @@ All fields are indexed by default. Opt a field out with `{"searchable": false}` 
 - **Application**: [Effect](https://effect.website) — HTTP routing, SQL, validation, error handling, dependency injection
 - **Schema engine**: `@effect/sql` with hand-written DDL for both system tables and runtime-generated content tables
 - **GraphQL**: [graphql-yoga](https://the-guild.dev/graphql/yoga-server) with generated SDL
+- **Testing**: [Vitest](https://vitest.dev) (`npm test`, `npm run test:run`)
 
 ## Example
 

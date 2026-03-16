@@ -24,6 +24,10 @@ const BLOCK_SYSTEM_COLUMNS = [
   `"id" TEXT PRIMARY KEY`,
   `"_root_record_id" TEXT NOT NULL`,
   `"_root_field_api_key" TEXT NOT NULL`,
+  `"_parent_container_model_api_key" TEXT NOT NULL`,
+  `"_parent_block_id" TEXT`,
+  `"_parent_field_api_key" TEXT NOT NULL`,
+  `"_depth" INTEGER NOT NULL DEFAULT 0`,
 ];
 
 interface FieldDef {
@@ -161,7 +165,7 @@ export function migrateContentTable(
     const existingColNames = new Set(existingCols.map((c) => c.name));
 
     const systemColNames = isBlock
-      ? new Set(["id", "_root_record_id", "_root_field_api_key"])
+      ? new Set(["id", "_root_record_id", "_root_field_api_key", "_parent_container_model_api_key", "_parent_block_id", "_parent_field_api_key", "_depth"])
       : new Set(["id", "_status", "_published_at", "_first_published_at", "_published_snapshot", "_created_at", "_updated_at", "_position", "_parent_id"]);
 
     const desiredFieldNames = new Set(fields.map((f) => f.apiKey));

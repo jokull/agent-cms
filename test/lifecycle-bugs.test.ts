@@ -110,8 +110,8 @@ describe("P1: Published snapshots cleaned on block removal", () => {
         return JSON.parse(rows[0]._published_snapshot);
       }).pipe(Effect.provide(sqlLayer))
     );
-    expect(beforeRemoval.body.document.children).toHaveLength(3);
-    expect(beforeRemoval.body.document.children[1].type).toBe("block");
+    expect(beforeRemoval.body.value.document.children).toHaveLength(3);
+    expect(beforeRemoval.body.value.document.children[1].type).toBe("block");
 
     // Remove the block type
     parse(await agent.callTool({
@@ -128,8 +128,8 @@ describe("P1: Published snapshots cleaned on block removal", () => {
         return JSON.parse(rows[0]._published_snapshot);
       }).pipe(Effect.provide(sqlLayer))
     );
-    expect(afterRemoval.body.document.children).toHaveLength(2);
-    expect(afterRemoval.body.document.children.every((c: any) => c.type === "paragraph")).toBe(true);
+    expect(afterRemoval.body.value.document.children).toHaveLength(2);
+    expect(afterRemoval.body.value.document.children.every((c: any) => c.type === "paragraph")).toBe(true);
   });
 
   it("remove_block_from_whitelist cleans published snapshots", async () => {
@@ -217,12 +217,12 @@ describe("P1: Published snapshots cleaned on block removal", () => {
       }).pipe(Effect.provide(sqlLayer))
     );
     // Should have paragraph + code_block, callout removed
-    expect(snapshot.body.document.children).toHaveLength(2);
-    const types = snapshot.body.document.children.map((c: any) => c.type);
+    expect(snapshot.body.value.document.children).toHaveLength(2);
+    const types = snapshot.body.value.document.children.map((c: any) => c.type);
     expect(types).toContain("paragraph");
     expect(types).toContain("block");
     // Remaining block should be the code block
-    const remainingBlock = snapshot.body.document.children.find((c: any) => c.type === "block");
+    const remainingBlock = snapshot.body.value.document.children.find((c: any) => c.type === "block");
     expect(remainingBlock.item).toBe(codeId);
   });
 });

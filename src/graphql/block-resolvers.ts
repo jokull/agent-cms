@@ -6,9 +6,9 @@ import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
 import type { AssetRow } from "../db/row-types.js";
 import { getLinkTargets, getLinksTargets, getBlockWhitelist } from "../db/validators.js";
-import { extractBlockIds, extractInlineBlockIds, extractLinkIds } from "../dast/index.js";
-import type { SchemaBuilderContext, DynamicRow, DastDocInput } from "./gql-types.js";
+import type { SchemaBuilderContext, DynamicRow, GqlContext } from "./gql-types.js";
 import { toTypeName, toCamelCase, fieldToSDL, getRegistryDef, deserializeRecord } from "./gql-utils.js";
+import { batchResolveLinkedRecords, resolveStructuredTextValue } from "./structured-text-resolver.js";
 
 /**
  * Build block model resolvers, compute structured text union types,
@@ -63,148 +63,54 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
       } else if (f.field_type === "link") {
         const targets = getLinkTargets(f.validators);
         if (targets && targets.length > 0) {
-          bmResolvers[gqlName] = async (parent: DynamicRow) => {
+          bmResolvers[gqlName] = async (parent: DynamicRow, _args: unknown, context: GqlContext) => {
             const linkedId = parent[f.api_key];
             if (!linkedId) return null;
-            // Search across target content tables
-            for (const apiKey of targets) {
-              const tName = typeNames.get(apiKey);
-              const rows = await runSql(
-                Effect.gen(function* () {
-                  const s = yield* SqlClient.SqlClient;
-                  return yield* s.unsafe<DynamicRow>(
-                    `SELECT * FROM "content_${apiKey}" WHERE id = ?`, [linkedId]
-                  );
-                })
-              );
-              if (rows.length > 0) {
-                return { ...deserializeRecord(rows[0]), __typename: tName ? `${tName}Record` : undefined };
-              }
-            }
-            return null;
+            const resolved = await batchResolveLinkedRecords({
+              runSql,
+              targetApiKeys: targets,
+              ids: [linkedId as string],
+              typeNames,
+              includeDrafts: context?.includeDrafts ?? false,
+            });
+            return resolved.get(linkedId as string) ?? null;
           };
         }
       } else if (f.field_type === "structured_text") {
-        bmResolvers[gqlName] = async (parent: DynamicRow) => {
-          let raw = parent[f.api_key];
+        bmResolvers[gqlName] = async (parent: DynamicRow, _args: unknown, context: GqlContext) => {
+          const raw = parent[f.api_key];
           if (!raw) return null;
-          if (typeof raw === "string") {
-            try { raw = JSON.parse(raw); } catch { return null; }
-          }
-
-          const rawObj = raw as DynamicRow;
-          // Block ST fields store the full envelope {value: {schema,document}, blocks: {...}}
-          // Unwrap to get the DAST document and any embedded block data
-          const dast = rawObj.document ? rawObj : (rawObj.value ?? rawObj);
-          const embeddedBlocks: DynamicRow = (rawObj.blocks ?? {}) as DynamicRow;
-
-          // Extract block IDs from the DAST
-          const blockLevelIds = new Set(extractBlockIds(dast as DastDocInput));
-          const inlineBlockIdSet = new Set(extractInlineBlockIds(dast as DastDocInput));
-
-          const blocks: DynamicRow[] = [];
-          const inlineBlocks: DynamicRow[] = [];
-
-          if (blockLevelIds.size > 0 || inlineBlockIdSet.size > 0) {
-            const allIds = [...blockLevelIds, ...inlineBlockIdSet];
-
-            // First: resolve from embedded block data (nested blocks stored as JSON inside parent)
-            for (const id of allIds) {
-              const embedded = embeddedBlocks[id];
-              if (embedded && typeof embedded === "object") {
-                const embObj = embedded as DynamicRow;
-                const blockType = embObj._type as string | undefined;
-                const bmtn = blockType ? `${toTypeName(blockType)}Record` : undefined;
-                const resolved = { id, ...embObj, __typename: bmtn };
-                if (blockLevelIds.has(id)) blocks.push(resolved);
-                else inlineBlocks.push(resolved);
-              }
-            }
-
-            // Fallback: try block tables for any IDs not found in embedded data
-            const resolvedIds = new Set([
-              ...blocks.map((b) => b.id as string),
-              ...inlineBlocks.map((b) => b.id as string),
-            ]);
-            const unresolvedIds = allIds.filter((id) => !resolvedIds.has(id));
-
-            if (unresolvedIds.length > 0) {
-              for (const innerBm of blockModels) {
-                const placeholders = unresolvedIds.map(() => "?").join(", ");
-                const fetched = await runSql(
-                  Effect.gen(function* () {
-                    const s = yield* SqlClient.SqlClient;
-                    const rows = yield* s.unsafe<DynamicRow>(
-                      `SELECT * FROM "block_${innerBm.api_key}" WHERE id IN (${placeholders})`,
-                      unresolvedIds
-                    );
-                    return rows.map((r: DynamicRow) => {
-                      const deserialized = deserializeRecord(r);
-                      return { id: String(deserialized.id ?? ""), ...deserialized, __typename: `${toTypeName(innerBm.api_key)}Record` };
-                    });
-                  })
-                );
-                for (const record of fetched) {
-                  if (blockLevelIds.has(record.id as string)) blocks.push(record);
-                  else if (inlineBlockIdSet.has(record.id as string)) inlineBlocks.push(record);
-                  else blocks.push(record);
-                }
-              }
-            }
-          }
-
-          // Resolve link references
-          const linkRecordIds = extractLinkIds(dast as DastDocInput);
-          const allModelApiKeys = models.map((m) => m.api_key);
-          const links: DynamicRow[] = [];
-          for (const linkId of linkRecordIds) {
-            for (const apiKey of allModelApiKeys) {
-              const tName = typeNames.get(apiKey);
-              const rows = await runSql(
-                Effect.gen(function* () {
-                  const s = yield* SqlClient.SqlClient;
-                  return yield* s.unsafe<DynamicRow>(
-                    `SELECT * FROM "content_${apiKey}" WHERE id = ?`, [linkId]
-                  );
-                })
-              );
-              if (rows.length > 0) {
-                links.push({ ...deserializeRecord(rows[0]), __typename: tName ? `${tName}Record` : undefined });
-                break;
-              }
-            }
-          }
-
-          return { value: dast, blocks, inlineBlocks, links };
+          return await resolveStructuredTextValue({
+            runSql,
+            rawValue: raw,
+            rootRecordId: typeof parent._root_record_id === "string" ? parent._root_record_id : undefined,
+            rootFieldApiKey: typeof parent._root_field_api_key === "string" ? parent._root_field_api_key : undefined,
+            parentContainerModelApiKey: bm.api_key,
+            parentBlockId: String(parent.id),
+            parentFieldApiKey: f.api_key,
+            models,
+            blockModels,
+            typeNames,
+            includeDrafts: context?.includeDrafts ?? false,
+          });
         };
       } else if (f.field_type === "links") {
         const targets = getLinksTargets(f.validators);
         if (targets && targets.length > 0) {
-          bmResolvers[gqlName] = async (parent: DynamicRow) => {
+          bmResolvers[gqlName] = async (parent: DynamicRow, _args: unknown, context: GqlContext) => {
             let linkedIds = parent[f.api_key];
             if (typeof linkedIds === "string") {
               try { linkedIds = JSON.parse(linkedIds); } catch { return []; }
             }
             if (!Array.isArray(linkedIds)) return [];
-            const result: DynamicRow[] = [];
-            for (const id of linkedIds) {
-              for (const apiKey of targets) {
-                const tName = typeNames.get(apiKey);
-                const rows = await runSql(
-                  Effect.gen(function* () {
-                    const s = yield* SqlClient.SqlClient;
-                    return yield* s.unsafe<DynamicRow>(
-                      `SELECT * FROM "content_${apiKey}" WHERE id = ?`, [id]
-                    );
-                  })
-                );
-                if (rows.length > 0) {
-                  result.push({ ...deserializeRecord(rows[0]), __typename: tName ? `${tName}Record` : undefined });
-                  break;
-                }
-              }
-            }
-            return result;
+            const resolved = await batchResolveLinkedRecords({
+              runSql,
+              targetApiKeys: targets,
+              ids: linkedIds as string[],
+              typeNames,
+              includeDrafts: context?.includeDrafts ?? false,
+            });
+            return (linkedIds as string[]).map((id) => resolved.get(id) ?? null).filter(Boolean);
           };
         }
       } else {

@@ -114,6 +114,7 @@ export function createRecord(rawBody: unknown) {
         const blocksOnly = getBlocksOnly(field.validators);
 
         const dast = yield* writeStructuredText({
+          rootModelApiKey: model.api_key,
           fieldApiKey: field.api_key,
           rootRecordId: id,
           value: stInput.value,
@@ -257,6 +258,7 @@ export function patchRecord(id: string, rawBody: unknown) {
           const blocksOnly = getBlocksOnly(field.validators);
 
           const dast = yield* writeStructuredText({
+            rootModelApiKey: model.api_key,
             fieldApiKey: field.api_key,
             rootRecordId: id,
             value: stInput.value,
@@ -428,6 +430,7 @@ export function bulkCreateRecords(rawBody: unknown) {
           const blocksOnly = getBlocksOnly(field.validators);
 
           const dast = yield* writeStructuredText({
+            rootModelApiKey: model.api_key,
             fieldApiKey: field.api_key,
             rootRecordId: id,
             value: stInput.value,

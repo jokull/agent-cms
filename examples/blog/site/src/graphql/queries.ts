@@ -54,8 +54,34 @@ export const POST_BY_SLUG_QUERY = graphql(`
       featured
       content {
         value
-        blocks
-        inlineBlocks
+        blocks {
+          __typename
+          ... on HeroSectionRecord {
+            id
+            headline
+            subheadline
+          }
+          ... on CodeBlockRecord {
+            id
+            code
+            language
+            filename
+          }
+        }
+        inlineBlocks {
+          __typename
+          ... on HeroSectionRecord {
+            id
+            headline
+            subheadline
+          }
+          ... on CodeBlockRecord {
+            id
+            code
+            language
+            filename
+          }
+        }
         links
       }
       author {
@@ -108,7 +134,7 @@ export const CATEGORY_BY_SLUG_QUERY = graphql(`
 
 export const ALL_CATEGORIES_QUERY = graphql(`
   query AllCategories {
-    allCategorys(orderBy: [sortOrder_ASC]) {
+    allCategories(orderBy: [sortOrder_ASC]) {
       name
       slug
       description

@@ -22,7 +22,8 @@ type Asset {
   title: String
   url: String!
   blurhash: String
-  responsiveImage(transforms: ImageTransformParams, cfImagesParams: ImageTransformParams): ResponsiveImage
+  customData: JSON
+  responsiveImage(transforms: ImageTransformParams, cfImagesParams: ImageTransformParams, imgixParams: ImageTransformParams): ResponsiveImage
 }
 
 type ResponsiveImage {
@@ -41,6 +42,17 @@ type ResponsiveImage {
 
 type SiteInfo {
   locales: [String!]!
+  faviconMetaTags: [Tag!]!
+  globalSeo(locale: String, fallbackLocales: [String!]): GlobalSeoField
+  noIndex: Boolean!
+}
+
+type GlobalSeoField {
+  siteName: String
+  titleSuffix: String
+  fallbackSeo: SeoField
+  facebookPageUrl: String
+  twitterAccount: String
 }
 
 """DatoCMS-compatible SEO meta tag"""
@@ -109,7 +121,15 @@ input StringFilter {
   in: [String!]
   notIn: [String!]
   matches: String
-  matchesObject: MatchesFilter
+  notMatches: String
+  isBlank: Boolean
+  isPresent: Boolean
+  exists: Boolean
+}
+
+input TextFilter {
+  matches: String
+  notMatches: String
   isBlank: Boolean
   isPresent: Boolean
   exists: Boolean
@@ -150,10 +170,96 @@ input DateTimeFilter {
   exists: Boolean
 }
 
+"""Filter for single-reference fields (link, media) by record/asset ID"""
+input LinkFilter {
+  eq: ID
+  neq: ID
+  in: [ID!]
+  notIn: [ID!]
+  exists: Boolean
+}
+
+"""
+Filter for multi-reference fields (links, media_gallery) stored as JSON arrays
+"""
+input LinksFilter {
+  eq: [ID!]
+  allIn: [ID!]
+  anyIn: [ID!]
+  notIn: [ID!]
+  exists: Boolean
+}
+
+"""Filter for geolocation fields"""
+input NearFilter {
+  latitude: Float!
+  longitude: Float!
+  radius: Float!
+}
+
+input LatLonFilter {
+  near: NearFilter
+  exists: Boolean
+}
+
+"""
+Filter for fields that only support existence checks (seo, json, color)
+"""
+input ExistsFilter {
+  exists: Boolean
+}
+
+"""Filter records by which locales have content"""
+input LocalesFilter {
+  allIn: [String!]
+  anyIn: [String!]
+  notIn: [String!]
+}
+
+"""Filter for tree model parent field"""
+input ParentFilter {
+  eq: ID
+  exists: Boolean
+}
+
+input PositionFilter {
+  eq: Int
+  neq: Int
+  gt: Int
+  lt: Int
+  gte: Int
+  lte: Int
+}
+
+union PostContentBlock = HeroSectionRecord | CodeBlockRecord
+
+type PostContentField {
+  value: JSON!
+  blocks: [PostContentBlock!]!
+  inlineBlocks: [PostContentBlock!]!
+  links: [JSON!]!
+}
+
+type HeroSectionRecord {
+  id: ID!
+  _modelApiKey: String!
+  headline: String
+  subheadline: String
+}
+
+type CodeBlockRecord {
+  id: ID!
+  _modelApiKey: String!
+  code: String
+  language: String
+  filename: String
+}
+
 type SiteSettings {
   id: ID!
   _modelApiKey: String!
   _status: String
+  _isValid: Boolean!
   _createdAt: String
   _updatedAt: String
   _publishedAt: String
@@ -161,8 +267,62 @@ type SiteSettings {
   _seoMetaTags: [Tag!]!
   siteName: String
   tagline: String
-  logo: Asset
   defaultSeo: SeoField
+}
+
+type Author {
+  id: ID!
+  _modelApiKey: String!
+  _status: String
+  _isValid: Boolean!
+  _createdAt: String
+  _updatedAt: String
+  _publishedAt: String
+  _firstPublishedAt: String
+  _seoMetaTags: [Tag!]!
+  name: String
+  bio: String
+  _allReferencingPosts(filter: PostFilter, orderBy: [PostOrderBy!], first: Int, skip: Int): [Post!]!
+}
+
+type Category {
+  id: ID!
+  _modelApiKey: String!
+  _status: String
+  _isValid: Boolean!
+  _createdAt: String
+  _updatedAt: String
+  _publishedAt: String
+  _firstPublishedAt: String
+  _seoMetaTags: [Tag!]!
+  name: String
+  slug: String
+  description: String
+  icon: String
+  sortOrder: Int
+  _allReferencingPosts(filter: PostFilter, orderBy: [PostOrderBy!], first: Int, skip: Int): [Post!]!
+}
+
+type Post {
+  id: ID!
+  _modelApiKey: String!
+  _status: String
+  _isValid: Boolean!
+  _createdAt: String
+  _updatedAt: String
+  _publishedAt: String
+  _firstPublishedAt: String
+  _seoMetaTags: [Tag!]!
+  title: String
+  slug: String
+  excerpt: String
+  content: PostContentField
+  author: Author
+  category: Category
+  publishedDate: String
+  readingTime: Int
+  featured: Boolean
+  seoField: SeoField
 }
 
 input SiteSettingsFilter {
@@ -174,7 +334,7 @@ input SiteSettingsFilter {
   _firstPublishedAt: DateTimeFilter
   siteName: StringFilter
   tagline: StringFilter
-  logo: StringFilter
+  defaultSeo: ExistsFilter
   AND: [SiteSettingsFilter!]
   OR: [SiteSettingsFilter!]
 }
@@ -192,26 +352,10 @@ enum SiteSettingsOrderBy {
   siteName_DESC
   tagline_ASC
   tagline_DESC
-  logo_ASC
-  logo_DESC
 }
 
 type SiteSettingsMeta {
   count: Int!
-}
-
-type Author {
-  id: ID!
-  _modelApiKey: String!
-  _status: String
-  _createdAt: String
-  _updatedAt: String
-  _publishedAt: String
-  _firstPublishedAt: String
-  _seoMetaTags: [Tag!]!
-  name: String
-  bio: String
-  photo: Asset
 }
 
 input AuthorFilter {
@@ -223,7 +367,6 @@ input AuthorFilter {
   _firstPublishedAt: DateTimeFilter
   name: StringFilter
   bio: StringFilter
-  photo: StringFilter
   AND: [AuthorFilter!]
   OR: [AuthorFilter!]
 }
@@ -241,29 +384,10 @@ enum AuthorOrderBy {
   name_DESC
   bio_ASC
   bio_DESC
-  photo_ASC
-  photo_DESC
 }
 
 type AuthorMeta {
   count: Int!
-}
-
-type Category {
-  id: ID!
-  _modelApiKey: String!
-  _status: String
-  _createdAt: String
-  _updatedAt: String
-  _publishedAt: String
-  _firstPublishedAt: String
-  _seoMetaTags: [Tag!]!
-  name: String
-  slug: String
-  description: String
-  coverImage: Asset
-  icon: String
-  sortOrder: Int
 }
 
 input CategoryFilter {
@@ -276,7 +400,6 @@ input CategoryFilter {
   name: StringFilter
   slug: StringFilter
   description: StringFilter
-  coverImage: StringFilter
   icon: StringFilter
   sortOrder: IntFilter
   AND: [CategoryFilter!]
@@ -298,8 +421,6 @@ enum CategoryOrderBy {
   slug_DESC
   description_ASC
   description_DESC
-  coverImage_ASC
-  coverImage_DESC
   icon_ASC
   icon_DESC
   sortOrder_ASC
@@ -308,30 +429,6 @@ enum CategoryOrderBy {
 
 type CategoryMeta {
   count: Int!
-}
-
-type Post {
-  id: ID!
-  _modelApiKey: String!
-  _status: String
-  _createdAt: String
-  _updatedAt: String
-  _publishedAt: String
-  _firstPublishedAt: String
-  _seoMetaTags: [Tag!]!
-  title: String
-  slug: String
-  excerpt: String
-  coverImage: Asset
-  content: StructuredText
-  author: Author
-  category: Category
-  relatedPosts: [Post!]
-  publishedDate: String
-  seoField: SeoField
-  gallery: [Asset!]
-  readingTime: Int
-  featured: Boolean
 }
 
 input PostFilter {
@@ -344,12 +441,13 @@ input PostFilter {
   title: StringFilter
   slug: StringFilter
   excerpt: StringFilter
-  coverImage: StringFilter
-  author: StringFilter
-  category: StringFilter
+  content: TextFilter
+  author: LinkFilter
+  category: LinkFilter
   publishedDate: StringFilter
   readingTime: IntFilter
   featured: BooleanFilter
+  seoField: ExistsFilter
   AND: [PostFilter!]
   OR: [PostFilter!]
 }
@@ -369,8 +467,8 @@ enum PostOrderBy {
   slug_DESC
   excerpt_ASC
   excerpt_DESC
-  coverImage_ASC
-  coverImage_DESC
+  content_ASC
+  content_DESC
   author_ASC
   author_DESC
   category_ASC
@@ -387,18 +485,47 @@ type PostMeta {
   count: Int!
 }
 
+input UploadFilter {
+  id: StringFilter
+  filename: StringFilter
+  mimeType: StringFilter
+  width: IntFilter
+  height: IntFilter
+  size: IntFilter
+  alt: StringFilter
+  title: StringFilter
+  _createdAt: DateTimeFilter
+  AND: [UploadFilter!]
+  OR: [UploadFilter!]
+}
+
+enum UploadOrderBy {
+  filename_ASC
+  filename_DESC
+  size_ASC
+  size_DESC
+  _createdAt_ASC
+  _createdAt_DESC
+}
+
+type UploadMeta {
+  count: Int!
+}
+
 type Query {
-  allSiteSettingss(locale: String, fallbackLocales: [String!], filter: SiteSettingsFilter, orderBy: [SiteSettingsOrderBy!], first: Int, skip: Int): [SiteSettings!]!
+  allSiteSettingses(locale: String, fallbackLocales: [String!], filter: SiteSettingsFilter, orderBy: [SiteSettingsOrderBy!], first: Int, skip: Int, excludeInvalid: Boolean): [SiteSettings!]!
   siteSettings(locale: String, fallbackLocales: [String!], id: ID, filter: SiteSettingsFilter): SiteSettings
-  _allSiteSettingssMeta(filter: SiteSettingsFilter): SiteSettingsMeta!
-  allAuthors(locale: String, fallbackLocales: [String!], filter: AuthorFilter, orderBy: [AuthorOrderBy!], first: Int, skip: Int): [Author!]!
+  _allSiteSettingsesMeta(filter: SiteSettingsFilter, excludeInvalid: Boolean): SiteSettingsMeta!
+  allAuthors(locale: String, fallbackLocales: [String!], filter: AuthorFilter, orderBy: [AuthorOrderBy!], first: Int, skip: Int, excludeInvalid: Boolean): [Author!]!
   author(locale: String, fallbackLocales: [String!], id: ID, filter: AuthorFilter): Author
-  _allAuthorsMeta(filter: AuthorFilter): AuthorMeta!
-  allCategorys(locale: String, fallbackLocales: [String!], filter: CategoryFilter, orderBy: [CategoryOrderBy!], first: Int, skip: Int): [Category!]!
+  _allAuthorsMeta(filter: AuthorFilter, excludeInvalid: Boolean): AuthorMeta!
+  allCategories(locale: String, fallbackLocales: [String!], filter: CategoryFilter, orderBy: [CategoryOrderBy!], first: Int, skip: Int, excludeInvalid: Boolean): [Category!]!
   category(locale: String, fallbackLocales: [String!], id: ID, filter: CategoryFilter): Category
-  _allCategorysMeta(filter: CategoryFilter): CategoryMeta!
-  allPosts(locale: String, fallbackLocales: [String!], filter: PostFilter, orderBy: [PostOrderBy!], first: Int, skip: Int): [Post!]!
+  _allCategoriesMeta(filter: CategoryFilter, excludeInvalid: Boolean): CategoryMeta!
+  allPosts(locale: String, fallbackLocales: [String!], filter: PostFilter, orderBy: [PostOrderBy!], first: Int, skip: Int, excludeInvalid: Boolean): [Post!]!
   post(locale: String, fallbackLocales: [String!], id: ID, filter: PostFilter): Post
-  _allPostsMeta(filter: PostFilter): PostMeta!
+  _allPostsMeta(filter: PostFilter, excludeInvalid: Boolean): PostMeta!
   _site: SiteInfo!
+  allUploads(filter: UploadFilter, orderBy: [UploadOrderBy!], first: Int, skip: Int): [Asset!]!
+  _allUploadsMeta(filter: UploadFilter): UploadMeta!
 }
