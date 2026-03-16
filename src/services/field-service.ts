@@ -90,6 +90,38 @@ export function createField(modelId: string, rawBody: unknown) {
 
     yield* syncTable(modelId);
 
+    // If the field is required and the model already has records, require a default value
+    const parsedValidators = body.validators ?? {};
+    if (parsedValidators.required) {
+      const modelInfo = yield* sql.unsafe<{ api_key: string; is_block: number }>(
+        "SELECT api_key, is_block FROM models WHERE id = ?", [modelId]
+      );
+      if (modelInfo.length > 0) {
+        const tableName = modelInfo[0].is_block ? `block_${modelInfo[0].api_key}` : `content_${modelInfo[0].api_key}`;
+        const recordCount = yield* sql.unsafe<{ c: number }>(
+          `SELECT COUNT(*) as c FROM "${tableName}"`,
+        );
+        if (recordCount[0]?.c > 0) {
+          if (body.defaultValue === undefined) {
+            return yield* new ValidationError({
+              message: `Cannot add required field '${body.apiKey}' to model with ${recordCount[0].c} existing record(s) without a default_value. Provide a default_value.`,
+              field: body.apiKey,
+            });
+          }
+          // Apply default value to all existing records
+          const serialized = typeof body.defaultValue === "object" && body.defaultValue !== null
+            ? JSON.stringify(body.defaultValue)
+            : typeof body.defaultValue === "boolean"
+              ? (body.defaultValue ? 1 : 0)
+              : body.defaultValue;
+          yield* sql.unsafe(
+            `UPDATE "${tableName}" SET "${body.apiKey}" = ? WHERE "${body.apiKey}" IS NULL`,
+            [serialized]
+          );
+        }
+      }
+    }
+
     return {
       id, modelId, label: body.label, apiKey: body.apiKey, fieldType: body.fieldType,
       position, localized: body.localized ?? false, validators: body.validators ?? {},

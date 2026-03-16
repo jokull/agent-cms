@@ -208,7 +208,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 ### Phase 4: Schema Lifecycle
 
 - [x] **P4.1** Field type change rejection *(done — 4 tests)*
-- [ ] **P4.2** Required field with existing records: Require `default_value` in field config. Apply default to all existing records on migration. Test. → [C11]
+- [x] **P4.2** Required field with default_value on existing records *(done — 4 tests)*
 - [ ] **P4.3** Model/field rename (`api_key` change): Rename table/column, update `_root_field_api_key` in block rows, invalidate schema cache. Test. → [C11]
 - [ ] **P4.4** Block type removal: Scan all StructuredText fields, clean DAST trees, delete block rows, drop table. Test with a block type used across multiple models. → [C11]
 - [ ] **P4.5** Block whitelist removal: Remove a block type from a field's whitelist (without deleting the type). Clean affected DAST trees. Test. → [C11]
