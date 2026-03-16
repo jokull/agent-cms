@@ -1,0 +1,561 @@
+{
+  "startedAt": "2026-03-16T22:32:00.025Z",
+  "cmsUrl": "http://127.0.0.1:8787",
+  "iterations": 7,
+  "warmupIterations": 1,
+  "suitePath": "/Users/jokull/Code/agent-cms/benchmarks/blog-query-suite.json",
+  "benchmarks": [
+    {
+      "name": "posts_summary_published",
+      "includeDrafts": false,
+      "summary": {
+        "samples": [
+          {
+            "iteration": 1,
+            "status": 200,
+            "ok": true,
+            "durationMs": 51.624,
+            "responseBytes": 7537,
+            "errorCount": 0
+          },
+          {
+            "iteration": 2,
+            "status": 200,
+            "ok": true,
+            "durationMs": 39.595,
+            "responseBytes": 7537,
+            "errorCount": 0
+          },
+          {
+            "iteration": 3,
+            "status": 200,
+            "ok": true,
+            "durationMs": 50.896,
+            "responseBytes": 7537,
+            "errorCount": 0
+          },
+          {
+            "iteration": 4,
+            "status": 200,
+            "ok": true,
+            "durationMs": 58.024,
+            "responseBytes": 7537,
+            "errorCount": 0
+          },
+          {
+            "iteration": 5,
+            "status": 200,
+            "ok": true,
+            "durationMs": 41.059,
+            "responseBytes": 7537,
+            "errorCount": 0
+          },
+          {
+            "iteration": 6,
+            "status": 200,
+            "ok": true,
+            "durationMs": 45.072,
+            "responseBytes": 7537,
+            "errorCount": 0
+          },
+          {
+            "iteration": 7,
+            "status": 200,
+            "ok": true,
+            "durationMs": 38.587,
+            "responseBytes": 7537,
+            "errorCount": 0
+          }
+        ],
+        "medianMs": 45.072,
+        "p95Ms": 58.024,
+        "minMs": 38.587,
+        "maxMs": 58.024,
+        "medianBytes": 7537
+      }
+    },
+    {
+      "name": "posts_summary_preview",
+      "includeDrafts": true,
+      "summary": {
+        "samples": [
+          {
+            "iteration": 1,
+            "status": 200,
+            "ok": true,
+            "durationMs": 42.171,
+            "responseBytes": 7537,
+            "errorCount": 0
+          },
+          {
+            "iteration": 2,
+            "status": 200,
+            "ok": true,
+            "durationMs": 34.605,
+            "responseBytes": 7537,
+            "errorCount": 0
+          },
+          {
+            "iteration": 3,
+            "status": 200,
+            "ok": true,
+            "durationMs": 43.592,
+            "responseBytes": 7537,
+            "errorCount": 0
+          },
+          {
+            "iteration": 4,
+            "status": 200,
+            "ok": true,
+            "durationMs": 39.744,
+            "responseBytes": 7537,
+            "errorCount": 0
+          },
+          {
+            "iteration": 5,
+            "status": 200,
+            "ok": true,
+            "durationMs": 44.816,
+            "responseBytes": 7537,
+            "errorCount": 0
+          },
+          {
+            "iteration": 6,
+            "status": 200,
+            "ok": true,
+            "durationMs": 41.255,
+            "responseBytes": 7537,
+            "errorCount": 0
+          },
+          {
+            "iteration": 7,
+            "status": 200,
+            "ok": true,
+            "durationMs": 40.964,
+            "responseBytes": 7537,
+            "errorCount": 0
+          }
+        ],
+        "medianMs": 41.255,
+        "p95Ms": 44.816,
+        "minMs": 34.605,
+        "maxMs": 44.816,
+        "medianBytes": 7537
+      }
+    },
+    {
+      "name": "posts_deep_published",
+      "includeDrafts": false,
+      "summary": {
+        "samples": [
+          {
+            "iteration": 1,
+            "status": 200,
+            "ok": true,
+            "durationMs": 29.231,
+            "responseBytes": 37289,
+            "errorCount": 0
+          },
+          {
+            "iteration": 2,
+            "status": 200,
+            "ok": true,
+            "durationMs": 34.005,
+            "responseBytes": 37289,
+            "errorCount": 0
+          },
+          {
+            "iteration": 3,
+            "status": 200,
+            "ok": true,
+            "durationMs": 27.193,
+            "responseBytes": 37289,
+            "errorCount": 0
+          },
+          {
+            "iteration": 4,
+            "status": 200,
+            "ok": true,
+            "durationMs": 34.505,
+            "responseBytes": 37289,
+            "errorCount": 0
+          },
+          {
+            "iteration": 5,
+            "status": 200,
+            "ok": true,
+            "durationMs": 49.249,
+            "responseBytes": 37289,
+            "errorCount": 0
+          },
+          {
+            "iteration": 6,
+            "status": 200,
+            "ok": true,
+            "durationMs": 27.703,
+            "responseBytes": 37289,
+            "errorCount": 0
+          },
+          {
+            "iteration": 7,
+            "status": 200,
+            "ok": true,
+            "durationMs": 33.368,
+            "responseBytes": 37289,
+            "errorCount": 0
+          }
+        ],
+        "medianMs": 33.368,
+        "p95Ms": 49.249,
+        "minMs": 27.193,
+        "maxMs": 49.249,
+        "medianBytes": 37289
+      }
+    },
+    {
+      "name": "posts_deep_preview",
+      "includeDrafts": true,
+      "summary": {
+        "samples": [
+          {
+            "iteration": 1,
+            "status": 200,
+            "ok": true,
+            "durationMs": 80.551,
+            "responseBytes": 37289,
+            "errorCount": 0
+          },
+          {
+            "iteration": 2,
+            "status": 200,
+            "ok": true,
+            "durationMs": 79.919,
+            "responseBytes": 37289,
+            "errorCount": 0
+          },
+          {
+            "iteration": 3,
+            "status": 200,
+            "ok": true,
+            "durationMs": 73.577,
+            "responseBytes": 37289,
+            "errorCount": 0
+          },
+          {
+            "iteration": 4,
+            "status": 200,
+            "ok": true,
+            "durationMs": 71.751,
+            "responseBytes": 37289,
+            "errorCount": 0
+          },
+          {
+            "iteration": 5,
+            "status": 200,
+            "ok": true,
+            "durationMs": 77.376,
+            "responseBytes": 37289,
+            "errorCount": 0
+          },
+          {
+            "iteration": 6,
+            "status": 200,
+            "ok": true,
+            "durationMs": 69.187,
+            "responseBytes": 37289,
+            "errorCount": 0
+          },
+          {
+            "iteration": 7,
+            "status": 200,
+            "ok": true,
+            "durationMs": 69.285,
+            "responseBytes": 37289,
+            "errorCount": 0
+          }
+        ],
+        "medianMs": 73.577,
+        "p95Ms": 80.551,
+        "minMs": 69.187,
+        "maxMs": 80.551,
+        "medianBytes": 37289
+      }
+    },
+    {
+      "name": "post_by_slug_deep_published",
+      "includeDrafts": false,
+      "summary": {
+        "samples": [
+          {
+            "iteration": 1,
+            "status": 200,
+            "ok": true,
+            "durationMs": 18.165,
+            "responseBytes": 4873,
+            "errorCount": 0
+          },
+          {
+            "iteration": 2,
+            "status": 200,
+            "ok": true,
+            "durationMs": 12.718,
+            "responseBytes": 4873,
+            "errorCount": 0
+          },
+          {
+            "iteration": 3,
+            "status": 200,
+            "ok": true,
+            "durationMs": 12.643,
+            "responseBytes": 4873,
+            "errorCount": 0
+          },
+          {
+            "iteration": 4,
+            "status": 200,
+            "ok": true,
+            "durationMs": 12.884,
+            "responseBytes": 4873,
+            "errorCount": 0
+          },
+          {
+            "iteration": 5,
+            "status": 200,
+            "ok": true,
+            "durationMs": 12.637,
+            "responseBytes": 4873,
+            "errorCount": 0
+          },
+          {
+            "iteration": 6,
+            "status": 200,
+            "ok": true,
+            "durationMs": 12.657,
+            "responseBytes": 4873,
+            "errorCount": 0
+          },
+          {
+            "iteration": 7,
+            "status": 200,
+            "ok": true,
+            "durationMs": 19.139,
+            "responseBytes": 4873,
+            "errorCount": 0
+          }
+        ],
+        "medianMs": 12.718,
+        "p95Ms": 19.139,
+        "minMs": 12.637,
+        "maxMs": 19.139,
+        "medianBytes": 4873
+      }
+    },
+    {
+      "name": "post_by_slug_deep_preview",
+      "includeDrafts": true,
+      "summary": {
+        "samples": [
+          {
+            "iteration": 1,
+            "status": 200,
+            "ok": true,
+            "durationMs": 17.421,
+            "responseBytes": 4873,
+            "errorCount": 0
+          },
+          {
+            "iteration": 2,
+            "status": 200,
+            "ok": true,
+            "durationMs": 16.166,
+            "responseBytes": 4873,
+            "errorCount": 0
+          },
+          {
+            "iteration": 3,
+            "status": 200,
+            "ok": true,
+            "durationMs": 24.88,
+            "responseBytes": 4873,
+            "errorCount": 0
+          },
+          {
+            "iteration": 4,
+            "status": 200,
+            "ok": true,
+            "durationMs": 15.828,
+            "responseBytes": 4873,
+            "errorCount": 0
+          },
+          {
+            "iteration": 5,
+            "status": 200,
+            "ok": true,
+            "durationMs": 16.492,
+            "responseBytes": 4873,
+            "errorCount": 0
+          },
+          {
+            "iteration": 6,
+            "status": 200,
+            "ok": true,
+            "durationMs": 18.008,
+            "responseBytes": 4873,
+            "errorCount": 0
+          },
+          {
+            "iteration": 7,
+            "status": 200,
+            "ok": true,
+            "durationMs": 17.981,
+            "responseBytes": 4873,
+            "errorCount": 0
+          }
+        ],
+        "medianMs": 17.421,
+        "p95Ms": 24.88,
+        "minMs": 15.828,
+        "maxMs": 24.88,
+        "medianBytes": 4873
+      }
+    },
+    {
+      "name": "posts_filter_category_published",
+      "includeDrafts": false,
+      "summary": {
+        "samples": [
+          {
+            "iteration": 1,
+            "status": 200,
+            "ok": true,
+            "durationMs": 11.775,
+            "responseBytes": 52,
+            "errorCount": 0
+          },
+          {
+            "iteration": 2,
+            "status": 200,
+            "ok": true,
+            "durationMs": 12.121,
+            "responseBytes": 52,
+            "errorCount": 0
+          },
+          {
+            "iteration": 3,
+            "status": 200,
+            "ok": true,
+            "durationMs": 12.927,
+            "responseBytes": 52,
+            "errorCount": 0
+          },
+          {
+            "iteration": 4,
+            "status": 200,
+            "ok": true,
+            "durationMs": 12.131,
+            "responseBytes": 52,
+            "errorCount": 0
+          },
+          {
+            "iteration": 5,
+            "status": 200,
+            "ok": true,
+            "durationMs": 11.702,
+            "responseBytes": 52,
+            "errorCount": 0
+          },
+          {
+            "iteration": 6,
+            "status": 200,
+            "ok": true,
+            "durationMs": 21.745,
+            "responseBytes": 52,
+            "errorCount": 0
+          },
+          {
+            "iteration": 7,
+            "status": 200,
+            "ok": true,
+            "durationMs": 12.96,
+            "responseBytes": 52,
+            "errorCount": 0
+          }
+        ],
+        "medianMs": 12.131,
+        "p95Ms": 21.745,
+        "minMs": 11.702,
+        "maxMs": 21.745,
+        "medianBytes": 52
+      }
+    },
+    {
+      "name": "posts_filter_category_preview",
+      "includeDrafts": true,
+      "summary": {
+        "samples": [
+          {
+            "iteration": 1,
+            "status": 200,
+            "ok": true,
+            "durationMs": 12.081,
+            "responseBytes": 52,
+            "errorCount": 0
+          },
+          {
+            "iteration": 2,
+            "status": 200,
+            "ok": true,
+            "durationMs": 11.492,
+            "responseBytes": 52,
+            "errorCount": 0
+          },
+          {
+            "iteration": 3,
+            "status": 200,
+            "ok": true,
+            "durationMs": 30.044,
+            "responseBytes": 52,
+            "errorCount": 0
+          },
+          {
+            "iteration": 4,
+            "status": 200,
+            "ok": true,
+            "durationMs": 13.639,
+            "responseBytes": 52,
+            "errorCount": 0
+          },
+          {
+            "iteration": 5,
+            "status": 200,
+            "ok": true,
+            "durationMs": 13.068,
+            "responseBytes": 52,
+            "errorCount": 0
+          },
+          {
+            "iteration": 6,
+            "status": 200,
+            "ok": true,
+            "durationMs": 12.906,
+            "responseBytes": 52,
+            "errorCount": 0
+          },
+          {
+            "iteration": 7,
+            "status": 200,
+            "ok": true,
+            "durationMs": 13.026,
+            "responseBytes": 52,
+            "errorCount": 0
+          }
+        ],
+        "medianMs": 13.026,
+        "p95Ms": 30.044,
+        "minMs": 11.492,
+        "maxMs": 30.044,
+        "medianBytes": 52
+      }
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # Product & Architecture Decisions
 
-Canonical record of all settled decisions for agent-cms. ROADMAP.md references a subset of these — this file is the complete list. Do not change these without explicit instruction from the project owner.
+Canonical record of all settled decisions for agent-cms. This file is the complete list. Do not change these without explicit instruction from the project owner.
 
 ## Storage & Data Model
 
@@ -37,7 +37,7 @@ Canonical record of all settled decisions for agent-cms. ROADMAP.md references a
 |---|---|---|---|
 | D20 | Schema engine | "Table of tables" → runtime DDL via `@effect/sql` | System tables (`models`, `fields`) are the meta-schema queried via Drizzle (static). Dynamic content/block tables are managed via `@effect/sql` raw SQL (CREATE TABLE, ALTER TABLE, INSERT, SELECT). No Drizzle codegen for dynamic tables — runtime safety comes from Effect, not static types. |
 | D21 | Auto-migration | Runtime DDL diffing on every schema change | Core DX feature. REST mutation → update system tables → schema engine diffs current vs desired → emits DDL → executes transactionally. SQLite supports transactional DDL (advantage over Postgres). |
-| D22 | Schema lifecycle | Every schema mutation cascades to content | Block type removal scans DAST trees. Field removal cleans block rows. Model removal is strict (refuse if referenced). See CHALLENGES.md [C11] for full matrix. |
+| D22 | Schema lifecycle | Every schema mutation cascades to content | Block type removal scans DAST trees. Field removal cleans block rows. Model removal is strict (refuse if referenced). |
 | D23 | Field type change (v1) | Reject if field has existing data | Simplest safe approach. Require field to be empty before type change. Can add coercion later. |
 | D24 | Required field on existing records | Require `default_value` in field config | DatoCMS approach. Auto-populate existing records with the default. |
 
@@ -59,7 +59,7 @@ Canonical record of all settled decisions for agent-cms. ROADMAP.md references a
 | D29 | Database access | **Drizzle for system tables** (static, typed) + **`@effect/sql` for dynamic tables** (runtime SQL) | Drizzle gives real type safety for the static system tables (models, fields, locales, assets). Dynamic content/block tables use `@effect/sql` (`SqlClient` template literals) — no static types possible, so runtime safety via Effect is the right tool. `@effect/sql-d1` in production, `@effect/sql-sqlite-node` in tests. Both share the `SqlClient.SqlClient` interface — application code is portable. |
 | D30 | Asset storage | R2 | Cloudflare-native object storage |
 | D31 | Image transforms | Cloudflare Images | Fully managed, no self-hosted infra (replaced earlier imgproxy decision). For local dev, serve originals without transforms. |
-| D32 | Schema cache | ~~KV~~ **None** | ~~Store serialized schema descriptor.~~ **Scoped out.** D1 edge colocation makes reads fast enough. No KV, no cache tags, no invalidation protocol. D1 is always fresh. Frontend frameworks handle their own caching (Next.js revalidate, SWR). Webhooks notify frontends of content changes for rebuild triggers. |
+| D32 | Schema cache | ~~KV~~ **None** | ~~Store serialized schema descriptor.~~ **Scoped out.** D1 edge colocation makes reads fast enough. No KV, no cache tags, no invalidation protocol. D1 is always fresh. Frontend frameworks handle their own caching (Next.js revalidate, SWR). Lifecycle hooks notify frontends or trigger rebuilds when needed. |
 | D33 | Slug generation | `slugify` (simov/slugify) | Django-parity Unicode→ASCII transliteration. NFKD decomposition + explicit charmap for non-decomposable chars (ð→d, þ→th, æ→ae, etc.). Zero deps, Workers-compatible. |
 | D34 | Tests | Vitest | Fast, TypeScript-native, good Workers/D1 testing story |
 | D35 | Validation | `@effect/schema` (replaces Zod) | Runtime schema validation integrated with Effect's typed error channel. DAST document validation, record field validation, REST API input validation — all compose naturally with Effect pipelines. Errors are typed and recoverable, not thrown exceptions. |
@@ -84,6 +84,10 @@ Canonical record of all settled decisions for agent-cms. ROADMAP.md references a
 | D38 | Video support | None for v1 | Media fields are image-only. |
 | D39 | Generic file uploads | None for v1 | Media fields reference images in R2. No arbitrary file type support. |
 | D40 | Field types in v1 | `string`, `text`, `boolean`, `integer`, `float`, `date`, `date_time`, `slug`, `media`, `media_gallery`, `link`, `links`, `structured_text`, `seo`, `json`, `color`, `lat_lon` | All 17 field types implemented. Registry pattern in `src/field-types.ts` enforces completeness. |
+| D49 | Webhooks | None | Scoped out. Since the CMS runs in your own Worker, use lifecycle hooks (`onPublish`, `onRecordCreate`, etc.) or Cloudflare-native primitives directly instead of HTTP callbacks to yourself. |
+| D50 | Cache tags / CDN invalidation | None | Scoped out. D1 edge locality plus frontend-framework revalidation and lifecycle hooks are sufficient. No application-level cache tag system. |
+| D51 | GraphQL subscriptions | None | Scoped out. Not needed for the intended workflow. Lifecycle hooks cover mutation-driven integrations without maintaining a subscription protocol. |
+| D52 | Per-field locale argument | None | Scoped out. Locale selection happens at the query level; per-field locale overrides add complexity for limited value. |
 
 ## System Table Schemas
 

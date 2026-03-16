@@ -15,6 +15,8 @@ import { buildContentModelResolvers } from "./content-resolvers.js";
 import { buildQueryResolvers } from "./query-resolvers.js";
 import { buildReverseRefs, buildReverseRefResolvers } from "./reverse-ref-resolvers.js";
 import { buildAssetResolvers } from "./asset-resolvers.js";
+import { ensureBlockLookupIndex, ensureContentFieldIndexes } from "../schema-engine/sql-ddl.js";
+import { recordSqlMetrics } from "./sql-metrics.js";
 
 // Re-export for handler.ts compatibility
 export type { SchemaBuilderOptions } from "./gql-types.js";
@@ -22,7 +24,10 @@ export type { SchemaBuilderOptions } from "./gql-types.js";
 export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, options?: SchemaBuilderOptions) {
   /** Run an Effect requiring SqlClient, converting to Promise for GraphQL resolvers */
   function runSql<A>(effect: Effect.Effect<A, unknown, SqlClient.SqlClient>): Promise<A> {
-    return Effect.runPromise(effect.pipe(Effect.provide(sqlLayer), Effect.orDie));
+    const startedAt = performance.now();
+    return Effect.runPromise(effect.pipe(Effect.provide(sqlLayer), Effect.orDie)).finally(() => {
+      recordSqlMetrics(performance.now() - startedAt);
+    });
   }
 
   return Effect.gen(function* () {
@@ -57,6 +62,17 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
       const list = fieldsByModelId.get(f.model_id) ?? [];
       list.push(parseFieldValidators(f));
       fieldsByModelId.set(f.model_id, list);
+    }
+
+    for (const blockModel of blockModels) {
+      yield* ensureBlockLookupIndex(blockModel.api_key);
+    }
+    for (const model of models) {
+      const fields = fieldsByModelId.get(model.id) ?? [];
+      yield* ensureContentFieldIndexes(model.api_key, fields.map((field) => ({
+        apiKey: field.api_key,
+        fieldType: field.field_type,
+      })));
     }
 
     // Load locales

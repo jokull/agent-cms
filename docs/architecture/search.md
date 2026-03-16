@@ -2,8 +2,6 @@
 
 Design document for content search in agent-cms. Two complementary layers: D1 FTS5 for keyword search and Cloudflare Vectorize for semantic search. Both edge-native, both essentially free at CMS scale.
 
-See [ROADMAP.md](./ROADMAP.md) § "Fulltext & Vector Search" for the backlog items.
-
 ## Architecture
 
 ```
@@ -38,7 +36,7 @@ The StructuredText field stores a DAST (Document Abstract Syntax Tree) document.
 
 **Reference:** [`datocms-structured-text-to-plain-text`](https://github.com/datocms/structured-text/tree/main/packages/to-plain-text) — DatoCMS's own implementation. Recursive tree walk, span extraction, whitespace normalization.
 
-**Our DAST types** are defined in [`src/dast/types.ts`](./src/dast/types.ts):
+**Our DAST types** are defined in [`src/dast/types.ts`](../../src/dast/types.ts):
 
 ```
 RootNode
@@ -52,7 +50,7 @@ RootNode
        └─ ThematicBreakNode
 ```
 
-**Existing tree-walk pattern** in [`src/dast/validate.ts`](./src/dast/validate.ts) — `walkNodesForType()` recursively traverses all DAST nodes collecting IDs by type. The text extractor follows the same pattern but collects `span.value` strings instead.
+**Existing tree-walk pattern** in [`src/dast/validate.ts`](../../src/dast/validate.ts) — `walkNodesForType()` recursively traverses all DAST nodes collecting IDs by type. The text extractor follows the same pattern but collects `span.value` strings instead.
 
 **Implementation plan:**
 
@@ -78,7 +76,7 @@ interface TextSection {
 
 ### Searchable Field Types
 
-From the field type registry in [`src/field-types.ts`](./src/field-types.ts):
+From the field type registry in [`src/field-types.ts`](../../src/field-types.ts):
 
 | Field Type | Text Extraction |
 |---|---|
@@ -97,16 +95,16 @@ For localized fields (`field.localized === true`), the value is a JSON object `{
 
 ### Block Text Resolution
 
-Blocks referenced in DAST (`type: "block"`, `type: "inlineBlock"`) need their text extracted too. The block data lives in separate `block_{type}` tables — [`src/schema-engine/sql-records.ts`](./src/schema-engine/sql-records.ts) handles fetching them.
+Blocks referenced in DAST (`type: "block"`, `type: "inlineBlock"`) need their text extracted too. The block data lives in separate `block_{type}` tables — [`src/schema-engine/sql-records.ts`](../../src/schema-engine/sql-records.ts) handles fetching them.
 
 Flow:
-1. Extract block IDs from DAST using [`extractBlockIds()`](./src/dast/index.ts)
+1. Extract block IDs from DAST using [`extractBlockIds()`](../../src/dast/index.ts)
 2. Fetch block records from `block_{type}` tables
 3. For each block, extract text from its fields (same field-type logic)
 4. If a block has a `structured_text` field → recurse (blocks can nest)
 5. Inline the extracted block text at the position where the block appears in the DAST
 
-This recursive resolution already exists in the GraphQL StructuredText resolver in [`src/graphql/schema-builder.ts`](./src/graphql/schema-builder.ts) (search for "recursive batch-fetch"). The text extractor follows the same pattern but returns plain text instead of resolved records.
+This recursive resolution already exists in the GraphQL StructuredText resolver in [`src/graphql/schema-builder.ts`](../../src/graphql/schema-builder.ts) (search for "recursive batch-fetch"). The text extractor follows the same pattern but returns plain text instead of resolved records.
 
 ## 2. Chunking
 
@@ -160,7 +158,7 @@ Use `rank` for BM25 scoring. Columns listed first get implicit higher weight in 
 
 ### Index Lifecycle
 
-Managed via Effect services, triggered from record mutation hooks in [`src/services/record-service.ts`](./src/services/record-service.ts):
+Managed via Effect services, triggered from record mutation hooks in [`src/services/record-service.ts`](../../src/services/record-service.ts):
 
 | Event | Action |
 |---|---|
@@ -171,7 +169,7 @@ Managed via Effect services, triggered from record mutation hooks in [`src/servi
 | `field.create` / `field.delete` | Rebuild FTS5 table (columns changed) |
 | `model.delete` | `DROP TABLE IF EXISTS fts_{model}` |
 
-The webhook system in [`src/services/webhook-service.ts`](./src/services/webhook-service.ts) already fires on all these events. The search indexer hooks into the same points.
+The webhook system in [`src/services/webhook-service.ts`](../../src/services/webhook-service.ts) already fires on all these events. The search indexer hooks into the same points.
 
 ### Query API
 
@@ -212,7 +210,7 @@ Cloudflare Vectorize is a managed vector database that runs on the same edge net
 
 ### Setup
 
-Add bindings to `CmsEnv` in [`src/index.ts`](./src/index.ts):
+Add bindings to `CmsEnv` in [`src/index.ts`](../../src/index.ts):
 
 ```typescript
 export interface CmsEnv {
@@ -445,14 +443,14 @@ Vectorize pricing: `(queried + stored vectors) × dimensions × $0.01/1M`. At 10
 
 ### Codebase
 
-- [`src/dast/types.ts`](./src/dast/types.ts) — DAST node type definitions
-- [`src/dast/index.ts`](./src/dast/index.ts) — `extractBlockIds()`, `extractInlineBlockIds()`, `extractLinkIds()` tree walkers
-- [`src/dast/validate.ts`](./src/dast/validate.ts) — `walkNodesForType()` recursive traversal pattern
-- [`src/field-types.ts`](./src/field-types.ts) — `FIELD_TYPE_REGISTRY` with `localizable`, `jsonStored` flags
-- [`src/services/record-service.ts`](./src/services/record-service.ts) — Record CRUD with webhook hooks (lines ~173, ~272, ~300)
-- [`src/services/webhook-service.ts`](./src/services/webhook-service.ts) — Event types and `fireWebhooks()` pattern
-- [`src/graphql/schema-builder.ts`](./src/graphql/schema-builder.ts) — Recursive block resolution (reference for block text extraction)
-- [`src/index.ts`](./src/index.ts) — `CmsEnv` type (where `AI` and `VECTORIZE` bindings go)
+- [`src/dast/types.ts`](../../src/dast/types.ts) — DAST node type definitions
+- [`src/dast/index.ts`](../../src/dast/index.ts) — `extractBlockIds()`, `extractInlineBlockIds()`, `extractLinkIds()` tree walkers
+- [`src/dast/validate.ts`](../../src/dast/validate.ts) — `walkNodesForType()` recursive traversal pattern
+- [`src/field-types.ts`](../../src/field-types.ts) — `FIELD_TYPE_REGISTRY` with `localizable`, `jsonStored` flags
+- [`src/services/record-service.ts`](../../src/services/record-service.ts) — Record CRUD with webhook hooks (lines ~173, ~272, ~300)
+- [`src/services/webhook-service.ts`](../../src/services/webhook-service.ts) — Event types and `fireWebhooks()` pattern
+- [`src/graphql/schema-builder.ts`](../../src/graphql/schema-builder.ts) — Recursive block resolution (reference for block text extraction)
+- [`src/index.ts`](../../src/index.ts) — `CmsEnv` type (where `AI` and `VECTORIZE` bindings go)
 
 ### External
 
@@ -469,5 +467,3 @@ Vectorize pricing: `(queried + stored vectors) × dimensions × $0.01/1M`. At 10
 ### Design decisions
 
 - [DECISIONS.md](./DECISIONS.md) — Canonical decisions (D1-D48)
-- [CHALLENGES.md](./CHALLENGES.md) — C12 (N+1 queries), C3 (StructuredText storage)
-- [ROADMAP.md](./ROADMAP.md) — Backlog items under "Fulltext & Vector Search"

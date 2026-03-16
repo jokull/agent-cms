@@ -37,6 +37,11 @@ interface BlockModelSchema {
   fields: ParsedFieldRow[];
 }
 
+interface MaterializeContext {
+  blockModels?: ReadonlyArray<{ api_key: string }>;
+  blockModelSchemas: Map<string, BlockModelSchema>;
+}
+
 export interface StructuredTextEnvelope {
   value: DastDocumentInput;
   blocks: Record<string, DynamicRow>;
@@ -101,6 +106,25 @@ function getBlockModelSchema(sql: SqlClient.SqlClient, blockApiKey: string) {
     const model = rows[0];
     const fields = yield* getParsedFields(sql, model.id);
     return { id: model.id, apiKey: model.api_key, fields } satisfies BlockModelSchema;
+  });
+}
+
+function getBlockModelSchemaCached(ctx: MaterializeContext, sql: SqlClient.SqlClient, blockApiKey: string) {
+  return Effect.gen(function* () {
+    const cached = ctx.blockModelSchemas.get(blockApiKey);
+    if (cached) return cached;
+    const schema = yield* getBlockModelSchema(sql, blockApiKey);
+    ctx.blockModelSchemas.set(blockApiKey, schema);
+    return schema;
+  });
+}
+
+function fetchBlockModelsCached(ctx: MaterializeContext, sql: SqlClient.SqlClient) {
+  return Effect.gen(function* () {
+    if (ctx.blockModels) return ctx.blockModels;
+    const blockModels = yield* fetchBlockModels(sql);
+    ctx.blockModels = blockModels;
+    return blockModels;
   });
 }
 
@@ -401,18 +425,21 @@ export function deleteBlockSubtrees(params: {
 }
 
 function materializeBlockPayload(
+  ctx: MaterializeContext,
   sql: SqlClient.SqlClient,
   blockApiKey: string,
   row: DynamicRow,
 ): Effect.Effect<DynamicRow, unknown, SqlClient.SqlClient> {
   return Effect.gen(function* () {
-    const blockModel = yield* getBlockModelSchema(sql, blockApiKey);
+    const blockModel = yield* getBlockModelSchemaCached(ctx, sql, blockApiKey);
     const payload: DynamicRow = { _type: blockApiKey };
     for (const field of blockModel.fields) {
       const rawValue = deserializeValue(row[field.api_key]);
       if (rawValue === undefined) continue;
       if (field.field_type === "structured_text" && rawValue !== null && rawValue !== undefined) {
         payload[field.api_key] = yield* materializeStructuredTextValue({
+          materializeContext: ctx,
+          allowedBlockApiKeys: getBlockWhitelist(field.validators) ?? [],
           parentContainerModelApiKey: blockApiKey,
           parentBlockId: String(row.id),
           parentFieldApiKey: field.api_key,
@@ -429,6 +456,8 @@ function materializeBlockPayload(
 }
 
 export function materializeStructuredTextValue(params: {
+  materializeContext?: MaterializeContext;
+  allowedBlockApiKeys?: readonly string[];
   parentContainerModelApiKey: string;
   parentBlockId: string | null;
   parentFieldApiKey: string;
@@ -438,6 +467,7 @@ export function materializeStructuredTextValue(params: {
 }): Effect.Effect<StructuredTextEnvelope | null, unknown, SqlClient.SqlClient> {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
+    const materializeContext = params.materializeContext ?? { blockModelSchemas: new Map<string, BlockModelSchema>() };
     let dast = params.rawValue;
     if (typeof dast === "string") {
       try {
@@ -448,23 +478,33 @@ export function materializeStructuredTextValue(params: {
     }
     if (!dast || typeof dast !== "object") return null;
 
-    const blockModels = yield* fetchBlockModels(sql);
-    const blocks: Record<string, DynamicRow> = {};
+    const blockIds = extractAllBlockIds(dast);
+    if (blockIds.length === 0) {
+      return { value: dast as DastDocumentInput, blocks: {} } satisfies StructuredTextEnvelope;
+    }
 
-    for (const model of blockModels) {
+    const blockModels = yield* fetchBlockModelsCached(materializeContext, sql);
+    const candidateBlockModels = params.allowedBlockApiKeys && params.allowedBlockApiKeys.length > 0
+      ? blockModels.filter((model) => params.allowedBlockApiKeys?.includes(model.api_key))
+      : blockModels;
+    const blocks: Record<string, DynamicRow> = {};
+    const placeholders = blockIds.map(() => "?").join(", ");
+
+    for (const model of candidateBlockModels) {
       const rows = yield* sql.unsafe<DynamicRow>(
         `SELECT * FROM "block_${model.api_key}"
          WHERE _root_record_id = ?
            AND _root_field_api_key = ?
            AND _parent_container_model_api_key = ?
            AND _parent_field_api_key = ?
-           AND ${params.parentBlockId === null ? "_parent_block_id IS NULL" : "_parent_block_id = ?"}`,
+           AND ${params.parentBlockId === null ? "_parent_block_id IS NULL" : "_parent_block_id = ?"}
+           AND id IN (${placeholders})`,
         params.parentBlockId === null
-          ? [params.rootRecordId, params.rootFieldApiKey, params.parentContainerModelApiKey, params.parentFieldApiKey]
-          : [params.rootRecordId, params.rootFieldApiKey, params.parentContainerModelApiKey, params.parentFieldApiKey, params.parentBlockId]
+          ? [params.rootRecordId, params.rootFieldApiKey, params.parentContainerModelApiKey, params.parentFieldApiKey, ...blockIds]
+          : [params.rootRecordId, params.rootFieldApiKey, params.parentContainerModelApiKey, params.parentFieldApiKey, params.parentBlockId, ...blockIds]
       );
       for (const row of rows) {
-        blocks[String(row.id)] = yield* materializeBlockPayload(sql, model.api_key, row);
+        blocks[String(row.id)] = yield* materializeBlockPayload(materializeContext, sql, model.api_key, row);
       }
     }
 
@@ -484,7 +524,9 @@ export function materializeRecordStructuredTextFields(params: {
       const rawValue = params.record[field.api_key];
       if (rawValue === null || rawValue === undefined) continue;
       const envelope = yield* materializeStructuredTextValue({
+        allowedBlockApiKeys: getBlockWhitelist(field.validators) ?? [],
         parentContainerModelApiKey: params.modelApiKey,
+        materializeContext: { blockModelSchemas: new Map<string, BlockModelSchema>() },
         parentBlockId: null,
         parentFieldApiKey: field.api_key,
         rootRecordId: String(params.record.id),

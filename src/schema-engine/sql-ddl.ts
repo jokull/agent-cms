@@ -30,9 +30,72 @@ const BLOCK_SYSTEM_COLUMNS = [
   `"_depth" INTEGER NOT NULL DEFAULT 0`,
 ];
 
+function blockLookupIndexName(blockApiKey: string): string {
+  return `idx_block_${blockApiKey}_lookup`;
+}
+
+export function ensureBlockLookupIndex(blockApiKey: string) {
+  return Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const tableName = `block_${blockApiKey}`;
+    const indexName = blockLookupIndexName(blockApiKey);
+    yield* sql.unsafe(
+      `CREATE INDEX IF NOT EXISTS "${indexName}"
+       ON "${tableName}" (
+         "_root_record_id",
+         "_root_field_api_key",
+         "_parent_container_model_api_key",
+         "_parent_field_api_key",
+         "_parent_block_id"
+       )`
+    );
+  });
+}
+
 interface FieldDef {
   apiKey: string;
   fieldType: FieldType;
+}
+
+function shouldIndexField(fieldType: FieldType): boolean {
+  return fieldType === "slug"
+    || fieldType === "link"
+    || fieldType === "date"
+    || fieldType === "date_time"
+    || fieldType === "integer";
+}
+
+function contentFieldIndexName(modelApiKey: string, fieldApiKey: string): string {
+  return `idx_content_${modelApiKey}_${fieldApiKey}`;
+}
+
+function contentCompositeIndexName(modelApiKey: string, leftFieldApiKey: string, rightFieldApiKey: string): string {
+  return `idx_content_${modelApiKey}_${leftFieldApiKey}_${rightFieldApiKey}`;
+}
+
+export function ensureContentFieldIndexes(modelApiKey: string, fields: FieldDef[]) {
+  return Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const tableName = `content_${modelApiKey}`;
+    for (const field of fields) {
+      if (!shouldIndexField(field.fieldType)) continue;
+      yield* sql.unsafe(
+        `CREATE INDEX IF NOT EXISTS "${contentFieldIndexName(modelApiKey, field.apiKey)}"
+         ON "${tableName}" ("${field.apiKey}")`
+      );
+    }
+
+    const linkFields = fields.filter((field) => field.fieldType === "link");
+    const temporalFields = fields.filter((field) => field.fieldType === "date" || field.fieldType === "date_time");
+    for (const linkField of linkFields) {
+      for (const temporalField of temporalFields) {
+        yield* sql.unsafe(
+          `CREATE INDEX IF NOT EXISTS "${contentCompositeIndexName(modelApiKey, linkField.apiKey, temporalField.apiKey)}"
+           ON "${tableName}" ("${linkField.apiKey}", "${temporalField.apiKey}" DESC)`
+        );
+      }
+    }
+  });
 }
 
 interface CreateContentTableOptions {
@@ -59,6 +122,7 @@ export function createContentTable(modelApiKey: string, fields: FieldDef[], opti
     }
     const allCols = [...systemCols, ...fieldCols].join(", ");
     yield* sql.unsafe(`CREATE TABLE IF NOT EXISTS "${tableName}" (${allCols})`);
+    yield* ensureContentFieldIndexes(modelApiKey, fields);
     return tableName;
   });
 }
@@ -75,6 +139,7 @@ export function createBlockTable(blockApiKey: string, fields: FieldDef[]) {
     );
     const allCols = [...BLOCK_SYSTEM_COLUMNS, ...fieldCols].join(", ");
     yield* sql.unsafe(`CREATE TABLE IF NOT EXISTS "${tableName}" (${allCols})`);
+    yield* ensureBlockLookupIndex(blockApiKey);
     return tableName;
   });
 }
@@ -187,6 +252,12 @@ export function migrateContentTable(
         yield* dropColumn(tableName, col.name);
         columnsDropped.push(col.name);
       }
+    }
+
+    if (isBlock) {
+      yield* ensureBlockLookupIndex(modelApiKey);
+    } else {
+      yield* ensureContentFieldIndexes(modelApiKey, fields);
     }
 
     return { created: false, columnsAdded, columnsDropped };

@@ -23,7 +23,7 @@ Effect services with `SqlClient` dependency injection. Layers composed at the en
 - `Layer.merge(sqlLayer, vectorizeLayer)` → provided once at handler boundary
 - `Effect.runPromise` only at framework boundaries (MCP, GraphQL Yoga, HTTP handler)
 
-See `IDIOMATIC_EFFECT.md` for full patterns.
+See [`docs/contributing/effect.md`](/Users/jokull/Code/agent-cms/docs/contributing/effect.md) for full patterns.
 
 ## Conventions
 

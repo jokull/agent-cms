@@ -7,7 +7,10 @@ import type { AssetRow } from "../db/row-types.js";
 import { getLinkTargets, getLinksTargets, computeIsValid } from "../db/validators.js";
 import type { SchemaBuilderContext, ModelQueryMeta, DynamicRow, GqlContext, AssetObject } from "./gql-types.js";
 import { toTypeName, toCamelCase, fieldToSDL, getRegistryDef, deserializeRecord } from "./gql-utils.js";
-import { batchFetchRecords, batchResolveLinkedRecords, resolveStructuredTextValue } from "./structured-text-resolver.js";
+import { resolveStructuredTextValue } from "./structured-text-resolver.js";
+import { loadLinkedRecords } from "./linked-record-loader.js";
+import { loadStructuredTextEnvelope } from "./structured-text-loader.js";
+import { getBlockWhitelist } from "../db/validators.js";
 
 /**
  * Build content model types and field resolvers.
@@ -301,30 +304,6 @@ export function buildContentModelResolvers(
       return map;
     }
 
-    /** Batch-fetch records from a content table by IDs, return map of id -> record */
-    /** Resolve a single record ID across target tables (for single link fields) */
-    async function resolveLinkedRecord(targetApiKeys: string[], id: string, includeDrafts: boolean): Promise<DynamicRow | null> {
-      const resolved = await batchResolveLinkedRecords({
-        runSql,
-        targetApiKeys,
-        ids: [id],
-        typeNames,
-        includeDrafts,
-      });
-      return resolved.get(id) ?? null;
-    }
-
-    /** Batch-resolve multiple record IDs across target tables (for links fields) */
-    async function resolveLinkedRecords(targetApiKeys: string[], ids: string[], includeDrafts: boolean): Promise<Map<string, DynamicRow>> {
-      return await batchResolveLinkedRecords({
-        runSql,
-        targetApiKeys,
-        ids,
-        typeNames,
-        includeDrafts,
-      });
-    }
-
     for (const f of fields) {
       const gqlName = toCamelCase(f.api_key);
 
@@ -334,7 +313,14 @@ export function buildContentModelResolvers(
           typeResolvers[gqlName] = async (parent: DynamicRow, _args: unknown, context: GqlContext) => {
             const linkedId = parent[f.api_key];
             if (!linkedId) return null;
-            return await resolveLinkedRecord(targets, linkedId as string, context?.includeDrafts ?? false);
+            return await loadLinkedRecords({
+              runSql,
+              targetApiKeys: targets,
+              ids: [linkedId as string],
+              typeNames,
+              includeDrafts: context?.includeDrafts ?? false,
+              context,
+            }).then((resolved) => resolved.get(linkedId as string) ?? null);
           };
         }
       }
@@ -347,8 +333,14 @@ export function buildContentModelResolvers(
               try { linkedIds = JSON.parse(linkedIds); } catch { return []; }
             }
             if (!Array.isArray(linkedIds)) return [];
-            // Batch-fetch all linked records in one IN query per target table
-            const resolved = await resolveLinkedRecords(targets, linkedIds as string[], context?.includeDrafts ?? false);
+            const resolved = await loadLinkedRecords({
+              runSql,
+              targetApiKeys: targets,
+              ids: linkedIds as string[],
+              typeNames,
+              includeDrafts: context?.includeDrafts ?? false,
+              context,
+            });
             // Return in original order, preserving insertion order
             return (linkedIds as string[]).map((id: string) => resolved.get(id) ?? null).filter(Boolean);
           };
@@ -413,6 +405,23 @@ export function buildContentModelResolvers(
         typeResolvers[gqlName] = async (parent: DynamicRow, _args: unknown, context: GqlContext) => {
           let dast = parent[f.api_key];
           if (!dast) return null;
+          const includeDrafts = context?.includeDrafts ?? false;
+          const isEnvelope = typeof dast === "object" && dast !== null && !Array.isArray(dast)
+            && "value" in (dast as Record<string, unknown>)
+            && "blocks" in (dast as Record<string, unknown>);
+          if (includeDrafts && !isEnvelope) {
+            dast = await loadStructuredTextEnvelope({
+              runSql,
+              context,
+              allowedBlockApiKeys: getBlockWhitelist(f.validators),
+              parentContainerModelApiKey: model.api_key,
+              parentBlockId: null,
+              parentFieldApiKey: f.api_key,
+              rootRecordId: String(parent.id),
+              rootFieldApiKey: f.api_key,
+              rawValue: dast,
+            });
+          }
           return await resolveStructuredTextValue({
             runSql,
             rawValue: dast,
@@ -423,8 +432,10 @@ export function buildContentModelResolvers(
             parentFieldApiKey: f.api_key,
             models,
             blockModels,
+            allowedBlockApiKeys: getBlockWhitelist(f.validators),
             typeNames,
-            includeDrafts: context?.includeDrafts ?? false,
+            includeDrafts,
+            linkedRecordCache: context?.linkedRecordCache,
           });
         };
       }

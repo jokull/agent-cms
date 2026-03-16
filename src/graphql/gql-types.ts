@@ -16,6 +16,36 @@ export interface GqlContext {
   includeDrafts?: boolean;
   locale?: string;
   fallbackLocales?: string[];
+  linkedRecordCache?: Map<string, Promise<DynamicRow | null>>;
+  linkedRecordLoaders?: Map<string, {
+    cache: Map<string, Promise<DynamicRow | null>>;
+    pending: Map<string, {
+      promise: Promise<DynamicRow | null>;
+      resolve: (value: DynamicRow | null) => void;
+      reject: (error: unknown) => void;
+    }>;
+    scheduled: boolean;
+  }>;
+  structuredTextEnvelopeLoaders?: Map<string, {
+    cache: Map<string, Promise<unknown>>;
+    pending: Map<string, {
+      deferred: {
+        promise: Promise<unknown>;
+        resolve: (value: unknown) => void;
+        reject: (error: unknown) => void;
+      };
+      params: {
+        allowedBlockApiKeys?: readonly string[];
+        parentContainerModelApiKey: string;
+        parentBlockId: string | null;
+        parentFieldApiKey: string;
+        rootRecordId: string;
+        rootFieldApiKey: string;
+        rawValue: unknown;
+      };
+    }>;
+    scheduled: boolean;
+  }>;
 }
 
 /** Resolved asset object returned by GraphQL */

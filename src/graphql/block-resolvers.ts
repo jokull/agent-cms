@@ -7,8 +7,9 @@ import { SqlClient } from "@effect/sql";
 import type { AssetRow } from "../db/row-types.js";
 import { getLinkTargets, getLinksTargets, getBlockWhitelist } from "../db/validators.js";
 import type { SchemaBuilderContext, DynamicRow, GqlContext } from "./gql-types.js";
-import { toTypeName, toCamelCase, fieldToSDL, getRegistryDef, deserializeRecord } from "./gql-utils.js";
-import { batchResolveLinkedRecords, resolveStructuredTextValue } from "./structured-text-resolver.js";
+import { toTypeName, toCamelCase, fieldToSDL, getRegistryDef } from "./gql-utils.js";
+import { resolveStructuredTextValue } from "./structured-text-resolver.js";
+import { loadLinkedRecords } from "./linked-record-loader.js";
 
 /**
  * Build block model resolvers, compute structured text union types,
@@ -66,12 +67,13 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
           bmResolvers[gqlName] = async (parent: DynamicRow, _args: unknown, context: GqlContext) => {
             const linkedId = parent[f.api_key];
             if (!linkedId) return null;
-            const resolved = await batchResolveLinkedRecords({
+            const resolved = await loadLinkedRecords({
               runSql,
               targetApiKeys: targets,
               ids: [linkedId as string],
               typeNames,
               includeDrafts: context?.includeDrafts ?? false,
+              context,
             });
             return resolved.get(linkedId as string) ?? null;
           };
@@ -90,8 +92,10 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
             parentFieldApiKey: f.api_key,
             models,
             blockModels,
+            allowedBlockApiKeys: getBlockWhitelist(f.validators),
             typeNames,
             includeDrafts: context?.includeDrafts ?? false,
+            linkedRecordCache: context?.linkedRecordCache,
           });
         };
       } else if (f.field_type === "links") {
@@ -103,12 +107,13 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
               try { linkedIds = JSON.parse(linkedIds); } catch { return []; }
             }
             if (!Array.isArray(linkedIds)) return [];
-            const resolved = await batchResolveLinkedRecords({
+            const resolved = await loadLinkedRecords({
               runSql,
               targetApiKeys: targets,
               ids: linkedIds as string[],
               typeNames,
               includeDrafts: context?.includeDrafts ?? false,
+              context,
             });
             return (linkedIds as string[]).map((id) => resolved.get(id) ?? null).filter(Boolean);
           };

@@ -92,6 +92,12 @@ Block types get a `Record` suffix: `code_block` → `CodeBlockRecord`.
 
 Field `api_key` values stay snake_case in queries: `cover_image`, `published_at`.
 
+#### Performance model
+
+GraphQL nesting here is not compiled into one giant SQL join. The server fetches root records, batches linked records and StructuredText work into set-oriented SQL, then assembles the nested GraphQL shape in memory. That keeps SQL simple and indexable, but preview StructuredText still costs more than published reads because it is reconstructed from relational block tables.
+
+See [`docs/architecture/performance.md`](/Users/jokull/Code/agent-cms/docs/architecture/performance.md) for the GraphQL-to-SQL architecture, batching strategy, indexing tradeoffs, and measured behavior.
+
 #### MCP resources and prompts
 
 Agents connecting via MCP get two resources for upfront context:

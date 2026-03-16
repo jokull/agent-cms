@@ -1,0 +1,537 @@
+{
+  "startedAt": "2026-03-16T22:48:16.344Z",
+  "cmsUrl": "http://127.0.0.1:8788",
+  "iterations": 5,
+  "warmupIterations": 1,
+  "suitePath": "/Users/jokull/Code/agent-cms/benchmarks/blog-query-suite-scale.json",
+  "benchmarks": [
+    {
+      "name": "posts_summary_20_published",
+      "includeDrafts": false,
+      "summary": {
+        "samples": [
+          {
+            "iteration": 1,
+            "status": 200,
+            "ok": true,
+            "durationMs": 7.607,
+            "responseBytes": 7548,
+            "errorCount": 0,
+            "sqlStatementCount": 3,
+            "sqlTotalMs": 7
+          },
+          {
+            "iteration": 2,
+            "status": 200,
+            "ok": true,
+            "durationMs": 7.975,
+            "responseBytes": 7548,
+            "errorCount": 0,
+            "sqlStatementCount": 3,
+            "sqlTotalMs": 7
+          },
+          {
+            "iteration": 3,
+            "status": 200,
+            "ok": true,
+            "durationMs": 13.451,
+            "responseBytes": 7548,
+            "errorCount": 0,
+            "sqlStatementCount": 3,
+            "sqlTotalMs": 7
+          },
+          {
+            "iteration": 4,
+            "status": 200,
+            "ok": true,
+            "durationMs": 7.992,
+            "responseBytes": 7548,
+            "errorCount": 0,
+            "sqlStatementCount": 3,
+            "sqlTotalMs": 8
+          },
+          {
+            "iteration": 5,
+            "status": 200,
+            "ok": true,
+            "durationMs": 5.625,
+            "responseBytes": 7548,
+            "errorCount": 0,
+            "sqlStatementCount": 3,
+            "sqlTotalMs": 5
+          }
+        ],
+        "medianMs": 7.975,
+        "p95Ms": 13.451,
+        "minMs": 5.625,
+        "maxMs": 13.451,
+        "medianBytes": 7548,
+        "medianSqlStatements": 3,
+        "p95SqlStatements": 3,
+        "medianSqlMs": 7
+      }
+    },
+    {
+      "name": "posts_summary_20_preview",
+      "includeDrafts": true,
+      "summary": {
+        "samples": [
+          {
+            "iteration": 1,
+            "status": 200,
+            "ok": true,
+            "durationMs": 5.908,
+            "responseBytes": 7548,
+            "errorCount": 0,
+            "sqlStatementCount": 3,
+            "sqlTotalMs": 6
+          },
+          {
+            "iteration": 2,
+            "status": 200,
+            "ok": true,
+            "durationMs": 7.315,
+            "responseBytes": 7548,
+            "errorCount": 0,
+            "sqlStatementCount": 3,
+            "sqlTotalMs": 7
+          },
+          {
+            "iteration": 3,
+            "status": 200,
+            "ok": true,
+            "durationMs": 5.993,
+            "responseBytes": 7548,
+            "errorCount": 0,
+            "sqlStatementCount": 3,
+            "sqlTotalMs": 4
+          },
+          {
+            "iteration": 4,
+            "status": 200,
+            "ok": true,
+            "durationMs": 5.733,
+            "responseBytes": 7548,
+            "errorCount": 0,
+            "sqlStatementCount": 3,
+            "sqlTotalMs": 6
+          },
+          {
+            "iteration": 5,
+            "status": 200,
+            "ok": true,
+            "durationMs": 5.179,
+            "responseBytes": 7548,
+            "errorCount": 0,
+            "sqlStatementCount": 3,
+            "sqlTotalMs": 4
+          }
+        ],
+        "medianMs": 5.908,
+        "p95Ms": 7.315,
+        "minMs": 5.179,
+        "maxMs": 7.315,
+        "medianBytes": 7548,
+        "medianSqlStatements": 3,
+        "p95SqlStatements": 3,
+        "medianSqlMs": 6
+      }
+    },
+    {
+      "name": "posts_summary_80_published",
+      "includeDrafts": false,
+      "summary": {
+        "samples": [
+          {
+            "iteration": 1,
+            "status": 200,
+            "ok": true,
+            "durationMs": 9.424,
+            "responseBytes": 30123,
+            "errorCount": 0,
+            "sqlStatementCount": 3,
+            "sqlTotalMs": 7
+          },
+          {
+            "iteration": 2,
+            "status": 200,
+            "ok": true,
+            "durationMs": 11.318,
+            "responseBytes": 30123,
+            "errorCount": 0,
+            "sqlStatementCount": 3,
+            "sqlTotalMs": 12
+          },
+          {
+            "iteration": 3,
+            "status": 200,
+            "ok": true,
+            "durationMs": 9.112,
+            "responseBytes": 30123,
+            "errorCount": 0,
+            "sqlStatementCount": 3,
+            "sqlTotalMs": 7
+          },
+          {
+            "iteration": 4,
+            "status": 200,
+            "ok": true,
+            "durationMs": 21.16,
+            "responseBytes": 30123,
+            "errorCount": 0,
+            "sqlStatementCount": 3,
+            "sqlTotalMs": 19
+          },
+          {
+            "iteration": 5,
+            "status": 200,
+            "ok": true,
+            "durationMs": 11.358,
+            "responseBytes": 30123,
+            "errorCount": 0,
+            "sqlStatementCount": 3,
+            "sqlTotalMs": 9
+          }
+        ],
+        "medianMs": 11.318,
+        "p95Ms": 21.16,
+        "minMs": 9.112,
+        "maxMs": 21.16,
+        "medianBytes": 30123,
+        "medianSqlStatements": 3,
+        "p95SqlStatements": 3,
+        "medianSqlMs": 9
+      }
+    },
+    {
+      "name": "posts_summary_80_preview",
+      "includeDrafts": true,
+      "summary": {
+        "samples": [
+          {
+            "iteration": 1,
+            "status": 200,
+            "ok": true,
+            "durationMs": 8.69,
+            "responseBytes": 30123,
+            "errorCount": 0,
+            "sqlStatementCount": 3,
+            "sqlTotalMs": 7
+          },
+          {
+            "iteration": 2,
+            "status": 200,
+            "ok": true,
+            "durationMs": 9.396,
+            "responseBytes": 30123,
+            "errorCount": 0,
+            "sqlStatementCount": 3,
+            "sqlTotalMs": 8
+          },
+          {
+            "iteration": 3,
+            "status": 200,
+            "ok": true,
+            "durationMs": 14.04,
+            "responseBytes": 30123,
+            "errorCount": 0,
+            "sqlStatementCount": 3,
+            "sqlTotalMs": 17
+          },
+          {
+            "iteration": 4,
+            "status": 200,
+            "ok": true,
+            "durationMs": 8.708,
+            "responseBytes": 30123,
+            "errorCount": 0,
+            "sqlStatementCount": 3,
+            "sqlTotalMs": 6
+          },
+          {
+            "iteration": 5,
+            "status": 200,
+            "ok": true,
+            "durationMs": 8.758,
+            "responseBytes": 30123,
+            "errorCount": 0,
+            "sqlStatementCount": 3,
+            "sqlTotalMs": 9
+          }
+        ],
+        "medianMs": 8.758,
+        "p95Ms": 14.04,
+        "minMs": 8.69,
+        "maxMs": 14.04,
+        "medianBytes": 30123,
+        "medianSqlStatements": 3,
+        "p95SqlStatements": 3,
+        "medianSqlMs": 8
+      }
+    },
+    {
+      "name": "posts_deep_12_published",
+      "includeDrafts": false,
+      "summary": {
+        "samples": [
+          {
+            "iteration": 1,
+            "status": 200,
+            "ok": true,
+            "durationMs": 14.905,
+            "responseBytes": 37157,
+            "errorCount": 0,
+            "sqlStatementCount": 3,
+            "sqlTotalMs": 5
+          },
+          {
+            "iteration": 2,
+            "status": 200,
+            "ok": true,
+            "durationMs": 9.876,
+            "responseBytes": 37157,
+            "errorCount": 0,
+            "sqlStatementCount": 3,
+            "sqlTotalMs": 10
+          },
+          {
+            "iteration": 3,
+            "status": 200,
+            "ok": true,
+            "durationMs": 5.389,
+            "responseBytes": 37157,
+            "errorCount": 0,
+            "sqlStatementCount": 3,
+            "sqlTotalMs": 6
+          },
+          {
+            "iteration": 4,
+            "status": 200,
+            "ok": true,
+            "durationMs": 13.921,
+            "responseBytes": 37157,
+            "errorCount": 0,
+            "sqlStatementCount": 3,
+            "sqlTotalMs": 21
+          },
+          {
+            "iteration": 5,
+            "status": 200,
+            "ok": true,
+            "durationMs": 5.833,
+            "responseBytes": 37157,
+            "errorCount": 0,
+            "sqlStatementCount": 3,
+            "sqlTotalMs": 6
+          }
+        ],
+        "medianMs": 9.876,
+        "p95Ms": 14.905,
+        "minMs": 5.389,
+        "maxMs": 14.905,
+        "medianBytes": 37157,
+        "medianSqlStatements": 3,
+        "p95SqlStatements": 3,
+        "medianSqlMs": 6
+      }
+    },
+    {
+      "name": "posts_deep_12_preview",
+      "includeDrafts": true,
+      "summary": {
+        "samples": [
+          {
+            "iteration": 1,
+            "status": 200,
+            "ok": true,
+            "durationMs": 118.064,
+            "responseBytes": 37157,
+            "errorCount": 0,
+            "sqlStatementCount": 15,
+            "sqlTotalMs": 896
+          },
+          {
+            "iteration": 2,
+            "status": 200,
+            "ok": true,
+            "durationMs": 82.194,
+            "responseBytes": 37157,
+            "errorCount": 0,
+            "sqlStatementCount": 15,
+            "sqlTotalMs": 851
+          },
+          {
+            "iteration": 3,
+            "status": 200,
+            "ok": true,
+            "durationMs": 83.066,
+            "responseBytes": 37157,
+            "errorCount": 0,
+            "sqlStatementCount": 15,
+            "sqlTotalMs": 793
+          },
+          {
+            "iteration": 4,
+            "status": 200,
+            "ok": true,
+            "durationMs": 84.356,
+            "responseBytes": 37157,
+            "errorCount": 0,
+            "sqlStatementCount": 15,
+            "sqlTotalMs": 894
+          },
+          {
+            "iteration": 5,
+            "status": 200,
+            "ok": true,
+            "durationMs": 69.751,
+            "responseBytes": 37157,
+            "errorCount": 0,
+            "sqlStatementCount": 15,
+            "sqlTotalMs": 789
+          }
+        ],
+        "medianMs": 83.066,
+        "p95Ms": 118.064,
+        "minMs": 69.751,
+        "maxMs": 118.064,
+        "medianBytes": 37157,
+        "medianSqlStatements": 15,
+        "p95SqlStatements": 15,
+        "medianSqlMs": 851
+      }
+    },
+    {
+      "name": "posts_deep_36_published",
+      "includeDrafts": false,
+      "summary": {
+        "samples": [
+          {
+            "iteration": 1,
+            "status": 200,
+            "ok": true,
+            "durationMs": 9.787,
+            "responseBytes": 111425,
+            "errorCount": 0,
+            "sqlStatementCount": 3,
+            "sqlTotalMs": 9
+          },
+          {
+            "iteration": 2,
+            "status": 200,
+            "ok": true,
+            "durationMs": 9.758,
+            "responseBytes": 111425,
+            "errorCount": 0,
+            "sqlStatementCount": 3,
+            "sqlTotalMs": 9
+          },
+          {
+            "iteration": 3,
+            "status": 200,
+            "ok": true,
+            "durationMs": 9.251,
+            "responseBytes": 111425,
+            "errorCount": 0,
+            "sqlStatementCount": 3,
+            "sqlTotalMs": 6
+          },
+          {
+            "iteration": 4,
+            "status": 200,
+            "ok": true,
+            "durationMs": 8.285,
+            "responseBytes": 111425,
+            "errorCount": 0,
+            "sqlStatementCount": 3,
+            "sqlTotalMs": 9
+          },
+          {
+            "iteration": 5,
+            "status": 200,
+            "ok": true,
+            "durationMs": 9.111,
+            "responseBytes": 111425,
+            "errorCount": 0,
+            "sqlStatementCount": 3,
+            "sqlTotalMs": 6
+          }
+        ],
+        "medianMs": 9.251,
+        "p95Ms": 9.787,
+        "minMs": 8.285,
+        "maxMs": 9.787,
+        "medianBytes": 111425,
+        "medianSqlStatements": 3,
+        "p95SqlStatements": 3,
+        "medianSqlMs": 9
+      }
+    },
+    {
+      "name": "posts_deep_36_preview",
+      "includeDrafts": true,
+      "summary": {
+        "samples": [
+          {
+            "iteration": 1,
+            "status": 200,
+            "ok": true,
+            "durationMs": 212.281,
+            "responseBytes": 111425,
+            "errorCount": 0,
+            "sqlStatementCount": 39,
+            "sqlTotalMs": 6788
+          },
+          {
+            "iteration": 2,
+            "status": 200,
+            "ok": true,
+            "durationMs": 216.548,
+            "responseBytes": 111425,
+            "errorCount": 0,
+            "sqlStatementCount": 39,
+            "sqlTotalMs": 7388
+          },
+          {
+            "iteration": 3,
+            "status": 200,
+            "ok": true,
+            "durationMs": 202.515,
+            "responseBytes": 111425,
+            "errorCount": 0,
+            "sqlStatementCount": 39,
+            "sqlTotalMs": 6638
+          },
+          {
+            "iteration": 4,
+            "status": 200,
+            "ok": true,
+            "durationMs": 429.541,
+            "responseBytes": 111425,
+            "errorCount": 0,
+            "sqlStatementCount": 39,
+            "sqlTotalMs": 7823
+          },
+          {
+            "iteration": 5,
+            "status": 200,
+            "ok": true,
+            "durationMs": 224.97,
+            "responseBytes": 111425,
+            "errorCount": 0,
+            "sqlStatementCount": 39,
+            "sqlTotalMs": 6911
+          }
+        ],
+        "medianMs": 216.548,
+        "p95Ms": 429.541,
+        "minMs": 202.515,
+        "maxMs": 429.541,
+        "medianBytes": 111425,
+        "medianSqlStatements": 39,
+        "p95SqlStatements": 39,
+        "medianSqlMs": 6911
+      }
+    }
+  ]
+}

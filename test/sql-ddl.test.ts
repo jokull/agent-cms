@@ -47,6 +47,26 @@ describe("@effect/sql DDL operations", () => {
         expect(colNames).toContain("title");
         expect(colNames).toContain("views");
         expect(colNames).toContain("published");
+
+        const sql = yield* SqlClient.SqlClient;
+        const indexes = yield* sql.unsafe<{ name: string }>('PRAGMA index_list("content_post")');
+        expect(indexes.some((i) => i.name === "idx_content_post_views")).toBe(true);
+        expect(indexes.some((i) => i.name === "idx_content_post_title")).toBe(false);
+      })
+    );
+  });
+
+  it("creates composite indexes for link plus temporal fields", async () => {
+    await run(
+      Effect.gen(function* () {
+        yield* createContentTable("entry", [
+          { apiKey: "category", fieldType: "link" },
+          { apiKey: "published_date", fieldType: "date" },
+        ]);
+
+        const sql = yield* SqlClient.SqlClient;
+        const indexes = yield* sql.unsafe<{ name: string }>('PRAGMA index_list("content_entry")');
+        expect(indexes.some((i) => i.name === "idx_content_entry_category_published_date")).toBe(true);
       })
     );
   });
@@ -65,6 +85,37 @@ describe("@effect/sql DDL operations", () => {
         expect(colNames).toContain("_root_field_api_key");
         expect(colNames).toContain("headline");
         expect(colNames).not.toContain("_status");
+
+        const sql = yield* SqlClient.SqlClient;
+        const indexes = yield* sql.unsafe<{ name: string }>('PRAGMA index_list("block_hero_section")');
+        expect(indexes.some((i) => i.name === "idx_block_hero_section_lookup")).toBe(true);
+      })
+    );
+  });
+
+  it("adds the block lookup index for existing block tables during migration", async () => {
+    await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql.unsafe(`
+          CREATE TABLE "block_legacy_block" (
+            "id" TEXT PRIMARY KEY,
+            "_root_record_id" TEXT NOT NULL,
+            "_root_field_api_key" TEXT NOT NULL,
+            "_parent_container_model_api_key" TEXT NOT NULL,
+            "_parent_block_id" TEXT,
+            "_parent_field_api_key" TEXT NOT NULL,
+            "_depth" INTEGER NOT NULL DEFAULT 0,
+            "title" TEXT
+          )
+        `);
+
+        yield* migrateContentTable("legacy_block", true, [
+          { apiKey: "title", fieldType: "string" },
+        ]);
+
+        const indexes = yield* sql.unsafe<{ name: string }>('PRAGMA index_list("block_legacy_block")');
+        expect(indexes.some((i) => i.name === "idx_block_legacy_block_lookup")).toBe(true);
       })
     );
   });

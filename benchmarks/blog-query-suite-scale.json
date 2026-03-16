@@ -1,0 +1,62 @@
+[
+  {
+    "name": "posts_summary_20_published",
+    "includeDrafts": false,
+    "variables": { "first": 20 },
+    "query": "query BenchPostsSummary($first: Int) { allPosts(first: $first, orderBy: [publishedDate_DESC]) { id title slug excerpt publishedDate readingTime featured category { name slug } author { name } } }"
+  },
+  {
+    "name": "posts_summary_20_preview",
+    "includeDrafts": true,
+    "variables": { "first": 20 },
+    "query": "query BenchPostsSummary($first: Int) { allPosts(first: $first, orderBy: [publishedDate_DESC]) { id title slug excerpt publishedDate readingTime featured category { name slug } author { name } } }"
+  },
+  {
+    "name": "posts_summary_80_published",
+    "includeDrafts": false,
+    "variables": { "first": 80 },
+    "query": "query BenchPostsSummary($first: Int) { allPosts(first: $first, orderBy: [publishedDate_DESC]) { id title slug excerpt publishedDate readingTime featured category { name slug } author { name } } }"
+  },
+  {
+    "name": "posts_summary_80_preview",
+    "includeDrafts": true,
+    "variables": { "first": 80 },
+    "query": "query BenchPostsSummary($first: Int) { allPosts(first: $first, orderBy: [publishedDate_DESC]) { id title slug excerpt publishedDate readingTime featured category { name slug } author { name } } }"
+  },
+  {
+    "name": "posts_deep_12_published",
+    "includeDrafts": false,
+    "variables": { "first": 12 },
+    "query": "query BenchPostsDeep($first: Int) { allPosts(first: $first, orderBy: [publishedDate_DESC]) { id title slug content { value blocks { __typename ... on HeroSectionRecord { id headline subheadline } ... on CodeBlockRecord { id language filename code } ... on FeatureGridRecord { id heading features { value blocks { __typename ... on FeatureCardRecord { id title description details { value blocks { __typename ... on CodeBlockRecord { id language filename code } } } } } } } ... on FeatureCardRecord { id title description details { value blocks { __typename ... on CodeBlockRecord { id language filename code } } } } } } category { id name slug } author { id name } } }"
+  },
+  {
+    "name": "posts_deep_12_preview",
+    "includeDrafts": true,
+    "variables": { "first": 12 },
+    "query": "query BenchPostsDeep($first: Int) { allPosts(first: $first, orderBy: [publishedDate_DESC]) { id title slug content { value blocks { __typename ... on HeroSectionRecord { id headline subheadline } ... on CodeBlockRecord { id language filename code } ... on FeatureGridRecord { id heading features { value blocks { __typename ... on FeatureCardRecord { id title description details { value blocks { __typename ... on CodeBlockRecord { id language filename code } } } } } } } ... on FeatureCardRecord { id title description details { value blocks { __typename ... on CodeBlockRecord { id language filename code } } } } } } category { id name slug } author { id name } } }"
+  },
+  {
+    "name": "posts_deep_36_published",
+    "includeDrafts": false,
+    "variables": { "first": 36 },
+    "query": "query BenchPostsDeep($first: Int) { allPosts(first: $first, orderBy: [publishedDate_DESC]) { id title slug content { value blocks { __typename ... on HeroSectionRecord { id headline subheadline } ... on CodeBlockRecord { id language filename code } ... on FeatureGridRecord { id heading features { value blocks { __typename ... on FeatureCardRecord { id title description details { value blocks { __typename ... on CodeBlockRecord { id language filename code } } } } } } } ... on FeatureCardRecord { id title description details { value blocks { __typename ... on CodeBlockRecord { id language filename code } } } } } } category { id name slug } author { id name } } }"
+  },
+  {
+    "name": "posts_deep_36_preview",
+    "includeDrafts": true,
+    "variables": { "first": 36 },
+    "query": "query BenchPostsDeep($first: Int) { allPosts(first: $first, orderBy: [publishedDate_DESC]) { id title slug content { value blocks { __typename ... on HeroSectionRecord { id headline subheadline } ... on CodeBlockRecord { id language filename code } ... on FeatureGridRecord { id heading features { value blocks { __typename ... on FeatureCardRecord { id title description details { value blocks { __typename ... on CodeBlockRecord { id language filename code } } } } } } } ... on FeatureCardRecord { id title description details { value blocks { __typename ... on CodeBlockRecord { id language filename code } } } } } } category { id name slug } author { id name } } }"
+  },
+  {
+    "name": "posts_deep_72_published",
+    "includeDrafts": false,
+    "variables": { "first": 72 },
+    "query": "query BenchPostsDeep($first: Int) { allPosts(first: $first, orderBy: [publishedDate_DESC]) { id title slug content { value blocks { __typename ... on HeroSectionRecord { id headline subheadline } ... on CodeBlockRecord { id language filename code } ... on FeatureGridRecord { id heading features { value blocks { __typename ... on FeatureCardRecord { id title description details { value blocks { __typename ... on CodeBlockRecord { id language filename code } } } } } } } ... on FeatureCardRecord { id title description details { value blocks { __typename ... on CodeBlockRecord { id language filename code } } } } } } category { id name slug } author { id name } } }"
+  },
+  {
+    "name": "posts_deep_72_preview",
+    "includeDrafts": true,
+    "variables": { "first": 72 },
+    "query": "query BenchPostsDeep($first: Int) { allPosts(first: $first, orderBy: [publishedDate_DESC]) { id title slug content { value blocks { __typename ... on HeroSectionRecord { id headline subheadline } ... on CodeBlockRecord { id language filename code } ... on FeatureGridRecord { id heading features { value blocks { __typename ... on FeatureCardRecord { id title description details { value blocks { __typename ... on CodeBlockRecord { id language filename code } } } } } } } ... on FeatureCardRecord { id title description details { value blocks { __typename ... on CodeBlockRecord { id language filename code } } } } } } category { id name slug } author { id name } } }"
+  }
+]

@@ -91,4 +91,12 @@ describe("GraphQL Content Delivery API", () => {
     expect(result.data.allPosts[0]._status).toBe("draft");
     expect(result.data.allPosts[0]._createdAt).toBeTruthy();
   });
+
+  it("rejects overly complex queries", async () => {
+    const aliases = Array.from({ length: 251 }, (_, i) => `title${i}: title`).join("\n");
+    const result = await gqlQuery(handler, `{ allPosts { ${aliases} } }`);
+    expect(result.data).toBeUndefined();
+    expect(result.errors).toBeDefined();
+    expect(result.errors?.[0]?.extensions?.code).toBe("QUERY_COMPLEXITY_LIMIT_EXCEEDED");
+  });
 });

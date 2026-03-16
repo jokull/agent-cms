@@ -1,8 +1,10 @@
 import { createCMSHandler } from "agent-cms";
 
-export default {
-  fetch(request: Request, env: Env): Promise<Response> {
-    return createCMSHandler({
+let cachedHandler: ReturnType<typeof createCMSHandler> | null = null;
+
+function getHandler(env: Env) {
+  if (!cachedHandler) {
+    cachedHandler = createCMSHandler({
       bindings: {
         db: env.DB,
         assets: env.ASSETS,
@@ -11,7 +13,14 @@ export default {
         ai: env.AI,
         vectorize: env.VECTORIZE,
       },
-    }).fetch(request);
+    });
+  }
+  return cachedHandler;
+}
+
+export default {
+  fetch(request: Request, env: Env): Promise<Response> {
+    return getHandler(env).fetch(request);
   },
 };
 
