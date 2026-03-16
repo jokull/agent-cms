@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { validateDast, extractBlockIds, extractLinkIds } from "../src/dast/index.js";
+import { validateDast, extractBlockIds, extractInlineBlockIds, extractAllBlockIds, extractLinkIds } from "../src/dast/index.js";
 
 describe("DAST Validation", () => {
   describe("valid documents", () => {
@@ -255,26 +255,35 @@ describe("DAST Validation", () => {
     });
   });
 
-  describe("extractBlockIds", () => {
-    it("extracts block and inlineBlock IDs", () => {
-      const doc = {
-        schema: "dast" as const,
-        document: {
-          type: "root" as const,
-          children: [
-            { type: "block" as const, item: "block_1" },
-            {
-              type: "paragraph" as const,
-              children: [
-                { type: "inlineBlock" as const, item: "block_2" },
-                { type: "span" as const, value: "text" },
-              ],
-            },
-            { type: "block" as const, item: "block_3" },
-          ],
-        },
-      };
-      expect(extractBlockIds(doc as any)).toEqual(["block_1", "block_2", "block_3"]);
+  describe("extractBlockIds / extractInlineBlockIds / extractAllBlockIds", () => {
+    const doc = {
+      schema: "dast" as const,
+      document: {
+        type: "root" as const,
+        children: [
+          { type: "block" as const, item: "block_1" },
+          {
+            type: "paragraph" as const,
+            children: [
+              { type: "inlineBlock" as const, item: "inline_1" },
+              { type: "span" as const, value: "text" },
+            ],
+          },
+          { type: "block" as const, item: "block_2" },
+        ],
+      },
+    };
+
+    it("extractBlockIds returns only block-level IDs", () => {
+      expect(extractBlockIds(doc as any)).toEqual(["block_1", "block_2"]);
+    });
+
+    it("extractInlineBlockIds returns only inline block IDs", () => {
+      expect(extractInlineBlockIds(doc as any)).toEqual(["inline_1"]);
+    });
+
+    it("extractAllBlockIds returns both", () => {
+      expect(extractAllBlockIds(doc as any)).toEqual(["block_1", "inline_1", "block_2"]);
     });
 
     it("returns empty for document without blocks", () => {

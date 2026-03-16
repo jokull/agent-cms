@@ -1,7 +1,7 @@
 import { createSchema } from "graphql-yoga";
 import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
-import { extractBlockIds } from "../dast/index.js";
+import { extractBlockIds, extractInlineBlockIds } from "../dast/index.js";
 import type { ModelRow, FieldRow, AssetRow } from "../db/row-types.js";
 import { getLinkTargets, getLinksTargets } from "../db/validators.js";
 import { compileFilterToSql, compileOrderBy } from "./filter-compiler.js";
@@ -162,6 +162,7 @@ export function buildGraphQLSchema(sqlLayer: any) {
       type StructuredText {
         value: JSON!
         blocks: [JSON!]!
+        inlineBlocks: [JSON!]!
         links: [JSON!]!
       }
       input StringFilter { eq: String, neq: String, matches: String, isBlank: Boolean, exists: Boolean }
@@ -341,34 +342,46 @@ export function buildGraphQLSchema(sqlLayer: any) {
               try { dast = JSON.parse(dast); } catch { return null; }
             }
 
-            // Extract block IDs from DAST
-            const blockIds = extractBlockIds(dast);
+            // Extract block IDs and inline block IDs separately
+            const blockLevelIds = new Set(extractBlockIds(dast));
+            const inlineBlockIdSet = new Set(extractInlineBlockIds(dast));
 
-            // Fetch blocks from their respective tables
+            // Fetch all blocks for this field, then categorize
             const blocks: any[] = [];
-            if (blockIds.length > 0) {
+            const inlineBlocks: any[] = [];
+
+            if (blockLevelIds.size > 0 || inlineBlockIdSet.size > 0) {
               for (const bm of blockModels) {
                 const fetched = runSql(
                   Effect.gen(function* () {
                     const s = yield* SqlClient.SqlClient;
-                    // Get blocks from this block type table that match our record
                     const rows = yield* s.unsafe<Record<string, any>>(
                       `SELECT * FROM "block_${bm.api_key}" WHERE _root_record_id = ? AND _root_field_api_key = ?`,
                       [parent.id, f.api_key]
                     );
                     return rows.map((r: any) => ({
                       ...deserializeRecord(r),
-                      __typename: toTypeName(bm.api_key),
+                      __typename: `${toTypeName(bm.api_key)}Record`,
                     }));
                   })
                 );
-                blocks.push(...fetched);
+                for (const record of fetched) {
+                  if (blockLevelIds.has(record.id)) {
+                    blocks.push(record);
+                  } else if (inlineBlockIdSet.has(record.id)) {
+                    inlineBlocks.push(record);
+                  } else {
+                    // Block exists but not referenced in DAST — include in blocks
+                    blocks.push(record);
+                  }
+                }
               }
             }
 
             return {
               value: dast,
               blocks,
+              inlineBlocks,
               links: [], // TODO: resolve itemLink/inlineItem references
             };
           };

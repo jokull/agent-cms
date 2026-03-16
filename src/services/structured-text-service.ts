@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect";
 import { SqlClient } from "@effect/sql";
-import { validateDast, validateBlocksOnly, extractBlockIds } from "../dast/index.js";
+import { validateDast, validateBlocksOnly, extractAllBlockIds } from "../dast/index.js";
 import { ValidationError } from "../errors.js";
 import { DastDocumentInput } from "../dast/schema.js";
 
@@ -61,7 +61,7 @@ export function writeStructuredText(params: {
     }
 
     // 2. Extract block IDs from DAST and validate they match provided blocks
-    const referencedBlockIds = extractBlockIds(dast);
+    const referencedBlockIds = extractAllBlockIds(dast);
     const providedBlockIds = Object.keys(blocks);
 
     for (const id of referencedBlockIds) {

@@ -267,23 +267,52 @@ export function validateBlocksOnly(doc: unknown): ValidationError[] {
 }
 
 /**
- * Extract all block IDs referenced in a DAST document.
- * Accepts DastDocument or any structurally compatible decoded input.
+ * Extract all block-level block IDs (type "block") from a DAST document.
  */
 export function extractBlockIds(doc: { document: { children: readonly unknown[] } }): string[] {
   const ids: string[] = [];
-  walkNodes([...doc.document.children], ids);
+  walkNodesForType([...doc.document.children], "block", ids);
   return ids;
 }
 
-function walkNodes(nodes: unknown[], ids: string[]) {
+/**
+ * Extract all inline block IDs (type "inlineBlock") from a DAST document.
+ */
+export function extractInlineBlockIds(doc: { document: { children: readonly unknown[] } }): string[] {
+  const ids: string[] = [];
+  walkNodesForType([...doc.document.children], "inlineBlock", ids);
+  return ids;
+}
+
+/**
+ * Extract ALL block IDs (both "block" and "inlineBlock") from a DAST document.
+ * Used for write orchestration where both types need to be stored.
+ */
+export function extractAllBlockIds(doc: { document: { children: readonly unknown[] } }): string[] {
+  const ids: string[] = [];
+  walkNodesForTypes([...doc.document.children], ["block", "inlineBlock"], ids);
+  return ids;
+}
+
+function walkNodesForType(nodes: unknown[], targetType: string, ids: string[]) {
   for (const node of nodes) {
     if (!isRecord(node)) continue;
-    if ((node.type === "block" || node.type === "inlineBlock") && typeof node.item === "string") {
+    if (node.type === targetType && typeof node.item === "string") {
       ids.push(node.item);
     }
     const children = getArray(node, "children");
-    if (children) walkNodes(children, ids);
+    if (children) walkNodesForType(children, targetType, ids);
+  }
+}
+
+function walkNodesForTypes(nodes: unknown[], targetTypes: string[], ids: string[]) {
+  for (const node of nodes) {
+    if (!isRecord(node)) continue;
+    if (targetTypes.includes(node.type as string) && typeof node.item === "string") {
+      ids.push(node.item);
+    }
+    const children = getArray(node, "children");
+    if (children) walkNodesForTypes(children, targetTypes, ids);
   }
 }
 
