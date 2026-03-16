@@ -111,7 +111,7 @@ const uploadFieldMap: Record<string, string> = {
  * Build asset-related type defs, queries, and resolvers.
  */
 export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
-  const { resolvers, typeDefs, queryFieldDefs, runSql, assetUrl, cfImageUrl, isProduction, locales } = ctx;
+  const { resolvers, typeDefs, queryFieldDefs, runSql, assetUrl, cfImageUrl, locales } = ctx;
 
   // _site query - DatoCMS-compatible site info with globalSeo and faviconMetaTags
   queryFieldDefs.push("_site: SiteInfo!");

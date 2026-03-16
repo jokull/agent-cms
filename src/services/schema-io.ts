@@ -184,7 +184,11 @@ export function importSchema(schema: unknown) {
 
     // --- 3. Create all fields (models exist, so link/links validators resolve) ---
     for (const model of s.models) {
-      const modelId = modelApiKeyToId.get(model.apiKey)!;
+      const modelId = modelApiKeyToId.get(model.apiKey);
+      if (modelId === undefined) {
+        return yield* Effect.fail(new ValidationError({ message: `Model "${model.apiKey}" was not created — cannot attach fields` }));
+        continue;
+      }
       for (const field of model.fields) {
         yield* FieldService.createField(modelId, {
           label: field.label,

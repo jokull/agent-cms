@@ -8,7 +8,7 @@ import { getLinkTargets, getLinksTargets } from "../db/validators.js";
 import { compileFilterToSql, compileOrderBy, type FilterCompilerOpts } from "./filter-compiler.js";
 import type { ModelRow, ParsedFieldRow } from "../db/row-types.js";
 import type { SchemaBuilderContext, ReverseRef, DynamicRow, GqlContext } from "./gql-types.js";
-import { toTypeName, toCamelCase, deserializeRecord } from "./gql-utils.js";
+import { toTypeName, toCamelCase, deserializeRecord, decodeSnapshot } from "./gql-utils.js";
 
 /**
  * Build the reverse reference map: target model api_key -> array of incoming link/links refs.
@@ -81,7 +81,8 @@ export function buildReverseRefResolvers(
       const sourceTableName = sourceRefs[0].sourceTableName;
 
       // Build filter compiler opts for the source model
-      const sourceModel = models.find((m) => m.api_key === sourceApiKey)!;
+      const sourceModel = models.find((m) => m.api_key === sourceApiKey);
+      if (!sourceModel) continue;
       const sourceFields = fieldsByModelId.get(sourceModel.id) ?? [];
       const sourceCamelToSnake = new Map<string, string>();
       const sourceLocalizedCamelKeys = new Set<string>();
@@ -157,16 +158,7 @@ export function buildReverseRefResolvers(
             }
 
             const rows = yield* s.unsafe<DynamicRow>(query, params);
-            return rows.map((row) => {
-              const deserialized = deserializeRecord(row);
-              if (!includeDrafts && deserialized._published_snapshot) {
-                const snapshot = typeof deserialized._published_snapshot === "string"
-                  ? JSON.parse(deserialized._published_snapshot as string)
-                  : deserialized._published_snapshot;
-                return { ...deserialized, ...(snapshot as DynamicRow) };
-              }
-              return deserialized;
-            });
+            return rows.map((row) => decodeSnapshot(deserializeRecord(row), includeDrafts));
           })
         );
       };

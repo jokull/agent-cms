@@ -119,6 +119,27 @@ export function applyOrdering(records: DynamicRow[], orderBy: string[] | undefin
   });
 }
 
+/**
+ * Overlay a record's _published_snapshot onto itself, returning the merged DynamicRow.
+ * Handles: missing/null snapshot, non-string snapshot already parsed, and malformed JSON.
+ * When includeDrafts is true, or the snapshot is absent/unparseable, returns the record unchanged.
+ */
+export function decodeSnapshot(record: DynamicRow, includeDrafts: boolean): DynamicRow {
+  if (includeDrafts || !record._published_snapshot) return record;
+  let snapshot: unknown;
+  if (typeof record._published_snapshot === "string") {
+    try {
+      snapshot = JSON.parse(record._published_snapshot);
+    } catch {
+      return record;
+    }
+  } else {
+    snapshot = record._published_snapshot;
+  }
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return record;
+  return { ...record, ...(snapshot as DynamicRow) };
+}
+
 /** Deserialize JSON string fields in a record */
 export function deserializeRecord(record: DynamicRow): DynamicRow {
   const result: DynamicRow = {};

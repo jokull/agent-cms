@@ -470,13 +470,11 @@ Hybrid mode (default when Vectorize available): combines both for best results.`
     async () => run(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
-        try {
-          const rows = yield* sql.unsafe<Record<string, unknown>>("SELECT * FROM site_settings LIMIT 1");
-          return rows.length > 0 ? rows[0] : { message: "No site settings configured yet. Use update_site_settings to create them." };
-        } catch {
-          return { message: "site_settings table not found. Run migration 0002 first." };
-        }
-      })
+        const rows = yield* sql.unsafe<Record<string, unknown>>("SELECT * FROM site_settings LIMIT 1");
+        return rows.length > 0 ? rows[0] : { message: "No site settings configured yet. Use update_site_settings to create them." };
+      }).pipe(
+        Effect.catchAll(() => Effect.succeed({ message: "site_settings table not found. Run migration 0002 first." }))
+      )
     )
   );
 

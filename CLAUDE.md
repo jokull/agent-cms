@@ -48,3 +48,17 @@ Test helpers in `test/app-helpers.ts` — creates in-memory D1, runs migrations,
 **New MCP tool**: Add `server.tool(name, description, zodSchema, async (args) => run(Service.method(args)))` in `src/mcp/server.ts`. Keep tools thin — logic goes in services.
 
 **New GraphQL feature**: Modify `src/graphql/schema-builder.ts` for SDL generation, add resolver in the appropriate `*-resolvers.ts` file. Resolvers bridge to Effect via `runSql()`.
+
+<!-- effect-solutions:start -->
+## Effect Best Practices
+
+**IMPORTANT:** Always consult effect-solutions before writing Effect code.
+
+1. Run `effect-solutions list` to see available guides
+2. Run `effect-solutions show <topic>...` for relevant patterns (supports multiple topics)
+3. Search `.reference/effect/` for real implementations (run `effect-solutions setup` first)
+
+Topics: quick-start, project-setup, tsconfig, basics, services-and-layers, data-modeling, error-handling, config, testing, cli.
+
+Never guess at Effect patterns - check the guide first.
+<!-- effect-solutions:end -->

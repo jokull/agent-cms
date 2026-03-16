@@ -9,9 +9,17 @@
     // exactOptionalPropertyTypes disabled — causes false positives with Effect/Yoga types
     "esModuleInterop": true,
     "skipLibCheck": true,
+    "plugins": [
+      {
+        "name": "@effect/language-service"
+      }
+    ],
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
+    "moduleDetection": "force",
+    "noUnusedLocals": true,
+    "noImplicitOverride": true,
     "noEmit": true,
     "declaration": true,
     "declarationMap": true,

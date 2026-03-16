@@ -72,21 +72,22 @@ export function ftsSearch(query: string, options: {
 
     if (options.modelApiKey) {
       // Single model search
+      const modelApiKey = options.modelApiKey;
       const rows = yield* sql.unsafe<{
         record_id: string;
         rank: number;
         snippet: string;
       }>(
-        `SELECT record_id, rank, snippet("fts_${options.modelApiKey}", 2, '<mark>', '</mark>', '...', 32) as snippet
-         FROM "fts_${options.modelApiKey}"
-         WHERE "fts_${options.modelApiKey}" MATCH ?
+        `SELECT record_id, rank, snippet("fts_${modelApiKey}", 2, '<mark>', '</mark>', '...', 32) as snippet
+         FROM "fts_${modelApiKey}"
+         WHERE "fts_${modelApiKey}" MATCH ?
          ORDER BY rank
          LIMIT ? OFFSET ?`,
         [query, limit, offset]
       );
       return rows.map((r) => ({
         recordId: r.record_id,
-        modelApiKey: options.modelApiKey!,
+        modelApiKey,
         rank: r.rank,
         snippet: r.snippet,
       }));

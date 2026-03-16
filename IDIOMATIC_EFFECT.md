@@ -221,3 +221,38 @@ export function createRecord(body: unknown) {
 - `try { JSON.parse() } catch {}` inside Effect.gen → acceptable for defensive deserialization of DB data, but prefer row types that avoid it
 - Duck-typing platform errors → import the actual error class
 - `Effect.runPromise` in service code → keep it at boundaries only
+
+## Type Safety Sweep Prompt
+
+Use this prompt to audit and fix type safety issues. Run periodically or before releases.
+
+```
+Sweep src/ for type safety issues. Scan for these patterns:
+- `as ` casts (excluding `as const`)
+- `JSON.parse` returning untyped data
+- `!` non-null assertions
+- `try/catch` inside Effect.gen (should use Effect error handling)
+
+Group findings by severity:
+
+**Critical** (production crash risk):
+- JSON.parse on nullable/unknown data without guards
+- Non-null assertions (!) on Map.get(), Array.find(), optional chains
+- try/catch inside Effect.gen bypassing the error channel
+
+**Moderate** (type hole, silent wrong behavior):
+- `as SomeType` on external/dynamic data without runtime validation
+- Repeated decode patterns that should be extracted into typed helpers
+
+**Acceptable** (leave alone):
+- `as const` assertions
+- Resolver dict mutations `(resolvers.Query as Record<string, unknown>)`
+- `as` after thorough typeof/shape guards
+- One `as` at a generic utility boundary (e.g. JSON parse wrapper)
+- `try { JSON.parse() } catch {}` for defensive DB deserialization
+
+Fix critical issues. For moderate issues, propose fixes but don't touch
+files the user is actively editing. Use Schema.decodeUnknown at system
+boundaries, typed helpers for repeated patterns, and early-return guards
+instead of bang assertions.
+```

@@ -7,7 +7,7 @@ import { SqlClient } from "@effect/sql";
 import { compileFilterToSql, compileOrderBy, type FilterCompilerOpts } from "./filter-compiler.js";
 import { computeIsValid } from "../db/validators.js";
 import type { SchemaBuilderContext, ModelQueryMeta, DynamicRow, GqlContext } from "./gql-types.js";
-import { toTypeName, toCamelCase, pluralize, getRegistryDef, deserializeRecord } from "./gql-utils.js";
+import { toCamelCase, pluralize, getRegistryDef, deserializeRecord, decodeSnapshot } from "./gql-utils.js";
 
 /**
  * Build filter/orderBy type defs and Query resolvers for each content model.
@@ -119,17 +119,7 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
           }
 
           const rows = yield* s.unsafe<DynamicRow>(query, params);
-          return rows.map((row) => {
-            const deserialized = deserializeRecord(row);
-            // When not including drafts, overlay published snapshot values
-            if (!includeDrafts && deserialized._published_snapshot) {
-              const snapshot = typeof deserialized._published_snapshot === "string"
-                ? JSON.parse(deserialized._published_snapshot as string)
-                : deserialized._published_snapshot;
-              return { ...deserialized, ...(snapshot as DynamicRow) };
-            }
-            return deserialized;
-          });
+          return rows.map((row) => decodeSnapshot(deserializeRecord(row), includeDrafts));
         })
       );
     }
@@ -201,14 +191,7 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
               [args.id]
             );
             if (rows.length === 0) return null;
-            const deserialized = deserializeRecord(rows[0]);
-            if (!includeDrafts && deserialized._published_snapshot) {
-              const snapshot = typeof deserialized._published_snapshot === "string"
-                ? JSON.parse(deserialized._published_snapshot as string)
-                : deserialized._published_snapshot;
-              return { ...deserialized, ...(snapshot as DynamicRow) };
-            }
-            return deserialized;
+            return decodeSnapshot(deserializeRecord(rows[0]), includeDrafts);
           })
         );
       }
