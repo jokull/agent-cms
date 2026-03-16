@@ -236,6 +236,8 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 - [x] `_locales` GraphQL field *(done — returns locale codes where record has content, DatoCMS parity, 2 tests)*
 - [x] `_all<Field>Locales` pattern *(done — returns [{locale, value}] for each localized field, DatoCMS parity, 3 tests)*
 - [x] Enhanced GraphQL filters *(done — `in`/`notIn` on StringFilter, `isPresent`, `matchesObject` with caseSensitive, 3 tests)*
+- [x] MCP `schema_info` power tool *(done — full schema in one call with filtering by name/type and compact mode, 4 tests)*
+- [x] MCP `update_model` + `update_field` tools *(done — complete schema CRUD via MCP, 2 tests)*
 - [x] Type assertion cleanup *(done — replaced `as` casts with type guards, runtime narrowing, Effect Schema validation)*
 - [ ] GraphQL subscriptions for real-time updates
 - [ ] Schema descriptor KV caching for production cold starts

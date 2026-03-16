@@ -98,14 +98,36 @@ export function createMcpServer(sqlLayer: Layer.Layer<SqlClient.SqlClient>) {
     async (args) => run(ModelService.createModel(args))
   );
 
+  server.tool("update_model", "Update model properties (name, apiKey, singleton, sortable)",
+    {
+      modelId: z.string(),
+      name: z.string().optional(),
+      apiKey: z.string().optional(),
+      singleton: z.boolean().optional(),
+      sortable: z.boolean().optional(),
+    },
+    async ({ modelId, ...rest }) => run(ModelService.updateModel(modelId, rest))
+  );
+
   server.tool("create_field", "Add a field to a model",
     {
       modelId: z.string(), label: z.string(), apiKey: z.string(),
-      fieldType: z.string().describe("string|text|boolean|integer|slug|media|media_gallery|link|links|structured_text"),
+      fieldType: z.string().describe("string|text|boolean|integer|float|date|date_time|slug|media|media_gallery|link|links|structured_text|seo|json|color|lat_lon"),
       localized: z.boolean().optional(),
       validators: z.record(z.string(), z.unknown()).optional(),
     },
     async ({ modelId, ...rest }) => run(FieldService.createField(modelId, rest))
+  );
+
+  server.tool("update_field", "Update field properties (label, apiKey, validators, hint)",
+    {
+      fieldId: z.string(),
+      label: z.string().optional(),
+      apiKey: z.string().optional(),
+      validators: z.record(z.string(), z.unknown()).optional(),
+      hint: z.string().optional(),
+    },
+    async ({ fieldId, ...rest }) => run(FieldService.updateField(fieldId, rest))
   );
 
   server.tool("delete_model", "Delete a model (fails if referenced)",
@@ -116,6 +138,75 @@ export function createMcpServer(sqlLayer: Layer.Layer<SqlClient.SqlClient>) {
   server.tool("delete_field", "Delete a field and drop column",
     { fieldId: z.string() },
     async ({ fieldId }) => run(FieldService.deleteField(fieldId))
+  );
+
+  // --- Schema Info (power tool) ---
+
+  server.tool("schema_info", "Get the complete CMS schema in one call — models, block types, fields, relations. The primary tool for understanding the content model.",
+    {
+      filterByName: z.string().optional().describe("Filter models/blocks by name (case-insensitive substring match)"),
+      filterByType: z.enum(["model", "block"]).optional().describe("Only return models or only blocks"),
+      includeFieldDetails: z.boolean().optional().describe("Include full field definitions with validators (default: true)"),
+    },
+    async ({ filterByName, filterByType, includeFieldDetails = true }) => run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+
+        let modelQuery = "SELECT * FROM models";
+        const conditions: string[] = [];
+        const params: unknown[] = [];
+
+        if (filterByType === "model") conditions.push("is_block = 0");
+        if (filterByType === "block") conditions.push("is_block = 1");
+        if (filterByName) {
+          conditions.push("LOWER(name) LIKE ?");
+          params.push(`%${filterByName.toLowerCase()}%`);
+        }
+        if (conditions.length > 0) modelQuery += ` WHERE ${conditions.join(" AND ")}`;
+        modelQuery += " ORDER BY is_block, created_at";
+
+        const models = yield* sql.unsafe<Record<string, any>>(modelQuery, params);
+        const allFields = yield* sql.unsafe<Record<string, any>>("SELECT * FROM fields ORDER BY model_id, position");
+        const locales = yield* sql.unsafe<Record<string, any>>("SELECT * FROM locales ORDER BY position");
+
+        const fieldsByModel = new Map<string, any[]>();
+        for (const f of allFields) {
+          const list = fieldsByModel.get(f.model_id) ?? [];
+          list.push(f);
+          fieldsByModel.set(f.model_id, list);
+        }
+
+        return {
+          locales: locales.map((l: any) => ({ code: l.code, position: l.position, fallbackLocaleId: l.fallback_locale_id })),
+          models: models.map((m: any) => {
+            const mFields = fieldsByModel.get(m.id) ?? [];
+            return {
+              id: m.id,
+              name: m.name,
+              apiKey: m.api_key,
+              isBlock: !!m.is_block,
+              singleton: !!m.singleton,
+              sortable: !!m.sortable,
+              tree: !!m.tree,
+              ...(includeFieldDetails ? {
+                fields: mFields.map((f: any) => ({
+                  id: f.id,
+                  label: f.label,
+                  apiKey: f.api_key,
+                  type: f.field_type,
+                  localized: !!f.localized,
+                  validators: JSON.parse(f.validators || "{}"),
+                  hint: f.hint,
+                })),
+              } : {
+                fieldCount: mFields.length,
+                fieldNames: mFields.map((f: any) => f.api_key),
+              }),
+            };
+          }),
+        };
+      })
+    )
   );
 
   // --- Content ---
