@@ -1,0 +1,48 @@
+---
+interface Props {
+  locale: string;
+}
+
+const { locale } = Astro.props;
+const path = Astro.url.pathname;
+
+function switchLocale(current: string, target: string, pathname: string): string {
+  return pathname.replace(`/${current}`, `/${target}`);
+}
+---
+
+<nav class="lang-switcher">
+  {locale === "en" ? (
+    <strong>EN</strong>
+  ) : (
+    <a href={switchLocale(locale, "en", path)}>EN</a>
+  )}
+  <span>/</span>
+  {locale === "is" ? (
+    <strong>IS</strong>
+  ) : (
+    <a href={switchLocale(locale, "is", path)}>IS</a>
+  )}
+</nav>
+
+<style>
+  .lang-switcher {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    font-size: 0.875rem;
+  }
+  .lang-switcher a {
+    color: #666;
+    text-decoration: none;
+  }
+  .lang-switcher a:hover {
+    color: #1a1a1a;
+  }
+  .lang-switcher strong {
+    color: #1a1a1a;
+  }
+  .lang-switcher span {
+    color: #ccc;
+  }
+</style>

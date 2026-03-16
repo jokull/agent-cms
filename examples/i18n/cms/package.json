@@ -1,0 +1,16 @@
+{
+  "name": "test-i18n-cms",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrate": "wrangler d1 migrations apply test-i18n-cms-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply test-i18n-cms-db --remote"
+  },
+  "dependencies": {
+    "agent-cms": "file:../../..",
+    "wrangler": "^4.73.0"
+  }
+}

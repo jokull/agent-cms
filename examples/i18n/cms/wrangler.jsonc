@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "test-i18n-cms",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-12-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "test-i18n-cms-db",
+      "database_id": "placeholder",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ASSETS",
+      "bucket_name": "test-i18n-assets"
+    }
+  ],
+  "vars": {
+    "ENVIRONMENT": "production",
+    "ASSET_BASE_URL": "https://test-cms.solberg.is"
+  }
+}

@@ -1,0 +1,69 @@
+---
+import { getCloudflareEnv } from "cloudflare:workers";
+import Base from "../../layouts/Base.astro";
+import { gqlFetch } from "../../graphql/client.ts";
+import { PAGE_QUERY } from "../../graphql/queries.ts";
+
+const { locale } = Astro.params;
+
+if (!locale || !["en", "is"].includes(locale)) {
+  return Astro.redirect("/en/");
+}
+
+const env = getCloudflareEnv();
+const data = await gqlFetch(env.CMS, PAGE_QUERY, {
+  locale: locale as "en" | "is",
+});
+
+const page = data.page;
+---
+
+<Base title={page?.title ?? "Untitled"} locale={locale}>
+  <h1>{page?.title}</h1>
+  {page?.body && <p>{page.body}</p>}
+
+  {page?._allTitleLocales && (
+    <aside>
+      <h2>{locale === "en" ? "Available in" : "Einnig á"}:</h2>
+      <ul>
+        {page._allTitleLocales.map((l) => (
+          <li>
+            <a href={`/${l.locale}/`}>{l.locale === "en" ? "English" : "Íslenska"}: {l.value}</a>
+          </li>
+        ))}
+      </ul>
+    </aside>
+  )}
+</Base>
+
+<style>
+  h1 { margin-bottom: 1rem; }
+
+  p {
+    font-size: 1.125rem;
+    color: #444;
+    margin-bottom: 2rem;
+  }
+
+  aside {
+    margin-top: 2rem;
+    padding: 1rem;
+    background: #f0f0f0;
+    border-radius: 8px;
+  }
+
+  aside h2 {
+    font-size: 0.875rem;
+    text-transform: uppercase;
+    color: #888;
+    margin-bottom: 0.5rem;
+  }
+
+  aside ul {
+    list-style: none;
+  }
+
+  aside li {
+    margin-bottom: 0.25rem;
+  }
+</style>
