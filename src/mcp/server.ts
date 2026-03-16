@@ -548,5 +548,169 @@ Fields:
     )
   );
 
+  // --- Resources ---
+
+  server.resource(
+    "agent-cms-guide",
+    "agent-cms://guide",
+    { description: "Orientation guide for agents: workflow, naming conventions, field formats, and lifecycle" },
+    async () => ({
+      contents: [{
+        uri: "agent-cms://guide",
+        mimeType: "text/plain",
+        text: `agent-cms — Agent Orientation Guide
+
+Workflow order:
+  schema_info → create_model → create_field → create_record → publish_record
+
+Naming conventions:
+  - api_key: snake_case (e.g. blog_post, cover_image)
+  - GraphQL types: PascalCase (BlogPost, CoverImageRecord)
+  - GraphQL fields: camelCase (coverImage, blogPost)
+  - GraphQL list queries: allBlogPosts, allCategories
+  - GraphQL single queries: blogPost, category
+  - Block types get "Record" suffix in GraphQL: code_block → CodeBlockRecord
+
+Field value formats (composite types):
+  - media: asset ID string (from upload_asset)
+  - media_gallery: array of asset ID strings
+  - link: record ID string
+  - links: array of record ID strings
+  - seo: {"title":"...","description":"...","image":"<asset_id>","twitterCard":"summary_large_image"}
+  - structured_text: {"value":{"schema":"dast","document":{...}},"blocks":{"<id>":{"_type":"block_api_key",...}}}
+  - color: {"red":255,"green":0,"blue":0,"alpha":255}
+  - lat_lon: {"latitude":64.13,"longitude":-21.89}
+
+Draft/publish lifecycle:
+  Records start as drafts. Call publish_record to make them visible in GraphQL.
+  Edits after publishing create a new draft version — publish again to update.
+  GraphQL serves published content by default; use X-Include-Drafts header for previews.
+
+Asset upload flow:
+  1. Upload file to R2: wrangler r2 object put <bucket>/uploads/<filename> --file=<path>
+  2. Register with upload_asset tool (pass r2Key, filename, mimeType, dimensions)
+  3. Use returned asset ID in media/media_gallery fields
+
+Slug fields:
+  Set validator {"slug_source": "title"} to auto-generate from a source field.
+  Create the slug field AFTER the source field.
+
+Pluralization:
+  category → allCategories, blog_post → allBlogPosts, person → allPeople
+  Powered by standard English pluralization rules.`,
+      }],
+    })
+  );
+
+  server.resource(
+    "agent-cms-schema",
+    "agent-cms://schema",
+    { description: "Current CMS schema: models, fields, and locales as JSON" },
+    async () => {
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          const models = yield* sql.unsafe<ModelRow>("SELECT * FROM models ORDER BY is_block, created_at");
+          const fields = yield* sql.unsafe<FieldRow>("SELECT * FROM fields ORDER BY model_id, position");
+          const locales = yield* sql.unsafe<LocaleRow>("SELECT * FROM locales ORDER BY position");
+          const fieldsByModel = new Map<string, FieldRow[]>();
+          for (const f of fields) {
+            const list = fieldsByModel.get(f.model_id) ?? [];
+            list.push(f);
+            fieldsByModel.set(f.model_id, list);
+          }
+          return {
+            locales: locales.map((l) => ({ code: l.code, position: l.position, fallbackLocaleId: l.fallback_locale_id })),
+            models: models.map((m) => ({
+              id: m.id,
+              name: m.name,
+              apiKey: m.api_key,
+              isBlock: !!m.is_block,
+              singleton: !!m.singleton,
+              fields: (fieldsByModel.get(m.id) ?? []).map((f) => ({
+                id: f.id,
+                apiKey: f.api_key,
+                label: f.label,
+                type: f.field_type,
+                localized: !!f.localized,
+                validators: JSON.parse(f.validators || "{}"),
+              })),
+            })),
+          };
+        }).pipe(Effect.provide(sqlLayer))
+      );
+      return {
+        contents: [{
+          uri: "agent-cms://schema",
+          mimeType: "application/json",
+          text: JSON.stringify(result, null, 2),
+        }],
+      };
+    }
+  );
+
+  // --- Prompts ---
+
+  server.prompt(
+    "setup-content-model",
+    "Guide an agent through designing and creating content models from a description",
+    { description: z.string().describe("What kind of content to model (e.g. 'blog posts with categories and tags')") },
+    async ({ description }) => ({
+      messages: [{
+        role: "user",
+        content: {
+          type: "text",
+          text: `Set up content models for: ${description}
+
+Follow these steps:
+1. Call schema_info to check existing models — avoid duplicates.
+2. Design the models and fields needed. Consider:
+   - Which are content models vs block types (for StructuredText embedding)?
+   - Which fields need slug (add after the source field with slug_source validator)?
+   - Which fields reference other models (link/links with item_item_type validator)?
+   - Which fields need structured_text (with structured_text_blocks validator for allowed blocks)?
+3. Present your plan before executing — list models, fields, and relationships.
+4. Create models first, then fields in order (slug fields after their source).
+5. Create a few sample records to verify the schema works.
+6. Publish the sample records.
+7. Show the GraphQL query that a frontend would use to fetch this content.
+   Remember: api_key snake_case → GraphQL camelCase fields, PascalCase types.`,
+        },
+      }],
+    })
+  );
+
+  server.prompt(
+    "generate-graphql-queries",
+    "Generate GraphQL queries for a content model with proper naming conventions",
+    { modelApiKey: z.string().describe("The model's api_key (e.g. 'blog_post')") },
+    async ({ modelApiKey }) => ({
+      messages: [{
+        role: "user",
+        content: {
+          type: "text",
+          text: `Generate GraphQL queries for the "${modelApiKey}" model.
+
+Steps:
+1. Call describe_model with apiKey "${modelApiKey}" to get the full field list.
+2. Map field names from snake_case (api_key) to camelCase (GraphQL).
+3. Generate these queries:
+   a. List query: all_<pluralized> with pagination, filtering, and ordering
+   b. Single query: <model_api_key> by ID or filter
+   c. Meta query: _all_<pluralized>_meta for total count
+4. For each field type, use the right GraphQL fragment:
+   - media → { url width height alt title }
+   - structured_text → { value blocks { ... on <BlockType>Record { id <fields> } } }
+   - link → { id <fields of target model> }
+   - links → same as link but array
+   - seo → { title description image { url } twitterCard }
+   - color → { red green blue alpha hex }
+   - lat_lon → { latitude longitude }
+5. Include both a "full" query with all fields and a "list" query with essential fields only.`,
+        },
+      }],
+    })
+  );
+
   return server;
 }

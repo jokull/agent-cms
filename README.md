@@ -79,6 +79,29 @@ Read-only GraphQL API for frontends. Supports filtering, ordering, pagination, l
 }
 ```
 
+#### GraphQL naming conventions
+
+Model `api_key` values (snake_case) map to GraphQL names:
+
+| api_key | GraphQL type | Single query | List query | Meta query |
+|---------|-------------|-------------|------------|------------|
+| `blog_post` | `BlogPost` | `blog_post` | `all_blog_posts` | `_all_blog_posts_meta` |
+| `category` | `Category` | `category` | `all_categories` | `_all_categories_meta` |
+
+Block types get a `Record` suffix: `code_block` → `CodeBlockRecord`.
+
+Field `api_key` values stay snake_case in queries: `cover_image`, `published_at`.
+
+#### MCP resources and prompts
+
+Agents connecting via MCP get two resources for upfront context:
+- **`agent-cms://guide`** — workflow order, naming conventions, field value formats, and lifecycle summary
+- **`agent-cms://schema`** — current schema (models, fields, locales) as JSON
+
+Two prompts encode common multi-step workflows:
+- **`setup-content-model`** — design and create content models from a description
+- **`generate-graphql-queries`** — generate correctly-typed GraphQL queries for a model
+
 ### `/api` — REST admin
 
 JSON REST API for programmatic content management. Models, fields, records, assets, locales, publish/unpublish, bulk operations, schema import/export.
