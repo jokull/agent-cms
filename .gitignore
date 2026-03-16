@@ -5,3 +5,5 @@ dist/
 *.local
 .astro/
 package-lock.json
+.claude/
+wrangler.jsonc
