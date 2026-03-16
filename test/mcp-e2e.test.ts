@@ -185,8 +185,11 @@ describe("P5.6: End-to-end MCP → GraphQL", () => {
         author { name bio }
         content {
           value
-          blocks
-          inlineBlocks
+          blocks {
+            __typename
+            ... on HeroSectionRecord { headline ctaUrl }
+          }
+          inlineBlocks { __typename }
           links
         }
       }
