@@ -233,6 +233,8 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 - [x] `date` + `date_time` field types *(done — ISO string storage, filtering, ordering, 3 tests)*
 - [x] `color` field type *(done — {red,green,blue,alpha} JSON with computed hex in GraphQL, Effect Schema validation, 4 tests)*
 - [x] `lat_lon` field type *(done — {latitude,longitude} JSON, Effect Schema range validation, 4 tests)*
+- [x] `_locales` GraphQL field *(done — returns locale codes where record has content, DatoCMS parity, 2 tests)*
+- [x] Type assertion cleanup *(done — replaced `as` casts with type guards, runtime narrowing, Effect Schema validation)*
 - [ ] GraphQL subscriptions for real-time updates
 - [ ] Schema descriptor KV caching for production cold starts
 - [ ] Cloudflare Images integration (production only, not local dev)

@@ -241,6 +241,16 @@ export function buildGraphQLSchema(sqlLayer: any) {
       for (const f of fields) {
         fieldDefs.push(`${f.api_key}: ${fieldToSDL(f.field_type, f.validators, typeNames)}`);
       }
+
+      // Track localized fields early so we can add _locales to the type def
+      const localizedFieldKeys = new Set<string>();
+      for (const f of fields) {
+        if (f.localized) localizedFieldKeys.add(f.api_key);
+      }
+      if (localizedFieldKeys.size > 0) {
+        fieldDefs.push("_locales: [String!]!");
+      }
+
       typeDefs.push(`type ${typeName} {\n  ${fieldDefs.join("\n  ")}\n}`);
 
       // Link resolvers
@@ -281,10 +291,26 @@ export function buildGraphQLSchema(sqlLayer: any) {
         };
       }
 
-      // Track localized fields for this model
-      const localizedFieldKeys = new Set<string>();
-      for (const f of fields) {
-        if (f.localized) localizedFieldKeys.add(f.api_key);
+      // _locales resolver: returns locale codes where record has content
+      if (localizedFieldKeys.size > 0) {
+        typeResolvers._locales = (parent: any) => {
+          const foundLocales = new Set<string>();
+          for (const key of localizedFieldKeys) {
+            let localeMap = parent[key];
+            if (!localeMap) continue;
+            if (typeof localeMap === "string") {
+              try { localeMap = JSON.parse(localeMap); } catch { continue; }
+            }
+            if (typeof localeMap === "object" && localeMap !== null) {
+              for (const [locale, value] of Object.entries(localeMap)) {
+                if (value !== null && value !== undefined && value !== "") {
+                  foundLocales.add(locale);
+                }
+              }
+            }
+          }
+          return [...foundLocales];
+        };
       }
 
       // Localized field resolvers: extract value for requested locale
