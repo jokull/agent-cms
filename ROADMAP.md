@@ -357,6 +357,34 @@ These features outpace DatoCMS — possible because of Cloudflare edge colocatio
 - [x] **P8.3** Asset URL stability on replace *(done — `PUT /api/assets/:id` + MCP `replace_asset`. Updates file metadata (filename, mimeType, size, dimensions, r2Key) while keeping same asset ID. Alt/title preserved if not overridden. All content references stay stable. 6 tests)*
 - [x] **P8.4** HTML tables in StructuredText *(done — DAST `table`/`tableRow`/`tableCell` node types added to validator. Tables can contain rich inline content (bold, links). Validated: no empty tables, children must be tableRow, cells contain inline content. 6 tests)*
 
+### Fulltext & Vector Search
+
+Content search powered by D1 FTS5 (keyword) + Cloudflare Vectorize (semantic), all edge-native. No external services.
+
+#### Prerequisites
+
+- [ ] **DAST → plain text extractor** — Walk DAST tree, extract text from spans, flatten blocks recursively. Same approach as `datocms-structured-text-to-plain-text` (recursive tree walk, span value extraction, whitespace normalization). Also extract from `string`, `text`, `seo.title`, `seo.description` fields. Output: plain text per record for FTS5 indexing and embedding chunking.
+- [ ] **Chunking** — Split extracted text into 200-800 token segments using heading nodes (h2/h3) as natural chunk boundaries. Prepend record title + section context to each chunk. 10-20% overlap between chunks for retrieval quality.
+
+#### FTS5 (keyword search)
+
+- [ ] **FTS5 virtual tables** — Create `fts_{model_api_key}` virtual table per model. Columns = searchable text fields concatenated. Rebuild on record create/update/delete.
+- [ ] **FTS5 GraphQL integration** — `_search(query: String!)` root query returning ranked results across all models. `matches` filter enhanced with FTS5 `MATCH` for phrase/prefix support.
+
+#### Vectorize (semantic search)
+
+- [ ] **Vectorize binding** — Add optional `VECTORIZE` binding to `CmsEnv`. Create index per CMS instance (384 dims, cosine metric).
+- [ ] **Embedding pipeline** — On record create/update/publish: extract text → chunk → embed via Workers AI `bge-small-en-v1.5` (384 dims) → upsert to Vectorize with `{record_id, model_api_key, field_api_key, chunk_index}` metadata.
+- [ ] **Semantic search endpoint** — `POST /api/search` and MCP `search_content` tool. Embed query → Vectorize top-K → fetch records from D1. Return ranked results with relevance scores.
+- [ ] **Hybrid search** — Combine FTS5 (BM25) + Vectorize (cosine) results via reciprocal rank fusion. Single search query returns keyword + semantic matches merged.
+
+#### Cost/performance budget
+
+- Workers AI `bge-small-en-v1.5`: ~free at CMS scale (10k Neurons/day free tier)
+- Vectorize: ~free for <100k chunks at 384 dims
+- FTS5: zero cost (D1-native)
+- Search latency: ~50-100ms end-to-end (embed query + Vectorize KNN + D1 fetch)
+
 ### Future (not prioritized)
 
 - [ ] GraphQL subscriptions for real-time updates
