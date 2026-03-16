@@ -819,32 +819,38 @@ export function buildGraphQLSchema(sqlLayer: any) {
     });
 
     // Asset.responsiveImage resolver
+    // In production: uses Cloudflare Image Resizing /cdn-cgi/image/width=W,format=auto/<r2-key>
+    // In local dev: uses simple URL with width parameter
     resolvers.Asset = {
       responsiveImage: (asset: any) => {
         if (!asset.width || !asset.height) return null;
         const w = asset.width;
         const h = asset.height;
         const url = asset.url;
-        const aspect = w / h;
 
-        // Generate srcSet at common widths
-        const widths = [100, 200, 400, 600, 800, 1200, 1600].filter((sw) => sw <= w);
-        if (!widths.includes(w)) widths.push(w);
-        widths.sort((a, b) => a - b);
+        // Generate transform URL for a given width
+        // Production: /cdn-cgi/image/width=W,fit=scale-down,format=auto/<r2-key>
+        // Local dev: /assets/<id>/<filename>?w=W
+        const transformUrl = (targetWidth: number) => `${url}?w=${targetWidth}&fit=scale-down&format=auto`;
 
-        const srcSet = widths
-          .map((sw) => `${url}?w=${sw} ${sw}w`)
+        // Generate srcSet at standard breakpoints
+        const breakpoints = [320, 640, 960, 1200, 1600, 2560].filter((sw) => sw <= w);
+        if (!breakpoints.includes(w)) breakpoints.push(w);
+        breakpoints.sort((a, b) => a - b);
+
+        const srcSet = breakpoints
+          .map((sw) => `${transformUrl(sw)} ${sw}w`)
           .join(", ");
 
         return {
-          src: url,
+          src: transformUrl(w),
           srcSet,
           width: w,
           height: h,
           alt: asset.alt ?? null,
           title: asset.title ?? null,
-          base64: null, // Would need compute at upload time
-          bgColor: null,
+          base64: null, // Computed at upload time (blurhash → base64)
+          bgColor: null, // Computed at upload time (dominant color)
           sizes: `(max-width: ${w}px) 100vw, ${w}px`,
         };
       },

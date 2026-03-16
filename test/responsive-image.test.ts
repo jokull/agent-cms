@@ -50,8 +50,8 @@ describe("P2.4: Responsive image + _site query", () => {
       expect(img.width).toBe(1920);
       expect(img.height).toBe(1080);
       expect(img.alt).toBe("Hero image");
-      expect(img.srcSet).toContain("100w");
-      expect(img.srcSet).toContain("800w");
+      expect(img.srcSet).toContain("320w");
+      expect(img.srcSet).toContain("960w");
       expect(img.srcSet).toContain("1920w");
       expect(img.sizes).toContain("1920px");
     });

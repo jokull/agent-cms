@@ -245,16 +245,17 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 - [x] **P6.1** Meta field filtering + ordering *(done — DateTimeFilter on _createdAt/_updatedAt/_publishedAt/_firstPublishedAt, camelCase→snake_case column mapping in filter compiler, 6 tests)*
 - [ ] **P6.2** N+1 query batching — batch link/links/media resolution using IN queries instead of per-item SELECT. Trip resolves 10+ linked records per tour page.
 - [x] **P6.3** `_seoMetaTags` auto-generation *(done — generates title, og:title, og:description, og:image, twitter:card, article:modified_time from seo field or heuristic fallback to first string/text/media fields, 4 tests)*
-- [ ] **P6.4** `video` field type — external video embed storing {url, providerUid, provider, width, height, thumbnailUrl}. Trip uses UploadVideoField with streamingUrl/mp4Url.
 - [x] **P6.5** `_modelApiKey` meta field *(done — exposed on every content type, tested)*
-- [ ] **P6.6** responsiveImage imgix params — accept `imgixParams` argument on responsiveImage (auto, fit, crop, w, h, facepad). Trip uses `responsiveImage(imgixParams: { auto: format, fit: crop, w: 1200, h: 800 })`.
+- [ ] **P6.6** responsiveImage with Cloudflare Image Resizing — accept `transforms` argument on responsiveImage (width, height, fit, format, quality). Generate srcSet using `/cdn-cgi/image/` URL pattern with R2 source. Replace imgix references. Trip uses `responsiveImage(imgixParams: { auto: format, fit: crop, w: 1200, h: 800 })`.
 - [ ] **P6.7** StructuredText links resolution — resolve itemLink/inlineItem references in StructuredText `links` array (currently TODO).
+- [ ] **P6.8** R2 asset upload pipeline — actual file upload to R2 (currently metadata-only). Upload via presigned URL or Worker proxy. Store r2Key on asset row for transform URL generation.
+- [ ] **P6.9** Asset upload via MCP — `upload_asset` accepts base64 or URL, stores in R2, returns asset with transform URLs.
 
 ### Future (not prioritized)
 
 - [ ] GraphQL subscriptions for real-time updates
 - [ ] Schema descriptor KV caching for production cold starts
-- [ ] Cloudflare Images integration (production only, not local dev)
+- [ ] Cloudflare Image Resizing integration (production transform URLs, local dev passthrough)
 - [ ] Blurhash / dominant color extraction on asset upload
 - [ ] Per-field locale argument (`title(locale: en)` override)
 - [ ] `_isValid` meta field on records
