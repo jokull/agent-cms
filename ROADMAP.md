@@ -202,8 +202,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 ### Phase 3: Localization
 
 - [ ] **P3.1** Locale management: REST CRUD for `locales` table. `POST /locales`, `DELETE /locales/:id`. Test add/remove.
-- [ ] **P3.2** Localized fields: `localized: true` flag on field definitions. Schema engine creates TEXT columns that store JSON `{"en": "Hello", "is": "Halló"}` for localized fields. Non-localized fields store plain values. Test: create localized string field, write values in two locales, read back.
-- [ ] **P3.3** GraphQL locale resolution: `locale` argument on queries extracts the correct locale from JSON columns. `fallbackLocales` array for fallback chain. Test: query with primary locale (hit), query with missing locale (fallback), query with no fallback (null).
+- [x] **P3.2+P3.3** Localized fields + GraphQL locale resolution *(done — 6 tests)*
 - [x] **P3.4** `[SCHEMA:recipes]` *(done — 113 tests total, all 3 milestones complete!)*
 
 ### Phase 4: Schema Lifecycle

@@ -169,6 +169,12 @@ export function buildGraphQLSchema(sqlLayer: any) {
       input BooleanFilter { eq: Boolean, exists: Boolean }
     `);
 
+    // Load locales for default locale resolution
+    const locales = yield* sql.unsafe<{ code: string; position: number; fallback_locale_id: string | null }>(
+      "SELECT code, position, fallback_locale_id FROM locales ORDER BY position"
+    );
+    const defaultLocale = locales.length > 0 ? locales[0].code : null;
+
     // Collect type names
     const typeNames = new Map<string, string>();
     for (const m of models) typeNames.set(m.api_key, toTypeName(m.api_key));
@@ -195,6 +201,51 @@ export function buildGraphQLSchema(sqlLayer: any) {
       typeResolvers._updatedAt = (p: any) => p._updated_at;
       typeResolvers._publishedAt = (p: any) => p._published_at;
       typeResolvers._firstPublishedAt = (p: any) => p._first_published_at;
+
+      // Track localized fields for this model
+      const localizedFieldKeys = new Set<string>();
+      for (const f of fields) {
+        if (f.localized) localizedFieldKeys.add(f.api_key);
+      }
+
+      // Localized field resolvers: extract value for requested locale
+      for (const f of fields) {
+        if (f.localized && !["link", "links", "media", "media_gallery", "structured_text"].includes(f.field_type)) {
+          typeResolvers[f.api_key] = (parent: any, _args: any, context: any) => {
+            const rawValue = parent[f.api_key];
+            if (rawValue === null || rawValue === undefined) return null;
+
+            // Parse JSON if needed
+            let localeMap = rawValue;
+            if (typeof localeMap === "string") {
+              try { localeMap = JSON.parse(localeMap); } catch { return rawValue; }
+            }
+            if (typeof localeMap !== "object" || localeMap === null) return rawValue;
+
+            // Resolve locale: query arg > context > default
+            const locale = context?.locale ?? defaultLocale;
+            const fallbacks = context?.fallbackLocales ?? [];
+
+            // Try primary locale
+            if (locale && localeMap[locale] !== undefined && localeMap[locale] !== null && localeMap[locale] !== "") {
+              return localeMap[locale];
+            }
+            // Try fallbacks
+            for (const fb of fallbacks) {
+              if (localeMap[fb] !== undefined && localeMap[fb] !== null && localeMap[fb] !== "") {
+                return localeMap[fb];
+              }
+            }
+            // Try default locale as final fallback
+            if (defaultLocale && localeMap[defaultLocale] !== undefined) {
+              return localeMap[defaultLocale];
+            }
+            // Return first available value
+            const values = Object.values(localeMap);
+            return values.length > 0 ? values[0] : null;
+          };
+        }
+      }
 
       for (const f of fields) {
         if (f.field_type === "link") {
@@ -341,8 +392,8 @@ export function buildGraphQLSchema(sqlLayer: any) {
 
       // Queries
       const listName = `all${typeName}s`;
-      queryFieldDefs.push(`${listName}(filter: ${typeName}Filter, orderBy: [${typeName}OrderBy!], first: Int, skip: Int): [${typeName}!]!`);
-      queryFieldDefs.push(`${model.api_key}(id: ID, filter: ${typeName}Filter): ${typeName}`);
+      queryFieldDefs.push(`${listName}(locale: String, fallbackLocales: [String!], filter: ${typeName}Filter, orderBy: [${typeName}OrderBy!], first: Int, skip: Int): [${typeName}!]!`);
+      queryFieldDefs.push(`${model.api_key}(locale: String, fallbackLocales: [String!], id: ID, filter: ${typeName}Filter): ${typeName}`);
       queryFieldDefs.push(`_all${typeName}sMeta(filter: ${typeName}Filter): ${typeName}Meta!`);
 
       // Query resolvers — push filtering/ordering/pagination to SQL
@@ -436,11 +487,16 @@ export function buildGraphQLSchema(sqlLayer: any) {
 
       resolvers.Query[listName] = (_: any, args: any, context: any) => {
         const includeDrafts = context?.includeDrafts ?? false;
+        // Pass locale info to nested field resolvers via context mutation
+        if (args.locale) context.locale = args.locale;
+        if (args.fallbackLocales) context.fallbackLocales = args.fallbackLocales;
         return queryWithFilter(args, includeDrafts);
       };
 
       resolvers.Query[model.api_key] = (_: any, args: any, context: any) => {
         const includeDrafts = context?.includeDrafts ?? false;
+        if (args.locale) context.locale = args.locale;
+        if (args.fallbackLocales) context.fallbackLocales = args.fallbackLocales;
         if (args.id) {
           return runSql(
             Effect.gen(function* () {
