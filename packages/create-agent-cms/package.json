@@ -1,0 +1,12 @@
+{
+  "name": "create-agent-cms",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "create-agent-cms": "./src/index.js"
+  },
+  "files": ["src", "templates"],
+  "dependencies": {
+    "prompts": "^2.4.2"
+  }
+}

@@ -30,8 +30,4 @@ export function isFieldType(value: string): value is FieldType {
 export const RECORD_STATUSES = ["draft", "published", "updated"] as const;
 export type RecordStatus = (typeof RECORD_STATUSES)[number];
 
-/** Cloudflare Worker environment bindings */
-export interface Env {
-  DB: D1Database;
-  ENVIRONMENT: string;
-}
+// CmsEnv is exported from src/index.ts
