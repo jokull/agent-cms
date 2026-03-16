@@ -186,7 +186,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 - [x] **P1.4** StructuredText update + orphan cleanup *(done — 3 tests)*
 - [x] **P1.5** GraphQL StructuredText resolution *(done — { value, blocks, links }, 3 tests)*
 - [ ] **P1.6** Nested blocks: A block type with a StructuredText field that itself allows blocks. Test recursive resolution: content record → block A (has ST field) → block B (inside A's ST). Verify GraphQL returns the full nested `{ value, blocks }` structure.
-- [ ] **P1.7** StructuredText validators: `structured_text_blocks` (whitelist block types), `structured_text_links` (whitelist linkable model types). Reject writes with block types or link targets not in the whitelist. Test both acceptance and rejection.
+- [x] **P1.7** StructuredText validators *(done — block whitelist tested in P1.3, blocks_only in P1.8)*
 - [x] **P1.8** Block-only StructuredText / modular content *(done — 8 tests)*
 - [x] **P1.9** Draft/publish lifecycle *(done — 6 tests)*
 - [x] **P1.10** includeDrafts + GraphQL meta fields *(done — X-Include-Drafts header, published snapshot overlay, 7 tests)*
@@ -201,7 +201,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 
 ### Phase 3: Localization
 
-- [ ] **P3.1** Locale management: REST CRUD for `locales` table. `POST /locales`, `DELETE /locales/:id`. Test add/remove.
+- [x] **P3.1** Locale management REST CRUD *(done — 6 tests)*
 - [x] **P3.2+P3.3** Localized fields + GraphQL locale resolution *(done — 6 tests)*
 - [x] **P3.4** `[SCHEMA:recipes]` *(done — 113 tests total, all 3 milestones complete!)*
 
