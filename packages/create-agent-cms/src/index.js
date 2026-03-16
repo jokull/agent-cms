@@ -206,7 +206,8 @@ export default {
     try {
       const d1Output = run(`npx wrangler d1 create ${dbName}`, { cwd: dir });
       // Extract database_id from output
-      const idMatch = d1Output.match(/database_id\s*=\s*"([^"]+)"/);
+      // Match both TOML (database_id = "...") and JSON ("database_id": "...") output formats
+      const idMatch = d1Output.match(/database_id["\s:=]+["']?([0-9a-f-]{36})["']?/);
       if (idMatch) {
         const databaseId = idMatch[1];
         console.log(`  D1 database created: ${databaseId}\n`);
