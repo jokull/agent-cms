@@ -133,6 +133,44 @@ Records start as drafts. Publishing captures a snapshot — edits to the draft d
 
 Define locales with fallback chains. Localized fields store a value per locale. The GraphQL API respects the `Accept-Language` header and falls back through the chain when a locale is missing.
 
+## Bindings
+
+Only `DB` is required. Everything else is optional — each binding unlocks capabilities that gracefully degrade when absent.
+
+| Binding | Type | What it enables |
+|---------|------|-----------------|
+| `DB` | D1 | **Required.** Content storage, schema, FTS5 keyword search. |
+| `ASSETS` | R2 | Asset file storage. Without it, asset metadata is stored but files can't be served via `/assets/`. |
+| `AI` | Workers AI | Embedding generation for semantic search (uses `bge-small-en-v1.5`, 384 dimensions). |
+| `VECTORIZE` | Vectorize | Semantic vector search. Requires `AI`. Without both, search falls back to FTS5 keyword matching. |
+| `CMS_READ_KEY` | Secret | API key required for GraphQL reads. Without it, GraphQL is open. |
+| `CMS_WRITE_KEY` | Secret | API key required for REST writes, MCP, and publish/unpublish. Without it, writes are open. |
+| `ASSET_BASE_URL` | Variable | Public URL prefix for asset URLs and Cloudflare Image Resizing. Must be a custom domain (not `workers.dev`) for image transforms. |
+
+Example `wrangler.jsonc` with all bindings:
+
+```jsonc
+{
+  "d1_databases": [{ "binding": "DB", "database_name": "my-cms-db", "database_id": "..." }],
+  "r2_buckets": [{ "binding": "ASSETS", "bucket_name": "my-cms-assets" }],
+  "vectorize": [{ "binding": "VECTORIZE", "index_name": "my-cms-content" }],
+  "ai": { "binding": "AI" },
+  "vars": { "ASSET_BASE_URL": "https://cms.example.com" }
+}
+```
+
+To create the Vectorize index: `npx wrangler vectorize create my-cms-content --dimensions=384 --metric=cosine`
+
+### Search modes
+
+Search is always available via FTS5 (built into D1). When `AI` + `VECTORIZE` bindings are configured, two additional modes unlock:
+
+- **`keyword`** — FTS5 BM25 ranking. Exact word matching, phrases (`"exact match"`), prefix (`word*`), boolean (`AND`/`OR`).
+- **`semantic`** — Vectorize cosine similarity. Finds conceptually related content even when query and document share no keywords.
+- **`hybrid`** (default when Vectorize available) — Reciprocal rank fusion of keyword + semantic results. Records appearing in both sets get boosted.
+
+All fields are indexed by default. Opt a field out with `{"searchable": false}` in its validators.
+
 ## Stack
 
 - **Runtime**: Cloudflare Workers (edge, no cold starts)
