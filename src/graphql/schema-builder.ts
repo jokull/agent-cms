@@ -471,23 +471,75 @@ export function buildGraphQLSchema(sqlLayer: any) {
         }
       }
 
-      // Helper: resolve a record ID across one or more target tables
+      // --- Batch resolution helpers (reduces N+1 to 1 query per field per record) ---
+
+      /** Batch-fetch assets by IDs, return map of id → asset object */
+      function batchFetchAssets(ids: string[]): Map<string, Record<string, any>> {
+        if (ids.length === 0) return new Map();
+        const placeholders = ids.map(() => "?").join(", ");
+        const rows = runSql(
+          Effect.gen(function* () {
+            const s = yield* SqlClient.SqlClient;
+            return yield* s.unsafe<AssetRow>(
+              `SELECT * FROM assets WHERE id IN (${placeholders})`, ids
+            );
+          })
+        );
+        const map = new Map<string, Record<string, any>>();
+        for (const a of rows) {
+          map.set(a.id, {
+            id: a.id, filename: a.filename, mimeType: a.mime_type,
+            size: a.size, width: a.width, height: a.height,
+            alt: a.alt, title: a.title,
+            url: `/assets/${a.id}/${a.filename}`,
+          });
+        }
+        return map;
+      }
+
+      /** Batch-fetch records from a content table by IDs, return map of id → record */
+      function batchFetchRecords(tableApiKey: string, ids: string[]): Map<string, Record<string, any>> {
+        if (ids.length === 0) return new Map();
+        const tName = typeNames.get(tableApiKey);
+        const placeholders = ids.map(() => "?").join(", ");
+        const rows = runSql(
+          Effect.gen(function* () {
+            const s = yield* SqlClient.SqlClient;
+            return yield* s.unsafe<Record<string, any>>(
+              `SELECT * FROM "content_${tableApiKey}" WHERE id IN (${placeholders})`, ids
+            );
+          })
+        );
+        const map = new Map<string, Record<string, any>>();
+        for (const row of rows) {
+          map.set(row.id, { ...deserializeRecord(row), __typename: tName ? `${tName}Record` : undefined });
+        }
+        return map;
+      }
+
+      /** Resolve a single record ID across target tables (for single link fields) */
       function resolveLinkedRecord(targetApiKeys: string[], id: string): Record<string, any> | null {
         for (const apiKey of targetApiKeys) {
-          const tName = typeNames.get(apiKey);
-          if (!tName) continue;
-          const result = runSql(
-            Effect.gen(function* () {
-              const s = yield* SqlClient.SqlClient;
-              const rows = yield* s.unsafe<Record<string, any>>(
-                `SELECT * FROM "content_${apiKey}" WHERE id = ?`, [id]
-              );
-              return rows.length > 0 ? { ...deserializeRecord(rows[0]), __typename: `${tName}Record` } : null;
-            })
-          );
-          if (result) return result;
+          const map = batchFetchRecords(apiKey, [id]);
+          const found = map.get(id);
+          if (found) return found;
         }
         return null;
+      }
+
+      /** Batch-resolve multiple record IDs across target tables (for links fields) */
+      function batchResolveLinkedRecords(targetApiKeys: string[], ids: string[]): Map<string, Record<string, any>> {
+        const result = new Map<string, Record<string, any>>();
+        const remaining = new Set(ids);
+        for (const apiKey of targetApiKeys) {
+          if (remaining.size === 0) break;
+          const map = batchFetchRecords(apiKey, [...remaining]);
+          for (const [id, record] of map) {
+            result.set(id, record);
+            remaining.delete(id);
+          }
+        }
+        return result;
       }
 
       for (const f of fields) {
@@ -510,53 +562,31 @@ export function buildGraphQLSchema(sqlLayer: any) {
                 try { linkedIds = JSON.parse(linkedIds); } catch { return []; }
               }
               if (!Array.isArray(linkedIds)) return [];
-              return linkedIds.map((id: string) => resolveLinkedRecord(targets, id)).filter(Boolean);
+              // Batch-fetch all linked records in one IN query per target table
+              const resolved = batchResolveLinkedRecords(targets, linkedIds);
+              // Return in original order, preserving insertion order
+              return linkedIds.map((id: string) => resolved.get(id) ?? null).filter(Boolean);
             };
           }
         }
-        // Media field resolver: return asset metadata
+        // Media field resolver: batch-fetch single asset
         if (f.field_type === "media") {
           typeResolvers[f.api_key] = (parent: any) => {
             const assetId = parent[f.api_key];
             if (!assetId) return null;
-            return runSql(
-              Effect.gen(function* () {
-                const s = yield* SqlClient.SqlClient;
-                const rows = yield* s.unsafe<AssetRow>("SELECT * FROM assets WHERE id = ?", [assetId]);
-                if (rows.length === 0) return null;
-                const a = rows[0];
-                return {
-                  id: a.id, filename: a.filename, mimeType: a.mime_type,
-                  size: a.size, width: a.width, height: a.height,
-                  alt: a.alt, title: a.title,
-                  url: `/assets/${a.id}/${a.filename}`, // Local dev URL
-                };
-              })
-            );
+            const map = batchFetchAssets([assetId]);
+            return map.get(assetId) ?? null;
           };
         }
-        // Media gallery resolver: return array of asset metadata
+        // Media gallery resolver: batch-fetch all assets in one IN query
         if (f.field_type === "media_gallery") {
           typeResolvers[f.api_key] = (parent: any) => {
             let ids = parent[f.api_key];
             if (typeof ids === "string") { try { ids = JSON.parse(ids); } catch { return []; } }
             if (!Array.isArray(ids)) return [];
-            return ids.map((assetId: string) =>
-              runSql(
-                Effect.gen(function* () {
-                  const s = yield* SqlClient.SqlClient;
-                  const rows = yield* s.unsafe<AssetRow>("SELECT * FROM assets WHERE id = ?", [assetId]);
-                  if (rows.length === 0) return null;
-                  const a = rows[0];
-                  return {
-                    id: a.id, filename: a.filename, mimeType: a.mime_type,
-                    size: a.size, width: a.width, height: a.height,
-                    alt: a.alt, title: a.title,
-                    url: `/assets/${a.id}/${a.filename}`,
-                  };
-                })
-              )
-            ).filter(Boolean);
+            const assetMap = batchFetchAssets(ids);
+            // Return in original order
+            return ids.map((id: string) => assetMap.get(id) ?? null).filter(Boolean);
           };
         }
         // SEO field resolver: return parsed JSON with image asset resolution
@@ -638,37 +668,15 @@ export function buildGraphQLSchema(sqlLayer: any) {
               }
             }
 
-            // Resolve itemLink/inlineItem record references
-            const linkRecordIds = new Set(extractLinkIds(dast));
-            const links: any[] = [];
-
-            if (linkRecordIds.size > 0) {
-              // Search all content tables for the referenced records
-              for (const m of models) {
-                const mTypeName = typeNames.get(m.api_key);
-                if (!mTypeName) continue;
-                const mTable = `content_${m.api_key}`;
-                const ids = [...linkRecordIds];
-                if (ids.length === 0) break;
-                const placeholders = ids.map(() => "?").join(", ");
-                const found = runSql(
-                  Effect.gen(function* () {
-                    const s = yield* SqlClient.SqlClient;
-                    return yield* s.unsafe<Record<string, any>>(
-                      `SELECT * FROM "${mTable}" WHERE id IN (${placeholders})`,
-                      ids
-                    );
-                  })
-                );
-                for (const row of found) {
-                  links.push({
-                    ...deserializeRecord(row),
-                    __typename: `${mTypeName}Record`,
-                  });
-                  linkRecordIds.delete(row.id);
-                }
-              }
-            }
+            // Resolve itemLink/inlineItem record references using batch helper
+            const linkRecordIds = extractLinkIds(dast);
+            const allModelApiKeys = models.map((m) => m.api_key);
+            const resolvedLinks = linkRecordIds.length > 0
+              ? batchResolveLinkedRecords(allModelApiKeys, linkRecordIds)
+              : new Map();
+            const links = linkRecordIds
+              .map((id) => resolvedLinks.get(id) ?? null)
+              .filter(Boolean);
 
             return {
               value: dast,

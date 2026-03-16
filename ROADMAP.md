@@ -243,7 +243,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 ### Phase 6: Real-World Parity (informed by ~/Code/trip DatoCMS usage)
 
 - [x] **P6.1** Meta field filtering + ordering *(done — DateTimeFilter on _createdAt/_updatedAt/_publishedAt/_firstPublishedAt, camelCase→snake_case column mapping in filter compiler, 6 tests)*
-- [ ] **P6.2** N+1 query batching — batch link/links/media resolution using IN queries instead of per-item SELECT. Trip resolves 10+ linked records per tour page.
+- [x] **P6.2** N+1 query batching *(done — links/media_gallery use IN queries instead of per-item SELECT, batchFetchAssets/batchFetchRecords/batchResolveLinkedRecords helpers, StructuredText links use same batch path)*
 - [x] **P6.3** `_seoMetaTags` auto-generation *(done — generates title, og:title, og:description, og:image, twitter:card, article:modified_time from seo field or heuristic fallback to first string/text/media fields, 4 tests)*
 - [x] **P6.5** `_modelApiKey` meta field *(done — exposed on every content type, tested)*
 - [ ] **P6.6** responsiveImage with Cloudflare Image Resizing — accept `transforms` argument on responsiveImage (width, height, fit, format, quality). Generate srcSet using `/cdn-cgi/image/` URL pattern with R2 source. Replace imgix references. Trip uses `responsiveImage(imgixParams: { auto: format, fit: crop, w: 1200, h: 800 })`.
