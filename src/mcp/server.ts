@@ -16,6 +16,7 @@ import * as SchemaLifecycle from "../services/schema-lifecycle.js";
 import * as SchemaIO from "../services/schema-io.js";
 import * as SearchService from "../search/search-service.js";
 import { isCmsError } from "../errors.js";
+import type { ModelRow, FieldRow, LocaleRow } from "../db/row-types.js";
 
 export function createMcpServer(sqlLayer: Layer.Layer<SqlClient.SqlClient>) {
   const server = new McpServer({
@@ -37,9 +38,8 @@ export function createMcpServer(sqlLayer: Layer.Layer<SqlClient.SqlClient>) {
           if (isCmsError(error)) {
             errorInfo.type = error._tag;
             errorInfo.message = error.message;
-          } else if (error && typeof error === "object") {
-            if ("message" in error) errorInfo.message = String(error.message);
-            if ("_tag" in error) errorInfo.type = String(error._tag);
+          } else if (error instanceof Error) {
+            errorInfo.message = error.message;
           } else {
             errorInfo.message = String(error);
           }
@@ -68,15 +68,15 @@ export function createMcpServer(sqlLayer: Layer.Layer<SqlClient.SqlClient>) {
     async () => run(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
-        const models = yield* sql.unsafe<Record<string, any>>("SELECT * FROM models ORDER BY is_block, created_at");
-        const fields = yield* sql.unsafe<Record<string, any>>("SELECT * FROM fields ORDER BY model_id, position");
-        const fieldsByModel = new Map<string, any[]>();
+        const models = yield* sql.unsafe<ModelRow>("SELECT * FROM models ORDER BY is_block, created_at");
+        const fields = yield* sql.unsafe<FieldRow>("SELECT * FROM fields ORDER BY model_id, position");
+        const fieldsByModel = new Map<string, Array<{ apiKey: string; label: string; type: string; localized: boolean }>>();
         for (const f of fields) {
           const list = fieldsByModel.get(f.model_id) ?? [];
           list.push({ apiKey: f.api_key, label: f.label, type: f.field_type, localized: !!f.localized });
           fieldsByModel.set(f.model_id, list);
         }
-        return models.map((m: any) => ({
+        return models.map((m) => ({
           id: m.id, name: m.name, apiKey: m.api_key,
           isBlock: !!m.is_block, singleton: !!m.singleton,
           fields: fieldsByModel.get(m.id) ?? [],
@@ -90,14 +90,14 @@ export function createMcpServer(sqlLayer: Layer.Layer<SqlClient.SqlClient>) {
     async ({ apiKey }) => run(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
-        const models = yield* sql.unsafe<Record<string, any>>("SELECT * FROM models WHERE api_key = ?", [apiKey]);
+        const models = yield* sql.unsafe<ModelRow>("SELECT * FROM models WHERE api_key = ?", [apiKey]);
         if (models.length === 0) return { error: `Model '${apiKey}' not found` };
         const model = models[0];
-        const fields = yield* sql.unsafe<Record<string, any>>("SELECT * FROM fields WHERE model_id = ? ORDER BY position", [model.id]);
+        const fields = yield* sql.unsafe<FieldRow>("SELECT * FROM fields WHERE model_id = ? ORDER BY position", [model.id]);
         return {
           id: model.id, name: model.name, apiKey: model.api_key,
           isBlock: !!model.is_block, singleton: !!model.singleton, hasDraft: !!model.has_draft,
-          fields: fields.map((f: any) => ({
+          fields: fields.map((f) => ({
             id: f.id, apiKey: f.api_key, label: f.label, type: f.field_type,
             localized: !!f.localized, validators: JSON.parse(f.validators || "{}"), hint: f.hint,
           })),
@@ -195,11 +195,11 @@ Key validators by field type:
         if (conditions.length > 0) modelQuery += ` WHERE ${conditions.join(" AND ")}`;
         modelQuery += " ORDER BY is_block, created_at";
 
-        const models = yield* sql.unsafe<Record<string, any>>(modelQuery, params);
-        const allFields = yield* sql.unsafe<Record<string, any>>("SELECT * FROM fields ORDER BY model_id, position");
-        const locales = yield* sql.unsafe<Record<string, any>>("SELECT * FROM locales ORDER BY position");
+        const models = yield* sql.unsafe<ModelRow>(modelQuery, params);
+        const allFields = yield* sql.unsafe<FieldRow>("SELECT * FROM fields ORDER BY model_id, position");
+        const locales = yield* sql.unsafe<LocaleRow>("SELECT * FROM locales ORDER BY position");
 
-        const fieldsByModel = new Map<string, any[]>();
+        const fieldsByModel = new Map<string, FieldRow[]>();
         for (const f of allFields) {
           const list = fieldsByModel.get(f.model_id) ?? [];
           list.push(f);
@@ -207,8 +207,8 @@ Key validators by field type:
         }
 
         return {
-          locales: locales.map((l: any) => ({ code: l.code, position: l.position, fallbackLocaleId: l.fallback_locale_id })),
-          models: models.map((m: any) => {
+          locales: locales.map((l) => ({ code: l.code, position: l.position, fallbackLocaleId: l.fallback_locale_id })),
+          models: models.map((m) => {
             const mFields = fieldsByModel.get(m.id) ?? [];
             return {
               id: m.id,
@@ -219,7 +219,7 @@ Key validators by field type:
               sortable: !!m.sortable,
               tree: !!m.tree,
               ...(includeFieldDetails ? {
-                fields: mFields.map((f: any) => ({
+                fields: mFields.map((f) => ({
                   id: f.id,
                   label: f.label,
                   apiKey: f.api_key,
@@ -230,7 +230,7 @@ Key validators by field type:
                 })),
               } : {
                 fieldCount: mFields.length,
-                fieldNames: mFields.map((f: any) => f.api_key),
+                fieldNames: mFields.map((f) => f.api_key),
               }),
             };
           }),
@@ -330,7 +330,7 @@ All records must belong to the same model. Slugs are auto-generated. Returns arr
     async ({ paragraphs = [], blocks = [] }) => {
       const { ulid } = await import("ulidx");
 
-      const children: any[] = [];
+      const children: unknown[] = [];
       const blockMap: Record<string, any> = {};
 
       // Interleave paragraphs and blocks
@@ -448,7 +448,7 @@ Flow:
 
 The schema format matches export_schema output:
 { "version": 1, "locales": [...], "models": [{ "name", "apiKey", "fields": [...] }] }`,
-    { schema: z.any().describe("The schema JSON object (from export_schema output)") },
+    { schema: z.record(z.string(), z.unknown()).describe("The schema JSON object (from export_schema output)") },
     async ({ schema }) => run(SchemaIO.importSchema(schema))
   );
 

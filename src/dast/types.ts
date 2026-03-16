@@ -109,6 +109,6 @@ export interface DastDocument {
 /** The full StructuredText value as returned by GraphQL */
 export interface StructuredTextValue {
   value: DastDocument;
-  blocks: Record<string, { type: string; [key: string]: any }>;
-  links?: Record<string, { id: string; [key: string]: any }>;
+  blocks: Record<string, { type: string; [key: string]: unknown }>;
+  links?: Record<string, { id: string; [key: string]: unknown }>;
 }

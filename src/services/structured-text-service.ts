@@ -23,8 +23,8 @@ import { DastDocumentInput } from "../dast/schema.js";
 export function writeStructuredText(params: {
   fieldApiKey: string;
   rootRecordId: string;
-  value: any;
-  blocks?: Record<string, any>;
+  value: unknown;
+  blocks?: Record<string, unknown>;
   allowedBlockTypes?: string[];
   blocksOnly?: boolean;
 }) {
@@ -75,7 +75,14 @@ export function writeStructuredText(params: {
 
     // 3. Validate block types against whitelist — ONLY for blocks directly referenced by this DAST
     const referencedBlockIdSet = new Set(referencedBlockIds);
-    for (const [blockId, blockData] of Object.entries(blocks)) {
+    for (const [blockId, rawBlockData] of Object.entries(blocks)) {
+      if (typeof rawBlockData !== "object" || rawBlockData === null) {
+        return yield* new ValidationError({
+          message: `Block '${blockId}' must be an object`,
+          field: fieldApiKey,
+        });
+      }
+      const blockData = rawBlockData as Record<string, unknown>;
       if (!blockData._type || typeof blockData._type !== "string") {
         return yield* new ValidationError({
           message: `Block '${blockId}' must have a _type property`,
@@ -108,8 +115,9 @@ export function writeStructuredText(params: {
     }
 
     // 4. Write block rows
-    for (const [blockId, blockData] of Object.entries(blocks)) {
-      const blockType = blockData._type;
+    for (const [blockId, rawBlock] of Object.entries(blocks)) {
+      const blockData = rawBlock as Record<string, unknown>;
+      const blockType = blockData._type as string;
       const tableName = `block_${blockType}`;
 
       // Get the fields for this block type
@@ -126,7 +134,7 @@ export function writeStructuredText(params: {
       // Build the insert
       const columns = ["id", "_root_record_id", "_root_field_api_key"];
       const placeholders = ["?", "?", "?"];
-      const values: any[] = [blockId, rootRecordId, fieldApiKey];
+      const values: unknown[] = [blockId, rootRecordId, fieldApiKey];
 
       for (const field of blockFields) {
         const val = blockData[field.api_key];

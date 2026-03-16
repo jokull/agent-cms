@@ -43,7 +43,7 @@ export function removeBlockType(blockApiKey: string) {
       if (model.length === 0) continue;
 
       const tableName = model[0].is_block ? `block_${model[0].api_key}` : `content_${model[0].api_key}`;
-      const records = yield* sql.unsafe<{ id: string; [key: string]: any }>(
+      const records = yield* sql.unsafe<Record<string, unknown>>(
         `SELECT id, "${field.api_key}", _published_snapshot FROM "${tableName}" WHERE "${field.api_key}" IS NOT NULL OR _published_snapshot IS NOT NULL`
       );
 
@@ -57,10 +57,11 @@ export function removeBlockType(blockApiKey: string) {
 
         if (blockIdSet.size > 0) {
           // Clean draft DAST
-          let dast = record[field.api_key];
-          if (typeof dast === "string") {
-            try { dast = JSON.parse(dast); } catch { dast = null; }
+          let dastRaw: unknown = record[field.api_key];
+          if (typeof dastRaw === "string") {
+            try { dastRaw = JSON.parse(dastRaw); } catch { dastRaw = null; }
           }
+          const dast = dastRaw as DastLike | null;
           if (dast?.document?.children) {
             const cleaned = removeBlockNodesFromDast(dast, blockIdSet);
             yield* sql.unsafe(
@@ -70,7 +71,7 @@ export function removeBlockType(blockApiKey: string) {
           }
 
           // Clean published snapshot DAST
-          yield* cleanPublishedSnapshot(sql, tableName, record.id, field.api_key, blockIdSet);
+          yield* cleanPublishedSnapshot(sql, tableName, String(record.id), field.api_key, blockIdSet);
         }
       }
 
@@ -140,12 +141,13 @@ export function removeBlockFromWhitelist(params: {
     // Clean DAST trees (draft + published snapshot) if there are blocks to remove
     let cleanedRecords = 0;
     if (blockIdSet.size > 0) {
-      const records = yield* sql.unsafe<{ id: string; [key: string]: any }>(
+      const records = yield* sql.unsafe<Record<string, unknown>>(
         `SELECT id, "${field.api_key}", _published_snapshot FROM "${tableName}" WHERE "${field.api_key}" IS NOT NULL OR _published_snapshot IS NOT NULL`
       );
       for (const record of records) {
-        let dast = record[field.api_key];
-        if (typeof dast === "string") { try { dast = JSON.parse(dast); } catch { dast = null; } }
+        let dastRaw: unknown = record[field.api_key];
+        if (typeof dastRaw === "string") { try { dastRaw = JSON.parse(dastRaw); } catch { dastRaw = null; } }
+        const dast = dastRaw as DastLike | null;
         if (dast?.document?.children) {
           const cleaned = removeBlockNodesFromDast(dast, blockIdSet);
           yield* sql.unsafe(
@@ -156,7 +158,7 @@ export function removeBlockFromWhitelist(params: {
         }
 
         // Clean published snapshot
-        yield* cleanPublishedSnapshot(sql, tableName, record.id, field.api_key, blockIdSet);
+        yield* cleanPublishedSnapshot(sql, tableName, String(record.id), field.api_key, blockIdSet);
       }
 
       // Delete the block rows (scoped to this model's records)
@@ -204,20 +206,21 @@ export function removeLocale(localeId: string) {
       if (model.length === 0) continue;
 
       const tableName = model[0].is_block ? `block_${model[0].api_key}` : `content_${model[0].api_key}`;
-      const records = yield* sql.unsafe<{ id: string; [key: string]: any }>(
+      const records = yield* sql.unsafe<Record<string, unknown>>(
         `SELECT id, "${field.api_key}" FROM "${tableName}" WHERE "${field.api_key}" IS NOT NULL`
       );
 
       for (const record of records) {
-        let value = record[field.api_key];
-        if (typeof value === "string") { try { value = JSON.parse(value); } catch { continue; } }
-        if (typeof value !== "object" || value === null || Array.isArray(value)) continue;
+        let parsed: unknown = record[field.api_key];
+        if (typeof parsed === "string") { try { parsed = JSON.parse(parsed); } catch { continue; } }
+        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) continue;
 
-        if (localeCode in value) {
-          delete value[localeCode];
+        const localeMap = parsed as Record<string, unknown>;
+        if (localeCode in localeMap) {
+          delete localeMap[localeCode];
           yield* sql.unsafe(
             `UPDATE "${tableName}" SET "${field.api_key}" = ? WHERE id = ?`,
-            [JSON.stringify(value), record.id]
+            [JSON.stringify(localeMap), record.id]
           );
           updatedRecords++;
         }
@@ -245,16 +248,17 @@ function cleanPublishedSnapshot(
     );
     if (!rows[0]?._published_snapshot) return;
 
-    let snapshot: Record<string, any>;
+    let snapshot: Record<string, unknown>;
     try { snapshot = JSON.parse(rows[0]._published_snapshot); } catch { return; }
 
-    let dast = snapshot[fieldApiKey];
+    let dast: unknown = snapshot[fieldApiKey];
     if (typeof dast === "string") {
       try { dast = JSON.parse(dast); } catch { return; }
     }
-    if (!dast?.document?.children) return;
+    const dastObj = dast as DastLike | null;
+    if (!dastObj?.document?.children) return;
 
-    snapshot[fieldApiKey] = removeBlockNodesFromDast(dast, blockIds);
+    snapshot[fieldApiKey] = removeBlockNodesFromDast(dastObj, blockIds);
     yield* sql.unsafe(
       `UPDATE "${tableName}" SET _published_snapshot = ? WHERE id = ?`,
       [JSON.stringify(snapshot), recordId]
@@ -262,8 +266,20 @@ function cleanPublishedSnapshot(
   });
 }
 
+interface DastLike {
+  document?: { children?: DastNode[] };
+  [key: string]: unknown;
+}
+
+interface DastNode {
+  type?: string;
+  item?: string;
+  children?: DastNode[];
+  [key: string]: unknown;
+}
+
 /** Remove block/inlineBlock nodes whose item IDs are in the given set */
-function removeBlockNodesFromDast(dast: any, blockIds: Set<string>): any {
+function removeBlockNodesFromDast(dast: DastLike, blockIds: Set<string>): DastLike {
   if (!dast?.document?.children) return dast;
 
   return {
@@ -275,10 +291,10 @@ function removeBlockNodesFromDast(dast: any, blockIds: Set<string>): any {
   };
 }
 
-function filterNodes(nodes: any[], blockIds: Set<string>): any[] {
+function filterNodes(nodes: DastNode[], blockIds: Set<string>): DastNode[] {
   return nodes
     .filter((node) => {
-      if ((node.type === "block" || node.type === "inlineBlock") && blockIds.has(node.item)) {
+      if ((node.type === "block" || node.type === "inlineBlock") && typeof node.item === "string" && blockIds.has(node.item)) {
         return false;
       }
       return true;

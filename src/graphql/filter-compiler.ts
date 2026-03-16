@@ -15,7 +15,7 @@
 interface FilterInput {
   AND?: FilterInput[];
   OR?: FilterInput[];
-  [field: string]: any;
+  [field: string]: unknown;
 }
 
 interface SqlCondition {
@@ -47,7 +47,7 @@ export interface FilterCompilerOpts {
 export function compileFilterToSql(
   filter: FilterInput | undefined,
   opts?: FilterCompilerOpts
-): { where: string; params: any[] } | null {
+): { where: string; params: unknown[] } | null {
   if (!filter || Object.keys(filter).length === 0) return null;
 
   const conditions = buildSqlConditions(filter, opts);
@@ -127,7 +127,7 @@ function buildSqlConditions(
     if (key === "_locales" && typeof value === "object" && value !== null) {
       const locCols = opts?.localizedDbColumns ?? [];
       if (locCols.length > 0) {
-        const locCondition = compileLocalesFilter(value, locCols);
+        const locCondition = compileLocalesFilter(value as Record<string, unknown>, locCols);
         if (locCondition) conditions.push(locCondition);
       }
       continue;
@@ -140,7 +140,7 @@ function buildSqlConditions(
 
     const isJsonArray = opts?.jsonArrayFields?.has(key) ?? false;
 
-    for (const [op, expected] of Object.entries(value)) {
+    for (const [op, expected] of Object.entries(value as Record<string, unknown>)) {
       if (expected === undefined) continue;
       const cond = compileOperator(op, expected, col, dbKey, isJsonArray);
       if (cond) conditions.push(cond);
@@ -235,11 +235,11 @@ function compileOperator(
       }
       // DatoCMS-style { pattern, caseSensitive } object
       if (typeof expected === "object" && expected !== null && "pattern" in expected) {
-        const obj = expected as { pattern: string; caseSensitive?: boolean };
+        const obj = expected as Record<string, unknown>;
         if (obj.caseSensitive) {
-          return { sql: `${col} GLOB ?`, params: [`*${obj.pattern}*`] };
+          return { sql: `${col} GLOB ?`, params: [`*${String(obj.pattern)}*`] };
         }
-        return { sql: `${col} LIKE ?`, params: [`%${obj.pattern}%`] };
+        return { sql: `${col} LIKE ?`, params: [`%${String(obj.pattern)}%`] };
       }
       return null;
     case "notMatches":
@@ -247,11 +247,11 @@ function compileOperator(
         return { sql: `${col} NOT LIKE ?`, params: [`%${expected}%`] };
       }
       if (typeof expected === "object" && expected !== null && "pattern" in expected) {
-        const obj = expected as { pattern: string; caseSensitive?: boolean };
+        const obj = expected as Record<string, unknown>;
         if (obj.caseSensitive) {
-          return { sql: `${col} NOT GLOB ?`, params: [`*${obj.pattern}*`] };
+          return { sql: `${col} NOT GLOB ?`, params: [`*${String(obj.pattern)}*`] };
         }
-        return { sql: `${col} NOT LIKE ?`, params: [`%${obj.pattern}%`] };
+        return { sql: `${col} NOT LIKE ?`, params: [`%${String(obj.pattern)}%`] };
       }
       return null;
 
@@ -272,7 +272,10 @@ function compileOperator(
     // --- Geolocation: near { latitude, longitude, radius } ---
     case "near": {
       if (typeof expected !== "object" || expected === null) return null;
-      const { latitude, longitude, radius } = expected as { latitude?: number; longitude?: number; radius?: number };
+      const geo = expected as Record<string, unknown>;
+      const latitude = typeof geo.latitude === "number" ? geo.latitude : undefined;
+      const longitude = typeof geo.longitude === "number" ? geo.longitude : undefined;
+      const radius = typeof geo.radius === "number" ? geo.radius : undefined;
       if (latitude == null || longitude == null || radius == null) return null;
 
       // Bounding-box approximation: 1° latitude ≈ 111,320 meters
@@ -296,11 +299,11 @@ function compileOperator(
     // Legacy: matchesObject (kept for backwards compat, prefer unified "matches")
     case "matchesObject":
       if (typeof expected === "object" && expected !== null && "pattern" in expected) {
-        const obj = expected as { pattern: string; caseSensitive?: boolean };
+        const obj = expected as Record<string, unknown>;
         if (obj.caseSensitive) {
-          return { sql: `${col} GLOB ?`, params: [`*${obj.pattern}*`] };
+          return { sql: `${col} GLOB ?`, params: [`*${String(obj.pattern)}*`] };
         }
-        return { sql: `${col} LIKE ?`, params: [`%${obj.pattern}%`] };
+        return { sql: `${col} LIKE ?`, params: [`%${String(obj.pattern)}%`] };
       }
       return null;
 
@@ -320,11 +323,9 @@ function compileLocalesFilter(
   value: Record<string, unknown>,
   localizedDbColumns: string[]
 ): SqlCondition | null {
-  const { allIn, anyIn, notIn } = value as {
-    allIn?: string[];
-    anyIn?: string[];
-    notIn?: string[];
-  };
+  const allIn = Array.isArray(value.allIn) ? value.allIn as string[] : undefined;
+  const anyIn = Array.isArray(value.anyIn) ? value.anyIn as string[] : undefined;
+  const notIn = Array.isArray(value.notIn) ? value.notIn as string[] : undefined;
 
   const parts: SqlCondition[] = [];
 
