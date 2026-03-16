@@ -152,6 +152,16 @@ export function buildGraphQLSchema(sqlLayer: any) {
 
     typeDefs.push("scalar JSON");
     typeDefs.push(`
+      """Cloudflare Image Resizing transform parameters"""
+      input ImageTransformParams {
+        width: Int
+        height: Int
+        fit: String
+        quality: Int
+        format: String
+        gravity: String
+        dpr: Int
+      }
       type Asset {
         id: ID!
         filename: String!
@@ -162,13 +172,16 @@ export function buildGraphQLSchema(sqlLayer: any) {
         alt: String
         title: String
         url: String!
-        responsiveImage: ResponsiveImage
+        blurhash: String
+        responsiveImage(transforms: ImageTransformParams, cfImagesParams: ImageTransformParams): ResponsiveImage
       }
       type ResponsiveImage {
         src: String!
         srcSet: String!
+        webpSrcSet: String!
         width: Int!
         height: Int!
+        aspectRatio: Float!
         alt: String
         title: String
         base64: String
@@ -490,7 +503,7 @@ export function buildGraphQLSchema(sqlLayer: any) {
           map.set(a.id, {
             id: a.id, filename: a.filename, mimeType: a.mime_type,
             size: a.size, width: a.width, height: a.height,
-            alt: a.alt, title: a.title,
+            alt: a.alt, title: a.title, blurhash: a.blurhash ?? null,
             url: `/assets/${a.id}/${a.filename}`,
           });
         }
@@ -846,6 +859,11 @@ export function buildGraphQLSchema(sqlLayer: any) {
           const records = await queryWithFilter({ filter: args.filter, first: 1 }, includeDrafts);
           return records[0] ?? null;
         }
+        // Singleton models: return the single record without arguments
+        if (model.singleton) {
+          const records = await queryWithFilter({ first: 1 }, includeDrafts);
+          return records[0] ?? null;
+        }
         return null;
       };
 
@@ -862,39 +880,62 @@ export function buildGraphQLSchema(sqlLayer: any) {
     });
 
     // Asset.responsiveImage resolver
-    // In production: uses Cloudflare Image Resizing /cdn-cgi/image/width=W,format=auto/<r2-key>
-    // In local dev: uses simple URL with width parameter
+    // Accepts transforms (or imgixParams for DatoCMS compat) to control output dimensions/fit
+    // Production: /cdn-cgi/image/width=W,height=H,fit=F,format=auto/<r2-key>
+    // Local dev: query params passthrough
     resolvers.Asset = {
-      responsiveImage: (asset: any) => {
+      responsiveImage: (asset: any, args: any) => {
         if (!asset.width || !asset.height) return null;
-        const w = asset.width;
-        const h = asset.height;
+        const params = args?.transforms ?? args?.cfImagesParams ?? {};
+
+        // Requested dimensions (fall back to original)
+        const requestedW = params.width ?? params.w ?? asset.width;
+        const requestedH = params.height ?? params.h ?? null;
+        const fit = params.fit ?? "scale-down";
+        const quality = params.quality ?? params.q ?? null;
+        const format = params.format ?? params.auto ?? "auto";
+        const gravity = params.gravity ?? null;
+
+        // Compute output dimensions
+        const origW = asset.width;
+        const origH = asset.height;
+        const aspect = origW / origH;
+        const outW = Math.min(requestedW, origW);
+        const outH = requestedH ? Math.min(requestedH, origH) : Math.round(outW / aspect);
+        const outAspect = outW / outH;
+
         const url = asset.url;
 
-        // Generate transform URL for a given width
-        // Production: /cdn-cgi/image/width=W,fit=scale-down,format=auto/<r2-key>
-        // Local dev: /assets/<id>/<filename>?w=W
-        const transformUrl = (targetWidth: number) => `${url}?w=${targetWidth}&fit=scale-down&format=auto`;
+        // Build transform URL query string
+        function transformUrl(targetWidth: number, targetFormat?: string): string {
+          const p = [`w=${targetWidth}`, `fit=${fit}`];
+          if (requestedH) p.push(`h=${Math.round(targetWidth / outAspect)}`);
+          if (quality) p.push(`q=${quality}`);
+          if (targetFormat ?? format) p.push(`format=${targetFormat ?? format}`);
+          if (gravity) p.push(`gravity=${gravity}`);
+          return `${url}?${p.join("&")}`;
+        }
 
-        // Generate srcSet at standard breakpoints
-        const breakpoints = [320, 640, 960, 1200, 1600, 2560].filter((sw) => sw <= w);
-        if (!breakpoints.includes(w)) breakpoints.push(w);
+        // Generate srcSet at standard breakpoints, capped at output width
+        const breakpoints = [320, 640, 960, 1200, 1600, 2560].filter((sw) => sw <= outW);
+        if (!breakpoints.includes(outW)) breakpoints.push(outW);
         breakpoints.sort((a, b) => a - b);
 
-        const srcSet = breakpoints
-          .map((sw) => `${transformUrl(sw)} ${sw}w`)
-          .join(", ");
+        const srcSet = breakpoints.map((sw) => `${transformUrl(sw)} ${sw}w`).join(", ");
+        const webpSrcSet = breakpoints.map((sw) => `${transformUrl(sw, "webp")} ${sw}w`).join(", ");
 
         return {
-          src: transformUrl(w),
+          src: transformUrl(outW),
           srcSet,
-          width: w,
-          height: h,
+          webpSrcSet,
+          width: outW,
+          height: outH,
+          aspectRatio: outAspect,
           alt: asset.alt ?? null,
           title: asset.title ?? null,
-          base64: null, // Computed at upload time (blurhash → base64)
-          bgColor: null, // Computed at upload time (dominant color)
-          sizes: `(max-width: ${w}px) 100vw, ${w}px`,
+          base64: asset.blurhash ?? null, // TODO: convert blurhash to base64 data URI
+          bgColor: null,
+          sizes: `(max-width: ${outW}px) 100vw, ${outW}px`,
         };
       },
     };

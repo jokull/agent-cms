@@ -261,10 +261,14 @@ Deployment architecture: system tables created via `wrangler d1 migrations apply
 - [x] **GraphiQL playground** — enabled at `GET /graphql` via Yoga `landingPage: true`. Schema introspection works out of the box.
 - [x] **CORS** — all responses include `Access-Control-Allow-Origin`, preflight `OPTIONS` handled. Allows `X-Include-Drafts` and `Authorization` headers.
 - [x] **Schema caching** — GraphQL schema built once per Worker instance, not per-request.
+- [x] **Async GraphQL resolvers** — all resolvers use `Effect.runPromise` for D1 async compatibility. Verified working end-to-end on `wrangler dev` with local D1.
+- [x] **Wrangler migrations** — `migrations/` directory with wrangler-compatible `.sql` files. `wrangler d1 migrations apply` works.
+- [x] **Singleton model queries** — models with `singleton: true` return the single record when queried without id/filter arguments (e.g. `homepage { title }`).
+- [x] **responsiveImage transforms** — accepts `transforms` (or `cfImagesParams`) argument with width, height, fit, quality, format, gravity. Generates srcSet + webpSrcSet at standard breakpoints capped at requested dimensions. `aspectRatio` computed.
 
 #### Needed for first real project
 
-- [ ] **`wrangler dev` local DX** — verify `wrangler dev` works end-to-end: create model via REST, query via GraphQL, use GraphiQL. Document the flow.
+- [x] **`wrangler dev` local DX** — verified end-to-end: migrations apply, REST creates models/fields/records, GraphQL queries resolve, GraphiQL playground works.
 - [ ] **`wrangler deploy` + D1 setup** — document: `wrangler d1 create`, `wrangler d1 migrations apply`, `wrangler deploy`. Verify first-request builds schema correctly from empty D1.
 - [ ] **Audit log system table** — `audit_log` table tracking schema and content mutations (who, what, when). Essential for CMS trust and debugging.
 - [ ] **R2 asset upload** — presigned URL endpoint for file upload to R2. Asset creation returns upload URL; client uploads directly to R2.
@@ -284,7 +288,7 @@ Deployment architecture: system tables created via `wrangler d1 migrations apply
 - [ ] GraphQL subscriptions for real-time updates
 - [ ] Schema descriptor KV caching for production cold starts
 - [ ] Cloudflare Image Resizing integration (production transform URLs, local dev passthrough)
-- [ ] Blurhash / dominant color extraction on asset upload
+- [ ] Blurhash / dominant color extraction on asset upload *(scoped out for now — needs compute Cloudflare doesn't provide natively; fields exist in schema as nullable)*
 - [ ] Per-field locale argument (`title(locale: en)` override)
 - [ ] `_isValid` meta field on records
 - [ ] Cache tag webhook invalidation (production Cloudflare KV)
