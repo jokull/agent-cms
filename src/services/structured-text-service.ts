@@ -1,8 +1,8 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { SqlClient } from "@effect/sql";
 import { validateDast, validateBlocksOnly, extractBlockIds } from "../dast/index.js";
 import { ValidationError } from "../errors.js";
-import type { DastDocument } from "../dast/types.js";
+import { DastDocumentInput } from "../dast/schema.js";
 
 /**
  * Validate and process a StructuredText field value for writing.
@@ -41,7 +41,13 @@ export function writeStructuredText(params: {
       });
     }
 
-    const dast = value as DastDocument;
+    // Decode via Schema — runtime-verified, no forced cast
+    const dast = yield* Schema.decodeUnknown(DastDocumentInput)(value).pipe(
+      Effect.mapError((e) => new ValidationError({
+        message: `Invalid DAST structure: ${e.message}`,
+        field: fieldApiKey,
+      }))
+    );
 
     // 1b. Validate blocks-only constraint (modular content / page builder)
     if (blocksOnly) {

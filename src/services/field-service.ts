@@ -1,11 +1,12 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { SqlClient } from "@effect/sql";
 import { ulid } from "ulidx";
 import { FIELD_TYPES, type FieldType } from "../types.js";
 import { NotFoundError, ValidationError, DuplicateError } from "../errors.js";
 import { migrateContentTable } from "../schema-engine/sql-ddl.js";
-import type { ModelRow, FieldRow, ParsedFieldRow } from "../db/row-types.js";
+import type { ModelRow, FieldRow } from "../db/row-types.js";
 import { parseFieldValidators } from "../db/row-types.js";
+import { CreateFieldInput } from "./input-schemas.js";
 
 function syncTable(modelId: string) {
   return Effect.gen(function* () {
@@ -43,14 +44,15 @@ export function listFields(modelId: string) {
   });
 }
 
-export function createField(modelId: string, body: unknown) {
+export function createField(modelId: string, rawBody: unknown) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const models = yield* sql.unsafe<{ id: string }>("SELECT id FROM models WHERE id = ?", [modelId]);
     if (models.length === 0) return yield* new NotFoundError({ entity: "Model", id: modelId });
 
-    if (!isCreateFieldInput(body))
-      return yield* new ValidationError({ message: "label, apiKey, and fieldType are required" });
+    const body = yield* Schema.decodeUnknown(CreateFieldInput)(rawBody).pipe(
+      Effect.mapError((e) => new ValidationError({ message: `Invalid input: ${e.message}` }))
+    );
 
     if (!/^[a-z][a-z0-9_]*$/.test(body.apiKey))
       return yield* new ValidationError({ message: "apiKey must start with a lowercase letter and contain only lowercase letters, numbers, and underscores" });
@@ -136,25 +138,4 @@ export function deleteField(fieldId: string) {
   });
 }
 
-// --- Input validation ---
-
-interface CreateFieldInput {
-  label: string;
-  apiKey: string;
-  fieldType: string;
-  position?: number;
-  localized?: boolean;
-  validators?: Record<string, unknown>;
-  defaultValue?: unknown;
-  appearance?: unknown;
-  hint?: string;
-  fieldsetId?: string;
-}
-
-function isCreateFieldInput(input: unknown): input is CreateFieldInput {
-  if (typeof input !== "object" || input === null) return false;
-  const obj = input as Record<string, unknown>;
-  return typeof obj.label === "string" && obj.label.length > 0 &&
-         typeof obj.apiKey === "string" && obj.apiKey.length > 0 &&
-         typeof obj.fieldType === "string";
-}
+// Input schema imported from ./input-schemas.ts

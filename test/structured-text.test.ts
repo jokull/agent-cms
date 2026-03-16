@@ -115,7 +115,7 @@ describe("StructuredText write orchestration", () => {
     });
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.error).toContain("DAST");
+    expect(body.error).toContain("StructuredText");
   });
 
   it("rejects blocks not in whitelist", async () => {

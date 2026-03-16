@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { SqlClient } from "@effect/sql";
 import { ulid } from "ulidx";
 import { NotFoundError, ValidationError, DuplicateError } from "../errors.js";
@@ -14,6 +14,8 @@ import { writeStructuredText, deleteBlocksForField } from "./structured-text-ser
 import type { ModelRow, FieldRow, ParsedFieldRow, ContentRow } from "../db/row-types.js";
 import { parseFieldValidators, isContentRow } from "../db/row-types.js";
 import { getSlugSource, getBlockWhitelist, getBlocksOnly, isRequired } from "../db/validators.js";
+import { CreateRecordInput, PatchRecordInput } from "./input-schemas.js";
+import { StructuredTextWriteInput } from "../dast/schema.js";
 
 function getModelByApiKey(apiKey: string) {
   return Effect.gen(function* () {
@@ -37,10 +39,11 @@ function getModelFields(modelId: string) {
   });
 }
 
-export function createRecord(body: unknown) {
+export function createRecord(rawBody: unknown) {
   return Effect.gen(function* () {
-    if (!isCreateRecordInput(body))
-      return yield* new ValidationError({ message: "modelApiKey is required" });
+    const body = yield* Schema.decodeUnknown(CreateRecordInput)(rawBody).pipe(
+      Effect.mapError((e) => new ValidationError({ message: `Invalid input: ${e.message}` }))
+    );
 
     const model = yield* getModelByApiKey(body.modelApiKey);
     if (!model) return yield* new NotFoundError({ entity: "Model", id: body.modelApiKey });
@@ -77,23 +80,27 @@ export function createRecord(body: unknown) {
     // Process fields
     for (const field of modelFields) {
       // StructuredText: validate DAST + write blocks
-      if (field.field_type === "structured_text" && data[field.api_key] !== undefined) {
-        const stInput = data[field.api_key];
-        if (isStructuredTextInput(stInput)) {
-          const allowedBlockTypes = getBlockWhitelist(field.validators);
-          const blocksOnly = getBlocksOnly(field.validators);
+      if (field.field_type === "structured_text" && data[field.api_key] !== undefined && data[field.api_key] !== null) {
+        const stInput = yield* Schema.decodeUnknown(StructuredTextWriteInput)(data[field.api_key]).pipe(
+          Effect.mapError((e) => new ValidationError({
+            message: `Invalid StructuredText for field '${field.api_key}': ${e.message}`,
+            field: field.api_key,
+          }))
+        );
 
-          const dast = yield* writeStructuredText({
-            fieldApiKey: field.api_key,
-            rootRecordId: id,
-            value: stInput.value,
-            blocks: stInput.blocks ?? {},
-            allowedBlockTypes,
-            blocksOnly,
-          });
+        const allowedBlockTypes = getBlockWhitelist(field.validators);
+        const blocksOnly = getBlocksOnly(field.validators);
 
-          data[field.api_key] = dast;
-        }
+        const dast = yield* writeStructuredText({
+          fieldApiKey: field.api_key,
+          rootRecordId: id,
+          value: stInput.value,
+          blocks: stInput.blocks,
+          allowedBlockTypes,
+          blocksOnly,
+        });
+
+        data[field.api_key] = dast;
       }
 
       if (field.field_type === "slug") {
@@ -154,10 +161,11 @@ export function getRecord(modelApiKey: string, id: string) {
   });
 }
 
-export function patchRecord(id: string, body: unknown) {
+export function patchRecord(id: string, rawBody: unknown) {
   return Effect.gen(function* () {
-    if (!isPatchRecordInput(body))
-      return yield* new ValidationError({ message: "modelApiKey is required" });
+    const body = yield* Schema.decodeUnknown(PatchRecordInput)(rawBody).pipe(
+      Effect.mapError((e) => new ValidationError({ message: `Invalid input: ${e.message}` }))
+    );
     const model = yield* getModelByApiKey(body.modelApiKey);
     if (!model) return yield* new NotFoundError({ entity: "Model", id: body.modelApiKey });
 
@@ -177,8 +185,17 @@ export function patchRecord(id: string, body: unknown) {
     for (const field of modelFields) {
       // StructuredText update: delete old blocks, write new ones
       if (field.field_type === "structured_text" && data[field.api_key] !== undefined) {
-        const stInput = data[field.api_key];
-        if (isStructuredTextInput(stInput)) {
+        if (data[field.api_key] === null) {
+          // Clearing the field
+          yield* deleteBlocksForField({ rootRecordId: id, fieldApiKey: field.api_key });
+        } else {
+          const stInput = yield* Schema.decodeUnknown(StructuredTextWriteInput)(data[field.api_key]).pipe(
+            Effect.mapError((e) => new ValidationError({
+              message: `Invalid StructuredText for field '${field.api_key}': ${e.message}`,
+              field: field.api_key,
+            }))
+          );
+
           yield* deleteBlocksForField({ rootRecordId: id, fieldApiKey: field.api_key });
 
           const allowedBlockTypes = getBlockWhitelist(field.validators);
@@ -188,14 +205,12 @@ export function patchRecord(id: string, body: unknown) {
             fieldApiKey: field.api_key,
             rootRecordId: id,
             value: stInput.value,
-            blocks: stInput.blocks ?? {},
+            blocks: stInput.blocks,
             allowedBlockTypes,
             blocksOnly,
           });
 
           data[field.api_key] = dast;
-        } else if (stInput === null) {
-          yield* deleteBlocksForField({ rootRecordId: id, fieldApiKey: field.api_key });
         }
       }
 
@@ -225,37 +240,4 @@ export function removeRecord(modelApiKey: string, id: string) {
   });
 }
 
-// --- Input type guards ---
-
-interface CreateRecordInput {
-  modelApiKey: string;
-  data?: Record<string, unknown>;
-}
-
-function isCreateRecordInput(input: unknown): input is CreateRecordInput {
-  if (typeof input !== "object" || input === null) return false;
-  const obj = input as Record<string, unknown>;
-  return typeof obj.modelApiKey === "string" && obj.modelApiKey.length > 0;
-}
-
-interface PatchRecordInput {
-  modelApiKey: string;
-  data?: Record<string, unknown>;
-}
-
-function isPatchRecordInput(input: unknown): input is PatchRecordInput {
-  if (typeof input !== "object" || input === null) return false;
-  const obj = input as Record<string, unknown>;
-  return typeof obj.modelApiKey === "string";
-}
-
-interface StructuredTextInput {
-  value: unknown;
-  blocks?: Record<string, unknown>;
-}
-
-function isStructuredTextInput(input: unknown): input is StructuredTextInput {
-  if (typeof input !== "object" || input === null) return false;
-  const obj = input as Record<string, unknown>;
-  return "value" in obj && obj.value !== undefined;
-}
+// Input schemas imported from ./input-schemas.ts and ../dast/schema.ts

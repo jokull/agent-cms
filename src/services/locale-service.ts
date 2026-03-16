@@ -1,21 +1,24 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { SqlClient } from "@effect/sql";
 import { ulid } from "ulidx";
 import { NotFoundError, ValidationError, DuplicateError } from "../errors.js";
+import type { LocaleRow } from "../db/row-types.js";
+import { CreateLocaleInput } from "./input-schemas.js";
 
 export function listLocales() {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    return yield* sql.unsafe<Record<string, any>>("SELECT * FROM locales ORDER BY position");
+    return yield* sql.unsafe<LocaleRow>("SELECT * FROM locales ORDER BY position");
   });
 }
 
-export function createLocale(body: any) {
+export function createLocale(rawBody: unknown) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
 
-    if (!body.code || typeof body.code !== "string")
-      return yield* new ValidationError({ message: "code is required (e.g. 'en', 'is')" });
+    const body = yield* Schema.decodeUnknown(CreateLocaleInput)(rawBody).pipe(
+      Effect.mapError((e) => new ValidationError({ message: `Invalid input: ${e.message}` }))
+    );
 
     const existing = yield* sql.unsafe<{ id: string }>("SELECT id FROM locales WHERE code = ?", [body.code]);
     if (existing.length > 0)
@@ -23,13 +26,14 @@ export function createLocale(body: any) {
 
     const allLocales = yield* sql.unsafe<{ id: string }>("SELECT id FROM locales");
     const id = ulid();
+    const position = body.position ?? allLocales.length;
 
     yield* sql.unsafe(
       "INSERT INTO locales (id, code, position, fallback_locale_id) VALUES (?, ?, ?, ?)",
-      [id, body.code, body.position ?? allLocales.length, body.fallbackLocaleId ?? null]
+      [id, body.code, position, body.fallbackLocaleId ?? null]
     );
 
-    return { id, code: body.code, position: body.position ?? allLocales.length, fallbackLocaleId: body.fallbackLocaleId ?? null };
+    return { id, code: body.code, position, fallbackLocaleId: body.fallbackLocaleId ?? null };
   });
 }
 

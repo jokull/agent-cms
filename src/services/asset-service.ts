@@ -1,16 +1,17 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { SqlClient } from "@effect/sql";
 import { ulid } from "ulidx";
 import { NotFoundError, ValidationError } from "../errors.js";
+import type { AssetRow } from "../db/row-types.js";
+import { CreateAssetInput } from "./input-schemas.js";
 
-export function createAsset(body: any) {
+export function createAsset(rawBody: unknown) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
 
-    if (!body.filename || typeof body.filename !== "string")
-      return yield* new ValidationError({ message: "filename is required" });
-    if (!body.mimeType || typeof body.mimeType !== "string")
-      return yield* new ValidationError({ message: "mimeType is required" });
+    const body = yield* Schema.decodeUnknown(CreateAssetInput)(rawBody).pipe(
+      Effect.mapError((e) => new ValidationError({ message: `Invalid input: ${e.message}` }))
+    );
 
     const now = new Date().toISOString();
     const id = ulid();
@@ -20,32 +21,32 @@ export function createAsset(body: any) {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id, body.filename, body.mimeType,
-        body.size ?? 0, body.width ?? null, body.height ?? null,
+        body.size, body.width ?? null, body.height ?? null,
         body.alt ?? null, body.title ?? null,
         body.r2Key ?? `uploads/${id}/${body.filename}`,
         body.blurhash ?? null,
         body.colors ? JSON.stringify(body.colors) : null,
         body.focalPoint ? JSON.stringify(body.focalPoint) : null,
-        JSON.stringify(body.tags ?? []),
+        JSON.stringify(body.tags),
         now,
       ]
     );
 
-    return { id, filename: body.filename, mimeType: body.mimeType, size: body.size ?? 0, width: body.width, height: body.height, alt: body.alt, title: body.title, r2Key: body.r2Key ?? `uploads/${id}/${body.filename}`, createdAt: now };
+    return { id, filename: body.filename, mimeType: body.mimeType, size: body.size, width: body.width, height: body.height, alt: body.alt, title: body.title, r2Key: body.r2Key ?? `uploads/${id}/${body.filename}`, createdAt: now };
   });
 }
 
 export function listAssets() {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    return yield* sql.unsafe<Record<string, any>>("SELECT * FROM assets ORDER BY created_at DESC");
+    return yield* sql.unsafe<AssetRow>("SELECT * FROM assets ORDER BY created_at DESC");
   });
 }
 
 export function getAsset(id: string) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const rows = yield* sql.unsafe<Record<string, any>>("SELECT * FROM assets WHERE id = ?", [id]);
+    const rows = yield* sql.unsafe<AssetRow>("SELECT * FROM assets WHERE id = ?", [id]);
     if (rows.length === 0) return yield* new NotFoundError({ entity: "Asset", id });
     return rows[0];
   });

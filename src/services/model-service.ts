@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { SqlClient } from "@effect/sql";
 import { ulid } from "ulidx";
 import {
@@ -8,8 +8,9 @@ import {
   ReferenceConflictError,
 } from "../errors.js";
 import { migrateContentTable, dropTableSql } from "../schema-engine/sql-ddl.js";
-import type { ModelRow, FieldRow, ParsedFieldRow } from "../db/row-types.js";
+import type { ModelRow, FieldRow } from "../db/row-types.js";
 import { parseFieldValidators } from "../db/row-types.js";
+import { CreateModelInput } from "./input-schemas.js";
 
 export function listModels() {
   return Effect.gen(function* () {
@@ -36,12 +37,13 @@ export function getModel(id: string) {
   });
 }
 
-export function createModel(body: unknown) {
+export function createModel(rawBody: unknown) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
 
-    if (!isCreateModelInput(body))
-      return yield* new ValidationError({ message: "name and apiKey are required strings" });
+    const body = yield* Schema.decodeUnknown(CreateModelInput)(rawBody).pipe(
+      Effect.mapError((e) => new ValidationError({ message: `Invalid input: ${e.message}` }))
+    );
 
     if (!/^[a-z][a-z0-9_]*$/.test(body.apiKey))
       return yield* new ValidationError({
@@ -57,32 +59,29 @@ export function createModel(body: unknown) {
 
     const now = new Date().toISOString();
     const id = ulid();
-    const isBlock = body.isBlock ?? false;
-    const singleton = body.singleton ?? false;
 
     yield* sql.unsafe(
       `INSERT INTO models (id, name, api_key, is_block, singleton, sortable, tree, has_draft, ordering, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id, body.name, body.apiKey,
-        isBlock ? 1 : 0,
-        singleton ? 1 : 0,
+        body.isBlock ? 1 : 0,
+        body.singleton ? 1 : 0,
         body.sortable ? 1 : 0,
         body.tree ? 1 : 0,
-        body.hasDraft !== false ? 1 : 0,
+        body.hasDraft ? 1 : 0,
         body.ordering ?? null,
         now, now,
       ]
     );
 
-    yield* migrateContentTable(body.apiKey, isBlock, []);
+    yield* migrateContentTable(body.apiKey, body.isBlock, []);
 
     return {
       id, name: body.name, apiKey: body.apiKey,
-      isBlock, singleton,
-      sortable: body.sortable ?? false,
-      tree: body.tree ?? false,
-      hasDraft: body.hasDraft !== false,
+      isBlock: body.isBlock, singleton: body.singleton,
+      sortable: body.sortable, tree: body.tree,
+      hasDraft: body.hasDraft,
       ordering: body.ordering ?? null,
       createdAt: now, updatedAt: now,
     };
@@ -119,7 +118,6 @@ export function deleteModel(id: string) {
 
     const model = models[0];
 
-    // Strict reference checking for non-block models
     if (!model.is_block) {
       const allFields = yield* sql.unsafe<FieldRow>("SELECT * FROM fields");
       const referencingFields = allFields.filter((f) => {
@@ -152,24 +150,4 @@ export function deleteModel(id: string) {
 
     return { deleted: true };
   });
-}
-
-// --- Input validation ---
-
-interface CreateModelInput {
-  name: string;
-  apiKey: string;
-  isBlock?: boolean;
-  singleton?: boolean;
-  sortable?: boolean;
-  tree?: boolean;
-  hasDraft?: boolean;
-  ordering?: string;
-}
-
-function isCreateModelInput(input: unknown): input is CreateModelInput {
-  if (typeof input !== "object" || input === null) return false;
-  const obj = input as Record<string, unknown>;
-  return typeof obj.name === "string" && obj.name.length > 0 &&
-         typeof obj.apiKey === "string" && obj.apiKey.length > 0;
 }

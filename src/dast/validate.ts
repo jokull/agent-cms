@@ -1,5 +1,3 @@
-import type { DastDocument } from "./types.js";
-
 const VALID_MARKS: Set<string> = new Set([
   "strong", "emphasis", "underline", "strikethrough", "code", "highlight",
 ]);
@@ -270,10 +268,11 @@ export function validateBlocksOnly(doc: unknown): ValidationError[] {
 
 /**
  * Extract all block IDs referenced in a DAST document.
+ * Accepts DastDocument or any structurally compatible decoded input.
  */
-export function extractBlockIds(doc: DastDocument): string[] {
+export function extractBlockIds(doc: { document: { children: readonly unknown[] } }): string[] {
   const ids: string[] = [];
-  walkNodes(doc.document.children, ids);
+  walkNodes([...doc.document.children], ids);
   return ids;
 }
 
@@ -291,9 +290,9 @@ function walkNodes(nodes: unknown[], ids: string[]) {
 /**
  * Extract all record link IDs referenced in a DAST document.
  */
-export function extractLinkIds(doc: DastDocument): string[] {
+export function extractLinkIds(doc: { document: { children: readonly unknown[] } }): string[] {
   const ids: string[] = [];
-  walkLinkNodes(doc.document.children, ids);
+  walkLinkNodes([...doc.document.children], ids);
   return ids;
 }
 
