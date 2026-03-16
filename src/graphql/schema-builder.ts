@@ -471,43 +471,46 @@ export function buildGraphQLSchema(sqlLayer: any) {
         }
       }
 
+      // Helper: resolve a record ID across one or more target tables
+      function resolveLinkedRecord(targetApiKeys: string[], id: string): Record<string, any> | null {
+        for (const apiKey of targetApiKeys) {
+          const tName = typeNames.get(apiKey);
+          if (!tName) continue;
+          const result = runSql(
+            Effect.gen(function* () {
+              const s = yield* SqlClient.SqlClient;
+              const rows = yield* s.unsafe<Record<string, any>>(
+                `SELECT * FROM "content_${apiKey}" WHERE id = ?`, [id]
+              );
+              return rows.length > 0 ? { ...deserializeRecord(rows[0]), __typename: `${tName}Record` } : null;
+            })
+          );
+          if (result) return result;
+        }
+        return null;
+      }
+
       for (const f of fields) {
         if (f.field_type === "link") {
           const targets = getLinkTargets(f.validators);
-          if (targets?.length === 1 && typeNames.has(targets[0])) {
-            const targetTable = `content_${targets[0]}`;
+          if (targets && targets.length > 0) {
             typeResolvers[f.api_key] = (parent: any) => {
               const linkedId = parent[f.api_key];
               if (!linkedId) return null;
-              return runSql(
-                Effect.gen(function* () {
-                  const s = yield* SqlClient.SqlClient;
-                  const rows = yield* s.unsafe<Record<string, any>>(`SELECT * FROM "${targetTable}" WHERE id = ?`, [linkedId]);
-                  return rows.length > 0 ? deserializeRecord(rows[0]) : null;
-                })
-              );
+              return resolveLinkedRecord(targets, linkedId);
             };
           }
         }
         if (f.field_type === "links") {
           const targets = getLinksTargets(f.validators);
-          if (targets?.length === 1 && typeNames.has(targets[0])) {
-            const targetTable = `content_${targets[0]}`;
+          if (targets && targets.length > 0) {
             typeResolvers[f.api_key] = (parent: any) => {
               let linkedIds = parent[f.api_key];
               if (typeof linkedIds === "string") {
                 try { linkedIds = JSON.parse(linkedIds); } catch { return []; }
               }
               if (!Array.isArray(linkedIds)) return [];
-              return linkedIds.map((id: string) =>
-                runSql(
-                  Effect.gen(function* () {
-                    const s = yield* SqlClient.SqlClient;
-                    const rows = yield* s.unsafe<Record<string, any>>(`SELECT * FROM "${targetTable}" WHERE id = ?`, [id]);
-                    return rows.length > 0 ? deserializeRecord(rows[0]) : null;
-                  })
-                )
-              ).filter(Boolean);
+              return linkedIds.map((id: string) => resolveLinkedRecord(targets, id)).filter(Boolean);
             };
           }
         }
