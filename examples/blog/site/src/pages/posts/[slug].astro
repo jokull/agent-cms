@@ -1,6 +1,5 @@
 ---
 import Base from "../../layouts/Base.astro";
-import ResponsiveImage from "../../components/ResponsiveImage.astro";
 import StructuredText from "../../components/StructuredText.astro";
 import { env } from "cloudflare:workers";
 import { gqlFetch } from "../../graphql/client";
@@ -19,12 +18,6 @@ if (!post) {
 
 <Base seoTags={post._seoMetaTags}>
   <article class="post">
-    {post.coverImage?.responsiveImage && (
-      <div class="cover">
-        <ResponsiveImage data={post.coverImage.responsiveImage} loading="eager" sizes="100vw" />
-      </div>
-    )}
-
     <header>
       {post.category && (
         <a href={`/categories/${post.category.slug}`} class="category">
@@ -35,9 +28,6 @@ if (!post) {
       <div class="meta">
         {post.author && (
           <div class="author">
-            {post.author.photo?.responsiveImage && (
-              <ResponsiveImage data={post.author.photo.responsiveImage} class="author-photo" />
-            )}
             <span>{post.author.name}</span>
           </div>
         )}
@@ -56,50 +46,11 @@ if (!post) {
         <StructuredText data={post.content} />
       </div>
     )}
-
-    {post.gallery && post.gallery.length > 0 && (
-      <section class="gallery">
-        <h2>Gallery</h2>
-        <div class="gallery-grid">
-          {post.gallery.map((image) =>
-            image.responsiveImage ? (
-              <ResponsiveImage
-                data={image.responsiveImage}
-                sizes="(min-width: 768px) 50vw, 100vw"
-              />
-            ) : null
-          )}
-        </div>
-      </section>
-    )}
-
-    {post.relatedPosts && post.relatedPosts.length > 0 && (
-      <section class="related">
-        <h2>Related Posts</h2>
-        <div class="related-grid">
-          {post.relatedPosts.map((related) => (
-            <a href={`/posts/${related.slug}`} class="related-card">
-              {related.coverImage?.responsiveImage && (
-                <ResponsiveImage data={related.coverImage.responsiveImage} />
-              )}
-              <h3>{related.title}</h3>
-            </a>
-          ))}
-        </div>
-      </section>
-    )}
   </article>
 </Base>
 
 <style>
   .post { max-width: 720px; margin: 0 auto; }
-
-  .cover {
-    margin: -2rem -2rem 2rem;
-    border-radius: 8px;
-    overflow: hidden;
-  }
-  .cover :global(img) { width: 100%; display: block; }
 
   header { margin-bottom: 2rem; }
 
@@ -131,12 +82,6 @@ if (!post) {
     gap: 0.5rem;
   }
 
-  .author :global(.author-photo) {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-  }
-
   .featured-badge {
     background: #fef3c7;
     color: #92400e;
@@ -166,28 +111,4 @@ if (!post) {
     background: none;
     padding: 0;
   }
-
-  .gallery, .related { margin-top: 3rem; }
-  .gallery h2, .related h2 { font-size: 1.3rem; margin-bottom: 1rem; }
-
-  .gallery-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-    gap: 0.5rem;
-  }
-  .gallery-grid :global(img) { border-radius: 4px; }
-
-  .related-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 1.5rem;
-  }
-
-  .related-card {
-    text-decoration: none;
-    color: #1a1a1a;
-  }
-  .related-card :global(img) { border-radius: 4px; }
-  .related-card h3 { font-size: 1rem; margin-top: 0.5rem; }
-  .related-card:hover h3 { color: #2563eb; }
 </style>

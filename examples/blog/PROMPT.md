@@ -333,3 +333,18 @@ After completing all 4 stages, the CMS has:
 - **responsiveImage** queryable on all media fields via GraphQL
 
 The frontend (Astro site in `../site/`) can now query all of this via the GraphQL API at `/graphql`, with full `responsiveImage` transforms via Cloudflare Image Resizing.
+
+### Fulltext Search
+
+All content records are automatically indexed in FTS5 on create/update/delete. The site includes a `/search` page that queries `POST /api/search`. The MCP server exposes a `search_content` tool for agent-driven search.
+
+**Alternative setup:** Use `npx tsx seed.ts` from the `examples/blog/` directory to seed schema + content + FTS5 index in one step (requires the CMS running on localhost:8787).
+
+The seed script creates 6 posts with content specifically designed to demonstrate the **vocabulary mismatch problem** — where keyword search fails but vector search (Phase 2) would succeed:
+
+| Semantic query | Would match | Why FTS5 misses it |
+|---|---|---|
+| "how to make websites faster" | Computation at the Periphery | Uses "latency", "distance", not "faster" |
+| "dealing with too much information" | The Curation Deficit | Discusses "attention", "scarcity", not "information" |
+| "catching bugs before production" | Contracts All the Way Down | Uses "runtime failure", "contracts", not "bugs" |
+| "letting AI handle publishing" | Delegation and Trust | Discusses "governance", "autonomy", not "handle" |

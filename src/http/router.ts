@@ -16,6 +16,8 @@ import { isCmsError, errorToResponse } from "../errors.js";
 import { ReorderInput } from "../services/input-schemas.js";
 import { ValidationError } from "../errors.js";
 import * as SchemaIO from "../services/schema-io.js";
+import * as SearchService from "../search/search-service.js";
+import type { AiBinding, VectorizeBinding } from "../search/vectorize.js";
 
 /** Helper: run a CMS Effect and return an HTTP response */
 function handle<A>(
@@ -299,6 +301,18 @@ const schemaRouter = HttpRouter.empty.pipe(
   )
 );
 
+// --- Search ---
+const searchRouter = HttpRouter.empty.pipe(
+  HttpRouter.post(
+    "/",
+    Effect.gen(function* () {
+      const req = yield* HttpServerRequest.HttpServerRequest;
+      const body = yield* req.json;
+      return yield* handle(SearchService.search(body as any));
+    })
+  )
+);
+
 // --- Health ---
 const healthRouter = HttpRouter.empty.pipe(
   HttpRouter.get("/health", HttpServerResponse.json({ status: "ok" }))
@@ -313,6 +327,7 @@ export const appRouter = HttpRouter.empty.pipe(
   HttpRouter.concat(assetsRouter.pipe(HttpRouter.prefixAll("/api/assets"))),
   HttpRouter.concat(localesRouter.pipe(HttpRouter.prefixAll("/api/locales"))),
   HttpRouter.concat(schemaRouter.pipe(HttpRouter.prefixAll("/api/schema"))),
+  HttpRouter.concat(searchRouter.pipe(HttpRouter.prefixAll("/api/search"))),
 );
 
 /**
@@ -329,9 +344,16 @@ export interface WebHandlerOptions {
   writeKey?: string;
   /** R2 bucket for serving asset files */
   r2Bucket?: R2Bucket;
+  /** Workers AI binding for embedding generation (optional — enables vector search) */
+  ai?: AiBinding;
+  /** Vectorize index binding (optional — enables semantic search) */
+  vectorize?: VectorizeBinding;
 }
 
 export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, options?: WebHandlerOptions) {
+  // Configure Vectorize bindings for search (optional)
+  SearchService.configureVectorize(options?.ai, options?.vectorize);
+
   const restApp = Effect.flatten(HttpRouter.toHttpApp(appRouter)).pipe(
     Effect.catchAll((error: unknown) => {
       if (isCmsError(error)) {

@@ -14,6 +14,7 @@ import * as AssetService from "../services/asset-service.js";
 import * as WebhookService from "../services/webhook-service.js";
 import * as SchemaLifecycle from "../services/schema-lifecycle.js";
 import * as SchemaIO from "../services/schema-io.js";
+import * as SearchService from "../search/search-service.js";
 import { isCmsError } from "../errors.js";
 
 export function createMcpServer(sqlLayer: Layer.Layer<SqlClient.SqlClient>) {
@@ -449,6 +450,24 @@ The schema format matches export_schema output:
 { "version": 1, "locales": [...], "models": [{ "name", "apiKey", "fields": [...] }] }`,
     { schema: z.any().describe("The schema JSON object (from export_schema output)") },
     async ({ schema }) => run(SchemaIO.importSchema(schema))
+  );
+
+  // --- Search ---
+
+  server.tool("search_content",
+    `Search content records. Supports keyword search (FTS5), semantic search (Vectorize), or hybrid (both combined with rank fusion).
+
+Keyword mode: phrases ("exact match"), prefix (word*), boolean (AND/OR).
+Semantic mode: finds conceptually related content even when vocabulary differs (requires AI+Vectorize bindings).
+Hybrid mode (default when Vectorize available): combines both for best results.`,
+    {
+      query: z.string().describe("Search query"),
+      modelApiKey: z.string().optional().describe("Scope to a specific model"),
+      first: z.number().optional().describe("Max results (default 10, max 100)"),
+      skip: z.number().optional().describe("Pagination offset"),
+      mode: z.enum(["keyword", "semantic", "hybrid"]).optional().describe("Search mode (default: hybrid if Vectorize available, otherwise keyword)"),
+    },
+    async (args) => run(SearchService.search(args))
   );
 
   return server;

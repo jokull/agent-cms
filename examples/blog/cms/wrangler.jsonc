@@ -18,6 +18,15 @@
       "bucket_name": "test-blog-assets"
     }
   ],
+  "vectorize": [
+    {
+      "binding": "VECTORIZE",
+      "index_name": "test-cms-content"
+    }
+  ],
+  "ai": {
+    "binding": "AI"
+  },
   "vars": {
     "ENVIRONMENT": "production",
     "ASSET_BASE_URL": "https://test-cms.solberg.is"

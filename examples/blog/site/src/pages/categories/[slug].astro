@@ -1,6 +1,5 @@
 ---
 import Base from "../../layouts/Base.astro";
-import ResponsiveImage from "../../components/ResponsiveImage.astro";
 import { env } from "cloudflare:workers";
 import { gqlFetch } from "../../graphql/client";
 import { CATEGORY_BY_SLUG_QUERY, POSTS_BY_CATEGORY_QUERY } from "../../graphql/queries";
@@ -20,11 +19,6 @@ const posts = postsData.allPosts;
 
 <Base title={`${category.name} — Blog`}>
   <header class="category-header">
-    {category.coverImage?.responsiveImage && (
-      <div class="cover">
-        <ResponsiveImage data={category.coverImage.responsiveImage} loading="eager" />
-      </div>
-    )}
     <h1>{category.name}</h1>
     {category.description && <p class="description">{category.description}</p>}
   </header>
@@ -32,11 +26,6 @@ const posts = postsData.allPosts;
   <div class="post-list">
     {posts.map((post) => (
       <article class="post-item">
-        {post.coverImage?.responsiveImage && (
-          <a href={`/posts/${post.slug}`} class="post-image">
-            <ResponsiveImage data={post.coverImage.responsiveImage} sizes="200px" />
-          </a>
-        )}
         <div class="post-info">
           <h2><a href={`/posts/${post.slug}`}>{post.title}</a></h2>
           {post.excerpt && <p>{post.excerpt}</p>}
@@ -64,7 +53,6 @@ const posts = postsData.allPosts;
   }
   .category-header h1 { font-size: 2rem; margin: 1rem 0 0.5rem; }
   .description { color: #666; font-size: 1.1rem; }
-  .cover { border-radius: 8px; overflow: hidden; margin-bottom: 1rem; }
 
   .post-list {
     display: flex;
@@ -73,17 +61,12 @@ const posts = postsData.allPosts;
   }
 
   .post-item {
-    display: flex;
-    gap: 1.5rem;
     background: white;
     border-radius: 8px;
     overflow: hidden;
     box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-    padding: 1rem;
+    padding: 1.25rem;
   }
-
-  .post-image { flex-shrink: 0; width: 200px; }
-  .post-image :global(img) { border-radius: 4px; width: 100%; }
 
   .post-info h2 { font-size: 1.2rem; margin-bottom: 0.5rem; }
   .post-info h2 a { text-decoration: none; color: #1a1a1a; }

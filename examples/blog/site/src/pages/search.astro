@@ -1,0 +1,395 @@
+---
+import Base from "../layouts/Base.astro";
+import { env } from "cloudflare:workers";
+import { gqlFetch } from "../graphql/client";
+import { SITE_SETTINGS_QUERY } from "../graphql/queries";
+
+const cms = env.CMS;
+
+const url = new URL(Astro.request.url);
+const query = url.searchParams.get("q")?.trim() ?? "";
+
+const settings = await gqlFetch(cms, SITE_SETTINGS_QUERY);
+const site = settings.siteSettings;
+
+interface SearchResult {
+  recordId: string;
+  modelApiKey: string;
+  rank: number;
+  snippet: string;
+}
+
+let results: SearchResult[] = [];
+let searchError = "";
+let searchMode = "";
+const modeParam = url.searchParams.get("mode") ?? undefined;
+
+if (query) {
+  try {
+    const res = await cms.fetch("http://cms/api/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, first: 20, mode: modeParam }),
+    });
+    const data = (await res.json()) as { results?: SearchResult[]; meta?: { mode?: string }; error?: string };
+    if (data.error) {
+      searchError = data.error;
+    } else {
+      results = data.results ?? [];
+      searchMode = data.meta?.mode ?? "keyword";
+    }
+  } catch (e) {
+    searchError = "Search is temporarily unavailable";
+  }
+}
+
+// For each result, fetch the record title and slug via the REST API
+interface EnrichedResult {
+  recordId: string;
+  modelApiKey: string;
+  rank: number;
+  snippet: string;
+  title: string;
+  slug?: string;
+  excerpt?: string;
+}
+
+const enriched: EnrichedResult[] = [];
+for (const r of results) {
+  try {
+    const res = await cms.fetch(
+      `http://cms/api/records/${r.recordId}?modelApiKey=${r.modelApiKey}`
+    );
+    if (res.ok) {
+      const record = (await res.json()) as Record<string, unknown>;
+      enriched.push({
+        ...r,
+        title: (record.title as string) ?? (record.name as string) ?? r.recordId,
+        slug: record.slug as string | undefined,
+        excerpt: record.excerpt as string | undefined,
+      });
+    }
+  } catch {
+    // skip records we can't fetch
+  }
+}
+---
+
+<Base title={query ? `Search: ${query}` : "Search"}>
+  <div class="search-page">
+    <h1>Search</h1>
+
+    <form action="/search" method="get" class="search-form">
+      <input
+        type="search"
+        name="q"
+        value={query}
+        placeholder="Search posts..."
+        autofocus
+        autocomplete="off"
+      />
+      <button type="submit">Search</button>
+    </form>
+
+    {query && (
+      <div class="results-info">
+        {searchError ? (
+          <p class="error">{searchError}</p>
+        ) : (
+          <p>
+            {enriched.length} result{enriched.length !== 1 ? "s" : ""} for "{query}"
+            {searchMode && <span class="mode-badge">{searchMode}</span>}
+          </p>
+        )}
+      </div>
+    )}
+
+    {query && !searchError && (
+      <div class="mode-switcher">
+        <a href={`/search?q=${encodeURIComponent(query)}&mode=keyword`} class={searchMode === "keyword" ? "active" : ""}>Keyword</a>
+        <a href={`/search?q=${encodeURIComponent(query)}&mode=semantic`} class={searchMode === "semantic" ? "active" : ""}>Semantic</a>
+        <a href={`/search?q=${encodeURIComponent(query)}&mode=hybrid`} class={searchMode === "hybrid" ? "active" : ""}>Hybrid</a>
+      </div>
+    )}
+
+    {enriched.length > 0 && (
+      <div class="results">
+        {enriched.map((r) => {
+          const href =
+            r.modelApiKey === "post" && r.slug
+              ? `/posts/${r.slug}`
+              : r.modelApiKey === "category" && r.slug
+                ? `/categories/${r.slug}`
+                : null;
+
+          return (
+            <article class="result">
+              <div class="result-model">{r.modelApiKey}</div>
+              {href ? (
+                <h2><a href={href}>{r.title}</a></h2>
+              ) : (
+                <h2>{r.title}</h2>
+              )}
+              {r.excerpt && <p class="excerpt">{r.excerpt}</p>}
+              <p class="snippet" set:html={r.snippet} />
+            </article>
+          );
+        })}
+      </div>
+    )}
+
+    {query && enriched.length === 0 && !searchError && (
+      <div class="no-results">
+        <p>No results found for "{query}"</p>
+        <p class="hint">
+          {searchMode === "keyword"
+            ? "Try semantic mode to find conceptually related content even when the vocabulary differs."
+            : "Try different search terms."}
+        </p>
+      </div>
+    )}
+
+    {!query && (
+      <div class="suggestions">
+        <h3>Keyword search</h3>
+        <p>Exact word matching via FTS5. Supports phrases and boolean operators.</p>
+        <ul>
+          <li><a href="/search?q=edge&mode=keyword">edge</a> — finds posts mentioning "edge"</li>
+          <li><a href="/search?q=%22type+sandwich%22&mode=keyword">"type sandwich"</a> — exact phrase</li>
+          <li><a href="/search?q=DAST&mode=keyword">DAST</a> — technical term match</li>
+        </ul>
+
+        <h3>Semantic search</h3>
+        <p>Finds conceptually related content via vector embeddings — even when the vocabulary is completely different.</p>
+        <ul>
+          <li>
+            <a href="/search?q=how+to+make+websites+faster&mode=semantic">how to make websites faster</a>
+            <span class="would-match">→ finds "Computation at the Periphery" (about edge latency, not "faster")</span>
+          </li>
+          <li>
+            <a href="/search?q=letting+AI+handle+publishing&mode=semantic">letting AI handle publishing</a>
+            <span class="would-match">→ finds "Delegation and Trust" (about governance, not "handle")</span>
+          </li>
+          <li>
+            <a href="/search?q=catching+bugs+before+production&mode=semantic">catching bugs before production</a>
+            <span class="would-match">→ finds "Contracts All the Way Down" (about type safety, not "bugs")</span>
+          </li>
+        </ul>
+
+        <h3>Hybrid search</h3>
+        <p>Combines keyword + semantic with reciprocal rank fusion. Best of both worlds.</p>
+        <ul>
+          <li><a href="/search?q=edge+computing">edge computing</a> — keyword hits + semantically related results</li>
+          <li><a href="/search?q=content+management">content management</a> — broad concept across models</li>
+        </ul>
+      </div>
+    )}
+  </div>
+</Base>
+
+<style>
+  .search-page {
+    max-width: 640px;
+    margin: 0 auto;
+  }
+
+  h1 {
+    font-size: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .search-form {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .search-form input {
+    flex: 1;
+    padding: 0.6rem 1rem;
+    font-size: 1rem;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    outline: none;
+    font-family: inherit;
+  }
+
+  .search-form input:focus {
+    border-color: #2563eb;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+  }
+
+  .search-form button {
+    padding: 0.6rem 1.25rem;
+    font-size: 1rem;
+    background: #2563eb;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+
+  .search-form button:hover {
+    background: #1d4ed8;
+  }
+
+  .results-info {
+    margin-bottom: 0.5rem;
+    font-size: 0.9rem;
+    color: #666;
+  }
+
+  .mode-badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    background: #e0e7ff;
+    color: #3730a3;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    margin-left: 0.5rem;
+    font-weight: 600;
+  }
+
+  .mode-switcher {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .mode-switcher a {
+    font-size: 0.8rem;
+    padding: 0.3rem 0.75rem;
+    border-radius: 4px;
+    text-decoration: none;
+    color: #666;
+    background: #f1f5f9;
+    transition: background 0.15s;
+  }
+
+  .mode-switcher a:hover {
+    background: #e2e8f0;
+    color: #1a1a1a;
+  }
+
+  .mode-switcher a.active {
+    background: #2563eb;
+    color: white;
+  }
+
+  .error {
+    color: #dc2626;
+  }
+
+  .results {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+  }
+
+  .result {
+    background: white;
+    border-radius: 8px;
+    padding: 1.25rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  }
+
+  .result-model {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #888;
+    margin-bottom: 0.25rem;
+  }
+
+  .result h2 {
+    font-size: 1.1rem;
+    margin: 0 0 0.5rem;
+  }
+
+  .result h2 a {
+    text-decoration: none;
+    color: #1a1a1a;
+  }
+
+  .result h2 a:hover {
+    color: #2563eb;
+  }
+
+  .excerpt {
+    font-size: 0.9rem;
+    color: #555;
+    margin-bottom: 0.5rem;
+  }
+
+  .snippet {
+    font-size: 0.85rem;
+    color: #777;
+    line-height: 1.5;
+  }
+
+  .snippet :global(mark) {
+    background: #fef08a;
+    color: inherit;
+    padding: 0.05rem 0.15rem;
+    border-radius: 2px;
+  }
+
+  .no-results {
+    text-align: center;
+    padding: 2rem 0;
+  }
+
+  .no-results .hint {
+    margin-top: 0.75rem;
+    font-size: 0.9rem;
+    color: #888;
+    max-width: 480px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .suggestions {
+    color: #555;
+    font-size: 0.95rem;
+  }
+
+  .suggestions h3 {
+    font-size: 0.95rem;
+    margin: 1.5rem 0 0.4rem;
+    color: #1a1a1a;
+  }
+
+  .suggestions h3:first-child {
+    margin-top: 0;
+  }
+
+  .suggestions p {
+    margin-bottom: 0.6rem;
+    font-size: 0.9rem;
+    color: #888;
+  }
+
+  .suggestions ul {
+    list-style: none;
+    margin-bottom: 1rem;
+  }
+
+  .suggestions li {
+    margin-bottom: 0.5rem;
+  }
+
+  .suggestions li a {
+    font-weight: 500;
+  }
+
+  .would-match {
+    display: block;
+    font-size: 0.8rem;
+    color: #888;
+    margin-top: 0.15rem;
+    font-style: italic;
+  }
+</style>

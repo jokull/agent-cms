@@ -1,6 +1,5 @@
 ---
 import Base from "../../layouts/Base.astro";
-import ResponsiveImage from "../../components/ResponsiveImage.astro";
 import { env } from "cloudflare:workers";
 import { gqlFetch } from "../../graphql/client";
 import { ALL_POSTS_QUERY, ALL_CATEGORIES_QUERY } from "../../graphql/queries";
@@ -38,11 +37,6 @@ const categories = categoriesData.allCategorys;
       <div class="post-list">
         {posts.map((post) => (
           <article class="post-item">
-            {post.coverImage?.responsiveImage && (
-              <a href={`/posts/${post.slug}`} class="post-image">
-                <ResponsiveImage data={post.coverImage.responsiveImage} sizes="200px" />
-              </a>
-            )}
             <div class="post-info">
               {post.category && (
                 <a href={`/categories/${post.category.slug}`} class="category">
@@ -92,16 +86,11 @@ const categories = categoriesData.allCategorys;
   }
 
   .post-item {
-    display: flex;
-    gap: 1.5rem;
     background: white;
     border-radius: 8px;
-    padding: 1rem;
+    padding: 1.25rem;
     box-shadow: 0 1px 3px rgba(0,0,0,0.08);
   }
-
-  .post-image { flex-shrink: 0; width: 180px; }
-  .post-image :global(img) { border-radius: 4px; width: 100%; }
 
   .category {
     font-size: 0.75rem;
@@ -134,7 +123,5 @@ const categories = categoriesData.allCategorys;
   @media (max-width: 768px) {
     .posts-page { grid-template-columns: 1fr; }
     .sidebar { display: none; }
-    .post-item { flex-direction: column; }
-    .post-image { width: 100%; }
   }
 </style>

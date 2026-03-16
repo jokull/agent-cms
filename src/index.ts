@@ -1,5 +1,6 @@
 import { D1Client } from "@effect/sql-d1";
 import { createWebHandler } from "./http/router.js";
+import type { AiBinding, VectorizeBinding } from "./search/vectorize.js";
 
 /** Cloudflare Worker environment bindings for agent-cms */
 export interface CmsEnv {
@@ -14,6 +15,10 @@ export interface CmsEnv {
   /** Write API key — required for REST writes, MCP, publish/unpublish.
    *  Like DatoCMS CMA token. Set via: wrangler secret put CMS_WRITE_KEY */
   CMS_WRITE_KEY?: string;
+  /** Workers AI binding for embedding generation (optional — enables vector search) */
+  AI?: AiBinding;
+  /** Vectorize index binding (optional — enables semantic search) */
+  VECTORIZE?: VectorizeBinding;
 }
 
 /**
@@ -36,6 +41,8 @@ export function createCMSHandler(env: CmsEnv) {
     readKey: env.CMS_READ_KEY,
     writeKey: env.CMS_WRITE_KEY,
     r2Bucket: env.ASSETS,
+    ai: env.AI,
+    vectorize: env.VECTORIZE,
   });
 
   return {
