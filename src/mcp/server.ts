@@ -321,16 +321,29 @@ export function createMcpServer(sqlLayer: Layer.Layer<SqlClient.SqlClient>) {
 
   // --- Assets ---
 
-  server.tool("upload_asset", "Register an asset (metadata only — actual file upload is separate)",
+  server.tool("upload_asset",
+    `Register an asset after uploading the file to R2 via wrangler CLI.
+
+Upload flow:
+1. Tell the user to run: wrangler r2 object put <bucket>/uploads/<filename> --file=<local-path> --content-type=<mime-type>
+2. Call this tool with the r2Key, filename, mimeType, and image dimensions
+3. The asset is registered and can be referenced in media fields by its ID
+
+Example r2Key: "uploads/hero.jpg"`,
     {
-      filename: z.string(), mimeType: z.string(),
-      size: z.number().optional(), width: z.number().optional(), height: z.number().optional(),
-      alt: z.string().optional(), title: z.string().optional(),
+      filename: z.string().describe("Original filename (e.g. hero.jpg)"),
+      mimeType: z.string().describe("MIME type (e.g. image/jpeg)"),
+      r2Key: z.string().describe("R2 object key used in wrangler r2 object put (e.g. uploads/hero.jpg)"),
+      size: z.number().optional().describe("File size in bytes"),
+      width: z.number().optional().describe("Image width in pixels"),
+      height: z.number().optional().describe("Image height in pixels"),
+      alt: z.string().optional().describe("Alt text for accessibility"),
+      title: z.string().optional().describe("Image title"),
     },
     async (args) => run(AssetService.createAsset(args))
   );
 
-  server.tool("list_assets", "List all assets",
+  server.tool("list_assets", "List all assets with their IDs, filenames, and R2 keys",
     {},
     async () => run(AssetService.listAssets())
   );
