@@ -52,6 +52,50 @@ export function getAsset(id: string) {
   });
 }
 
+/**
+ * Replace an asset's file while keeping the same ID and URL.
+ * Updates metadata (filename, mimeType, size, dimensions, r2Key) but the asset ID
+ * and all content references remain stable. DatoCMS can't do this (imgix regenerates URLs).
+ */
+export function replaceAsset(id: string, rawBody: unknown) {
+  return Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+
+    const rows = yield* sql.unsafe<AssetRow>("SELECT * FROM assets WHERE id = ?", [id]);
+    if (rows.length === 0) return yield* new NotFoundError({ entity: "Asset", id });
+
+    const body = yield* Schema.decodeUnknown(CreateAssetInput)(rawBody).pipe(
+      Effect.mapError((e) => new ValidationError({ message: `Invalid input: ${e.message}` }))
+    );
+
+    const r2Key = body.r2Key ?? `uploads/${id}/${body.filename}`;
+
+    yield* sql.unsafe(
+      `UPDATE assets SET filename = ?, mime_type = ?, size = ?, width = ?, height = ?,
+       alt = ?, title = ?, r2_key = ?, blurhash = ?, colors = ?, focal_point = ?, tags = ?
+       WHERE id = ?`,
+      [
+        body.filename, body.mimeType, body.size,
+        body.width ?? null, body.height ?? null,
+        body.alt ?? rows[0].alt, body.title ?? rows[0].title,
+        r2Key,
+        body.blurhash ?? null,
+        body.colors ? JSON.stringify(body.colors) : null,
+        body.focalPoint ? JSON.stringify(body.focalPoint) : null,
+        JSON.stringify(body.tags),
+        id,
+      ]
+    );
+
+    return {
+      id, filename: body.filename, mimeType: body.mimeType, size: body.size,
+      width: body.width, height: body.height,
+      alt: body.alt ?? rows[0].alt, title: body.title ?? rows[0].title,
+      r2Key, replaced: true,
+    };
+  });
+}
+
 export function deleteAsset(id: string) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;

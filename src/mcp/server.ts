@@ -397,6 +397,25 @@ Example r2Key: "uploads/hero.jpg"`,
     async () => run(AssetService.listAssets())
   );
 
+  server.tool("replace_asset",
+    `Replace an asset's file while keeping the same ID and URL. All content references remain stable.
+
+Flow:
+1. Upload new file to R2: wrangler r2 object put <bucket>/uploads/<new-filename> --file=<path>
+2. Call this tool with the asset ID and new file metadata
+3. The asset URL stays the same — no broken links in content`,
+    {
+      assetId: z.string().describe("ID of the existing asset to replace"),
+      filename: z.string().describe("New filename"),
+      mimeType: z.string().describe("New MIME type"),
+      r2Key: z.string().describe("New R2 object key"),
+      size: z.number().optional(),
+      width: z.number().optional(),
+      height: z.number().optional(),
+    },
+    async ({ assetId, ...rest }) => run(AssetService.replaceAsset(assetId, rest))
+  );
+
   // --- Webhooks ---
 
   server.tool("create_webhook", "Register a webhook URL for CMS events",

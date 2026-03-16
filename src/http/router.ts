@@ -246,6 +246,16 @@ const assetsRouter = HttpRouter.empty.pipe(
     })
   ),
 
+  HttpRouter.put(
+    "/:id",
+    Effect.gen(function* () {
+      const params = yield* HttpRouter.params;
+      const req = yield* HttpServerRequest.HttpServerRequest;
+      const body = yield* req.json;
+      return yield* handle(AssetService.replaceAsset(param(params, "id"), body));
+    })
+  ),
+
   HttpRouter.del(
     "/:id",
     Effect.gen(function* () {

@@ -3,7 +3,7 @@ const VALID_MARKS: Set<string> = new Set([
 ]);
 
 const VALID_BLOCK_LEVEL_TYPES: Set<string> = new Set([
-  "paragraph", "heading", "list", "blockquote", "code", "thematicBreak", "block",
+  "paragraph", "heading", "list", "blockquote", "code", "thematicBreak", "block", "table",
 ]);
 
 const VALID_INLINE_TYPES: Set<string> = new Set([
@@ -144,6 +144,54 @@ function validateBlockLevelNode(node: unknown, path: string, errors: ValidationE
         errors.push({ path: `${path}.item`, message: "Block node must have an item ID string" });
       }
       break;
+    }
+    case "table": {
+      const children = getArray(node, "children");
+      if (!children || children.length === 0) {
+        errors.push({ path: `${path}.children`, message: "Table must have at least one row" });
+      } else {
+        for (let i = 0; i < children.length; i++) {
+          validateTableRow(children[i], `${path}.children[${i}]`, errors);
+        }
+      }
+      break;
+    }
+  }
+}
+
+function validateTableRow(node: unknown, path: string, errors: ValidationError[]) {
+  if (!isRecord(node) || node.type !== "tableRow") {
+    errors.push({ path, message: 'Table children must have type "tableRow"' });
+    return;
+  }
+  const children = getArray(node, "children");
+  if (!children || children.length === 0) {
+    errors.push({ path: `${path}.children`, message: "Table row must have at least one cell" });
+    return;
+  }
+  for (let i = 0; i < children.length; i++) {
+    validateTableCell(children[i], `${path}.children[${i}]`, errors);
+  }
+}
+
+function validateTableCell(node: unknown, path: string, errors: ValidationError[]) {
+  if (!isRecord(node) || node.type !== "tableCell") {
+    errors.push({ path, message: 'Table row children must have type "tableCell"' });
+    return;
+  }
+  // Cells contain inline content (paragraphs with spans/links)
+  const children = getArray(node, "children");
+  if (!children) {
+    errors.push({ path: `${path}.children`, message: "Table cell must have children" });
+    return;
+  }
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i];
+    if (isRecord(child) && child.type === "paragraph") {
+      validateInlineChildren(child, `${path}.children[${i}]`, errors);
+    } else {
+      // Cells can also contain simple inline nodes directly
+      validateInlineNode(child, `${path}.children[${i}]`, errors);
     }
   }
 }

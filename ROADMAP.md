@@ -354,8 +354,8 @@ These features outpace DatoCMS — possible because of Cloudflare edge colocatio
 
 - [x] **P8.1** Bulk insert/upsert *(done — `POST /api/records/bulk` + MCP `bulk_create_records`. Up to 1000 records per call, auto-slugs, auto-positions. 9 tests)*
 - [x] **P8.2** Dangling link safety *(done — audited all link/asset resolution paths. All already return null/filter gracefully. Fixed block orphan cleanup on record deletion. 8 tests proving safety across link, links, media, gallery, blocks, cross-references)*
-- [ ] **P8.3** Asset URL stability on replace — Replace an asset's file (new R2 object) while keeping the same asset ID and URL. DatoCMS can't do this (imgix generates new URLs). 21 replies, 3,555 views.
-- [ ] **P8.4** HTML tables in StructuredText — DAST `table`/`tableRow`/`tableCell` node types in validation + rendering. Parity with markdown tables. Consider markdown table syntax as input shorthand.
+- [x] **P8.3** Asset URL stability on replace *(done — `PUT /api/assets/:id` + MCP `replace_asset`. Updates file metadata (filename, mimeType, size, dimensions, r2Key) while keeping same asset ID. Alt/title preserved if not overridden. All content references stay stable. 6 tests)*
+- [x] **P8.4** HTML tables in StructuredText *(done — DAST `table`/`tableRow`/`tableCell` node types added to validator. Tables can contain rich inline content (bold, links). Validated: no empty tables, children must be tableRow, cells contain inline content. 6 tests)*
 
 ### Future (not prioritized)
 
