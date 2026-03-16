@@ -3,8 +3,9 @@ import {
   HttpServerRequest,
   HttpServerResponse,
   HttpApp,
+  HttpServerError,
 } from "@effect/platform";
-import { Effect, Layer, Schema } from "effect";
+import { Effect, Layer, Schema, Option } from "effect";
 import { SqlClient } from "@effect/sql";
 import * as ModelService from "../services/model-service.js";
 import * as FieldService from "../services/field-service.js";
@@ -18,6 +19,7 @@ import { ValidationError } from "../errors.js";
 import * as SchemaIO from "../services/schema-io.js";
 import * as SearchService from "../search/search-service.js";
 import type { AiBinding, VectorizeBinding } from "../search/vectorize.js";
+import { VectorizeContext } from "../search/vectorize-context.js";
 
 /** Helper: run a CMS Effect and return an HTTP response */
 function handle<A>(
@@ -308,7 +310,17 @@ const searchRouter = HttpRouter.empty.pipe(
     Effect.gen(function* () {
       const req = yield* HttpServerRequest.HttpServerRequest;
       const body = yield* req.json;
-      return yield* handle(SearchService.search(body as any));
+      const SearchInput = Schema.Struct({
+        query: Schema.String,
+        modelApiKey: Schema.optional(Schema.String),
+        first: Schema.optional(Schema.Number),
+        skip: Schema.optional(Schema.Number),
+        mode: Schema.optional(Schema.Literal("keyword", "semantic", "hybrid")),
+      });
+      const parsed = yield* Schema.decodeUnknown(SearchInput)(body).pipe(
+        Effect.mapError((e) => new ValidationError({ message: `Invalid search input: ${e.message}` }))
+      );
+      return yield* handle(SearchService.search(parsed));
     })
   ),
 
@@ -317,9 +329,13 @@ const searchRouter = HttpRouter.empty.pipe(
     Effect.gen(function* () {
       const req = yield* HttpServerRequest.HttpServerRequest;
       const body = yield* req.json;
-      const modelApiKey = typeof body === "object" && body !== null && "modelApiKey" in body
-        ? (body as Record<string, unknown>).modelApiKey as string | undefined
-        : undefined;
+      const ReindexInput = Schema.Struct({
+        modelApiKey: Schema.optional(Schema.String),
+      });
+      const parsed = yield* Schema.decodeUnknown(ReindexInput)(body).pipe(
+        Effect.mapError((e) => new ValidationError({ message: `Invalid input: ${e.message}` }))
+      );
+      const modelApiKey = parsed.modelApiKey;
       return yield* handle(SearchService.reindexAll(modelApiKey));
     })
   )
@@ -363,8 +379,13 @@ export interface WebHandlerOptions {
 }
 
 export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, options?: WebHandlerOptions) {
-  // Configure Vectorize bindings for search (optional)
-  SearchService.configureVectorize(options?.ai, options?.vectorize);
+  const vectorizeLayer = Layer.succeed(
+    VectorizeContext,
+    options?.ai && options?.vectorize
+      ? Option.some({ ai: options.ai, vectorize: options.vectorize })
+      : Option.none()
+  );
+  const fullLayer = Layer.merge(sqlLayer, vectorizeLayer);
 
   const restApp = Effect.flatten(HttpRouter.toHttpApp(appRouter)).pipe(
     Effect.catchAll((error: unknown) => {
@@ -373,13 +394,13 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
         return HttpServerResponse.json(mapped.body, { status: mapped.status });
       }
       // RouteNotFound from @effect/platform router
-      if (error && typeof error === "object" && "_tag" in error && (error as { _tag: string })._tag === "RouteNotFound") {
+      if (error instanceof HttpServerError.RouteNotFound) {
         return HttpServerResponse.json({ error: "Not found" }, { status: 404 });
       }
       console.error("REST handler error:", error);
       return HttpServerResponse.json({ error: "Internal server error" }, { status: 500 });
     }),
-    Effect.provide(sqlLayer)
+    Effect.provide(fullLayer)
   );
   // @effect/platform router type variance requires this assertion
   const restHandler = HttpApp.toWebHandler(restApp as HttpApp.Default);
@@ -459,7 +480,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
               "SELECT r2_key FROM assets WHERE id = ?", [assetId]
             );
             return rows[0]?.r2_key ?? null;
-          }).pipe(Effect.provide(sqlLayer), Effect.orDie)
+          }).pipe(Effect.provide(fullLayer), Effect.orDie)
         );
         if (r2Key) {
           const object = await options.r2Bucket.get(r2Key);
@@ -506,7 +527,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
       if (!mcpHandler) {
         const { createMcpServer } = await import("../mcp/server.js");
         const { createMcpHttpHandler } = await import("../mcp/http-transport.js");
-        const mcpServer = createMcpServer(sqlLayer);
+        const mcpServer = createMcpServer(fullLayer);
         mcpHandler = createMcpHttpHandler(mcpServer);
       }
       const response = await mcpHandler(request);

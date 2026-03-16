@@ -1,7 +1,8 @@
 /**
  * Vectorize semantic search using Cloudflare Workers AI + Vectorize.
- * Optional — gracefully degrades when bindings are not available.
+ * All functions return Effect — async boundaries use Effect.tryPromise.
  */
+import { Data, Effect } from "effect";
 
 /** Minimal type for Workers AI binding (avoids importing @cloudflare/workers-types globally) */
 export interface AiBinding {
@@ -17,48 +18,61 @@ export interface VectorizeBinding {
   }>;
 }
 
+export class VectorizeError extends Data.TaggedError("VectorizeError")<{
+  readonly message: string;
+}> {}
+
 const EMBED_MODEL = "@cf/baai/bge-small-en-v1.5";
 
 /**
  * Generate embeddings for text chunks using Workers AI.
  */
-export async function embedTexts(ai: AiBinding, texts: string[]): Promise<number[][]> {
-  if (texts.length === 0) return [];
-  const result = await ai.run(EMBED_MODEL, { text: texts });
-  return result.data;
+export function embedTexts(ai: AiBinding, texts: string[]) {
+  if (texts.length === 0) return Effect.succeed([] as number[][]);
+  return Effect.tryPromise({
+    try: () => ai.run(EMBED_MODEL, { text: texts }),
+    catch: (error) => new VectorizeError({ message: `Embedding failed: ${error}` }),
+  }).pipe(Effect.map((result) => result.data));
 }
 
 /**
  * Index a record into Vectorize.
- * Creates one vector per record with title + body concatenated.
  */
-export async function vectorizeIndex(
+export function vectorizeIndex(
   ai: AiBinding,
   vectorize: VectorizeBinding,
   modelApiKey: string,
   recordId: string,
   title: string,
   body: string
-): Promise<void> {
+) {
   const text = [title, body].filter(Boolean).join(" — ");
-  if (!text) return;
-  const [embedding] = await embedTexts(ai, [text]);
-  await vectorize.upsert([{
-    id: `${modelApiKey}:${recordId}`,
-    values: embedding,
-    metadata: { recordId, modelApiKey },
-  }]);
+  if (!text) return Effect.void;
+  return Effect.gen(function* () {
+    const embeddings = yield* embedTexts(ai, [text]);
+    yield* Effect.tryPromise({
+      try: () => vectorize.upsert([{
+        id: `${modelApiKey}:${recordId}`,
+        values: embeddings[0],
+        metadata: { recordId, modelApiKey },
+      }]),
+      catch: (error) => new VectorizeError({ message: `Upsert failed: ${error}` }),
+    });
+  });
 }
 
 /**
  * Remove a record from Vectorize.
  */
-export async function vectorizeDeindex(
+export function vectorizeDeindex(
   vectorize: VectorizeBinding,
   modelApiKey: string,
   recordId: string
-): Promise<void> {
-  await vectorize.deleteByIds([`${modelApiKey}:${recordId}`]);
+) {
+  return Effect.tryPromise({
+    try: () => vectorize.deleteByIds([`${modelApiKey}:${recordId}`]),
+    catch: (error) => new VectorizeError({ message: `Deindex failed: ${error}` }),
+  });
 }
 
 export interface VectorResult {
@@ -70,22 +84,24 @@ export interface VectorResult {
 /**
  * Semantic search via Vectorize.
  */
-export async function vectorizeSearch(
+export function vectorizeSearch(
   ai: AiBinding,
   vectorize: VectorizeBinding,
   query: string,
   topK: number = 20
-): Promise<VectorResult[]> {
-  const [queryEmbedding] = await embedTexts(ai, [query]);
-  const results = await vectorize.query(queryEmbedding, {
-    topK,
-    returnMetadata: "all",
+) {
+  return Effect.gen(function* () {
+    const embeddings = yield* embedTexts(ai, [query]);
+    const results = yield* Effect.tryPromise({
+      try: () => vectorize.query(embeddings[0], { topK, returnMetadata: "all" }),
+      catch: (error) => new VectorizeError({ message: `Search failed: ${error}` }),
+    });
+    return results.matches.map((m) => ({
+      recordId: m.metadata?.recordId ?? m.id.split(":")[1],
+      modelApiKey: m.metadata?.modelApiKey ?? m.id.split(":")[0],
+      score: m.score,
+    }));
   });
-  return results.matches.map((m) => ({
-    recordId: m.metadata?.recordId ?? m.id.split(":")[1],
-    modelApiKey: m.metadata?.modelApiKey ?? m.id.split(":")[0],
-    score: m.score,
-  }));
 }
 
 /**

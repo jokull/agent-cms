@@ -6,7 +6,7 @@ import { SqlClient } from "@effect/sql";
  */
 export function insertRecord(
   tableName: string,
-  record: Record<string, any>
+  record: Record<string, unknown>
 ) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
@@ -28,7 +28,7 @@ export function insertRecord(
 export function selectAll(tableName: string) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const rows = yield* sql.unsafe<Record<string, any>>(
+    const rows = yield* sql.unsafe<Record<string, unknown>>(
       `SELECT * FROM "${tableName}"`
     );
     return rows.map(deserializeRow);
@@ -41,7 +41,7 @@ export function selectAll(tableName: string) {
 export function selectById(tableName: string, id: string) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const rows = yield* sql.unsafe<Record<string, any>>(
+    const rows = yield* sql.unsafe<Record<string, unknown>>(
       `SELECT * FROM "${tableName}" WHERE "id" = ?`,
       [id]
     );
@@ -52,10 +52,10 @@ export function selectById(tableName: string, id: string) {
 /**
  * Select records matching a column value.
  */
-export function selectWhere(tableName: string, column: string, value: any) {
+export function selectWhere(tableName: string, column: string, value: unknown) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const rows = yield* sql.unsafe<Record<string, any>>(
+    const rows = yield* sql.unsafe<Record<string, unknown>>(
       `SELECT * FROM "${tableName}" WHERE "${column}" = ?`,
       [serializeValue(value)]
     );
@@ -69,7 +69,7 @@ export function selectWhere(tableName: string, column: string, value: any) {
 export function updateRecord(
   tableName: string,
   id: string,
-  updates: Record<string, any>
+  updates: Record<string, unknown>
 ) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
@@ -112,7 +112,7 @@ export function countRecords(tableName: string) {
 // --- Serialization helpers ---
 
 /** Serialize a JS value for SQLite storage */
-function serializeValue(value: any): any {
+function serializeValue(value: unknown): unknown {
   if (value === undefined || value === null) return null;
   if (typeof value === "boolean") return value ? 1 : 0;
   if (typeof value === "object") return JSON.stringify(value);
@@ -120,8 +120,8 @@ function serializeValue(value: any): any {
 }
 
 /** Deserialize a row from SQLite — parse JSON columns */
-function deserializeRow(row: Record<string, any>): Record<string, any> {
-  const result: Record<string, any> = {};
+function deserializeRow(row: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(row)) {
     if (typeof value === "string" && (value.startsWith("{") || value.startsWith("["))) {
       try {

@@ -3,7 +3,7 @@
  * 3-layer architecture: Discovery → Schema → Content
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option } from "effect";
 import { SqlClient } from "@effect/sql";
 import { z } from "zod";
 import * as ModelService from "../services/model-service.js";
@@ -17,14 +17,19 @@ import * as SchemaIO from "../services/schema-io.js";
 import * as SearchService from "../search/search-service.js";
 import { isCmsError } from "../errors.js";
 import type { ModelRow, FieldRow, LocaleRow } from "../db/row-types.js";
+import { VectorizeContext } from "../search/vectorize-context.js";
 
-export function createMcpServer(sqlLayer: Layer.Layer<SqlClient.SqlClient>) {
+export function createMcpServer(sqlLayer: Layer.Layer<SqlClient.SqlClient | VectorizeContext>) {
+  // Ensure VectorizeContext is always available (defaults to Option.none())
+  const defaultVectorizeLayer = Layer.succeed(VectorizeContext, Option.none());
+  const fullLayer = Layer.merge(defaultVectorizeLayer, sqlLayer);
+
   const server = new McpServer({
     name: "agent-cms",
     version: "0.1.0",
   });
 
-  function run<A>(effect: Effect.Effect<A, unknown, SqlClient.SqlClient>): Promise<{
+  function run<A>(effect: Effect.Effect<A, unknown, SqlClient.SqlClient | VectorizeContext>): Promise<{
     content: Array<{ type: "text"; text: string }>;
     isError?: boolean;
   }> {
@@ -57,7 +62,7 @@ export function createMcpServer(sqlLayer: Layer.Layer<SqlClient.SqlClient>) {
             isError: true,
           });
         }),
-        Effect.provide(sqlLayer)
+        Effect.provide(fullLayer)
       )
     );
   }
@@ -331,7 +336,7 @@ All records must belong to the same model. Slugs are auto-generated. Returns arr
       const { ulid } = await import("ulidx");
 
       const children: unknown[] = [];
-      const blockMap: Record<string, any> = {};
+      const blockMap: Record<string, unknown> = {};
 
       // Interleave paragraphs and blocks
       let blockIdx = 0;
@@ -637,7 +642,7 @@ Pluralization:
               })),
             })),
           };
-        }).pipe(Effect.provide(sqlLayer))
+        }).pipe(Effect.provide(fullLayer))
       );
       return {
         contents: [{
