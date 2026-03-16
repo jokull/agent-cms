@@ -210,7 +210,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 - [x] **P4.1** Field type change rejection *(done — 4 tests)*
 - [x] **P4.2** Required field with default_value on existing records *(done — 4 tests)*
 - [x] **P4.3** Model/field rename *(done — table rename, column rename, validator cascade, 4 tests)*
-- [ ] **P4.4** Block type removal: Scan all StructuredText fields, clean DAST trees, delete block rows, drop table. Test with a block type used across multiple models. → [C11]
+- [x] **P4.4** Block type removal *(done — DAST cleanup, block deletion, table drop, whitelist update, 1 test)*
 - [ ] **P4.5** Block whitelist removal: Remove a block type from a field's whitelist (without deleting the type). Clean affected DAST trees. Test. → [C11]
 - [ ] **P4.6** Locale removal: Strip locale key from all localized field values across all models. Test. → [C11]
 

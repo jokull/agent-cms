@@ -11,6 +11,7 @@ import * as FieldService from "../services/field-service.js";
 import * as RecordService from "../services/record-service.js";
 import * as PublishService from "../services/publish-service.js";
 import * as AssetService from "../services/asset-service.js";
+import * as SchemaLifecycle from "../services/schema-lifecycle.js";
 import type { CmsError } from "../errors.js";
 
 export function createMcpServer(sqlLayer: Layer.Layer<SqlClient.SqlClient>) {
@@ -147,6 +148,13 @@ export function createMcpServer(sqlLayer: Layer.Layer<SqlClient.SqlClient>) {
   server.tool("unpublish_record", "Unpublish a record",
     { recordId: z.string(), modelApiKey: z.string() },
     async ({ recordId, modelApiKey }) => run(PublishService.unpublishRecord(modelApiKey, recordId))
+  );
+
+  // --- Schema Lifecycle ---
+
+  server.tool("remove_block_type", "Remove a block type: cleans DAST trees, deletes blocks, drops table",
+    { blockApiKey: z.string().describe("API key of the block type to remove") },
+    async ({ blockApiKey }) => run(SchemaLifecycle.removeBlockType(blockApiKey))
   );
 
   // --- Assets ---
