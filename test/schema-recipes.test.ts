@@ -159,7 +159,10 @@ describe("[SCHEMA:recipes] Recipe Site", () => {
         cover { filename mimeType width height }
         steps {
           value
-          blocks
+          blocks {
+            __typename
+            ... on RecipeStepRecord { instruction { value } }
+          }
           links
         }
       }
@@ -178,9 +181,9 @@ describe("[SCHEMA:recipes] Recipe Site", () => {
     // StructuredText resolution
     expect(r.steps.value.schema).toBe("dast");
     expect(r.steps.blocks).toHaveLength(1);
-    // The step block should have the instruction field stored as JSON
+    // The step block should have the instruction field
     const stepBlock = r.steps.blocks[0];
-    expect(stepBlock._root_field_api_key).toBe("steps");
+    expect(stepBlock.__typename).toBe("RecipeStepRecord");
   });
 
   it("filters recipes by integer fields", async () => {

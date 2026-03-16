@@ -133,7 +133,11 @@ describe("[SCHEMA:marketing] Marketing Site", () => {
         slug
         content {
           value
-          blocks
+          blocks {
+            __typename
+            ... on HeroSectionRecord { headline subheadline }
+            ... on CtaBannerRecord { heading buttonText buttonUrl }
+          }
           links
         }
       }
@@ -153,7 +157,7 @@ describe("[SCHEMA:marketing] Marketing Site", () => {
     expect(hero).toBeDefined();
     const cta = page.content.blocks.find((b: any) => b.heading === "Join us");
     expect(cta).toBeDefined();
-    expect(cta.button_url).toBe("/apply");
+    expect(cta.buttonUrl).toBe("/apply");
   });
 
   it("draft/publish cycle with blocks", async () => {

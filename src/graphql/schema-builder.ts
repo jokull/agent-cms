@@ -3,7 +3,7 @@ import { Effect, Layer } from "effect";
 import { SqlClient } from "@effect/sql";
 import { extractBlockIds, extractInlineBlockIds, extractLinkIds } from "../dast/index.js";
 import type { ModelRow, FieldRow, AssetRow } from "../db/row-types.js";
-import { getLinkTargets, getLinksTargets } from "../db/validators.js";
+import { getLinkTargets, getLinksTargets, getBlockWhitelist } from "../db/validators.js";
 import { parseFieldValidators } from "../db/row-types.js";
 import { compileFilterToSql, compileOrderBy, type FilterCompilerOpts } from "./filter-compiler.js";
 import { FIELD_TYPE_REGISTRY, type FieldTypeDefinition } from "../field-types.js";
@@ -275,6 +275,230 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
     const typeNames = new Map<string, string>();
     for (const m of models) typeNames.set(m.api_key, toTypeName(m.api_key));
 
+    // Also register block model type names so fieldToSDL link resolution works
+    const blockTypeNames = new Map<string, string>();
+    for (const bm of blockModels) {
+      const bmTypeName = `${toTypeName(bm.api_key)}Record`;
+      blockTypeNames.set(bm.api_key, bmTypeName);
+    }
+
+    // --- Generate GraphQL types for block models ---
+    for (const bm of blockModels) {
+      const bmTypeName = blockTypeNames.get(bm.api_key)!;
+      const bmFields = fieldsByModelId.get(bm.id) ?? [];
+
+      const bmFieldDefs = ["id: ID!", "_modelApiKey: String!"];
+      for (const f of bmFields) {
+        bmFieldDefs.push(`${toCamelCase(f.api_key)}: ${fieldToSDL(f.field_type, f.validators, typeNames)}`);
+      }
+      typeDefs.push(`type ${bmTypeName} {\n  ${bmFieldDefs.join("\n  ")}\n}`);
+
+      // Resolvers for block model types
+      const bmResolvers: Record<string, any> = {};
+      bmResolvers._modelApiKey = () => bm.api_key;
+
+      // camelCase → snake_case field resolvers + media/link resolvers
+      for (const f of bmFields) {
+        const gqlName = toCamelCase(f.api_key);
+
+        if (f.field_type === "media") {
+          bmResolvers[gqlName] = async (parent: any) => {
+            const assetId = parent[f.api_key];
+            if (!assetId) return null;
+            const placeholders = "?";
+            const rows = await runSql(
+              Effect.gen(function* () {
+                const s = yield* SqlClient.SqlClient;
+                return yield* s.unsafe<AssetRow>("SELECT * FROM assets WHERE id = ?", [assetId]);
+              })
+            );
+            if (rows.length === 0) return null;
+            const a = rows[0];
+            return {
+              id: a.id, filename: a.filename, mimeType: a.mime_type,
+              size: a.size, width: a.width, height: a.height,
+              alt: a.alt, title: a.title, blurhash: a.blurhash ?? null,
+              url: assetUrl(a.id, a.filename),
+            };
+          };
+        } else if (f.field_type === "link") {
+          const targets = getLinkTargets(f.validators);
+          if (targets && targets.length > 0) {
+            bmResolvers[gqlName] = async (parent: any) => {
+              const linkedId = parent[f.api_key];
+              if (!linkedId) return null;
+              // Search across target content tables
+              for (const apiKey of targets) {
+                const tName = typeNames.get(apiKey);
+                const rows = await runSql(
+                  Effect.gen(function* () {
+                    const s = yield* SqlClient.SqlClient;
+                    return yield* s.unsafe<Record<string, any>>(
+                      `SELECT * FROM "content_${apiKey}" WHERE id = ?`, [linkedId]
+                    );
+                  })
+                );
+                if (rows.length > 0) {
+                  return { ...deserializeRecord(rows[0]), __typename: tName ? `${tName}Record` : undefined };
+                }
+              }
+              return null;
+            };
+          }
+        } else if (f.field_type === "structured_text") {
+          bmResolvers[gqlName] = async (parent: any) => {
+            let dast = parent[f.api_key];
+            if (!dast) return null;
+            if (typeof dast === "string") {
+              try { dast = JSON.parse(dast); } catch { return null; }
+            }
+
+            // Extract block IDs from the DAST
+            const blockLevelIds = new Set(extractBlockIds(dast));
+            const inlineBlockIdSet = new Set(extractInlineBlockIds(dast));
+
+            const blocks: any[] = [];
+            const inlineBlocks: any[] = [];
+
+            if (blockLevelIds.size > 0 || inlineBlockIdSet.size > 0) {
+              const allIds = [...blockLevelIds, ...inlineBlockIdSet];
+              for (const innerBm of blockModels) {
+                const placeholders = allIds.map(() => "?").join(", ");
+                const fetched = await runSql(
+                  Effect.gen(function* () {
+                    const s = yield* SqlClient.SqlClient;
+                    const rows = yield* s.unsafe<Record<string, any>>(
+                      `SELECT * FROM "block_${innerBm.api_key}" WHERE id IN (${placeholders})`,
+                      allIds
+                    );
+                    return rows.map((r: Record<string, any>) => {
+                      const deserialized = deserializeRecord(r);
+                      return { id: String(deserialized.id ?? ""), ...deserialized, __typename: `${toTypeName(innerBm.api_key)}Record` };
+                    });
+                  })
+                );
+                for (const record of fetched) {
+                  if (blockLevelIds.has(record.id)) {
+                    blocks.push(record);
+                  } else if (inlineBlockIdSet.has(record.id)) {
+                    inlineBlocks.push(record);
+                  } else {
+                    blocks.push(record);
+                  }
+                }
+              }
+            }
+
+            // Resolve link references
+            const linkRecordIds = extractLinkIds(dast);
+            const allModelApiKeys = models.map((m) => m.api_key);
+            const links: any[] = [];
+            for (const linkId of linkRecordIds) {
+              for (const apiKey of allModelApiKeys) {
+                const tName = typeNames.get(apiKey);
+                const rows = await runSql(
+                  Effect.gen(function* () {
+                    const s = yield* SqlClient.SqlClient;
+                    return yield* s.unsafe<Record<string, any>>(
+                      `SELECT * FROM "content_${apiKey}" WHERE id = ?`, [linkId]
+                    );
+                  })
+                );
+                if (rows.length > 0) {
+                  links.push({ ...deserializeRecord(rows[0]), __typename: tName ? `${tName}Record` : undefined });
+                  break;
+                }
+              }
+            }
+
+            return { value: dast, blocks, inlineBlocks, links };
+          };
+        } else if (f.field_type === "links") {
+          const targets = getLinksTargets(f.validators);
+          if (targets && targets.length > 0) {
+            bmResolvers[gqlName] = async (parent: any) => {
+              let linkedIds = parent[f.api_key];
+              if (typeof linkedIds === "string") {
+                try { linkedIds = JSON.parse(linkedIds); } catch { return []; }
+              }
+              if (!Array.isArray(linkedIds)) return [];
+              const result: Record<string, any>[] = [];
+              for (const id of linkedIds) {
+                for (const apiKey of targets) {
+                  const tName = typeNames.get(apiKey);
+                  const rows = await runSql(
+                    Effect.gen(function* () {
+                      const s = yield* SqlClient.SqlClient;
+                      return yield* s.unsafe<Record<string, any>>(
+                        `SELECT * FROM "content_${apiKey}" WHERE id = ?`, [id]
+                      );
+                    })
+                  );
+                  if (rows.length > 0) {
+                    result.push({ ...deserializeRecord(rows[0]), __typename: tName ? `${tName}Record` : undefined });
+                    break;
+                  }
+                }
+              }
+              return result;
+            };
+          }
+        } else {
+          // Default camelCase → snake_case resolver
+          bmResolvers[gqlName] = (parent: any) => {
+            const raw = parent[f.api_key];
+            // Parse JSON-stored fields
+            const def = getRegistryDef(f.field_type);
+            if (def?.graphqlType === "JSON" && typeof raw === "string") {
+              try { return JSON.parse(raw); } catch { return raw; }
+            }
+            return raw;
+          };
+        }
+      }
+
+      resolvers[bmTypeName] = bmResolvers;
+    }
+
+    // --- Pre-compute per-field StructuredText union types ---
+    // Maps model api_key + field api_key → union type name (only for fields with block whitelists)
+    const structuredTextFieldTypes = new Map<string, string>(); // key: `${model.api_key}.${field.api_key}` → field type name
+
+    for (const model of models) {
+      const fields = fieldsByModelId.get(model.id) ?? [];
+      const modelTypeName = typeNames.get(model.api_key)!;
+
+      for (const f of fields) {
+        if (f.field_type !== "structured_text") continue;
+        const whitelist = getBlockWhitelist(f.validators);
+        if (!whitelist || whitelist.length === 0) continue;
+
+        // Collect member type names for the union
+        const memberTypeNames: string[] = [];
+        for (const blockApiKey of whitelist) {
+          const bmtn = blockTypeNames.get(blockApiKey);
+          if (bmtn) memberTypeNames.push(bmtn);
+        }
+        if (memberTypeNames.length === 0) continue;
+
+        const fieldPascal = toTypeName(f.api_key);
+        const unionName = `${modelTypeName}${fieldPascal}Block`;
+        const fieldTypeName = `${modelTypeName}${fieldPascal}Field`;
+
+        // Generate union type
+        typeDefs.push(`union ${unionName} = ${memberTypeNames.join(" | ")}`);
+
+        // Generate per-field StructuredText type
+        typeDefs.push(`type ${fieldTypeName} {\n  value: JSON!\n  blocks: [${unionName}!]!\n  inlineBlocks: [${unionName}!]!\n  links: [JSON!]!\n}`);
+
+        // __resolveType for the union
+        resolvers[unionName] = { __resolveType: (obj: any) => obj.__typename };
+
+        // Store mapping so the content model field uses this type instead of generic StructuredText
+        structuredTextFieldTypes.set(`${model.api_key}.${f.api_key}`, fieldTypeName);
+      }
+    }
+
     for (const model of models) {
       const fields = fieldsByModelId.get(model.id) ?? [];
       const typeName = typeNames.get(model.api_key)!;
@@ -300,7 +524,11 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
         fieldDefs.push(`_children: [${typeName}!]!`);
       }
       for (const f of fields) {
-        fieldDefs.push(`${toCamelCase(f.api_key)}: ${fieldToSDL(f.field_type, f.validators, typeNames)}`);
+        // Use per-field StructuredText type if available, otherwise fall back to fieldToSDL
+        const stKey = `${model.api_key}.${f.api_key}`;
+        const stFieldType = structuredTextFieldTypes.get(stKey);
+        const gqlType = stFieldType ?? fieldToSDL(f.field_type, f.validators, typeNames);
+        fieldDefs.push(`${toCamelCase(f.api_key)}: ${gqlType}`);
       }
 
       // Track localized fields by camelCase name (for filter compilation)
@@ -709,10 +937,9 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
                     blocks.push(record);
                   } else if (inlineBlockIdSet.has(record.id)) {
                     inlineBlocks.push(record);
-                  } else {
-                    // Block exists but not referenced in DAST — include in blocks
-                    blocks.push(record);
                   }
+                  // Skip blocks not referenced in this DAST (e.g., nested blocks
+                  // belonging to a child block's structured_text field)
                 }
               }
             }

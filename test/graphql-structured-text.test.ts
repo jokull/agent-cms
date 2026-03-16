@@ -65,7 +65,11 @@ describe("GraphQL StructuredText Resolution", () => {
         title
         content {
           value
-          blocks
+          blocks {
+            __typename
+            ... on HeroSectionRecord { headline ctaUrl }
+            ... on CtaBannerRecord { text url }
+          }
           links
         }
       }
@@ -83,7 +87,7 @@ describe("GraphQL StructuredText Resolution", () => {
     expect(page.content.blocks).toHaveLength(2);
     const heroBlock = page.content.blocks.find((b: any) => b.headline === "Build amazing things");
     expect(heroBlock).toBeDefined();
-    expect(heroBlock.cta_url).toBe("https://example.com");
+    expect(heroBlock.ctaUrl).toBe("https://example.com");
 
     const ctaBlock = page.content.blocks.find((b: any) => b.text === "Get started");
     expect(ctaBlock).toBeDefined();
@@ -99,7 +103,7 @@ describe("GraphQL StructuredText Resolution", () => {
       data: { title: "Empty Page" },
     });
 
-    const result = await gqlQuery(handler, `{ allPages { title content { value blocks links } } }`);
+    const result = await gqlQuery(handler, `{ allPages { title content { value blocks { __typename } links } } }`);
     expect(result.errors).toBeUndefined();
     expect(result.data.allPages[0].content).toBeNull();
   });
@@ -125,7 +129,7 @@ describe("GraphQL StructuredText Resolution", () => {
       },
     });
 
-    const result = await gqlQuery(handler, `{ allPages { title content { value blocks links } } }`);
+    const result = await gqlQuery(handler, `{ allPages { title content { value blocks { __typename } links } } }`);
     expect(result.errors).toBeUndefined();
     const page = result.data.allPages[0];
     expect(page.content.value.document.children).toHaveLength(2);

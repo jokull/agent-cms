@@ -160,8 +160,11 @@ describe("P1.6: Nested blocks", () => {
         title
         content {
           value
-          blocks
-          inlineBlocks
+          blocks {
+            __typename
+            ... on FeatureGridRecord { heading features { value } }
+          }
+          inlineBlocks { __typename }
           links
         }
       }

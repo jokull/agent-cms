@@ -307,7 +307,7 @@ describe("Dangling link safety", () => {
       });
 
       // Verify block exists via GraphQL
-      const before = await gql(`{ allPosts(filter: { title: { eq: "Post With Block" } }) { body { blocks } } }`);
+      const before = await gql(`{ allPosts(filter: { title: { eq: "Post With Block" } }) { body { blocks { __typename ... on CtaRecord { text } } } } }`);
       expect(before.data.allPosts[0].body.blocks).toHaveLength(1);
 
       // Delete the post
@@ -323,7 +323,7 @@ describe("Dangling link safety", () => {
         },
       });
 
-      const after = await gql(`{ allPosts(filter: { title: { eq: "Fresh Post" } }) { body { blocks } } }`);
+      const after = await gql(`{ allPosts(filter: { title: { eq: "Fresh Post" } }) { body { blocks { __typename } } } }`);
       expect(after.data.allPosts[0].body.blocks).toHaveLength(0);
     });
   });
