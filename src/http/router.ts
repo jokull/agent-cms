@@ -287,8 +287,9 @@ export function createWebHandler(sqlLayer: any) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Effect/platform router type variance
   const restHandler = HttpApp.toWebHandler(restApp as any);
 
-  // Lazy-import GraphQL handler to avoid circular deps
+  // Lazy-import handlers to avoid circular deps
   let graphqlHandler: ((req: Request) => Promise<Response>) | null = null;
+  let mcpHandler: ((req: Request) => Promise<Response>) | null = null;
 
   /** Add CORS headers to a response */
   function withCors(response: Response, request: Request): Response {
@@ -308,6 +309,18 @@ export function createWebHandler(sqlLayer: any) {
     }
 
     const url = new URL(request.url);
+
+    // Route /mcp to MCP HTTP transport
+    if (url.pathname === "/mcp") {
+      if (!mcpHandler) {
+        const { createMcpServer } = await import("../mcp/server.js");
+        const { createMcpHttpHandler } = await import("../mcp/http-transport.js");
+        const mcpServer = createMcpServer(sqlLayer);
+        mcpHandler = createMcpHttpHandler(mcpServer);
+      }
+      const response = await mcpHandler(request);
+      return withCors(response, request);
+    }
 
     // Route /graphql to Yoga
     if (url.pathname === "/graphql") {

@@ -309,23 +309,11 @@ agent-cms is **not a standalone Worker** — it's a library + CLI that scaffolds
   - Verifies: D1 accessible, R2 accessible, Worker deploys
   - Outputs: MCP server URL for Claude Desktop/Code config
 
-- [ ] **Library export** — `agent-cms` npm package exports:
-  - `createCMSHandler(env)` — returns the Worker fetch handler
-  - `createMCPHandler(env)` — returns the MCP HTTP transport handler
-  - Types for Env bindings (DB, R2, etc.)
+- [x] **Library export** *(done — `createCMSHandler(env)` exported, `CmsEnv` type, default export for direct wrangler dev)*
 
-- [ ] **Template `src/index.ts`** — minimal Worker entry point:
-  ```typescript
-  import { createCMSHandler } from "agent-cms";
-  export default {
-    fetch: (request, env) => createCMSHandler(env).fetch(request),
-  };
-  ```
+- [x] **MCP HTTP transport** *(done — `/mcp` endpoint using `WebStandardStreamableHTTPServerTransport` from official MCP SDK, stateless mode, verified on wrangler dev with D1: initialize, tools/list, tools/call all work)*
 
-#### MCP over HTTP
-
-- [ ] **MCP HTTP transport** — serve MCP at `/mcp` inside the Worker (SSE or Streamable HTTP). Claude Desktop/Code connects directly — no separate process.
-- [ ] **MCP config output** — scaffolding CLI prints the Claude Desktop config JSON to paste into settings.
+- [x] **MCP config output** *(done — scaffolding CLI prints Claude Desktop/Code config JSON)*
 
 #### Asset Upload (wrangler CLI flow)
 
