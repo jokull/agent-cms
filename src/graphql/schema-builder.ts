@@ -161,6 +161,47 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
       fieldsByModelId.set(f.model_id, list);
     }
 
+    // Build reverse reference map: target model api_key → array of incoming link/links refs
+    // This allows generating _allReferencing<Source>s fields on target types
+    const reverseRefs = new Map<string, Array<{
+      sourceModelApiKey: string;
+      sourceTypeName: string;
+      sourceTableName: string;
+      fieldApiKey: string;
+      fieldType: string;
+    }>>();
+
+    // Build model id → api_key lookup
+    const modelIdToApiKey = new Map<string, string>();
+    for (const m of models) modelIdToApiKey.set(m.id, m.api_key);
+
+    for (const m of models) {
+      const mFields = fieldsByModelId.get(m.id) ?? [];
+      for (const f of mFields) {
+        let targets: string[] | undefined;
+        if (f.field_type === "link") {
+          targets = getLinkTargets(f.validators);
+        } else if (f.field_type === "links") {
+          targets = getLinksTargets(f.validators);
+        }
+        if (!targets) continue;
+        for (const targetApiKey of targets) {
+          // Only add if target is a known content model
+          const exists = models.some((mod) => mod.api_key === targetApiKey);
+          if (!exists) continue;
+          const arr = reverseRefs.get(targetApiKey) ?? [];
+          arr.push({
+            sourceModelApiKey: m.api_key,
+            sourceTypeName: toTypeName(m.api_key),
+            sourceTableName: `content_${m.api_key}`,
+            fieldApiKey: f.api_key,
+            fieldType: f.field_type,
+          });
+          reverseRefs.set(targetApiKey, arr);
+        }
+      }
+    }
+
     const typeDefs: string[] = [];
     const queryFieldDefs: string[] = [];
     const resolvers: Record<string, any> = { Query: {} };
@@ -954,6 +995,127 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
         const includeDrafts = context?.includeDrafts ?? false;
         return { count: countWithFilter(args.filter, includeDrafts) };
       };
+    }
+
+    // --- Reverse reference fields ---
+    // For each target model with incoming link/links references, add _allReferencing<Source>s fields
+    for (const [targetApiKey, refs] of reverseRefs) {
+      const targetTypeName = toTypeName(targetApiKey);
+
+      // Group refs by source model (multiple fields from same source model share one field)
+      const bySource = new Map<string, typeof refs>();
+      for (const ref of refs) {
+        const arr = bySource.get(ref.sourceModelApiKey) ?? [];
+        arr.push(ref);
+        bySource.set(ref.sourceModelApiKey, arr);
+      }
+
+      const extendFields: string[] = [];
+
+      for (const [sourceApiKey, sourceRefs] of bySource) {
+        const sourceTypeName = toTypeName(sourceApiKey);
+        const fieldName = `_allReferencing${sourceTypeName}s`;
+        extendFields.push(
+          `${fieldName}(filter: ${sourceTypeName}Filter, orderBy: [${sourceTypeName}OrderBy!], first: Int, skip: Int): [${sourceTypeName}!]!`
+        );
+
+        const sourceTableName = sourceRefs[0].sourceTableName;
+
+        // Build filter compiler opts for the source model
+        const sourceModel = models.find((m) => m.api_key === sourceApiKey)!;
+        const sourceFields = fieldsByModelId.get(sourceModel.id) ?? [];
+        const sourceCamelToSnake = new Map<string, string>();
+        const sourceLocalizedCamelKeys = new Set<string>();
+        for (const sf of sourceFields) {
+          sourceCamelToSnake.set(toCamelCase(sf.api_key), sf.api_key);
+          if (sf.localized) sourceLocalizedCamelKeys.add(toCamelCase(sf.api_key));
+        }
+        const sourceJsonArrayFields = new Set(
+          sourceFields.filter((sf) => sf.field_type === "links" || sf.field_type === "media_gallery")
+            .map((sf) => toCamelCase(sf.api_key))
+        );
+
+        // Ensure resolver map exists for target type
+        if (!resolvers[targetTypeName]) resolvers[targetTypeName] = {};
+
+        resolvers[targetTypeName][fieldName] = async (parent: any, args: any, context: any) => {
+          return runSql(
+            Effect.gen(function* () {
+              const s = yield* SqlClient.SqlClient;
+
+              // Build WHERE clause: any link/links field pointing at this record
+              const refConditions: string[] = [];
+              const refParams: any[] = [];
+
+              for (const ref of sourceRefs) {
+                if (ref.fieldType === "link") {
+                  refConditions.push(`"${ref.fieldApiKey}" = ?`);
+                  refParams.push(parent.id);
+                } else {
+                  // links: JSON array — use json_each to check membership
+                  refConditions.push(`EXISTS (SELECT 1 FROM json_each("${ref.fieldApiKey}") WHERE value = ?)`);
+                  refParams.push(parent.id);
+                }
+              }
+
+              let query = `SELECT * FROM "${sourceTableName}" WHERE (${refConditions.join(" OR ")})`;
+              let params = [...refParams];
+
+              // Draft filtering
+              const includeDrafts = context?.includeDrafts ?? false;
+              if (!includeDrafts) {
+                query += ` AND "_status" IN ('published', 'updated')`;
+              }
+
+              // Apply user filter
+              const filterLocale = context?.locale ?? defaultLocale ?? undefined;
+              const filterOpts: FilterCompilerOpts = {
+                fieldIsLocalized: (fieldName) => sourceLocalizedCamelKeys.has(fieldName),
+                fieldNameMap: Object.fromEntries(sourceCamelToSnake),
+                localizedDbColumns: sourceFields.filter((sf) => sf.localized).map((sf) => sf.api_key),
+                jsonArrayFields: sourceJsonArrayFields,
+                locale: filterLocale,
+              };
+
+              const compiled = compileFilterToSql(args.filter, filterOpts);
+              if (compiled) {
+                query += ` AND ${compiled.where}`;
+                params.push(...compiled.params);
+              }
+
+              const orderBy = compileOrderBy(args.orderBy, filterOpts);
+              if (orderBy) {
+                query += ` ORDER BY ${orderBy}`;
+              }
+
+              const limit = Math.min(args.first ?? 20, 500);
+              query += ` LIMIT ?`;
+              params.push(limit);
+
+              if (args.skip) {
+                query += ` OFFSET ?`;
+                params.push(args.skip);
+              }
+
+              const rows = yield* s.unsafe<Record<string, any>>(query, params);
+              return rows.map((row) => {
+                const deserialized = deserializeRecord(row);
+                if (!includeDrafts && deserialized._published_snapshot) {
+                  const snapshot = typeof deserialized._published_snapshot === "string"
+                    ? JSON.parse(deserialized._published_snapshot)
+                    : deserialized._published_snapshot;
+                  return { ...deserialized, ...snapshot };
+                }
+                return deserialized;
+              });
+            })
+          );
+        };
+      }
+
+      if (extendFields.length > 0) {
+        typeDefs.push(`extend type ${targetTypeName} {\n  ${extendFields.join("\n  ")}\n}`);
+      }
     }
 
     // _site query — DatoCMS-compatible site info
