@@ -1,7 +1,7 @@
 import { createSchema } from "graphql-yoga";
 import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
-import { extractBlockIds, extractInlineBlockIds } from "../dast/index.js";
+import { extractBlockIds, extractInlineBlockIds, extractLinkIds } from "../dast/index.js";
 import type { ModelRow, FieldRow, AssetRow } from "../db/row-types.js";
 import { getLinkTargets, getLinksTargets } from "../db/validators.js";
 import { parseFieldValidators } from "../db/row-types.js";
@@ -635,11 +635,43 @@ export function buildGraphQLSchema(sqlLayer: any) {
               }
             }
 
+            // Resolve itemLink/inlineItem record references
+            const linkRecordIds = new Set(extractLinkIds(dast));
+            const links: any[] = [];
+
+            if (linkRecordIds.size > 0) {
+              // Search all content tables for the referenced records
+              for (const m of models) {
+                const mTypeName = typeNames.get(m.api_key);
+                if (!mTypeName) continue;
+                const mTable = `content_${m.api_key}`;
+                const ids = [...linkRecordIds];
+                if (ids.length === 0) break;
+                const placeholders = ids.map(() => "?").join(", ");
+                const found = runSql(
+                  Effect.gen(function* () {
+                    const s = yield* SqlClient.SqlClient;
+                    return yield* s.unsafe<Record<string, any>>(
+                      `SELECT * FROM "${mTable}" WHERE id IN (${placeholders})`,
+                      ids
+                    );
+                  })
+                );
+                for (const row of found) {
+                  links.push({
+                    ...deserializeRecord(row),
+                    __typename: `${mTypeName}Record`,
+                  });
+                  linkRecordIds.delete(row.id);
+                }
+              }
+            }
+
             return {
               value: dast,
               blocks,
               inlineBlocks,
-              links: [], // TODO: resolve itemLink/inlineItem references
+              links,
             };
           };
         }
