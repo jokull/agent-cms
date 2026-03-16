@@ -157,6 +157,68 @@ export function createMcpServer(sqlLayer: Layer.Layer<SqlClient.SqlClient>) {
     async ({ blockApiKey }) => run(SchemaLifecycle.removeBlockType(blockApiKey))
   );
 
+  server.tool("remove_block_from_whitelist", "Remove a block type from a field's whitelist and clean affected DAST trees",
+    { fieldId: z.string(), blockApiKey: z.string() },
+    async ({ fieldId, blockApiKey }) => run(SchemaLifecycle.removeBlockFromWhitelist({ fieldId, blockApiKey }))
+  );
+
+  server.tool("remove_locale", "Remove a locale and strip it from all localized field values",
+    { localeId: z.string() },
+    async ({ localeId }) => run(SchemaLifecycle.removeLocale(localeId))
+  );
+
+  // --- StructuredText Helper ---
+
+  server.tool("build_structured_text", "Build a valid StructuredText value from prose and blocks. Auto-assigns ULIDs to blocks.",
+    {
+      paragraphs: z.array(z.string()).optional().describe("Text paragraphs to include"),
+      blocks: z.array(z.object({
+        type: z.string().describe("Block type api_key"),
+        data: z.record(z.string(), z.unknown()).describe("Block field values"),
+      })).optional().describe("Blocks to embed between paragraphs"),
+    },
+    async ({ paragraphs = [], blocks = [] }) => {
+      const { ulid } = await import("ulidx");
+
+      const children: any[] = [];
+      const blockMap: Record<string, any> = {};
+
+      // Interleave paragraphs and blocks
+      let blockIdx = 0;
+      for (const text of paragraphs) {
+        children.push({
+          type: "paragraph",
+          children: [{ type: "span", value: text }],
+        });
+        // Insert next block after each paragraph if available
+        if (blockIdx < blocks.length) {
+          const b = blocks[blockIdx];
+          const id = ulid();
+          children.push({ type: "block", item: id });
+          blockMap[id] = { _type: b.type, ...b.data };
+          blockIdx++;
+        }
+      }
+      // Append remaining blocks
+      while (blockIdx < blocks.length) {
+        const b = blocks[blockIdx];
+        const id = ulid();
+        children.push({ type: "block", item: id });
+        blockMap[id] = { _type: b.type, ...b.data };
+        blockIdx++;
+      }
+
+      const result = {
+        value: { schema: "dast", document: { type: "root", children } },
+        blocks: blockMap,
+      };
+
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+      };
+    }
+  );
+
   // --- Assets ---
 
   server.tool("upload_asset", "Register an asset (metadata only — actual file upload is separate)",

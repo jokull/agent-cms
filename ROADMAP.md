@@ -211,15 +211,15 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 - [x] **P4.2** Required field with default_value on existing records *(done — 4 tests)*
 - [x] **P4.3** Model/field rename *(done — table rename, column rename, validator cascade, 4 tests)*
 - [x] **P4.4** Block type removal *(done — DAST cleanup, block deletion, table drop, whitelist update, 1 test)*
-- [ ] **P4.5** Block whitelist removal: Remove a block type from a field's whitelist (without deleting the type). Clean affected DAST trees. Test. → [C11]
-- [ ] **P4.6** Locale removal: Strip locale key from all localized field values across all models. Test. → [C11]
+- [x] **P4.5** Block whitelist removal *(done — DAST cleanup, keeps block type, 1 test)* → [C11]
+- [x] **P4.6** Locale removal *(done — strips locale from all localized fields, 1 test)* → [C11]
 
 ### Phase 5: MCP Tools
 
 - [x] **P5.1** MCP server scaffold *(done — 12 tools, 12 tests via InMemoryTransport)*
 - [x] **P5.2** Schema tools *(done — create_model, create_field, delete_model, delete_field)*
 - [x] **P5.3** Content tools *(done — create_record, update_record, delete_record, query_records, publish, unpublish)*
-- [ ] **P5.4** StructuredText tools: Helper tool for building DAST documents — agent provides prose and block data, tool assembles valid DAST with ULIDs assigned.
+- [x] **P5.4** StructuredText helper tool *(done — build_structured_text MCP tool, 3 tests)*
 - [x] **P5.5** Asset MCP tools *(done — upload_asset, list_assets)*
 - [x] **P5.6** End-to-end MCP test *(done — full agent workflow: schema → content → publish → GraphQL query)*
 
