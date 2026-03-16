@@ -1,4 +1,5 @@
 import type { ParsedFieldRow } from "../db/row-types.js";
+import { isSearchable } from "../db/validators.js";
 
 /**
  * Extract plain text from a DAST document.
@@ -77,6 +78,7 @@ export function extractRecordText(
     ?? fields.find((f) => f.field_type === "string");
 
   for (const field of fields) {
+    if (!isSearchable(field.validators)) continue;
     const value = record[field.api_key];
     if (value === undefined || value === null) continue;
 
@@ -98,19 +100,19 @@ export function extractRecordText(
 }
 
 function extractFieldText(field: ParsedFieldRow, value: unknown): string[] {
-  switch (field.field_type) {
-    case "string":
-    case "text":
-      if (field.localized && isRecord(value)) {
-        return Object.values(value).filter((v): v is string => typeof v === "string" && v.length > 0);
-      }
-      return typeof value === "string" ? [value] : [];
+  // Localized fields: extract all locale values
+  if (field.localized && isRecord(value)) {
+    const texts: string[] = [];
+    for (const localeValue of Object.values(value)) {
+      texts.push(...extractFieldText({ ...field, localized: 0 } as ParsedFieldRow, localeValue));
+    }
+    return texts;
+  }
 
+  switch (field.field_type) {
     case "structured_text": {
-      // Value may be a string (JSON) or already parsed object
       const parsed = typeof value === "string" ? safeParse(value) : value;
       if (!isRecord(parsed)) return [];
-      // DAST is in the "value" property of structured_text
       const dast = isRecord(parsed.value) ? parsed.value : parsed;
       const text = extractDastText(dast);
       return text ? [text] : [];
@@ -126,8 +128,38 @@ function extractFieldText(field: ParsedFieldRow, value: unknown): string[] {
     }
 
     default:
-      return [];
+      // Generic: extract text from any value
+      return extractGenericText(value);
   }
+}
+
+/** Extract text from any value — strings directly, JSON objects recursively. */
+function extractGenericText(value: unknown): string[] {
+  if (typeof value === "string") {
+    // Skip values that look like IDs (ULIDs, UUIDs)
+    if (/^[0-9A-HJKMNP-TV-Z]{26}$/i.test(value)) return []; // ULID (Crockford base32)
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) return []; // UUID
+    return value.length > 0 ? [value] : [];
+  }
+  if (typeof value === "number" || typeof value === "boolean") return [];
+  if (Array.isArray(value)) {
+    // Arrays of strings (e.g. tags) — extract each
+    // Arrays of IDs (links) — skip
+    const texts: string[] = [];
+    for (const item of value) {
+      texts.push(...extractGenericText(item));
+    }
+    return texts;
+  }
+  if (isRecord(value)) {
+    // JSON objects — extract string values recursively
+    const texts: string[] = [];
+    for (const v of Object.values(value)) {
+      texts.push(...extractGenericText(v));
+    }
+    return texts;
+  }
+  return [];
 }
 
 // --- Helpers ---

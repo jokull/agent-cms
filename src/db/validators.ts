@@ -37,3 +37,8 @@ export function getLinksTargets(validators: Record<string, unknown>): string[] |
   const v = validators.items_item_type;
   return Array.isArray(v) && v.every((x) => typeof x === "string") ? v : undefined;
 }
+
+/** Check if field is searchable (default: true — opt out with {"searchable": false}) */
+export function isSearchable(validators: Record<string, unknown>): boolean {
+  return validators.searchable !== false;
+}

@@ -212,6 +212,39 @@ describe("extractRecordText", () => {
     expect(result.title).toBe("Post");
     expect(result.body).toBe("");
   });
+
+  it("respects searchable: false opt-out", () => {
+    const fields = [
+      makeField({ api_key: "title", field_type: "string" }),
+      makeField({ api_key: "internal_notes", field_type: "text", position: 1, validators: { searchable: false } }),
+      makeField({ api_key: "summary", field_type: "text", position: 2 }),
+    ];
+    const record = { title: "Post", internal_notes: "Do not index this", summary: "Public summary" };
+    const result = extractRecordText(record, fields);
+    expect(result.title).toBe("Post");
+    expect(result.body).toBe("Public summary");
+    expect(result.body).not.toContain("Do not index");
+  });
+
+  it("extracts text from JSON fields by default", () => {
+    const fields = [
+      makeField({ api_key: "title", field_type: "string" }),
+      makeField({ api_key: "metadata", field_type: "json", position: 1 }),
+    ];
+    const record = { title: "Post", metadata: { summary: "JSON summary text", count: 42 } };
+    const result = extractRecordText(record, fields);
+    expect(result.body).toContain("JSON summary text");
+  });
+
+  it("skips ULID-like values in generic extraction", () => {
+    const fields = [
+      makeField({ api_key: "title", field_type: "string" }),
+      makeField({ api_key: "ref", field_type: "link", position: 1 }),
+    ];
+    const record = { title: "Post", ref: "01ARFG3EKA2B9CNDHJ6MP5QS7T" };
+    const result = extractRecordText(record, fields);
+    expect(result.body).toBe("");
+  });
 });
 
 // --- Integration tests ---
