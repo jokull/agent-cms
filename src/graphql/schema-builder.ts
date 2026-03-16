@@ -1,5 +1,5 @@
 import { createSchema } from "graphql-yoga";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { SqlClient } from "@effect/sql";
 import { extractBlockIds, extractInlineBlockIds, extractLinkIds } from "../dast/index.js";
 import type { ModelRow, FieldRow, AssetRow } from "../db/row-types.js";
@@ -114,10 +114,10 @@ export interface SchemaBuilderOptions {
   isProduction?: boolean;
 }
 
-export function buildGraphQLSchema(sqlLayer: any, options?: SchemaBuilderOptions) {
-  // Helper to run sql queries — async for D1 compatibility, sync fallback for tests
+export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, options?: SchemaBuilderOptions) {
+  /** Run an Effect requiring SqlClient, converting to Promise for GraphQL resolvers */
   function runSql<A>(effect: Effect.Effect<A, unknown, SqlClient.SqlClient>): Promise<A> {
-    return Effect.runPromise(Effect.provide(effect, sqlLayer) as Effect.Effect<A, never, never>);
+    return Effect.runPromise(effect.pipe(Effect.provide(sqlLayer), Effect.orDie));
   }
 
   return Effect.gen(function* () {

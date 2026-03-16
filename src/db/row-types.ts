@@ -95,14 +95,17 @@ export function isContentRow(row: unknown): row is ContentRow {
 
 // --- Helpers ---
 
+/** Runtime check that a value is a plain object record */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 /** Safely parse JSON to a Record, returning empty object on failure */
 function parseJsonRecord(json: string | null | undefined): Record<string, unknown> {
   if (!json) return {};
   try {
     const parsed: unknown = JSON.parse(json);
-    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>; // narrowed by runtime check above; TS can't narrow JSON.parse
-    }
+    if (isRecord(parsed)) return parsed;
   } catch { /* invalid JSON */ }
   return {};
 }

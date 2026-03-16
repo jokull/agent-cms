@@ -13,7 +13,7 @@ import * as PublishService from "../services/publish-service.js";
 import * as AssetService from "../services/asset-service.js";
 import * as WebhookService from "../services/webhook-service.js";
 import * as SchemaLifecycle from "../services/schema-lifecycle.js";
-import type { CmsError } from "../errors.js";
+import { isCmsError } from "../errors.js";
 
 export function createMcpServer(sqlLayer: Layer.Layer<SqlClient.SqlClient>) {
   const server = new McpServer({
@@ -21,21 +21,37 @@ export function createMcpServer(sqlLayer: Layer.Layer<SqlClient.SqlClient>) {
     version: "0.1.0",
   });
 
-  function run<A>(effect: Effect.Effect<A, CmsError | any, SqlClient.SqlClient>): Promise<{
+  function run<A>(effect: Effect.Effect<A, unknown, SqlClient.SqlClient>): Promise<{
     content: Array<{ type: "text"; text: string }>;
     isError?: boolean;
   }> {
     return Effect.runPromise(
       effect.pipe(
         Effect.map((result) => ({
-          content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+          content: [{ type: "text" as const, text: JSON.stringify(result) }],
         })),
-        Effect.catchAll((error) => {
-          const message = error && typeof error === "object" && "message" in error
-            ? String(error.message)
-            : String(error);
+        Effect.catchAll((error: unknown) => {
+          const errorInfo: Record<string, unknown> = {};
+          if (isCmsError(error)) {
+            errorInfo.type = error._tag;
+            errorInfo.message = error.message;
+          } else if (error && typeof error === "object") {
+            if ("message" in error) errorInfo.message = String(error.message);
+            if ("_tag" in error) errorInfo.type = String(error._tag);
+          } else {
+            errorInfo.message = String(error);
+          }
+          // Add guidance for common errors
+          if (errorInfo.message && typeof errorInfo.message === "string") {
+            if (errorInfo.message.includes("UNIQUE constraint"))
+              errorInfo.hint = "This resource already exists. Use list_models or schema_info to see current state.";
+            if (errorInfo.message.includes("not found") || errorInfo.message.includes("NOT NULL"))
+              errorInfo.hint = "Check the ID/apiKey. Use list_models to find valid values.";
+            if (errorInfo.message.includes("referenced"))
+              errorInfo.hint = "This resource is referenced by other models. Remove references first.";
+          }
           return Effect.succeed({
-            content: [{ type: "text" as const, text: `Error: ${message}` }],
+            content: [{ type: "text" as const, text: JSON.stringify(errorInfo) }],
             isError: true,
           });
         }),
@@ -90,10 +106,12 @@ export function createMcpServer(sqlLayer: Layer.Layer<SqlClient.SqlClient>) {
 
   // --- Schema ---
 
-  server.tool("create_model", "Create a content model or block type",
+  server.tool("create_model", "Create a content model or block type. Use isBlock:true for block types (embeddable in StructuredText). Use singleton:true for models with exactly one record (e.g. site settings). After creating a model, add fields with create_field.",
     {
-      name: z.string(), apiKey: z.string(),
-      isBlock: z.boolean().optional(), singleton: z.boolean().optional(),
+      name: z.string().describe("Human-readable name (e.g. 'Blog Post')"),
+      apiKey: z.string().describe("Snake_case identifier used in code (e.g. 'blog_post')"),
+      isBlock: z.boolean().optional().describe("true = block type for StructuredText embedding"),
+      singleton: z.boolean().optional().describe("true = only one record allowed (e.g. site settings)"),
     },
     async (args) => run(ModelService.createModel(args))
   );
@@ -109,12 +127,22 @@ export function createMcpServer(sqlLayer: Layer.Layer<SqlClient.SqlClient>) {
     async ({ modelId, ...rest }) => run(ModelService.updateModel(modelId, rest))
   );
 
-  server.tool("create_field", "Add a field to a model",
+  server.tool("create_field", `Add a field to a model. Auto-migrates the database table (adds column).
+
+Key validators by field type:
+- slug: {"slug_source": "title"} — auto-generates from source field
+- link: {"item_item_type": ["model_api_key"]} — target model
+- links: {"items_item_type": ["model_api_key"]} — target model
+- structured_text: {"structured_text_blocks": ["block_api_key"]} — allowed block types
+- any field: {"required": true} — field is required (provide default_value for existing records)`,
     {
-      modelId: z.string(), label: z.string(), apiKey: z.string(),
+      modelId: z.string().describe("ID of the model (from create_model response)"),
+      label: z.string().describe("Human-readable label (e.g. 'Cover Image')"),
+      apiKey: z.string().describe("Snake_case field name used in code (e.g. 'cover_image')"),
       fieldType: z.string().describe("string|text|boolean|integer|float|date|date_time|slug|media|media_gallery|link|links|structured_text|seo|json|color|lat_lon"),
       localized: z.boolean().optional(),
-      validators: z.record(z.string(), z.unknown()).optional(),
+      validators: z.record(z.string(), z.unknown()).optional().describe("Validation rules — see tool description for common patterns"),
+      defaultValue: z.unknown().optional().describe("Default value for existing records when adding a required field"),
     },
     async ({ modelId, ...rest }) => run(FieldService.createField(modelId, rest))
   );
@@ -211,8 +239,18 @@ export function createMcpServer(sqlLayer: Layer.Layer<SqlClient.SqlClient>) {
 
   // --- Content ---
 
-  server.tool("create_record", "Create a content record",
-    { modelApiKey: z.string(), data: z.record(z.string(), z.unknown()) },
+  server.tool("create_record", `Create a content record. Records start as draft — call publish_record to make them visible in GraphQL.
+
+Field value formats:
+- media: asset ID string (from upload_asset)
+- media_gallery: array of asset ID strings
+- link: record ID string
+- links: array of record ID strings
+- seo: {"title":"...","description":"...","image":"<asset_id>","twitterCard":"summary_large_image"}
+- structured_text: {"value":{"schema":"dast","document":{...}},"blocks":{"<id>":{"_type":"block_api_key",...}}}
+- color: {"red":255,"green":0,"blue":0,"alpha":255}
+- lat_lon: {"latitude":64.13,"longitude":-21.89}`,
+    { modelApiKey: z.string().describe("The model's api_key"), data: z.record(z.string(), z.unknown()).describe("Field values keyed by field api_key") },
     async (args) => run(RecordService.createRecord(args))
   );
 

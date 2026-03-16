@@ -295,7 +295,7 @@ export function removeRecord(modelApiKey: string, id: string) {
  * Reorder records for a sortable/tree model.
  * Accepts an ordered array of record IDs — sets _position = index.
  */
-export function reorderRecords(modelApiKey: string, recordIds: string[]) {
+export function reorderRecords(modelApiKey: string, recordIds: readonly string[]) {
   return Effect.gen(function* () {
     const model = yield* getModelByApiKey(modelApiKey);
     if (!model) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });

@@ -4,7 +4,7 @@ import {
   HttpServerResponse,
   HttpApp,
 } from "@effect/platform";
-import { Effect } from "effect";
+import { Effect, Layer, Schema } from "effect";
 import { SqlClient } from "@effect/sql";
 import * as ModelService from "../services/model-service.js";
 import * as FieldService from "../services/field-service.js";
@@ -12,7 +12,9 @@ import * as RecordService from "../services/record-service.js";
 import * as PublishService from "../services/publish-service.js";
 import * as AssetService from "../services/asset-service.js";
 import * as LocaleService from "../services/locale-service.js";
-import { type CmsError, errorToResponse } from "../errors.js";
+import { isCmsError, errorToResponse } from "../errors.js";
+import { ReorderInput } from "../services/input-schemas.js";
+import { ValidationError } from "../errors.js";
 
 /** Helper: run a CMS Effect and return an HTTP response */
 function handle<A>(
@@ -22,9 +24,9 @@ function handle<A>(
   return effect.pipe(
     Effect.flatMap((result) => HttpServerResponse.json(result, { status })),
     Effect.catchAll((error: unknown) => {
-      if (error && typeof error === "object" && "_tag" in error && "message" in error) {
-        const mapped = errorToResponse(error as CmsError);
-        if (mapped) return HttpServerResponse.json(mapped.body, { status: mapped.status });
+      if (isCmsError(error)) {
+        const mapped = errorToResponse(error);
+        return HttpServerResponse.json(mapped.body, { status: mapped.status });
       }
       console.error("Unhandled error:", error);
       return HttpServerResponse.json({ error: "Internal server error" }, { status: 500 });
@@ -200,11 +202,15 @@ const recordsRouter = HttpRouter.empty.pipe(
     "/reorder",
     Effect.gen(function* () {
       const req = yield* HttpServerRequest.HttpServerRequest;
-      const body: unknown = yield* req.json;
-      const b = (typeof body === "object" && body !== null) ? body : {};
-      const modelApiKey = "modelApiKey" in b ? String(b.modelApiKey) : "";
-      const recordIds = "recordIds" in b && Array.isArray(b.recordIds) ? b.recordIds.map(String) : [];
-      return yield* handle(RecordService.reorderRecords(modelApiKey, recordIds));
+      const rawBody: unknown = yield* req.json;
+      return yield* handle(
+        Effect.gen(function* () {
+          const { modelApiKey, recordIds } = yield* Schema.decodeUnknown(ReorderInput)(rawBody).pipe(
+            Effect.mapError((e) => new ValidationError({ message: `Invalid input: ${e.message}` }))
+          );
+          return yield* RecordService.reorderRecords(modelApiKey, recordIds);
+        })
+      );
     })
   )
 );
@@ -290,11 +296,15 @@ export interface WebHandlerOptions {
   r2Bucket?: R2Bucket;
 }
 
-export function createWebHandler(sqlLayer: any, options?: WebHandlerOptions) {
+export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, options?: WebHandlerOptions) {
   const restApp = Effect.flatten(HttpRouter.toHttpApp(appRouter)).pipe(
     Effect.catchAll((error: unknown) => {
-      // RouteNotFound → 404, everything else → 500 with details
-      if (error && typeof error === "object" && "_tag" in error && (error as Record<string, unknown>)._tag === "RouteNotFound") {
+      if (isCmsError(error)) {
+        const mapped = errorToResponse(error);
+        return HttpServerResponse.json(mapped.body, { status: mapped.status });
+      }
+      // RouteNotFound from @effect/platform router
+      if (error && typeof error === "object" && "_tag" in error && (error as { _tag: string })._tag === "RouteNotFound") {
         return HttpServerResponse.json({ error: "Not found" }, { status: 404 });
       }
       console.error("REST handler error:", error);
@@ -302,8 +312,8 @@ export function createWebHandler(sqlLayer: any, options?: WebHandlerOptions) {
     }),
     Effect.provide(sqlLayer)
   );
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Effect/platform router type variance
-  const restHandler = HttpApp.toWebHandler(restApp as any);
+  // @effect/platform router type variance requires this assertion
+  const restHandler = HttpApp.toWebHandler(restApp as HttpApp.Default);
 
   // Lazy-import handlers to avoid circular deps
   let graphqlHandler: ((req: Request) => Promise<Response>) | null = null;
@@ -380,7 +390,7 @@ export function createWebHandler(sqlLayer: any, options?: WebHandlerOptions) {
               "SELECT r2_key FROM assets WHERE id = ?", [assetId]
             );
             return rows[0]?.r2_key ?? null;
-          }).pipe(Effect.provide(sqlLayer)) as Effect.Effect<string | null, never, never>
+          }).pipe(Effect.provide(sqlLayer), Effect.orDie)
         );
         if (r2Key) {
           const object = await options.r2Bucket.get(r2Key);

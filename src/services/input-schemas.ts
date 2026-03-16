@@ -67,6 +67,12 @@ export const CreateAssetInput = Schema.Struct({
 });
 export type CreateAssetInput = typeof CreateAssetInput.Type;
 
+export const ReorderInput = Schema.Struct({
+  modelApiKey: Schema.NonEmptyString,
+  recordIds: Schema.Array(Schema.String),
+});
+export type ReorderInput = typeof ReorderInput.Type;
+
 // ColorInput and LatLonInput schemas moved to src/field-types.ts (field type registry)
 
 export const CreateLocaleInput = Schema.Struct({

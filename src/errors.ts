@@ -37,6 +37,17 @@ export type CmsError =
   | DuplicateError
   | SchemaEngineError;
 
+const CMS_ERROR_TAGS = new Set<string>([
+  "NotFoundError", "ValidationError", "ReferenceConflictError",
+  "DuplicateError", "SchemaEngineError",
+]);
+
+/** Runtime type guard for CmsError — checks _tag without unsafe casts */
+export function isCmsError(error: unknown): error is CmsError {
+  return typeof error === "object" && error !== null && "_tag" in error &&
+    CMS_ERROR_TAGS.has((error as { _tag: string })._tag);
+}
+
 /** Map a CMS error to an HTTP status code and JSON body */
 export function errorToResponse(error: CmsError): { status: number; body: { error: string } } {
   switch (error._tag) {

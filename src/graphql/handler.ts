@@ -1,4 +1,4 @@
-import { createYoga } from "graphql-yoga";
+import { createYoga, type YogaSchemaDefinition } from "graphql-yoga";
 import { Effect, Layer } from "effect";
 import { SqlClient } from "@effect/sql";
 import { buildGraphQLSchema } from "./schema-builder.js";
@@ -26,13 +26,13 @@ export function createGraphQLHandler(
       buildGraphQLSchema(sqlLayer, {
         assetBaseUrl: options?.assetBaseUrl,
         isProduction: options?.isProduction,
-      }).pipe(Effect.provide(sqlLayer))
+      }).pipe(Effect.provide(sqlLayer), Effect.orDie)
     );
   }
 
   const yoga = createYoga({
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    schema: (() => getSchema()) as any,
+    // Yoga's schema function type expects the full context, but our schema is context-agnostic
+    schema: (() => getSchema()) as YogaSchemaDefinition<object, GraphQLContext>,
     graphqlEndpoint: "/graphql",
     landingPage: true,
     context: ({ request }: { request: Request }) => {

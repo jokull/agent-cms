@@ -104,17 +104,15 @@ export function fireWebhooks(event: WebhookEvent, payload: Record<string, unknow
       const events: string[] = JSON.parse(wh.events || "[]");
       if (!events.includes(event)) continue;
 
-      // Fire-and-forget — don't block on response
-      try {
+      // Fire-and-forget — ignores fetch failures
+      yield* Effect.tryPromise(() =>
         fetch(wh.url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ event, timestamp: new Date().toISOString(), ...payload }),
-        }).catch(() => {}); // Swallow errors
-        fired.push(wh.url);
-      } catch {
-        // Ignore fetch failures
-      }
+        })
+      ).pipe(Effect.ignore);
+      fired.push(wh.url);
     }
 
     return fired;
