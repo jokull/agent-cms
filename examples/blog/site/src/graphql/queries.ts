@@ -145,8 +145,8 @@ export const POST_BY_SLUG_QUERY = graphql(`
 `);
 
 export const POSTS_BY_CATEGORY_QUERY = graphql(`
-  query PostsByCategory($categorySlug: String!) {
-    allPosts(filter: { category: { eq: $categorySlug } }, orderBy: [publishedDate_DESC]) {
+  query PostsByCategory($categoryId: ID!) {
+    allPosts(filter: { category: { eq: $categoryId } }, orderBy: [publishedDate_DESC]) {
       id
       title
       slug
@@ -173,6 +173,7 @@ export const POSTS_BY_CATEGORY_QUERY = graphql(`
 export const CATEGORY_BY_SLUG_QUERY = graphql(`
   query CategoryBySlug($slug: String!) {
     category(filter: { slug: { eq: $slug } }) {
+      id
       name
       slug
       description

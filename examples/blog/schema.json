@@ -1,0 +1,450 @@
+{
+    "version": 1,
+    "locales": [],
+    "models": [
+        {
+            "name": "Site Settings",
+            "apiKey": "site_settings",
+            "isBlock": false,
+            "singleton": true,
+            "sortable": false,
+            "tree": false,
+            "hasDraft": true,
+            "fields": [
+                {
+                    "label": "Site Name",
+                    "apiKey": "site_name",
+                    "fieldType": "string",
+                    "position": 0,
+                    "localized": false,
+                    "validators": {
+                        "required": true
+                    },
+                    "hint": null
+                },
+                {
+                    "label": "Tagline",
+                    "apiKey": "tagline",
+                    "fieldType": "text",
+                    "position": 1,
+                    "localized": false,
+                    "validators": {},
+                    "hint": null
+                },
+                {
+                    "label": "Logo",
+                    "apiKey": "logo",
+                    "fieldType": "media",
+                    "position": 2,
+                    "localized": false,
+                    "validators": {},
+                    "hint": null
+                },
+                {
+                    "label": "Default SEO",
+                    "apiKey": "default_seo",
+                    "fieldType": "seo",
+                    "position": 3,
+                    "localized": false,
+                    "validators": {},
+                    "hint": null
+                }
+            ]
+        },
+        {
+            "name": "Author",
+            "apiKey": "author",
+            "isBlock": false,
+            "singleton": true,
+            "sortable": false,
+            "tree": false,
+            "hasDraft": true,
+            "fields": [
+                {
+                    "label": "Name",
+                    "apiKey": "name",
+                    "fieldType": "string",
+                    "position": 0,
+                    "localized": false,
+                    "validators": {
+                        "required": true
+                    },
+                    "hint": null
+                },
+                {
+                    "label": "Bio",
+                    "apiKey": "bio",
+                    "fieldType": "text",
+                    "position": 1,
+                    "localized": false,
+                    "validators": {},
+                    "hint": null
+                },
+                {
+                    "label": "Photo",
+                    "apiKey": "photo",
+                    "fieldType": "media",
+                    "position": 2,
+                    "localized": false,
+                    "validators": {},
+                    "hint": null
+                }
+            ]
+        },
+        {
+            "name": "Category",
+            "apiKey": "category",
+            "isBlock": false,
+            "singleton": false,
+            "sortable": false,
+            "tree": false,
+            "hasDraft": true,
+            "fields": [
+                {
+                    "label": "Name",
+                    "apiKey": "name",
+                    "fieldType": "string",
+                    "position": 0,
+                    "localized": false,
+                    "validators": {
+                        "required": true
+                    },
+                    "hint": null
+                },
+                {
+                    "label": "Slug",
+                    "apiKey": "slug",
+                    "fieldType": "slug",
+                    "position": 1,
+                    "localized": false,
+                    "validators": {
+                        "slug_source": "name"
+                    },
+                    "hint": null
+                },
+                {
+                    "label": "Description",
+                    "apiKey": "description",
+                    "fieldType": "text",
+                    "position": 2,
+                    "localized": false,
+                    "validators": {},
+                    "hint": null
+                },
+                {
+                    "label": "Cover Image",
+                    "apiKey": "cover_image",
+                    "fieldType": "media",
+                    "position": 3,
+                    "localized": false,
+                    "validators": {},
+                    "hint": null
+                },
+                {
+                    "label": "Icon",
+                    "apiKey": "icon",
+                    "fieldType": "string",
+                    "position": 4,
+                    "localized": false,
+                    "validators": {},
+                    "hint": null
+                },
+                {
+                    "label": "Sort Order",
+                    "apiKey": "sort_order",
+                    "fieldType": "integer",
+                    "position": 5,
+                    "localized": false,
+                    "validators": {},
+                    "hint": null
+                }
+            ]
+        },
+        {
+            "name": "Post",
+            "apiKey": "post",
+            "isBlock": false,
+            "singleton": false,
+            "sortable": false,
+            "tree": false,
+            "hasDraft": true,
+            "fields": [
+                {
+                    "label": "Title",
+                    "apiKey": "title",
+                    "fieldType": "string",
+                    "position": 0,
+                    "localized": false,
+                    "validators": {
+                        "required": true
+                    },
+                    "hint": null
+                },
+                {
+                    "label": "Slug",
+                    "apiKey": "slug",
+                    "fieldType": "slug",
+                    "position": 1,
+                    "localized": false,
+                    "validators": {
+                        "slug_source": "title"
+                    },
+                    "hint": null
+                },
+                {
+                    "label": "Excerpt",
+                    "apiKey": "excerpt",
+                    "fieldType": "text",
+                    "position": 2,
+                    "localized": false,
+                    "validators": {},
+                    "hint": null
+                },
+                {
+                    "label": "Cover Image",
+                    "apiKey": "cover_image",
+                    "fieldType": "media",
+                    "position": 3,
+                    "localized": false,
+                    "validators": {},
+                    "hint": null
+                },
+                {
+                    "label": "Content",
+                    "apiKey": "content",
+                    "fieldType": "structured_text",
+                    "position": 4,
+                    "localized": false,
+                    "validators": {
+                        "structured_text_blocks": [
+                            "hero_section",
+                            "code_block",
+                            "image_gallery"
+                        ]
+                    },
+                    "hint": null
+                },
+                {
+                    "label": "Author",
+                    "apiKey": "author",
+                    "fieldType": "link",
+                    "position": 5,
+                    "localized": false,
+                    "validators": {
+                        "item_item_type": [
+                            "author"
+                        ]
+                    },
+                    "hint": null
+                },
+                {
+                    "label": "Category",
+                    "apiKey": "category",
+                    "fieldType": "link",
+                    "position": 6,
+                    "localized": false,
+                    "validators": {
+                        "item_item_type": [
+                            "category"
+                        ]
+                    },
+                    "hint": null
+                },
+                {
+                    "label": "Related Posts",
+                    "apiKey": "related_posts",
+                    "fieldType": "links",
+                    "position": 7,
+                    "localized": false,
+                    "validators": {
+                        "items_item_type": [
+                            "post"
+                        ]
+                    },
+                    "hint": null
+                },
+                {
+                    "label": "Published Date",
+                    "apiKey": "published_date",
+                    "fieldType": "date",
+                    "position": 8,
+                    "localized": false,
+                    "validators": {},
+                    "hint": null
+                },
+                {
+                    "label": "SEO",
+                    "apiKey": "seo_field",
+                    "fieldType": "seo",
+                    "position": 9,
+                    "localized": false,
+                    "validators": {},
+                    "hint": null
+                },
+                {
+                    "label": "Gallery",
+                    "apiKey": "gallery",
+                    "fieldType": "media_gallery",
+                    "position": 10,
+                    "localized": false,
+                    "validators": {},
+                    "hint": null
+                },
+                {
+                    "label": "Reading Time",
+                    "apiKey": "reading_time",
+                    "fieldType": "integer",
+                    "position": 11,
+                    "localized": false,
+                    "validators": {},
+                    "hint": null
+                },
+                {
+                    "label": "Featured",
+                    "apiKey": "featured",
+                    "fieldType": "boolean",
+                    "position": 12,
+                    "localized": false,
+                    "validators": {},
+                    "hint": null
+                }
+            ]
+        },
+        {
+            "name": "Hero Section",
+            "apiKey": "hero_section",
+            "isBlock": true,
+            "singleton": false,
+            "sortable": false,
+            "tree": false,
+            "hasDraft": true,
+            "fields": [
+                {
+                    "label": "Headline",
+                    "apiKey": "headline",
+                    "fieldType": "string",
+                    "position": 0,
+                    "localized": false,
+                    "validators": {
+                        "required": true
+                    },
+                    "hint": null
+                },
+                {
+                    "label": "Subheadline",
+                    "apiKey": "subheadline",
+                    "fieldType": "text",
+                    "position": 1,
+                    "localized": false,
+                    "validators": {},
+                    "hint": null
+                },
+                {
+                    "label": "Background Image",
+                    "apiKey": "background_image",
+                    "fieldType": "media",
+                    "position": 2,
+                    "localized": false,
+                    "validators": {},
+                    "hint": null
+                },
+                {
+                    "label": "CTA Text",
+                    "apiKey": "cta_text",
+                    "fieldType": "string",
+                    "position": 3,
+                    "localized": false,
+                    "validators": {},
+                    "hint": null
+                },
+                {
+                    "label": "CTA URL",
+                    "apiKey": "cta_url",
+                    "fieldType": "string",
+                    "position": 4,
+                    "localized": false,
+                    "validators": {},
+                    "hint": null
+                }
+            ]
+        },
+        {
+            "name": "Code Block",
+            "apiKey": "code_block",
+            "isBlock": true,
+            "singleton": false,
+            "sortable": false,
+            "tree": false,
+            "hasDraft": true,
+            "fields": [
+                {
+                    "label": "Code",
+                    "apiKey": "code",
+                    "fieldType": "text",
+                    "position": 0,
+                    "localized": false,
+                    "validators": {
+                        "required": true
+                    },
+                    "hint": null
+                },
+                {
+                    "label": "Language",
+                    "apiKey": "language",
+                    "fieldType": "string",
+                    "position": 1,
+                    "localized": false,
+                    "validators": {},
+                    "hint": null
+                },
+                {
+                    "label": "Filename",
+                    "apiKey": "filename",
+                    "fieldType": "string",
+                    "position": 2,
+                    "localized": false,
+                    "validators": {},
+                    "hint": null
+                }
+            ]
+        },
+        {
+            "name": "Image Gallery",
+            "apiKey": "image_gallery",
+            "isBlock": true,
+            "singleton": false,
+            "sortable": false,
+            "tree": false,
+            "hasDraft": true,
+            "fields": [
+                {
+                    "label": "Images",
+                    "apiKey": "images",
+                    "fieldType": "media_gallery",
+                    "position": 0,
+                    "localized": false,
+                    "validators": {},
+                    "hint": null
+                },
+                {
+                    "label": "Caption",
+                    "apiKey": "caption",
+                    "fieldType": "text",
+                    "position": 1,
+                    "localized": false,
+                    "validators": {},
+                    "hint": null
+                },
+                {
+                    "label": "Layout",
+                    "apiKey": "layout",
+                    "fieldType": "string",
+                    "position": 2,
+                    "localized": false,
+                    "validators": {},
+                    "hint": null
+                }
+            ]
+        }
+    ]
+}
