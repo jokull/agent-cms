@@ -218,3 +218,32 @@ Changing a field's type (e.g., `string` → `integer`, or `string` → `structur
 - Recursively delete sub-blocks of removed blocks
 - Update DAST JSON
 - Regenerate GraphQL schema (union type shrinks)
+
+## C12: N+1 Query Problem in GraphQL Resolvers
+
+**Problem:** Link, links, and media field resolvers each make a separate SQL query per linked record. A query like `allTours { guide { name } category { name } photos { url } }` for 100 tours with 5 photos each = 1 + 100 + 100 + 500 = 701 queries.
+
+**Impact:** Real-world schemas like ~/Code/trip resolve 10+ linked records per tour page. This is the main performance bottleneck.
+
+**Current architecture constraint:** `runSql()` uses `Effect.runSync` inside GraphQL resolvers, which is synchronous and prevents DataLoader-style batching.
+
+**Possible solutions:**
+
+1. **SQL IN-batching** (recommended for v1): After fetching parent records, collect all linked IDs per field, batch-fetch with `SELECT * FROM table WHERE id IN (?, ?, ...)`, then distribute results back to parents. No resolver architecture change needed — just smarter resolution at the query level.
+
+2. **DataLoader pattern**: Accumulate resolver calls, dedupe IDs, batch-fetch. Requires async resolvers, meaning `runSql` must change to `Effect.runPromise`. Harder to implement with Effect + Yoga's sync resolver model.
+
+3. **SQL JOINs**: For single-link fields, join at query time (`SELECT p.*, a.* FROM content_post p LEFT JOIN content_author a ON p.author = a.id`). Best perf but complex DDL generation.
+
+**Risk:** Medium — the IN-batching approach is straightforward but requires restructuring the resolver builder to work per-query rather than per-field.
+
+## C13: _seoMetaTags Auto-Generation
+
+**Problem:** DatoCMS auto-generates `<meta>` tags (og:title, og:description, og:image, twitter:card etc.) from record fields. The `_seoMetaTags` field returns an array of `{ tag, attributes, content }` objects that can be directly injected into `<head>`.
+
+**How DatoCMS does it:**
+- If model has an `seo` field → uses title/description/image from that
+- Falls back to first string field (title), first text field (description), first media field (image)
+- Generates: title, description, og:title, og:description, og:image, og:type, twitter:card, article:modified_time, etc.
+
+**Implementation path:** Add a `_seoMetaTags` resolver on every content type that reads the seo field (if present) or falls back to heuristic field selection. Return `[{ tag: "meta", attributes: { property: "og:title", content: "..." } }]`.

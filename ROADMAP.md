@@ -239,10 +239,26 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 - [x] MCP `schema_info` power tool *(done — full schema in one call with filtering by name/type and compact mode, 4 tests)*
 - [x] MCP `update_model` + `update_field` tools *(done — complete schema CRUD via MCP, 2 tests)*
 - [x] Type assertion cleanup *(done — replaced `as` casts with type guards, runtime narrowing, Effect Schema validation)*
+
+### Phase 6: Real-World Parity (informed by ~/Code/trip DatoCMS usage)
+
+- [ ] **P6.1** Meta field filtering + ordering — _createdAt, _updatedAt, _publishedAt, _firstPublishedAt as filterable/orderable DateTimeFilter fields. Trip uses `filter: { _firstPublishedAt: { exists: true } }` and `orderBy: _firstPublishedAt_DESC` heavily.
+- [ ] **P6.2** N+1 query batching — batch link/links/media resolution using IN queries instead of per-item SELECT. Trip resolves 10+ linked records per tour page.
+- [ ] **P6.3** `_seoMetaTags` auto-generation — auto-generate og:title, og:description, og:image meta tags from record fields + seo field. Trip queries `_seoMetaTags { tag attributes content }` on every page.
+- [ ] **P6.4** `video` field type — external video embed storing {url, providerUid, provider, width, height, thumbnailUrl}. Trip uses UploadVideoField with streamingUrl/mp4Url.
+- [ ] **P6.5** `_modelApiKey` meta field — expose the model's api_key on every record in GraphQL. Trip uses this for type discrimination.
+- [ ] **P6.6** responsiveImage imgix params — accept `imgixParams` argument on responsiveImage (auto, fit, crop, w, h, facepad). Trip uses `responsiveImage(imgixParams: { auto: format, fit: crop, w: 1200, h: 800 })`.
+- [ ] **P6.7** StructuredText links resolution — resolve itemLink/inlineItem references in StructuredText `links` array (currently TODO).
+
+### Future (not prioritized)
+
 - [ ] GraphQL subscriptions for real-time updates
 - [ ] Schema descriptor KV caching for production cold starts
 - [ ] Cloudflare Images integration (production only, not local dev)
 - [ ] Blurhash / dominant color extraction on asset upload
+- [ ] Per-field locale argument (`title(locale: en)` override)
+- [ ] `_isValid` meta field on records
+- [ ] Cache tag webhook invalidation (production Cloudflare KV)
 
 ---
 
