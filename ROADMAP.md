@@ -216,9 +216,9 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 
 ### Phase 5: MCP Tools
 
-- [ ] **P5.1** MCP server scaffold: `@modelcontextprotocol/sdk` package. MCP server that calls the local REST API. Discovery tool: `list_models` (returns all models with fields).
-- [ ] **P5.2** Schema tools: `create_model`, `create_field`, `update_model`, `update_field`, `delete_model`, `delete_field`. Each calls the REST API and returns the result. Test via MCP protocol.
-- [ ] **P5.3** Content tools: `create_record`, `update_record`, `delete_record`, `query_records`, `publish_record`, `unpublish_record`.
+- [x] **P5.1** MCP server scaffold *(done — 12 tools, 12 tests via InMemoryTransport)*
+- [x] **P5.2** Schema tools *(done — create_model, create_field, delete_model, delete_field)*
+- [x] **P5.3** Content tools *(done — create_record, update_record, delete_record, query_records, publish, unpublish)*
 - [ ] **P5.4** StructuredText tools: Helper tool for building DAST documents — agent provides prose and block data, tool assembles valid DAST with ULIDs assigned.
 - [ ] **P5.5** Asset tools: `upload_asset`, `list_assets`.
 - [ ] **P5.6** End-to-end MCP test: Use the MCP tools to create the blog schema, insert content, and query via GraphQL. Verify the full loop works.

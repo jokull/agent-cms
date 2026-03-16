@@ -18,6 +18,7 @@
     "@effect/sql-d1": "^0.47.0",
     "@effect/sql-drizzle": "^0.48.1",
     "@effect/sql-sqlite-node": "^0.50.1",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "drizzle-orm": "^1.0.0-beta.17-67b1795",
     "effect": "^3.19.19",
     "graphql": "^16.13.1",
