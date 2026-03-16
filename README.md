@@ -194,26 +194,31 @@ Search is always available via FTS5 (built into D1). When `AI` + `VECTORIZE` bin
 
 All fields are indexed by default. Opt a field out with `{"searchable": false}` in its validators.
 
-## Reacting to content events
+## Lifecycle hooks
 
-There is no built-in webhook system. Since you own the Worker, add event-driven logic directly in your code — trigger deploys, invalidate caches, sync to external services, or send notifications by composing your handler:
+React to content events with hooks passed to `createCMSHandler`. Hooks fire in the service layer after the operation completes — use them to trigger deploys, invalidate caches, or sync to external services.
 
 ```typescript
 import { createCMSHandler, type CmsEnv } from "agent-cms";
 
 export default {
-  async fetch(request: Request, env: CmsEnv) {
-    const response = await createCMSHandler(env).fetch(request);
-    // Example: trigger a Vercel deploy on publish
-    if (request.method === "POST" && new URL(request.url).pathname.includes("/publish")) {
-      await fetch(env.DEPLOY_HOOK_URL);
-    }
-    return response;
+  fetch(request: Request, env: CmsEnv) {
+    return createCMSHandler(env, {
+      hooks: {
+        onPublish: ({ modelApiKey, recordId }) => {
+          // Trigger a static site rebuild
+          return fetch(env.DEPLOY_HOOK_URL, { method: "POST" });
+        },
+        onRecordCreate: ({ modelApiKey, recordId }) => {
+          // Send a Slack notification, sync to analytics, etc.
+        },
+      },
+    }).fetch(request);
   },
 };
 ```
 
-This is simpler and more reliable than webhooks — no HTTP round-trips to yourself, no webhook table to manage, and full access to your env bindings.
+Available hooks: `onRecordCreate`, `onRecordUpdate`, `onRecordDelete`, `onPublish`, `onUnpublish`. All receive `{ modelApiKey, recordId }`. Hooks are fire-and-forget — errors are logged, not propagated to the caller.
 
 ## Stack
 

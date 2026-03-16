@@ -19,6 +19,7 @@ import { CreateRecordInput, PatchRecordInput } from "./input-schemas.js";
 import { getFieldTypeDef } from "../field-types.js";
 import { isFieldType } from "../types.js";
 import { StructuredTextWriteInput } from "../dast/schema.js";
+import { fireHook } from "../hooks.js";
 
 function getModelByApiKey(apiKey: string) {
   return Effect.gen(function* () {
@@ -172,6 +173,7 @@ export function createRecord(rawBody: unknown) {
 
     // Index for search
     yield* SearchService.indexRecord(body.modelApiKey, id, record, modelFields).pipe(Effect.ignore);
+    yield* fireHook("onRecordCreate", { modelApiKey: body.modelApiKey, recordId: id });
 
     return { id, ...record };
   });
@@ -311,6 +313,7 @@ export function patchRecord(id: string, rawBody: unknown) {
 
     yield* sqlUpdateRecord(tableName, id, updates);
     yield* SearchService.reindexRecord(body.modelApiKey, id, modelFields).pipe(Effect.ignore);
+    yield* fireHook("onRecordUpdate", { modelApiKey: body.modelApiKey, recordId: id });
     return yield* selectById(tableName, id);
   });
 }
@@ -339,6 +342,7 @@ export function removeRecord(modelApiKey: string, id: string) {
 
     yield* sqlDeleteRecord(tableName, id);
     yield* SearchService.deindexRecord(modelApiKey, id).pipe(Effect.ignore);
+    yield* fireHook("onRecordDelete", { modelApiKey, recordId: id });
     return { deleted: true };
   });
 }
@@ -480,6 +484,7 @@ export function bulkCreateRecords(rawBody: unknown) {
 
       yield* insertRecord(tableName, record);
       yield* SearchService.indexRecord(modelApiKey, id, record, modelFields).pipe(Effect.ignore);
+      yield* fireHook("onRecordCreate", { modelApiKey, recordId: id });
       created.push({ id });
     }
 

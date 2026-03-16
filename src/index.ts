@@ -3,6 +3,9 @@ import { D1Client } from "@effect/sql-d1";
 import { createWebHandler } from "./http/router.js";
 import { ensureSchema } from "./migrations.js";
 import type { AiBinding, VectorizeBinding } from "./search/vectorize.js";
+import type { CmsHooks } from "./hooks.js";
+
+export type { CmsHooks } from "./hooks.js";
 
 /** Cloudflare Worker environment bindings for agent-cms */
 export interface CmsEnv {
@@ -23,6 +26,11 @@ export interface CmsEnv {
   VECTORIZE?: VectorizeBinding;
 }
 
+export interface CmsHandlerOptions {
+  /** Lifecycle hooks fired on content events */
+  hooks?: CmsHooks;
+}
+
 /**
  * Create the agent-cms fetch handler.
  * Auto-migrates the D1 database on first request (fast no-op on subsequent requests).
@@ -36,7 +44,7 @@ export interface CmsEnv {
  * };
  * ```
  */
-export function createCMSHandler(env: CmsEnv) {
+export function createCMSHandler(env: CmsEnv, options?: CmsHandlerOptions) {
   const sqlLayer = D1Client.layer({ db: env.DB });
   const handler = createWebHandler(sqlLayer, {
     assetBaseUrl: env.ASSET_BASE_URL,
@@ -46,6 +54,7 @@ export function createCMSHandler(env: CmsEnv) {
     r2Bucket: env.ASSETS,
     ai: env.AI,
     vectorize: env.VECTORIZE,
+    hooks: options?.hooks,
   });
 
   // Auto-migrate: once per isolate (persists across requests in the same Worker instance)

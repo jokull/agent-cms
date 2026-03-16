@@ -6,6 +6,7 @@ import type { ModelRow, ContentRow, FieldRow } from "../db/row-types.js";
 import { parseFieldValidators } from "../db/row-types.js";
 import { computeIsValid } from "../db/validators.js";
 import { materializeRecordStructuredTextFields } from "./structured-text-service.js";
+import { fireHook } from "../hooks.js";
 
 export function publishRecord(modelApiKey: string, recordId: string) {
   return Effect.gen(function* () {
@@ -59,6 +60,7 @@ export function publishRecord(modelApiKey: string, recordId: string) {
       [now, now, JSON.stringify(snapshot), now, recordId]
     );
 
+    yield* fireHook("onPublish", { modelApiKey, recordId });
     return yield* selectById(tableName, recordId);
   });
 }
@@ -83,6 +85,7 @@ export function unpublishRecord(modelApiKey: string, recordId: string) {
       [now, recordId]
     );
 
+    yield* fireHook("onUnpublish", { modelApiKey, recordId });
     return yield* selectById(tableName, recordId);
   });
 }

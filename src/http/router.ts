@@ -20,6 +20,7 @@ import * as SchemaIO from "../services/schema-io.js";
 import * as SearchService from "../search/search-service.js";
 import type { AiBinding, VectorizeBinding } from "../search/vectorize.js";
 import { VectorizeContext } from "../search/vectorize-context.js";
+import { HooksContext, type CmsHooks } from "../hooks.js";
 
 /** Helper: run a CMS Effect and return an HTTP response */
 function handle<A>(
@@ -376,6 +377,8 @@ export interface WebHandlerOptions {
   ai?: AiBinding;
   /** Vectorize index binding (optional — enables semantic search) */
   vectorize?: VectorizeBinding;
+  /** Lifecycle hooks fired on content events */
+  hooks?: CmsHooks;
 }
 
 export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, options?: WebHandlerOptions) {
@@ -385,7 +388,11 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
       ? Option.some({ ai: options.ai, vectorize: options.vectorize })
       : Option.none()
   );
-  const fullLayer = Layer.merge(sqlLayer, vectorizeLayer);
+  const hooksLayer = Layer.succeed(
+    HooksContext,
+    options?.hooks ? Option.some(options.hooks) : Option.none()
+  );
+  const fullLayer = Layer.merge(Layer.merge(sqlLayer, vectorizeLayer), hooksLayer);
 
   const restApp = Effect.flatten(HttpRouter.toHttpApp(appRouter)).pipe(
     Effect.catchAll((error: unknown) => {

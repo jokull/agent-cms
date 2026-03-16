@@ -17,18 +17,20 @@ import * as SearchService from "../search/search-service.js";
 import { isCmsError } from "../errors.js";
 import type { ModelRow, FieldRow, LocaleRow } from "../db/row-types.js";
 import { VectorizeContext } from "../search/vectorize-context.js";
+import { HooksContext } from "../hooks.js";
 
-export function createMcpServer(sqlLayer: Layer.Layer<SqlClient.SqlClient | VectorizeContext>) {
-  // Ensure VectorizeContext is always available (defaults to Option.none())
+export function createMcpServer(sqlLayer: Layer.Layer<SqlClient.SqlClient | VectorizeContext | HooksContext>) {
+  // Ensure optional contexts are always available (defaults to Option.none())
   const defaultVectorizeLayer = Layer.succeed(VectorizeContext, Option.none());
-  const fullLayer = Layer.merge(defaultVectorizeLayer, sqlLayer);
+  const defaultHooksLayer = Layer.succeed(HooksContext, Option.none());
+  const fullLayer = Layer.merge(Layer.merge(defaultVectorizeLayer, defaultHooksLayer), sqlLayer);
 
   const server = new McpServer({
     name: "agent-cms",
     version: "0.1.0",
   });
 
-  function run<A>(effect: Effect.Effect<A, unknown, SqlClient.SqlClient | VectorizeContext>): Promise<{
+  function run<A>(effect: Effect.Effect<A, unknown, SqlClient.SqlClient | VectorizeContext | HooksContext>): Promise<{
     content: Array<{ type: "text"; text: string }>;
     isError?: boolean;
   }> {
