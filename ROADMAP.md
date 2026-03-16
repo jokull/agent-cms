@@ -62,7 +62,7 @@ See [DECISIONS.md](./DECISIONS.md) for the full canonical record of all product 
 | System tables | Drizzle 1.0 beta (static, typed) |
 | Dynamic tables | `@effect/sql` template literals (`@effect/sql-d1` prod, `@effect/sql-sqlite-node` test) |
 | GraphQL | Yoga + SDL `createSchema()` (consumer API) |
-| Hosting | Cloudflare Workers + D1 + R2 + KV |
+| Hosting | Cloudflare Workers + D1 + R2 |
 | Assets | R2 storage + Cloudflare Images transforms |
 | IDs | ULID via `ulidx` (time-sortable, 26 chars) |
 | Validation | `Schema` from `effect` package |
@@ -349,14 +349,17 @@ agent-cms is **not a standalone Worker** — it's a library + CLI that scaffolds
 - [ ] **Audit log** — system table tracking schema + content mutations
 - [ ] **Error messages with guidance** — suggest next action (e.g. "use `list_models`")
 
+### Scoped out
+
+- **Cache tags / CDN invalidation** — DatoCMS needs this because their API is centralized and every query crosses the internet. With D1 at the edge, queries are colocated and fast (single-digit ms). No CDN layer, no stale data problem, no invalidation protocol needed. Frontend frameworks (Next.js `revalidate`, SWR) handle their own caching. Webhooks on content changes (already implemented) let frontends trigger rebuilds. This entire class of complexity is eliminated by D1's architecture.
+- **Schema descriptor KV caching** — same rationale. D1 reads are fast enough; no need for a separate KV cache of the schema descriptor.
+- **Blurhash / dominant color extraction** — needs compute Cloudflare doesn't provide natively. Fields exist in schema as nullable for future use.
+
 ### Future (not prioritized)
 
 - [ ] GraphQL subscriptions for real-time updates
-- [ ] Schema descriptor KV caching for production cold starts
-- [ ] Blurhash / dominant color extraction *(scoped out — needs compute Cloudflare doesn't provide)*
 - [ ] Per-field locale argument (`title(locale: en)` override)
 - [ ] `_isValid` meta field on records
-- [ ] Cache tag webhook invalidation (Cloudflare KV)
 
 ---
 
@@ -391,7 +394,7 @@ MCP Tools → REST (Hono shell) → Effect pipelines → D1 (SQLite)
                                                                         ↓
                                                     Yoga (GraphQL Content Delivery API)
 
-Storage: R2 (assets) · KV (schema cache) · D1 (everything else)
+Storage: R2 (assets) · D1 (everything else) · No KV needed (D1 edge colocation eliminates caching layer)
 Tables:  system (Drizzle) + dynamic content_*/block_* (@effect/sql)
 Runtime: Effect (SQL, validation, DI, typed errors) + Hono (HTTP routing)
 Test:    @effect/sql-sqlite-node ":memory:" (same SqlClient interface as D1)
