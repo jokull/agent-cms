@@ -14,6 +14,7 @@ import { writeStructuredText, deleteBlocksForField } from "./structured-text-ser
 import type { ModelRow, FieldRow, ParsedFieldRow, ContentRow } from "../db/row-types.js";
 import { parseFieldValidators, isContentRow } from "../db/row-types.js";
 import { getSlugSource, getBlockWhitelist, getBlocksOnly, isRequired } from "../db/validators.js";
+import { fireWebhooks } from "./webhook-service.js";
 import { CreateRecordInput, PatchRecordInput } from "./input-schemas.js";
 import { StructuredTextWriteInput } from "../dast/schema.js";
 
@@ -135,6 +136,10 @@ export function createRecord(rawBody: unknown) {
     }
 
     yield* insertRecord(tableName, record);
+
+    // Fire webhook (non-blocking)
+    yield* fireWebhooks("record.create", { modelApiKey: body.modelApiKey, recordId: id });
+
     return { id, ...record };
   });
 }
@@ -220,6 +225,7 @@ export function patchRecord(id: string, rawBody: unknown) {
     }
 
     yield* sqlUpdateRecord(tableName, id, updates);
+    yield* fireWebhooks("record.update", { modelApiKey: body.modelApiKey, recordId: id });
     return yield* selectById(tableName, id);
   });
 }
@@ -236,6 +242,7 @@ export function removeRecord(modelApiKey: string, id: string) {
     if (!existing) return yield* new NotFoundError({ entity: "Record", id });
 
     yield* sqlDeleteRecord(tableName, id);
+    yield* fireWebhooks("record.delete", { modelApiKey, recordId: id });
     return { deleted: true };
   });
 }

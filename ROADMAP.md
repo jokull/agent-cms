@@ -225,7 +225,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 
 ### Future (not prioritized)
 
-- [ ] Webhooks on record/schema changes
+- [x] Webhooks on record/schema changes *(done — CRUD via MCP, fires on record create/update/delete/publish/unpublish, 5 tests)*
 - [ ] SEO composite field type
 - [ ] Tree/sortable models (position column, parent_id)
 - [ ] GraphQL subscriptions for real-time updates

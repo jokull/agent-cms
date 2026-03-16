@@ -3,6 +3,7 @@ import { SqlClient } from "@effect/sql";
 import { NotFoundError } from "../errors.js";
 import { selectById } from "../schema-engine/sql-records.js";
 import type { ModelRow, ContentRow } from "../db/row-types.js";
+import { fireWebhooks } from "./webhook-service.js";
 
 export function publishRecord(modelApiKey: string, recordId: string) {
   return Effect.gen(function* () {
@@ -32,6 +33,7 @@ export function publishRecord(modelApiKey: string, recordId: string) {
       [now, now, JSON.stringify(snapshot), now, recordId]
     );
 
+    yield* fireWebhooks("record.publish", { modelApiKey, recordId });
     return yield* selectById(tableName, recordId);
   });
 }
@@ -56,6 +58,7 @@ export function unpublishRecord(modelApiKey: string, recordId: string) {
       [now, recordId]
     );
 
+    yield* fireWebhooks("record.unpublish", { modelApiKey, recordId });
     return yield* selectById(tableName, recordId);
   });
 }
