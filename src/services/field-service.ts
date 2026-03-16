@@ -173,6 +173,44 @@ export function updateField(fieldId: string, body: Record<string, unknown>) {
     if (body.hint !== undefined) { sets.push("hint = ?"); values.push(body.hint); }
     if (body.appearance !== undefined) { sets.push("appearance = ?"); values.push(JSON.stringify(body.appearance)); }
 
+    // Handle api_key rename → rename the column + update block references
+    if (typeof body.apiKey === "string" && body.apiKey !== field.api_key) {
+      const newApiKey = body.apiKey;
+      if (!/^[a-z][a-z0-9_]*$/.test(newApiKey))
+        return yield* new ValidationError({ message: "apiKey must start with a lowercase letter and contain only lowercase letters, numbers, and underscores" });
+
+      // Check uniqueness within model
+      const conflict = yield* sql.unsafe<{ id: string }>(
+        "SELECT id FROM fields WHERE model_id = ? AND api_key = ? AND id != ?",
+        [field.model_id, newApiKey, fieldId]
+      );
+      if (conflict.length > 0)
+        return yield* new DuplicateError({ message: `Field with apiKey '${newApiKey}' already exists on this model` });
+
+      // Rename column in the dynamic table
+      const modelInfo = yield* sql.unsafe<{ api_key: string; is_block: number }>(
+        "SELECT api_key, is_block FROM models WHERE id = ?", [field.model_id]
+      );
+      if (modelInfo.length > 0) {
+        const tableName = modelInfo[0].is_block ? `block_${modelInfo[0].api_key}` : `content_${modelInfo[0].api_key}`;
+        yield* sql.unsafe(`ALTER TABLE "${tableName}" RENAME COLUMN "${field.api_key}" TO "${newApiKey}"`);
+      }
+
+      // Update _root_field_api_key in block tables if this was a ST field
+      if (field.field_type === "structured_text") {
+        const blockModels = yield* sql.unsafe<{ api_key: string }>("SELECT api_key FROM models WHERE is_block = 1");
+        for (const bm of blockModels) {
+          yield* sql.unsafe(
+            `UPDATE "block_${bm.api_key}" SET _root_field_api_key = ? WHERE _root_field_api_key = ?`,
+            [newApiKey, field.api_key]
+          );
+        }
+      }
+
+      sets.push("api_key = ?");
+      values.push(newApiKey);
+    }
+
     yield* sql.unsafe(`UPDATE fields SET ${sets.join(", ")} WHERE id = ?`, [...values, fieldId]);
 
     const updated = yield* sql.unsafe<FieldRow>("SELECT * FROM fields WHERE id = ?", [fieldId]);

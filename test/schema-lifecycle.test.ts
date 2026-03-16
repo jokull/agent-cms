@@ -99,6 +99,88 @@ describe("Schema Lifecycle", () => {
     });
   });
 
+  describe("P4.3: Model/field rename", () => {
+    it("renames a model api_key and its table", async () => {
+      const modelRes = await jsonRequest(handler, "POST", "/api/models", { name: "Post", apiKey: "post" });
+      const model = await modelRes.json();
+      await jsonRequest(handler, "POST", `/api/models/${model.id}/fields`, {
+        label: "Title", apiKey: "title", fieldType: "string",
+      });
+      await jsonRequest(handler, "POST", "/api/records", { modelApiKey: "post", data: { title: "Hello" } });
+
+      // Rename model
+      const renameRes = await jsonRequest(handler, "PATCH", `/api/models/${model.id}`, { apiKey: "article" });
+      expect(renameRes.status).toBe(200);
+      const renamed = await renameRes.json();
+      expect(renamed.api_key).toBe("article");
+
+      // Old model name should not work, new one should
+      const oldRes = await handler(new Request("http://localhost/api/records?modelApiKey=post"));
+      expect(oldRes.status).toBe(404);
+
+      const newRes = await handler(new Request("http://localhost/api/records?modelApiKey=article"));
+      expect(newRes.status).toBe(200);
+      const records = await newRes.json();
+      expect(records).toHaveLength(1);
+      expect(records[0].title).toBe("Hello");
+    });
+
+    it("renames a field api_key and its column", async () => {
+      const modelRes = await jsonRequest(handler, "POST", "/api/models", { name: "Post", apiKey: "post" });
+      const model = await modelRes.json();
+      const fieldRes = await jsonRequest(handler, "POST", `/api/models/${model.id}/fields`, {
+        label: "Title", apiKey: "title", fieldType: "string",
+      });
+      const field = await fieldRes.json();
+      await jsonRequest(handler, "POST", "/api/records", { modelApiKey: "post", data: { title: "Hello" } });
+
+      // Rename field
+      const renameRes = await jsonRequest(handler, "PATCH", `/api/models/${model.id}/fields/${field.id}`, {
+        apiKey: "headline",
+      });
+      expect(renameRes.status).toBe(200);
+      const renamed = await renameRes.json();
+      expect(renamed.api_key).toBe("headline");
+
+      // Data should still be accessible under new column name
+      const records = await Effect.runPromise(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          return yield* sql.unsafe<Record<string, any>>('SELECT * FROM "content_post"');
+        }).pipe(Effect.provide(sqlLayer))
+      );
+      expect(records[0].headline).toBe("Hello");
+    });
+
+    it("rejects rename to duplicate api_key", async () => {
+      const m1Res = await jsonRequest(handler, "POST", "/api/models", { name: "Post", apiKey: "post" });
+      await jsonRequest(handler, "POST", "/api/models", { name: "Article", apiKey: "article" });
+      const m1 = await m1Res.json();
+
+      const res = await jsonRequest(handler, "PATCH", `/api/models/${m1.id}`, { apiKey: "article" });
+      expect(res.status).toBe(409);
+    });
+
+    it("updates link field validators when model is renamed", async () => {
+      const authorRes = await jsonRequest(handler, "POST", "/api/models", { name: "Author", apiKey: "author" });
+      const author = await authorRes.json();
+      const postRes = await jsonRequest(handler, "POST", "/api/models", { name: "Post", apiKey: "post" });
+      const post = await postRes.json();
+      await jsonRequest(handler, "POST", `/api/models/${post.id}/fields`, {
+        label: "Author", apiKey: "author_link", fieldType: "link",
+        validators: { item_item_type: ["author"] },
+      });
+
+      // Rename author → writer
+      await jsonRequest(handler, "PATCH", `/api/models/${author.id}`, { apiKey: "writer" });
+
+      // Check that the post's link field validator was updated
+      const postDetail = await (await handler(new Request(`http://localhost/api/models/${post.id}`))).json();
+      const linkField = postDetail.fields.find((f: any) => f.api_key === "author_link");
+      expect(linkField.validators.item_item_type).toEqual(["writer"]);
+    });
+  });
+
   describe("P4.2: Required field with existing records", () => {
     it("rejects adding required field without default_value when records exist", async () => {
       const modelRes = await jsonRequest(handler, "POST", "/api/models", { name: "Post", apiKey: "post" });

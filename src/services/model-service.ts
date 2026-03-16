@@ -94,6 +94,7 @@ export function updateModel(id: string, body: Record<string, unknown>) {
     const existing = yield* sql.unsafe<ModelRow>("SELECT * FROM models WHERE id = ?", [id]);
     if (existing.length === 0) return yield* new NotFoundError({ entity: "Model", id });
 
+    const model = existing[0];
     const now = new Date().toISOString();
     const sets: string[] = ["updated_at = ?"];
     const values: unknown[] = [now];
@@ -102,6 +103,48 @@ export function updateModel(id: string, body: Record<string, unknown>) {
     if (body.singleton !== undefined) { sets.push("singleton = ?"); values.push(body.singleton ? 1 : 0); }
     if (body.sortable !== undefined) { sets.push("sortable = ?"); values.push(body.sortable ? 1 : 0); }
     if (body.hasDraft !== undefined) { sets.push("has_draft = ?"); values.push(body.hasDraft ? 1 : 0); }
+
+    // Handle api_key rename → rename the dynamic table
+    if (typeof body.apiKey === "string" && body.apiKey !== model.api_key) {
+      const newApiKey = body.apiKey;
+      if (!/^[a-z][a-z0-9_]*$/.test(newApiKey))
+        return yield* new ValidationError({ message: "apiKey must start with a lowercase letter and contain only lowercase letters, numbers, and underscores" });
+
+      // Check for conflicts
+      const conflict = yield* sql.unsafe<{ id: string }>("SELECT id FROM models WHERE api_key = ? AND id != ?", [newApiKey, id]);
+      if (conflict.length > 0)
+        return yield* new DuplicateError({ message: `Model with apiKey '${newApiKey}' already exists` });
+
+      const oldPrefix = model.is_block ? "block_" : "content_";
+      const oldTableName = `${oldPrefix}${model.api_key}`;
+      const newTableName = `${oldPrefix}${newApiKey}`;
+
+      // Rename the table
+      yield* sql.unsafe(`ALTER TABLE "${oldTableName}" RENAME TO "${newTableName}"`);
+
+      // Update _root_field_api_key won't change since that tracks the field, not the model
+      // But we need to update validators in other models that reference this model by api_key
+      const allFields = yield* sql.unsafe<FieldRow>("SELECT * FROM fields WHERE field_type IN ('link', 'links')");
+      for (const f of allFields) {
+        const validators = JSON.parse(f.validators || "{}");
+        let changed = false;
+        for (const key of ["item_item_type", "items_item_type"]) {
+          if (Array.isArray(validators[key])) {
+            const idx = validators[key].indexOf(model.api_key);
+            if (idx !== -1) {
+              validators[key][idx] = newApiKey;
+              changed = true;
+            }
+          }
+        }
+        if (changed) {
+          yield* sql.unsafe("UPDATE fields SET validators = ? WHERE id = ?", [JSON.stringify(validators), f.id]);
+        }
+      }
+
+      sets.push("api_key = ?");
+      values.push(newApiKey);
+    }
 
     yield* sql.unsafe(`UPDATE models SET ${sets.join(", ")} WHERE id = ?`, [...values, id]);
 
