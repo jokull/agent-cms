@@ -164,8 +164,11 @@ export function deleteModel(id: string) {
 
     const model = models[0];
 
+    // Check for references before deletion
+    const allFields = yield* sql.unsafe<FieldRow>("SELECT * FROM fields");
+
     if (!model.is_block) {
-      const allFields = yield* sql.unsafe<FieldRow>("SELECT * FROM fields");
+      // Content models: check link/links references
       const referencingFields = allFields.filter((f) => {
         if (f.field_type !== "link" && f.field_type !== "links") return false;
         if (f.model_id === id) return false;
@@ -185,6 +188,29 @@ export function deleteModel(id: string) {
         }
         return yield* new ReferenceConflictError({
           message: `Cannot delete model '${model.api_key}': referenced by fields: ${refs.join(", ")}`,
+          references: refs,
+        });
+      }
+    } else {
+      // Block models: check structured_text field whitelists
+      const referencingFields = allFields.filter((f) => {
+        if (f.field_type !== "structured_text") return false;
+        const validators = JSON.parse(f.validators || "{}");
+        const whitelist = validators?.block_whitelist;
+        return Array.isArray(whitelist) && whitelist.includes(model.api_key);
+      });
+
+      if (referencingFields.length > 0) {
+        const refs: string[] = [];
+        for (const f of referencingFields) {
+          const refModels = yield* sql.unsafe<{ api_key: string }>(
+            "SELECT api_key FROM models WHERE id = ?",
+            [f.model_id]
+          );
+          refs.push(`${refModels[0]?.api_key ?? "unknown"}.${f.api_key}`);
+        }
+        return yield* new ReferenceConflictError({
+          message: `Cannot delete block type '${model.api_key}': referenced by structured_text fields: ${refs.join(", ")}. Use remove_block_type to clean up DAST references first.`,
           references: refs,
         });
       }

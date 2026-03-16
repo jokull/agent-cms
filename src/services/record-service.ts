@@ -74,11 +74,14 @@ export function createRecord(rawBody: unknown) {
     const now = new Date().toISOString();
     const id = ulid();
     const sql = yield* SqlClient.SqlClient;
+    // Models with hasDraft=false skip draft state, publish immediately
+    const initialStatus = model.has_draft ? "draft" : "published";
     const record: Record<string, unknown> = {
       id,
-      _status: "draft",
+      _status: initialStatus,
       _created_at: now,
       _updated_at: now,
+      ...(!model.has_draft ? { _published_at: now, _first_published_at: now } : {}),
     };
 
     // Sortable/tree models: auto-assign _position

@@ -126,9 +126,9 @@ export function removeBlockFromWhitelist(params: {
 
     const tableName = model[0].is_block ? `block_${model[0].api_key}` : `content_${model[0].api_key}`;
 
-    // Find block IDs of this type for records of this model/field
+    // Find block IDs of this type for records of this model/field (scoped to this model's records)
     const blockIds = yield* sql.unsafe<{ id: string }>(
-      `SELECT id FROM "block_${blockApiKey}" WHERE _root_field_api_key = ?`,
+      `SELECT id FROM "block_${blockApiKey}" WHERE _root_field_api_key = ? AND _root_record_id IN (SELECT id FROM "${tableName}")`,
       [field.api_key]
     );
     const blockIdSet = new Set(blockIds.map((b) => b.id));
@@ -152,9 +152,9 @@ export function removeBlockFromWhitelist(params: {
         cleanedRecords++;
       }
 
-      // Delete the block rows
+      // Delete the block rows (scoped to this model's records)
       yield* sql.unsafe(
-        `DELETE FROM "block_${blockApiKey}" WHERE _root_field_api_key = ?`,
+        `DELETE FROM "block_${blockApiKey}" WHERE _root_field_api_key = ? AND _root_record_id IN (SELECT id FROM "${tableName}")`,
         [field.api_key]
       );
     }

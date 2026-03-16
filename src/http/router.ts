@@ -286,7 +286,14 @@ export interface WebHandlerOptions {
 
 export function createWebHandler(sqlLayer: any, options?: WebHandlerOptions) {
   const restApp = Effect.flatten(HttpRouter.toHttpApp(appRouter)).pipe(
-    Effect.catchAll(() => HttpServerResponse.json({ error: "Not found" }, { status: 404 })),
+    Effect.catchAll((error: unknown) => {
+      // RouteNotFound → 404, everything else → 500 with details
+      if (error && typeof error === "object" && "_tag" in error && (error as Record<string, unknown>)._tag === "RouteNotFound") {
+        return HttpServerResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      console.error("REST handler error:", error);
+      return HttpServerResponse.json({ error: "Internal server error" }, { status: 500 });
+    }),
     Effect.provide(sqlLayer)
   );
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Effect/platform router type variance

@@ -3,6 +3,7 @@ import { SqlClient } from "@effect/sql";
 import { ulid } from "ulidx";
 import { NotFoundError, ValidationError, DuplicateError } from "../errors.js";
 import type { LocaleRow } from "../db/row-types.js";
+import { removeLocale as removeLocaleWithCleanup } from "./schema-lifecycle.js";
 import { CreateLocaleInput } from "./input-schemas.js";
 
 export function listLocales() {
@@ -38,11 +39,7 @@ export function createLocale(rawBody: unknown) {
 }
 
 export function deleteLocale(id: string) {
-  return Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    const rows = yield* sql.unsafe<{ id: string }>("SELECT id FROM locales WHERE id = ?", [id]);
-    if (rows.length === 0) return yield* new NotFoundError({ entity: "Locale", id });
-    yield* sql.unsafe("DELETE FROM locales WHERE id = ?", [id]);
-    return { deleted: true };
-  });
+  // Delegate to schema-lifecycle which strips locale keys from all
+  // localized field values before deleting the locale row
+  return removeLocaleWithCleanup(id);
 }

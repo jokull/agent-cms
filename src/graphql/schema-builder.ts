@@ -744,10 +744,20 @@ export function buildGraphQLSchema(sqlLayer: any, options?: SchemaBuilderOptions
 
       // Query resolvers — push filtering/ordering/pagination to SQL
       // Support includeDrafts via context (from X-Include-Drafts header)
+      // Build locale-awareness for filter/order compilation
+      const fieldIsLocalized = (fieldName: string) => localizedFieldKeys.has(fieldName);
+
       async function queryWithFilter(
         args: { filter?: any; orderBy?: string[]; first?: number; skip?: number },
-        includeDrafts: boolean
+        includeDrafts: boolean,
+        locale?: string
       ) {
+        const filterLocale = locale ?? defaultLocale ?? undefined;
+        const filterOpts = {
+          fieldIsLocalized,
+          locale: filterLocale,
+        };
+
         return await runSql(
           Effect.gen(function* () {
             const s = yield* SqlClient.SqlClient;
@@ -761,8 +771,8 @@ export function buildGraphQLSchema(sqlLayer: any, options?: SchemaBuilderOptions
               conditions.push(`"_status" IN ('published', 'updated')`);
             }
 
-            // Compile user filter to SQL WHERE clause
-            const compiled = compileFilterToSql(args.filter);
+            // Compile user filter to SQL WHERE clause (locale-aware for localized fields)
+            const compiled = compileFilterToSql(args.filter, filterOpts);
             if (compiled) {
               conditions.push(compiled.where);
               params = compiled.params;
@@ -772,7 +782,7 @@ export function buildGraphQLSchema(sqlLayer: any, options?: SchemaBuilderOptions
               query += ` WHERE ${conditions.join(" AND ")}`;
             }
 
-            const orderBy = compileOrderBy(args.orderBy);
+            const orderBy = compileOrderBy(args.orderBy, filterOpts);
             if (orderBy) {
               query += ` ORDER BY ${orderBy}`;
             }
@@ -833,14 +843,16 @@ export function buildGraphQLSchema(sqlLayer: any, options?: SchemaBuilderOptions
 
       resolvers.Query[listName] = (_: any, args: any, context: any) => {
         const includeDrafts = context?.includeDrafts ?? false;
-        // Pass locale info to nested field resolvers via context mutation
+        const locale = args.locale ?? context?.locale ?? defaultLocale;
+        // Store locale for nested field resolvers (per-query, not shared across root fields)
         if (args.locale) context.locale = args.locale;
         if (args.fallbackLocales) context.fallbackLocales = args.fallbackLocales;
-        return queryWithFilter(args, includeDrafts);
+        return queryWithFilter(args, includeDrafts, locale);
       };
 
       resolvers.Query[model.api_key] = async (_: any, args: any, context: any) => {
         const includeDrafts = context?.includeDrafts ?? false;
+        const locale = args.locale ?? context?.locale ?? defaultLocale;
         if (args.locale) context.locale = args.locale;
         if (args.fallbackLocales) context.fallbackLocales = args.fallbackLocales;
         if (args.id) {
@@ -866,12 +878,12 @@ export function buildGraphQLSchema(sqlLayer: any, options?: SchemaBuilderOptions
           );
         }
         if (args.filter) {
-          const records = await queryWithFilter({ filter: args.filter, first: 1 }, includeDrafts);
+          const records = await queryWithFilter({ filter: args.filter, first: 1 }, includeDrafts, locale);
           return records[0] ?? null;
         }
         // Singleton models: return the single record without arguments
         if (model.singleton) {
-          const records = await queryWithFilter({ first: 1 }, includeDrafts);
+          const records = await queryWithFilter({ first: 1 }, includeDrafts, locale);
           return records[0] ?? null;
         }
         return null;

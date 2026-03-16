@@ -1,6 +1,6 @@
 # Code Review
 
-Automated review via OpenAI Codex (gpt-5.4), 2026-03-16.
+Automated review via OpenAI Codex (gpt-5.4), 2026-03-16. **All 8 findings fixed.**
 
 ## P1 — Must fix
 
