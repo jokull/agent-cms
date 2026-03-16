@@ -6,6 +6,8 @@ import type { ModelRow, FieldRow, AssetRow } from "../db/row-types.js";
 import { getLinkTargets, getLinksTargets } from "../db/validators.js";
 import { parseFieldValidators } from "../db/row-types.js";
 import { compileFilterToSql, compileOrderBy } from "./filter-compiler.js";
+import { FIELD_TYPE_REGISTRY, type FieldTypeDefinition } from "../field-types.js";
+import { isFieldType } from "../types.js";
 
 function toTypeName(apiKey: string): string {
   return apiKey.charAt(0).toUpperCase() +
@@ -17,43 +19,26 @@ function fieldToSDL(
   validators: Record<string, unknown>,
   typeNames: Map<string, string>
 ): string {
-  switch (fieldType) {
-    case "string": case "text": case "slug": return "String";
-    case "media": return "Asset";
-    case "boolean": return "Boolean";
-    case "integer": return "Int";
-    case "link": {
-      const targets = getLinkTargets(validators);
-      if (targets?.length === 1 && typeNames.has(targets[0])) return typeNames.get(targets[0])!;
-      return "JSON";
-    }
-    case "links": {
-      const targets = getLinksTargets(validators);
-      if (targets?.length === 1 && typeNames.has(targets[0])) return `[${typeNames.get(targets[0])!}!]`;
-      return "JSON";
-    }
-    case "media_gallery": return "[Asset!]";
-    case "structured_text": return "StructuredText";
-    case "seo": return "SeoField";
-    case "json": return "JSON";
-    case "float": return "Float";
-    case "date": return "String";
-    case "date_time": return "String";
-    case "color": return "ColorField";
-    case "lat_lon": return "LatLonField";
-    default: return "String";
+  // Link/links depend on validators for their GraphQL type
+  if (fieldType === "link") {
+    const targets = getLinkTargets(validators);
+    if (targets?.length === 1 && typeNames.has(targets[0])) return typeNames.get(targets[0])!;
+    return "JSON";
   }
+  if (fieldType === "links") {
+    const targets = getLinksTargets(validators);
+    if (targets?.length === 1 && typeNames.has(targets[0])) return `[${typeNames.get(targets[0])!}!]`;
+    return "JSON";
+  }
+  // All other field types: look up from registry
+  if (isFieldType(fieldType)) {
+    return FIELD_TYPE_REGISTRY[fieldType].graphqlType ?? "String";
+  }
+  return "String";
 }
 
-function filterInputType(fieldType: string): string {
-  switch (fieldType) {
-    case "string": case "text": case "slug": case "media": case "link": return "StringFilter";
-    case "date": case "date_time": return "StringFilter";
-    case "boolean": return "BooleanFilter";
-    case "integer": return "IntFilter";
-    case "float": return "FloatFilter";
-    default: return "StringFilter";
-  }
+function getRegistryDef(fieldType: string): FieldTypeDefinition | null {
+  return isFieldType(fieldType) ? FIELD_TYPE_REGISTRY[fieldType] : null;
 }
 
 function applyFilters(records: any[], filter: any): any[] {
@@ -281,10 +266,8 @@ export function buildGraphQLSchema(sqlLayer: any) {
         if (!f.localized) continue;
         const camelKey = f.api_key.charAt(0).toUpperCase() +
           f.api_key.slice(1).replace(/_([a-z])/g, (_: string, c: string) => c.toUpperCase());
-        const multiLocaleType = f.field_type === "integer" ? "IntMultiLocaleField"
-          : f.field_type === "float" ? "FloatMultiLocaleField"
-          : f.field_type === "boolean" ? "BooleanMultiLocaleField"
-          : "StringMultiLocaleField";
+        const mlDef = getRegistryDef(f.field_type);
+        const multiLocaleType = mlDef?.multiLocaleType ?? "StringMultiLocaleField";
         fieldDefs.push(`_all${camelKey}Locales: [${multiLocaleType}!]!`);
       }
 
@@ -447,7 +430,8 @@ export function buildGraphQLSchema(sqlLayer: any) {
 
       // Localized field resolvers: extract value for requested locale
       for (const f of fields) {
-        if (f.localized && !["link", "links", "media", "media_gallery", "structured_text", "seo", "json", "color", "lat_lon"].includes(f.field_type)) {
+        const locDef = getRegistryDef(f.field_type);
+        if (f.localized && locDef?.localizable) {
           typeResolvers[f.api_key] = (parent: any, _args: any, context: any) => {
             const rawValue = parent[f.api_key];
             if (rawValue === null || rawValue === undefined) return null;
@@ -716,8 +700,9 @@ export function buildGraphQLSchema(sqlLayer: any) {
         orderByValues.push("_position_ASC", "_position_DESC");
       }
       for (const f of fields) {
-        if (!["structured_text", "media_gallery", "links", "seo", "json", "color", "lat_lon"].includes(f.field_type)) {
-          filterFields.push(`${f.api_key}: ${filterInputType(f.field_type)}`);
+        const def = getRegistryDef(f.field_type);
+        if (def?.filterType) {
+          filterFields.push(`${f.api_key}: ${def.filterType}`);
           orderByValues.push(`${f.api_key}_ASC`, `${f.api_key}_DESC`);
         }
       }

@@ -67,21 +67,7 @@ export const CreateAssetInput = Schema.Struct({
 });
 export type CreateAssetInput = typeof CreateAssetInput.Type;
 
-/** Color field value: {red, green, blue, alpha?} with 0-255 range */
-export const ColorInput = Schema.Struct({
-  red: Schema.Number.pipe(Schema.int(), Schema.between(0, 255)),
-  green: Schema.Number.pipe(Schema.int(), Schema.between(0, 255)),
-  blue: Schema.Number.pipe(Schema.int(), Schema.between(0, 255)),
-  alpha: Schema.optional(Schema.Number.pipe(Schema.int(), Schema.between(0, 255))),
-});
-export type ColorInput = typeof ColorInput.Type;
-
-/** Geolocation field value: {latitude, longitude} */
-export const LatLonInput = Schema.Struct({
-  latitude: Schema.Number.pipe(Schema.between(-90, 90)),
-  longitude: Schema.Number.pipe(Schema.between(-180, 180)),
-});
-export type LatLonInput = typeof LatLonInput.Type;
+// ColorInput and LatLonInput schemas moved to src/field-types.ts (field type registry)
 
 export const CreateLocaleInput = Schema.Struct({
   code: Schema.NonEmptyString,

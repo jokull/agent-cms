@@ -1,37 +1,11 @@
 import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
 import type { FieldType } from "../types.js";
+import { getFieldTypeDef } from "../field-types.js";
 
 /** Map CMS field type to SQLite column type */
 function fieldTypeToSQLite(fieldType: FieldType): string {
-  switch (fieldType) {
-    case "string":
-    case "text":
-    case "slug":
-    case "media":
-    case "link":
-      return "TEXT";
-    case "boolean":
-    case "integer":
-      return "INTEGER";
-    case "media_gallery":
-    case "links":
-    case "structured_text":
-    case "seo":
-    case "json":
-    case "color":
-    case "lat_lon":
-      return "TEXT"; // JSON stored as TEXT
-    case "float":
-      return "REAL";
-    case "date":
-    case "date_time":
-      return "TEXT";
-    default: {
-      const _exhaustive: never = fieldType;
-      throw new Error(`Unknown field type: ${_exhaustive}`);
-    }
-  }
+  return getFieldTypeDef(fieldType).sqliteType;
 }
 
 /** System columns for content tables */
