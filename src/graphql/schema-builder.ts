@@ -155,6 +155,21 @@ export function buildGraphQLSchema(sqlLayer: any) {
         alt: String
         title: String
         url: String!
+        responsiveImage: ResponsiveImage
+      }
+      type ResponsiveImage {
+        src: String!
+        srcSet: String!
+        width: Int!
+        height: Int!
+        alt: String
+        title: String
+        base64: String
+        bgColor: String
+        sizes: String
+      }
+      type SiteInfo {
+        locales: [String!]!
       }
     `);
     typeDefs.push(`
@@ -544,6 +559,44 @@ export function buildGraphQLSchema(sqlLayer: any) {
         return { count: countWithFilter(args.filter, includeDrafts) };
       };
     }
+
+    // _site query — DatoCMS-compatible site info
+    queryFieldDefs.push("_site: SiteInfo!");
+    resolvers.Query._site = () => ({
+      locales: locales.map((l) => l.code),
+    });
+
+    // Asset.responsiveImage resolver
+    resolvers.Asset = {
+      responsiveImage: (asset: any) => {
+        if (!asset.width || !asset.height) return null;
+        const w = asset.width;
+        const h = asset.height;
+        const url = asset.url;
+        const aspect = w / h;
+
+        // Generate srcSet at common widths
+        const widths = [100, 200, 400, 600, 800, 1200, 1600].filter((sw) => sw <= w);
+        if (!widths.includes(w)) widths.push(w);
+        widths.sort((a, b) => a - b);
+
+        const srcSet = widths
+          .map((sw) => `${url}?w=${sw} ${sw}w`)
+          .join(", ");
+
+        return {
+          src: url,
+          srcSet,
+          width: w,
+          height: h,
+          alt: asset.alt ?? null,
+          title: asset.title ?? null,
+          base64: null, // Would need compute at upload time
+          bgColor: null,
+          sizes: `(max-width: ${w}px) 100vw, ${w}px`,
+        };
+      },
+    };
 
     if (queryFieldDefs.length === 0) {
       queryFieldDefs.push("_empty: String");

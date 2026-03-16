@@ -197,7 +197,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 - [x] **P2.1** Asset REST CRUD *(done — 10 tests)*
 - [x] **P2.2** `media` field GraphQL resolution *(done — resolves to Asset object, 4 tests)*
 - [x] **P2.3** `media_gallery` field GraphQL resolution *(done — resolves to [Asset!], included in P2.2 tests)*
-- [ ] **P2.4** Responsive image metadata in GraphQL: `responsiveImage` field on media assets returning `src`, `srcSet`, `width`, `height`, `alt`. For local dev, generate basic srcSet from stored dimensions. Cloudflare Images integration is deployment-time only.
+- [x] **P2.4** responsiveImage + _site query *(done — srcSet generation, _site { locales }, 4 tests)*
 
 ### Phase 3: Localization
 
