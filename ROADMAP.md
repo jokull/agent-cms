@@ -227,7 +227,7 @@ Items are in dependency order. Pick from the top. Each item should be completabl
 
 - [x] Webhooks on record/schema changes *(done — CRUD via MCP, fires on record create/update/delete/publish/unpublish, 5 tests)*
 - [x] SEO composite field type *(done — `seo` field stores {title, description, image, twitterCard} as JSON, image resolves to Asset in GraphQL, 5 tests)*
-- [ ] Tree/sortable models (position column, parent_id)
+- [x] Tree/sortable models *(done — _position auto-increment, _parent_id for tree hierarchy, _parent/_children GraphQL resolvers, reorder_records MCP tool + REST endpoint, 6 tests)*
 - [ ] GraphQL subscriptions for real-time updates
 - [ ] Schema descriptor KV caching for production cold starts
 - [ ] Cloudflare Images integration (production only, not local dev)

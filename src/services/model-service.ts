@@ -75,7 +75,10 @@ export function createModel(rawBody: unknown) {
       ]
     );
 
-    yield* migrateContentTable(body.apiKey, body.isBlock, []);
+    yield* migrateContentTable(body.apiKey, body.isBlock, [], {
+      sortable: body.sortable,
+      tree: body.tree,
+    });
 
     return {
       id, name: body.name, apiKey: body.apiKey,

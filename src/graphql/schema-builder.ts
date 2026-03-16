@@ -212,6 +212,14 @@ export function buildGraphQLSchema(sqlLayer: any) {
         "id: ID!", "_status: String", "_createdAt: String", "_updatedAt: String",
         "_publishedAt: String", "_firstPublishedAt: String",
       ];
+      if (model.sortable || model.tree) {
+        fieldDefs.push("_position: Int");
+      }
+      if (model.tree) {
+        fieldDefs.push(`_parent: ${typeName}`);
+        fieldDefs.push("_parentId: ID");
+        fieldDefs.push(`_children: [${typeName}!]!`);
+      }
       for (const f of fields) {
         fieldDefs.push(`${f.api_key}: ${fieldToSDL(f.field_type, f.validators, typeNames)}`);
       }
@@ -224,6 +232,36 @@ export function buildGraphQLSchema(sqlLayer: any) {
       typeResolvers._updatedAt = (p: any) => p._updated_at;
       typeResolvers._publishedAt = (p: any) => p._published_at;
       typeResolvers._firstPublishedAt = (p: any) => p._first_published_at;
+      if (model.sortable || model.tree) {
+        typeResolvers._position = (p: any) => p._position ?? 0;
+      }
+      if (model.tree) {
+        typeResolvers._parentId = (p: any) => p._parent_id ?? null;
+        typeResolvers._parent = (parent: any) => {
+          const parentId = parent._parent_id;
+          if (!parentId) return null;
+          return runSql(
+            Effect.gen(function* () {
+              const s = yield* SqlClient.SqlClient;
+              const rows = yield* s.unsafe<Record<string, any>>(
+                `SELECT * FROM "${tableName}" WHERE id = ?`, [parentId]
+              );
+              return rows.length > 0 ? deserializeRecord(rows[0]) : null;
+            })
+          );
+        };
+        typeResolvers._children = (parent: any) => {
+          return runSql(
+            Effect.gen(function* () {
+              const s = yield* SqlClient.SqlClient;
+              const rows = yield* s.unsafe<Record<string, any>>(
+                `SELECT * FROM "${tableName}" WHERE "_parent_id" = ? ORDER BY "_position" ASC`, [parent.id]
+              );
+              return rows.map(deserializeRecord);
+            })
+          );
+        };
+      }
 
       // Track localized fields for this model
       const localizedFieldKeys = new Set<string>();
@@ -426,6 +464,9 @@ export function buildGraphQLSchema(sqlLayer: any) {
       // Filter/OrderBy/Meta types
       const filterFields = ["id: StringFilter", "_status: StringFilter"];
       const orderByValues = ["_createdAt_ASC", "_createdAt_DESC", "_updatedAt_ASC", "_updatedAt_DESC"];
+      if (model.sortable || model.tree) {
+        orderByValues.push("_position_ASC", "_position_DESC");
+      }
       for (const f of fields) {
         if (!["structured_text", "media_gallery", "links", "seo"].includes(f.field_type)) {
           filterFields.push(`${f.api_key}: ${filterInputType(f.field_type)}`);

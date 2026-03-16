@@ -208,6 +208,16 @@ const recordsRouter = HttpRouter.empty.pipe(
       const modelApiKey = yield* queryParam("modelApiKey");
       return yield* handle(PublishService.unpublishRecord(modelApiKey, params.id));
     })
+  ),
+
+  // Reorder
+  HttpRouter.post(
+    "/reorder",
+    Effect.gen(function* () {
+      const req = yield* HttpServerRequest.HttpServerRequest;
+      const body = yield* req.json as any;
+      return yield* handle(RecordService.reorderRecords(body.modelApiKey, body.recordIds));
+    })
   )
 );
 

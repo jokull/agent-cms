@@ -71,12 +71,27 @@ export function createRecord(rawBody: unknown) {
 
     const now = new Date().toISOString();
     const id = ulid();
+    const sql = yield* SqlClient.SqlClient;
     const record: Record<string, unknown> = {
       id,
       _status: "draft",
       _created_at: now,
       _updated_at: now,
     };
+
+    // Sortable/tree models: auto-assign _position
+    if (model.sortable || model.tree) {
+      const maxPos = yield* sql.unsafe<{ max_pos: number | null }>(
+        `SELECT MAX("_position") as max_pos FROM "${tableName}"`
+      );
+      record._position = (maxPos[0]?.max_pos ?? -1) + 1;
+    }
+
+    // Tree models: accept _parent_id
+    if (model.tree && data._parent_id !== undefined) {
+      record._parent_id = data._parent_id;
+      delete data._parent_id;
+    }
 
     // Process fields
     for (const field of modelFields) {
@@ -116,7 +131,6 @@ export function createRecord(rawBody: unknown) {
           let slug = String(data[field.api_key]);
           const baseSlug = slug;
           let suffix = 1;
-          const sql = yield* SqlClient.SqlClient;
           while (true) {
             const existing = yield* sql.unsafe<{ id: string }>(
               `SELECT id FROM "${tableName}" WHERE "${field.api_key}" = ?`,
@@ -187,6 +201,18 @@ export function patchRecord(id: string, rawBody: unknown) {
     }
 
     const data: Record<string, unknown> = { ...(body.data ?? {}) };
+
+    // Tree models: accept _parent_id update
+    if (model.tree && data._parent_id !== undefined) {
+      updates._parent_id = data._parent_id;
+      delete data._parent_id;
+    }
+    // Sortable/tree models: accept _position update
+    if ((model.sortable || model.tree) && data._position !== undefined) {
+      updates._position = data._position;
+      delete data._position;
+    }
+
     for (const field of modelFields) {
       // StructuredText update: delete old blocks, write new ones
       if (field.field_type === "structured_text" && data[field.api_key] !== undefined) {
@@ -247,4 +273,27 @@ export function removeRecord(modelApiKey: string, id: string) {
   });
 }
 
-// Input schemas imported from ./input-schemas.ts and ../dast/schema.ts
+/**
+ * Reorder records for a sortable/tree model.
+ * Accepts an ordered array of record IDs — sets _position = index.
+ */
+export function reorderRecords(modelApiKey: string, recordIds: string[]) {
+  return Effect.gen(function* () {
+    const model = yield* getModelByApiKey(modelApiKey);
+    if (!model) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
+    if (!model.sortable && !model.tree)
+      return yield* new ValidationError({ message: `Model '${modelApiKey}' is not sortable` });
+
+    const sql = yield* SqlClient.SqlClient;
+    const tableName = `content_${model.api_key}`;
+
+    for (let i = 0; i < recordIds.length; i++) {
+      yield* sql.unsafe(
+        `UPDATE "${tableName}" SET "_position" = ? WHERE id = ?`,
+        [i, recordIds[i]]
+      );
+    }
+
+    return { reordered: recordIds.length };
+  });
+}

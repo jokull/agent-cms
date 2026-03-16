@@ -151,6 +151,14 @@ export function createMcpServer(sqlLayer: Layer.Layer<SqlClient.SqlClient>) {
     async ({ recordId, modelApiKey }) => run(PublishService.unpublishRecord(modelApiKey, recordId))
   );
 
+  server.tool("reorder_records", "Reorder records in a sortable/tree model by providing ordered record IDs",
+    {
+      modelApiKey: z.string(),
+      recordIds: z.array(z.string()).describe("Ordered array of record IDs — position = array index"),
+    },
+    async ({ modelApiKey, recordIds }) => run(RecordService.reorderRecords(modelApiKey, recordIds))
+  );
+
   // --- Schema Lifecycle ---
 
   server.tool("remove_block_type", "Remove a block type: cleans DAST trees, deletes blocks, drops table",

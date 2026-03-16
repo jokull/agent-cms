@@ -49,17 +49,29 @@ interface FieldDef {
   fieldType: FieldType;
 }
 
+interface CreateContentTableOptions {
+  sortable?: boolean;
+  tree?: boolean;
+}
+
 /**
  * Create a content table for a model using @effect/sql.
  */
-export function createContentTable(modelApiKey: string, fields: FieldDef[]) {
+export function createContentTable(modelApiKey: string, fields: FieldDef[], options?: CreateContentTableOptions) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const tableName = `content_${modelApiKey}`;
     const fieldCols = fields.map(
       (f) => `"${f.apiKey}" ${fieldTypeToSQLite(f.fieldType)}`
     );
-    const allCols = [...CONTENT_SYSTEM_COLUMNS, ...fieldCols].join(", ");
+    const systemCols = [...CONTENT_SYSTEM_COLUMNS];
+    if (options?.sortable || options?.tree) {
+      systemCols.push(`"_position" INTEGER NOT NULL DEFAULT 0`);
+    }
+    if (options?.tree) {
+      systemCols.push(`"_parent_id" TEXT`);
+    }
+    const allCols = [...systemCols, ...fieldCols].join(", ");
     yield* sql.unsafe(`CREATE TABLE IF NOT EXISTS "${tableName}" (${allCols})`);
     return tableName;
   });
@@ -144,7 +156,8 @@ export function getTableColumns(tableName: string) {
 export function migrateContentTable(
   modelApiKey: string,
   isBlock: boolean,
-  fields: FieldDef[]
+  fields: FieldDef[],
+  options?: CreateContentTableOptions
 ) {
   return Effect.gen(function* () {
     const tableName = isBlock ? `block_${modelApiKey}` : `content_${modelApiKey}`;
@@ -154,7 +167,7 @@ export function migrateContentTable(
       if (isBlock) {
         yield* createBlockTable(modelApiKey, fields);
       } else {
-        yield* createContentTable(modelApiKey, fields);
+        yield* createContentTable(modelApiKey, fields, options);
       }
       return { created: true, columnsAdded: [] as string[], columnsDropped: [] as string[] };
     }
@@ -165,7 +178,7 @@ export function migrateContentTable(
 
     const systemColNames = isBlock
       ? new Set(["id", "_root_record_id", "_root_field_api_key"])
-      : new Set(["id", "_status", "_published_at", "_first_published_at", "_published_snapshot", "_created_at", "_updated_at"]);
+      : new Set(["id", "_status", "_published_at", "_first_published_at", "_published_snapshot", "_created_at", "_updated_at", "_position", "_parent_id"]);
 
     const desiredFieldNames = new Set(fields.map((f) => f.apiKey));
 
