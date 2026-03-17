@@ -17,6 +17,7 @@ import * as VersionService from "../services/version-service.js";
 import * as SchemaLifecycle from "../services/schema-lifecycle.js";
 import * as SchemaIO from "../services/schema-io.js";
 import * as SearchService from "../search/search-service.js";
+import * as SiteSettingsService from "../services/site-settings-service.js";
 import { CreateAssetInput, CreateFieldInput, CreateModelInput, CreateRecordInput, PatchRecordInput, ReorderInput } from "../services/input-schemas.js";
 import type { ModelRow, FieldRow, LocaleRow } from "../db/row-types.js";
 import { VectorizeContext } from "../search/vectorize-context.js";
@@ -509,11 +510,7 @@ export function createMcpLayer(sqlLayer: Layer.Layer<SqlClient.SqlClient | Vecto
       }),
     describe_model: ({ apiKey }) =>
       Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        const models = yield* sql.unsafe<ModelRow>("SELECT * FROM models WHERE api_key = ?", [apiKey]);
-        if (models.length === 0) return { error: `Model '${apiKey}' not found` };
-        const model = models[0];
-        const fields = yield* sql.unsafe<FieldRow>("SELECT * FROM fields WHERE model_id = ? ORDER BY position", [model.id]);
+        const model = yield* ModelService.getModelByApiKey(apiKey);
         return {
           id: model.id,
           name: model.name,
@@ -521,7 +518,7 @@ export function createMcpLayer(sqlLayer: Layer.Layer<SqlClient.SqlClient | Vecto
           isBlock: !!model.is_block,
           singleton: !!model.singleton,
           hasDraft: !!model.has_draft,
-          fields: fields.map((f) => ({
+          fields: model.fields.map((f) => ({
             id: f.id,
             apiKey: f.api_key,
             label: f.label,
@@ -651,45 +648,8 @@ export function createMcpLayer(sqlLayer: Layer.Layer<SqlClient.SqlClient | Vecto
     import_schema: ({ schema }) => SchemaIO.importSchema(schema),
     search_content: (args) => SearchService.search(args),
     reindex_search: ({ modelApiKey }) => SearchService.reindexAll(modelApiKey),
-    get_site_settings: () =>
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        const rows = yield* sql.unsafe<Record<string, unknown>>("SELECT * FROM site_settings LIMIT 1");
-        return rows.length > 0 ? rows[0] : { message: "No site settings configured yet. Use update_site_settings to create them." };
-      }).pipe(
-        Effect.catchAll(() => Effect.succeed({ message: "site_settings table not found. Run migration 0002 first." })),
-      ),
-    update_site_settings: (args) =>
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        const sets: string[] = [];
-        const params: unknown[] = [];
-        const fieldMap: Record<string, string> = {
-          siteName: "site_name",
-          titleSuffix: "title_suffix",
-          noIndex: "no_index",
-          faviconId: "favicon_id",
-          facebookPageUrl: "facebook_page_url",
-          twitterAccount: "twitter_account",
-          fallbackSeoTitle: "fallback_seo_title",
-          fallbackSeoDescription: "fallback_seo_description",
-          fallbackSeoImageId: "fallback_seo_image_id",
-          fallbackSeoTwitterCard: "fallback_seo_twitter_card",
-        };
-        for (const [key, value] of Object.entries(args)) {
-          const col = fieldMap[key];
-          if (col && value !== undefined) {
-            sets.push(`"${col}" = ?`);
-            params.push(typeof value === "boolean" ? (value ? 1 : 0) : value);
-          }
-        }
-        if (sets.length === 0) return { error: "No fields to update" };
-        sets.push(`"updated_at" = datetime('now')`);
-        yield* sql.unsafe(`INSERT OR IGNORE INTO site_settings (id) VALUES ('default')`);
-        yield* sql.unsafe(`UPDATE site_settings SET ${sets.join(", ")} WHERE id = 'default'`, params);
-        const rows = yield* sql.unsafe<Record<string, unknown>>("SELECT * FROM site_settings WHERE id = 'default'");
-        return rows[0];
-      }),
+    get_site_settings: () => SiteSettingsService.getSiteSettings(),
+    update_site_settings: (args) => SiteSettingsService.updateSiteSettings(args),
   });
 
   const toolkitRegistration = Layer.effectDiscard(Effect.gen(function* () {

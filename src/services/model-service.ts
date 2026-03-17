@@ -38,6 +38,24 @@ export function getModel(id: string) {
   });
 }
 
+export function getModelByApiKey(apiKey: string) {
+  return Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const models = yield* sql.unsafe<ModelRow>("SELECT * FROM models WHERE api_key = ?", [apiKey]);
+    if (models.length === 0) return yield* new NotFoundError({ entity: "Model", id: apiKey });
+
+    const fields = yield* sql.unsafe<FieldRow>(
+      "SELECT * FROM fields WHERE model_id = ? ORDER BY position",
+      [models[0].id]
+    );
+
+    return {
+      ...models[0],
+      fields: fields.map(parseFieldValidators),
+    };
+  });
+}
+
 export function createModel(rawBody: unknown) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;

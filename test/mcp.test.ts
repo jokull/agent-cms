@@ -222,8 +222,9 @@ describe("MCP Server", () => {
         name: "describe_model",
         arguments: { apiKey: "nonexistent" },
       });
-      const result = getResult(res);
-      expect(result.error).toContain("not found");
+      expect(res.isError).toBe(true);
+      expect(res.content[0]?.text).toContain("\"_tag\":\"NotFoundError\"");
+      expect(res.content[0]?.text).toContain("\"id\":\"nonexistent\"");
     });
 
     it("returns error for duplicate model", async () => {
