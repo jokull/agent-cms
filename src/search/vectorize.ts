@@ -4,18 +4,22 @@
  */
 import { Data, Effect } from "effect";
 
-/** Minimal type for Workers AI binding (avoids importing @cloudflare/workers-types globally) */
+/**
+ * Minimal structural type for Workers AI binding.
+ * Compatible with Cloudflare's `Ai` type from `wrangler types` — no cast needed.
+ */
 export interface AiBinding {
-  run(model: string, input: { text: string[] }): Promise<{ data: number[][] }>;
+  run(model: string, input: { text: string[] }): Promise<unknown>;
 }
 
-/** Minimal type for Vectorize binding */
+/**
+ * Minimal structural type for Vectorize binding.
+ * Compatible with Cloudflare's `VectorizeIndex` type from `wrangler types` — no cast needed.
+ */
 export interface VectorizeBinding {
   upsert(vectors: Array<{ id: string; values: number[]; metadata?: Record<string, string> }>): Promise<unknown>;
   deleteByIds(ids: string[]): Promise<unknown>;
-  query(vector: number[], options: { topK: number; returnMetadata?: "all" | "none" }): Promise<{
-    matches: Array<{ id: string; score: number; metadata?: Record<string, string> }>;
-  }>;
+  query(vector: number[], options: { topK: number; returnMetadata?: "all" | "none" }): Promise<unknown>;
 }
 
 export class VectorizeError extends Data.TaggedError("VectorizeError")<{
@@ -32,7 +36,7 @@ export function embedTexts(ai: AiBinding, texts: string[]) {
   return Effect.tryPromise({
     try: () => ai.run(EMBED_MODEL, { text: texts }),
     catch: (error) => new VectorizeError({ message: `Embedding failed: ${error}` }),
-  }).pipe(Effect.map((result) => result.data));
+  }).pipe(Effect.map((result) => (result as { data: number[][] }).data));
 }
 
 /**
@@ -92,10 +96,11 @@ export function vectorizeSearch(
 ) {
   return Effect.gen(function* () {
     const embeddings = yield* embedTexts(ai, [query]);
-    const results = yield* Effect.tryPromise({
+    const raw = yield* Effect.tryPromise({
       try: () => vectorize.query(embeddings[0], { topK, returnMetadata: "all" }),
       catch: (error) => new VectorizeError({ message: `Search failed: ${error}` }),
     });
+    const results = raw as { matches: Array<{ id: string; score: number; metadata?: Record<string, string> }> };
     return results.matches.map((m) => ({
       recordId: m.metadata?.recordId ?? m.id.split(":")[1],
       modelApiKey: m.metadata?.modelApiKey ?? m.id.split(":")[0],

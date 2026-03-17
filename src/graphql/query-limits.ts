@@ -77,6 +77,16 @@ function analyzeDocument(document: DocumentNode): QueryMetrics {
   return { maxDepth, selectionCount };
 }
 
+function isIntrospectionQuery(document: DocumentNode): boolean {
+  return document.definitions.some(
+    (def) =>
+      def.kind === Kind.OPERATION_DEFINITION &&
+      def.selectionSet.selections.some(
+        (sel) => sel.kind === Kind.FIELD && sel.name.value.startsWith("__")
+      )
+  );
+}
+
 export function enforceQueryLimits(query: string, options: QueryLimitOptions): GraphQLError[] {
   let document: DocumentNode;
   try {
@@ -84,6 +94,9 @@ export function enforceQueryLimits(query: string, options: QueryLimitOptions): G
   } catch {
     return [];
   }
+
+  // Introspection queries have a fixed shape and are always safe
+  if (isIntrospectionQuery(document)) return [];
 
   const metrics = analyzeDocument(document);
   const errors: GraphQLError[] = [];

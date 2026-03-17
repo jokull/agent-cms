@@ -95,4 +95,16 @@ describe("execute() — in-process GraphQL", () => {
       allPosts: [{ title: "Draft Post" }],
     });
   });
+
+  it("allows introspection queries (exempt from depth limits)", async () => {
+    const result = await execute(`{
+      __schema {
+        queryType { name }
+        types { name kind fields { name type { name kind ofType { name kind ofType { name kind ofType { name } } } } } }
+      }
+    }`);
+    expect(result.errors).toBeUndefined();
+    const schema = (result.data as { __schema: { queryType: { name: string } } }).__schema;
+    expect(schema.queryType.name).toBe("Query");
+  });
 });
