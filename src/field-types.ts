@@ -238,6 +238,16 @@ export const FIELD_TYPE_REGISTRY: Record<FieldType, FieldTypeDefinition> = {
     jsonStored: true,
     hasCustomResolver: true,
   },
+  video: {
+    sqliteType: "TEXT",
+    graphqlType: "VideoField",
+    filterType: "ExistsFilter",
+    localizable: false,
+    multiLocaleType: "JsonMultiLocaleField",
+    inputSchema: null,
+    jsonStored: false,
+    hasCustomResolver: true,
+  },
 };
 
 /** Get the registry definition for a field type */

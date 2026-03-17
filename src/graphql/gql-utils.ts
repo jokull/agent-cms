@@ -140,6 +140,31 @@ export function decodeSnapshot(record: DynamicRow, includeDrafts: boolean): Dyna
   return { ...record, ...(snapshot as DynamicRow) };
 }
 
+/** Resolve a video field value into a VideoField object */
+export function resolveVideoField(raw: unknown): Record<string, unknown> | null {
+  if (!raw) return null;
+  let val = raw;
+  if (typeof val === "string") {
+    try { val = JSON.parse(val); } catch { /* bare URL string */ }
+  }
+  if (typeof val === "string") {
+    return { url: val, title: null, provider: null, providerUid: null, thumbnailUrl: null, width: null, height: null };
+  }
+  if (typeof val === "object" && val !== null && !Array.isArray(val)) {
+    const obj = val as Record<string, unknown>;
+    return {
+      url: obj.url ?? null,
+      title: obj.title ?? null,
+      provider: obj.provider ?? null,
+      providerUid: obj.provider_uid ?? obj.providerUid ?? null,
+      thumbnailUrl: obj.thumbnail_url ?? obj.thumbnailUrl ?? null,
+      width: obj.width ?? null,
+      height: obj.height ?? null,
+    };
+  }
+  return null;
+}
+
 /** Deserialize JSON string fields in a record */
 export function deserializeRecord(record: DynamicRow): DynamicRow {
   const result: DynamicRow = {};

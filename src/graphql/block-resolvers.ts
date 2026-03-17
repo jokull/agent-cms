@@ -7,7 +7,7 @@ import { SqlClient } from "@effect/sql";
 import type { AssetRow } from "../db/row-types.js";
 import { getLinkTargets, getLinksTargets, getBlockWhitelist } from "../db/validators.js";
 import type { SchemaBuilderContext, DynamicRow, GqlContext } from "./gql-types.js";
-import { toTypeName, toCamelCase, fieldToSDL, getRegistryDef } from "./gql-utils.js";
+import { toTypeName, toCamelCase, fieldToSDL, getRegistryDef, resolveVideoField } from "./gql-utils.js";
 import { resolveStructuredTextValue } from "./structured-text-resolver.js";
 import { loadLinkedRecords } from "./linked-record-loader.js";
 
@@ -152,6 +152,8 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
             return (linkedIds as string[]).map((id) => resolved.get(id) ?? null).filter(Boolean);
           };
         }
+      } else if (f.field_type === "video") {
+        bmResolvers[gqlName] = (parent: DynamicRow) => resolveVideoField(parent[f.api_key]);
       } else {
         // Default camelCase -> snake_case resolver
         bmResolvers[gqlName] = (parent: DynamicRow) => {

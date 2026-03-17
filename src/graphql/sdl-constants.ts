@@ -124,6 +124,15 @@ type LatLonField {
   latitude: Float!
   longitude: Float!
 }
+type VideoField {
+  url: String
+  title: String
+  provider: String
+  providerUid: String
+  thumbnailUrl: String
+  width: Int
+  height: Int
+}
 
 """DatoCMS-compatible StructuredText response"""
 type StructuredText {

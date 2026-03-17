@@ -6,7 +6,7 @@ import { SqlClient } from "@effect/sql";
 import type { AssetRow } from "../db/row-types.js";
 import { getLinkTargets, getLinksTargets, computeIsValid, findUniqueConstraintViolations } from "../db/validators.js";
 import type { SchemaBuilderContext, ModelQueryMeta, DynamicRow, GqlContext, AssetObject } from "./gql-types.js";
-import { toTypeName, toCamelCase, fieldToSDL, getRegistryDef, deserializeRecord } from "./gql-utils.js";
+import { toTypeName, toCamelCase, fieldToSDL, getRegistryDef, deserializeRecord, resolveVideoField } from "./gql-utils.js";
 import { resolveStructuredTextValue } from "./structured-text-resolver.js";
 import { loadLinkedRecords } from "./linked-record-loader.js";
 import { loadStructuredTextEnvelope } from "./structured-text-loader.js";
@@ -146,7 +146,7 @@ export function buildContentModelResolvers(
     const firstTextField = fields.find((f) => f.field_type === "text");
     const firstMediaField = fields.find((f) => f.field_type === "media");
 
-    typeResolvers._seoMetaTags = async (parent: DynamicRow) => {
+    typeResolvers._seoMetaTags = async (parent: DynamicRow, _args: unknown, context: GqlContext) => {
       const tags: Array<{ tag: string; attributes: Record<string, string> | null; content: string | null }> = [];
 
       // Extract SEO data from seo field or heuristic fields
@@ -157,7 +157,7 @@ export function buildContentModelResolvers(
 
       if (seoField) {
         let seo = seoField.localized
-          ? pickLocalizedValue(parent[seoField.api_key], {} as GqlContext, defaultLocale)
+          ? pickLocalizedValue(parent[seoField.api_key], context, defaultLocale)
           : parent[seoField.api_key];
         if (typeof seo === "string") { try { seo = JSON.parse(seo); } catch { seo = null; } }
         if (seo && typeof seo === "object") {
@@ -179,9 +179,19 @@ export function buildContentModelResolvers(
         }
       }
 
-      // Fallback to heuristic fields
-      if (!title && firstStringField) title = (parent[firstStringField.api_key] as string) ?? null;
-      if (!description && firstTextField) description = (parent[firstTextField.api_key] as string) ?? null;
+      // Fallback to heuristic fields (resolve localized values)
+      if (!title && firstStringField) {
+        const raw = firstStringField.localized
+          ? pickLocalizedValue(parent[firstStringField.api_key], context, defaultLocale)
+          : parent[firstStringField.api_key];
+        title = (typeof raw === "string" ? raw : null);
+      }
+      if (!description && firstTextField) {
+        const raw = firstTextField.localized
+          ? pickLocalizedValue(parent[firstTextField.api_key], context, defaultLocale)
+          : parent[firstTextField.api_key];
+        description = (typeof raw === "string" ? raw : null);
+      }
       if (!imageUrl && firstMediaField && parent[firstMediaField.api_key]) {
         const assetId = parent[firstMediaField.api_key] as string;
         const asset = await runSql(
@@ -412,6 +422,10 @@ export function buildContentModelResolvers(
           }
           return color;
         };
+      }
+      // Video field resolver: wrap string URL into { url } object
+      if (f.field_type === "video") {
+        typeResolvers[gqlName] = (parent: DynamicRow) => resolveVideoField(parent[f.api_key]);
       }
       // LatLon field resolver: parse JSON
       if (f.field_type === "lat_lon") {

@@ -75,7 +75,7 @@ export function buildReverseRefResolvers(
       const sourceTypeName = toTypeName(sourceApiKey);
       const fieldName = `_allReferencing${sourceTypeName}s`;
       extendFields.push(
-        `${fieldName}(filter: ${sourceTypeName}Filter, orderBy: [${sourceTypeName}OrderBy!], first: Int, skip: Int): [${sourceTypeName}!]!`
+        `${fieldName}(locale: String, fallbackLocales: [String!], filter: ${sourceTypeName}Filter, orderBy: [${sourceTypeName}OrderBy!], first: Int, skip: Int): [${sourceTypeName}!]!`
       );
 
       const sourceTableName = sourceRefs[0].sourceTableName;
@@ -99,6 +99,10 @@ export function buildReverseRefResolvers(
       if (!resolvers[targetTypeName]) resolvers[targetTypeName] = {};
 
       (resolvers[targetTypeName] as Record<string, unknown>)[fieldName] = async (parent: DynamicRow, args: DynamicRow, context: GqlContext) => {
+        // Propagate locale/fallbackLocales from args to context for nested resolvers
+        if (typeof args.locale === "string") context.locale = args.locale;
+        if (Array.isArray(args.fallbackLocales)) context.fallbackLocales = args.fallbackLocales;
+
         return runSql(
           Effect.gen(function* () {
             const s = yield* SqlClient.SqlClient;
@@ -128,7 +132,7 @@ export function buildReverseRefResolvers(
             }
 
             // Apply user filter
-            const filterLocale = context?.locale ?? defaultLocale ?? undefined;
+            const filterLocale = (typeof args.locale === "string" ? args.locale : undefined) ?? context?.locale ?? defaultLocale ?? undefined;
             const filterOpts: FilterCompilerOpts = {
               fieldIsLocalized: (fName) => sourceLocalizedCamelKeys.has(fName),
               fieldNameMap: Object.fromEntries(sourceCamelToSnake),

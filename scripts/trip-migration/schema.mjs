@@ -53,7 +53,7 @@ export const MIGRATION_SCHEMA = {
         { label: "Title", apiKey: "title", fieldType: "string", localized: true, validators: { required: true } },
         { label: "Slug", apiKey: "slug", fieldType: "slug" },
         { label: "Summary", apiKey: "summary", fieldType: "text", localized: true },
-        { label: "Duration", apiKey: "duration", fieldType: "integer" },
+        { label: "Duration", apiKey: "duration", fieldType: "string" },
         { label: "Tripadvisor Review Count", apiKey: "tripadvisor_review_count", fieldType: "integer" },
         { label: "Tripadvisor Rating", apiKey: "tripadvisor_rating", fieldType: "float" },
         { label: "Hero Image", apiKey: "hero_image", fieldType: "media" },
@@ -106,7 +106,7 @@ export const MIGRATION_SCHEMA = {
       apiKey: "video",
       isBlock: true,
       fields: [
-        { label: "Video URL", apiKey: "video_url", fieldType: "string" },
+        { label: "Video URL", apiKey: "video_url", fieldType: "video" },
       ],
     },
     {
