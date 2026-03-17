@@ -3,20 +3,52 @@
  * Loads CMS metadata, builds context, and delegates to sub-modules.
  */
 import { createSchema } from "graphql-yoga";
+import { GraphQLScalarType, Kind } from "graphql";
 import { Effect, Layer } from "effect";
 import { SqlClient } from "@effect/sql";
 import type { ModelRow, FieldRow } from "../db/row-types.js";
 import { parseFieldValidators } from "../db/row-types.js";
 import type { SchemaBuilderContext, SchemaBuilderOptions } from "./gql-types.js";
-import { toTypeName } from "./gql-utils.js";
+import { toContentTypeName, toTypeName } from "./gql-utils.js";
 import { BASE_TYPE_DEFS } from "./sdl-constants.js";
 import { buildBlockModelResolvers } from "./block-resolvers.js";
 import { buildContentModelResolvers } from "./content-resolvers.js";
 import { buildQueryResolvers } from "./query-resolvers.js";
 import { buildReverseRefs, buildReverseRefResolvers } from "./reverse-ref-resolvers.js";
 import { buildAssetResolvers } from "./asset-resolvers.js";
-import { ensureBlockLookupIndex, ensureContentFieldIndexes } from "../schema-engine/sql-ddl.js";
 import { recordSqlMetrics } from "./sql-metrics.js";
+
+const GraphQLItemId = new GraphQLScalarType({
+  name: "ItemId",
+  serialize(value) {
+    return value == null ? null : String(value);
+  },
+  parseValue(value) {
+    return value == null ? null : String(value);
+  },
+  parseLiteral(ast) {
+    if (ast.kind === Kind.STRING || ast.kind === Kind.INT) {
+      return ast.value;
+    }
+    return null;
+  },
+});
+
+const GraphQLSiteLocale = new GraphQLScalarType({
+  name: "SiteLocale",
+  serialize(value) {
+    return value == null ? null : String(value);
+  },
+  parseValue(value) {
+    return value == null ? null : String(value);
+  },
+  parseLiteral(ast) {
+    if (ast.kind === Kind.STRING || ast.kind === Kind.ENUM) {
+      return ast.value;
+    }
+    return null;
+  },
+});
 
 // Re-export for handler.ts compatibility
 export type { SchemaBuilderOptions } from "./gql-types.js";
@@ -64,16 +96,8 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
       fieldsByModelId.set(f.model_id, list);
     }
 
-    for (const blockModel of blockModels) {
-      yield* ensureBlockLookupIndex(blockModel.api_key);
-    }
-    for (const model of models) {
-      const fields = fieldsByModelId.get(model.id) ?? [];
-      yield* ensureContentFieldIndexes(model.api_key, fields.map((field) => ({
-        apiKey: field.api_key,
-        fieldType: field.field_type,
-      })));
-    }
+    // Index creation/backfills happen during migrations and schema mutation flows.
+    // Keep GraphQL schema construction read-only so cold requests don't pay DDL costs.
 
     // Load locales
     const locales = yield* sql.unsafe<{ code: string; position: number; fallback_locale_id: string | null }>(
@@ -83,7 +107,7 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
 
     // Collect type names
     const typeNames = new Map<string, string>();
-    for (const m of models) typeNames.set(m.api_key, toTypeName(m.api_key));
+    for (const m of models) typeNames.set(m.api_key, toContentTypeName(m.api_key));
 
     const blockTypeNames = new Map<string, string>();
     for (const bm of blockModels) {
@@ -96,6 +120,11 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
     const resolvers: Record<string, Record<string, unknown>> = { Query: {} };
 
     typeDefs.push(BASE_TYPE_DEFS);
+    if (locales.length > 0) {
+      typeDefs.push(`enum SiteLocale { ${locales.map((locale) => locale.code).join(" ")} }`);
+    } else {
+      typeDefs.push("scalar SiteLocale");
+    }
 
     // Build the shared context
     const ctx: SchemaBuilderContext = {
@@ -131,7 +160,11 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
 
     return createSchema({
       typeDefs: `${typeDefs.join("\n\n")}\ntype Query {\n  ${queryFieldDefs.join("\n  ")}\n}`,
-      resolvers,
+      resolvers: {
+        ...resolvers,
+        ItemId: GraphQLItemId,
+        ...(locales.length > 0 ? {} : { SiteLocale: GraphQLSiteLocale }),
+      },
     });
   });
 }

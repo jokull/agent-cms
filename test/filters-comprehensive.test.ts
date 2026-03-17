@@ -378,19 +378,19 @@ describe("Filter compiler — comprehensive", () => {
       // Article 1 has is: "Djúpt í TypeScript" (non-empty)
       // Article 2 has is: "" (empty)
       // Article 3 has no "is" key
-      const r = await q(`{ allArticles(filter: { _locales: { anyIn: ["is"] } }) { title } }`, { includeDrafts: true });
+      const r = await q(`{ allArticles(filter: { _locales: { anyIn: [is] } }) { title } }`, { includeDrafts: true });
       expect(r.errors).toBeUndefined();
       expect(r.data.allArticles).toHaveLength(1);
       expect(r.data.allArticles[0].title).toBe("Deep Dive into TypeScript");
     });
 
     it("allIn requires all specified locales to have content", async () => {
-      const r = await q(`{ allArticles(filter: { _locales: { allIn: ["en", "is"] } }) { title } }`, { includeDrafts: true });
+      const r = await q(`{ allArticles(filter: { _locales: { allIn: [en, is] } }) { title } }`, { includeDrafts: true });
       expect(r.data.allArticles).toHaveLength(1);
     });
 
     it("notIn excludes records with content in a locale", async () => {
-      const r = await q(`{ allArticles(filter: { _locales: { notIn: ["is"] } }) { title } }`, { includeDrafts: true });
+      const r = await q(`{ allArticles(filter: { _locales: { notIn: [is] } }) { title } }`, { includeDrafts: true });
       // Should exclude article 1 (has Icelandic content)
       for (const a of r.data.allArticles) {
         expect(a.title).not.toBe("Deep Dive into TypeScript");

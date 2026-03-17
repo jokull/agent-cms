@@ -12,14 +12,20 @@ A complete blog with two Cloudflare Workers:
 ```bash
 cd cms
 npm install
-npm run db:migrate
 npm run dev
+npm run setup -- http://127.0.0.1:8787
 ```
 
 CMS is now running at `http://localhost:8787` with:
 - GraphQL playground at `/graphql`
 - MCP server at `/mcp`
 - REST API at `/api/*`
+
+For remote environments, deploy first and then run:
+
+```bash
+CMS_WRITE_KEY=... npm run setup -- https://<your-cms-url>
+```
 
 ### 2. Create the Schema and Content
 

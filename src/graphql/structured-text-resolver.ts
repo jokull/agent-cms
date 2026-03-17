@@ -40,7 +40,7 @@ export async function batchFetchRecords(params: {
     const deserialized = decodeSnapshot(deserializeRecord(row), params.includeDrafts);
     result.set(String(row.id), {
       ...deserialized,
-      __typename: typeName ? `${typeName}Record` : undefined,
+      __typename: typeName ?? undefined,
     });
   }
   return result;

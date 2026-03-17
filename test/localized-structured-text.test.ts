@@ -10,6 +10,7 @@ describe("Localized StructuredText", () => {
     const enRes = await jsonRequest(handler, "POST", "/api/locales", { code: "en", position: 0 });
     const en = await enRes.json();
     await jsonRequest(handler, "POST", "/api/locales", { code: "is", position: 1, fallbackLocaleId: en.id });
+    await jsonRequest(handler, "POST", "/api/locales", { code: "fr", position: 2, fallbackLocaleId: en.id });
 
     const heroRes = await jsonRequest(handler, "POST", "/api/models", {
       name: "Hero Section", apiKey: "hero_section", isBlock: true,
@@ -72,7 +73,7 @@ describe("Localized StructuredText", () => {
     expect(createRes.status).toBe(201);
 
     const enResult = await gqlQuery(handler, `{
-      allPages(locale: "en") {
+      allPages(locale: en) {
         title
         body {
           blocks {
@@ -87,7 +88,7 @@ describe("Localized StructuredText", () => {
     expect(enResult.data.allPages[0].body.blocks[0].headline).toBe("English Hero");
 
     const isResult = await gqlQuery(handler, `{
-      allPages(locale: "is") {
+      allPages(locale: is) {
         title
         body {
           blocks {
@@ -102,7 +103,7 @@ describe("Localized StructuredText", () => {
     expect(isResult.data.allPages[0].body.blocks[0].headline).toBe("Icelandic Hero");
 
     const fallbackResult = await gqlQuery(handler, `{
-      allPages(locale: "fr", fallbackLocales: ["is", "en"]) {
+      allPages(locale: fr, fallbackLocales: [is, en]) {
         body {
           blocks {
             ... on HeroSectionRecord { headline }
@@ -153,7 +154,7 @@ describe("Localized StructuredText", () => {
     expect(publishRes.status).toBe(200);
 
     const enResult = await gqlQuery(handler, `{
-      allPages(locale: "en") {
+      allPages(locale: en) {
         body { blocks { ... on HeroSectionRecord { headline } } }
       }
     }`, undefined, { includeDrafts: false });
@@ -161,7 +162,7 @@ describe("Localized StructuredText", () => {
     expect(enResult.data.allPages[0].body.blocks[0].headline).toBe("Published English Hero");
 
     const isResult = await gqlQuery(handler, `{
-      allPages(locale: "is") {
+      allPages(locale: is) {
         body { blocks { ... on HeroSectionRecord { headline } } }
       }
     }`, undefined, { includeDrafts: false });

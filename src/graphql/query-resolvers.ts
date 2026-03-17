@@ -16,11 +16,11 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
   const { resolvers, typeDefs, queryFieldDefs, runSql, defaultLocale } = ctx;
 
   for (const meta of modelMetas) {
-    const { typeName, tableName, model, camelToSnake, localizedCamelKeys, localizedDbColumns, jsonArrayFields, fields } = meta;
+    const { baseTypeName, typeName, tableName, model, camelToSnake, localizedCamelKeys, localizedDbColumns, jsonArrayFields, fields } = meta;
 
     // Filter/OrderBy/Meta types (all use camelCase field names)
     const filterFields = [
-      "id: StringFilter", "_status: StatusFilter",
+      "id: LinkFilter", "_status: StatusFilter",
       "_createdAt: DateTimeFilter", "_updatedAt: DateTimeFilter",
       "_publishedAt: DateTimeFilter", "_firstPublishedAt: DateTimeFilter",
     ];
@@ -49,18 +49,18 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
         }
       }
     }
-    filterFields.push(`AND: [${typeName}Filter!]`, `OR: [${typeName}Filter!]`);
-    typeDefs.push(`input ${typeName}Filter {\n  ${filterFields.join("\n  ")}\n}`);
-    typeDefs.push(`enum ${typeName}OrderBy { ${orderByValues.join(" ")} }`);
-    typeDefs.push(`type ${typeName}Meta { count: Int! }`);
+    filterFields.push(`AND: [${baseTypeName}Filter!]`, `OR: [${baseTypeName}Filter!]`);
+    typeDefs.push(`input ${baseTypeName}Filter {\n  ${filterFields.join("\n  ")}\n}`);
+    typeDefs.push(`enum ${baseTypeName}OrderBy { ${orderByValues.join(" ")} }`);
+    typeDefs.push(`type ${baseTypeName}Meta { count: Int! }`);
 
     // Queries (camelCase like DatoCMS: blogPost not blog_post)
-    const listName = `all${pluralize(typeName)}`;
+    const listName = `all${pluralize(baseTypeName)}`;
     const singleName = toCamelCase(model.api_key);
-    queryFieldDefs.push(`${listName}(locale: String, fallbackLocales: [String!], filter: ${typeName}Filter, orderBy: [${typeName}OrderBy!], first: Int, skip: Int, excludeInvalid: Boolean): [${typeName}!]!`);
-    queryFieldDefs.push(`${singleName}(locale: String, fallbackLocales: [String!], id: ID, filter: ${typeName}Filter): ${typeName}`);
-    const metaName = `_all${pluralize(typeName)}Meta`;
-    queryFieldDefs.push(`${metaName}(filter: ${typeName}Filter, excludeInvalid: Boolean): ${typeName}Meta!`);
+    queryFieldDefs.push(`${listName}(locale: SiteLocale, fallbackLocales: [SiteLocale!], filter: ${baseTypeName}Filter, orderBy: [${baseTypeName}OrderBy!], first: Int, skip: Int, excludeInvalid: Boolean): [${typeName}!]!`);
+    queryFieldDefs.push(`${singleName}(locale: SiteLocale, fallbackLocales: [SiteLocale!], id: ItemId, filter: ${baseTypeName}Filter): ${typeName}`);
+    const metaName = `_all${pluralize(baseTypeName)}Meta`;
+    queryFieldDefs.push(`${metaName}(filter: ${baseTypeName}Filter, excludeInvalid: Boolean): ${baseTypeName}Meta!`);
 
     // Build locale-awareness and camelCase->snake_case mapping for filter/order compilation
     const fieldNameMap = Object.fromEntries(camelToSnake);

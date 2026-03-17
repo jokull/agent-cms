@@ -22,6 +22,7 @@ import * as SearchService from "../search/search-service.js";
 import type { AiBinding, VectorizeBinding } from "../search/vectorize.js";
 import { VectorizeContext } from "../search/vectorize-context.js";
 import { HooksContext, type CmsHooks } from "../hooks.js";
+import { ensureSchema } from "../migrations.js";
 
 function describeUnknown(error: unknown): string {
   if (error instanceof Error) return `${error.name}: ${error.message}`;
@@ -399,6 +400,16 @@ const searchRouter = HttpRouter.empty.pipe(
   )
 );
 
+// --- Setup / bootstrap ---
+const setupRouter = HttpRouter.empty.pipe(
+  HttpRouter.post(
+    "/setup",
+    Effect.gen(function* () {
+      return yield* handle(ensureSchema().pipe(Effect.as({ ok: true })));
+    })
+  )
+);
+
 // --- Health ---
 const healthRouter = HttpRouter.empty.pipe(
   HttpRouter.get("/health", HttpServerResponse.json({ status: "ok" }))
@@ -414,6 +425,7 @@ export const appRouter = HttpRouter.empty.pipe(
   HttpRouter.concat(localesRouter.pipe(HttpRouter.prefixAll("/api/locales"))),
   HttpRouter.concat(schemaRouter.pipe(HttpRouter.prefixAll("/api/schema"))),
   HttpRouter.concat(searchRouter.pipe(HttpRouter.prefixAll("/api/search"))),
+  HttpRouter.concat(setupRouter.pipe(HttpRouter.prefixAll("/api"))),
 );
 
 /**
@@ -472,6 +484,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
   // Lazy-import handlers to avoid circular deps
   let graphqlHandler: ((req: Request) => Promise<Response>) | null = null;
   let mcpHandler: ((req: Request) => Promise<Response>) | null = null;
+  let graphqlModulePromise: Promise<typeof import("../graphql/handler.js")> | null = null;
 
   function invalidateGraphqlSchemaCache() {
     graphqlHandler = null;
@@ -482,7 +495,8 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
     return (
       url.pathname.startsWith("/api/models") ||
       url.pathname.startsWith("/api/locales") ||
-      url.pathname.startsWith("/api/schema")
+      url.pathname.startsWith("/api/schema") ||
+      url.pathname === "/api/setup"
     );
   }
 
@@ -642,15 +656,43 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
 
       // Route /graphql to Yoga
       if (url.pathname === "/graphql") {
+        const traceEnabled = instrumentedRequest.headers.get("X-Bench-Trace") === "1" || instrumentedRequest.headers.get("X-Debug-Sql") === "true";
+        let graphqlImportMs = 0;
+        let graphqlInitMs = 0;
+        let graphqlImportCache: "hit" | "miss" = "hit";
+        let graphqlInitCache: "hit" | "miss" = "hit";
         if (!graphqlHandler) {
-          const { createGraphQLHandler } = await import("../graphql/handler.js");
+          graphqlInitCache = "miss";
+          if (!graphqlModulePromise) {
+            graphqlImportCache = "miss";
+            const importStartedAt = performance.now();
+            graphqlModulePromise = import("../graphql/handler.js").then((module) => {
+              graphqlImportMs = Number((performance.now() - importStartedAt).toFixed(3));
+              return module;
+            });
+          }
+          const module = await graphqlModulePromise;
+          const initStartedAt = performance.now();
+          const { createGraphQLHandler } = module;
           graphqlHandler = createGraphQLHandler(sqlLayer, {
             assetBaseUrl: options?.assetBaseUrl,
             isProduction: options?.isProduction,
           });
+          graphqlInitMs = Number((performance.now() - initStartedAt).toFixed(3));
         }
         const response = await graphqlHandler(instrumentedRequest);
-        return finish(response);
+        if (!traceEnabled) return finish(response);
+
+        const headers = new Headers(response.headers);
+        headers.set("X-Cms-Graphql-Import-Ms", graphqlImportMs.toFixed(3));
+        headers.set("X-Cms-Graphql-Import-Cache", graphqlImportCache);
+        headers.set("X-Cms-Graphql-Init-Ms", graphqlInitMs.toFixed(3));
+        headers.set("X-Cms-Graphql-Init-Cache", graphqlInitCache);
+        return finish(new Response(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers,
+        }));
       }
 
       // Everything else to the Effect router

@@ -6,8 +6,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "db:migrate": "wrangler d1 migrations apply test-i18n-cms-db --local",
-    "db:migrate:remote": "wrangler d1 migrations apply test-i18n-cms-db --remote"
+    "setup": "node setup.mjs"
   },
   "dependencies": {
     "agent-cms": "file:../../..",

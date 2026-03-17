@@ -11,6 +11,7 @@ describe("Localization", () => {
     const enRes = await jsonRequest(handler, "POST", "/api/locales", { code: "en", position: 0 });
     const en = await enRes.json();
     await jsonRequest(handler, "POST", "/api/locales", { code: "is", position: 1, fallbackLocaleId: en.id });
+    await jsonRequest(handler, "POST", "/api/locales", { code: "de", position: 2, fallbackLocaleId: en.id });
 
     // Create model with localized field
     const modelRes = await jsonRequest(handler, "POST", "/api/models", { name: "Article", apiKey: "article" });
@@ -65,7 +66,7 @@ describe("Localization", () => {
   });
 
   it("returns Icelandic locale when requested", async () => {
-    const result = await gqlQuery(handler, `{ allArticles(locale: "is") { title } }`);
+    const result = await gqlQuery(handler, `{ allArticles(locale: is) { title } }`);
     expect(result.errors).toBeUndefined();
     expect(result.data.allArticles[0].title).toBe("Halló heimur");
     expect(result.data.allArticles[1].title).toBe("Önnur grein");
@@ -73,7 +74,7 @@ describe("Localization", () => {
 
   it("falls back to English for missing Icelandic", async () => {
     const result = await gqlQuery(handler, `{
-      allArticles(locale: "is", fallbackLocales: ["en"]) { title }
+      allArticles(locale: is, fallbackLocales: [en]) { title }
     }`);
     expect(result.errors).toBeUndefined();
     // "English Only" has no Icelandic, should fall back to English
@@ -82,16 +83,16 @@ describe("Localization", () => {
   });
 
   it("returns null for missing locale without fallback", async () => {
-    const result = await gqlQuery(handler, `{ allArticles(locale: "de") { title } }`);
-    // German locale doesn't exist for any record
-    // Should fall back to default locale (en) or return first available
+    const result = await gqlQuery(handler, `{ allArticles(locale: de) { title } }`);
+    // German locale exists in schema but has no content on any record.
+    // Should fall back to default locale (en) or return first available.
     expect(result.errors).toBeUndefined();
     // With our implementation, it falls back to default locale (en)
     expect(result.data.allArticles[0].title).toBe("Hello World");
   });
 
   it("non-localized fields are unaffected by locale argument", async () => {
-    const result = await gqlQuery(handler, `{ allArticles(locale: "is") { views } }`);
+    const result = await gqlQuery(handler, `{ allArticles(locale: is) { views } }`);
     expect(result.data.allArticles[0].views).toBe(42);
   });
 
@@ -100,7 +101,7 @@ describe("Localization", () => {
     const id = all.data.allArticles[0].id;
 
     const result = await gqlQuery(handler, `{
-      article(id: "${id}", locale: "is") { title }
+      article(id: "${id}", locale: is) { title }
     }`);
     expect(result.data.article.title).toBe("Halló heimur");
   });
@@ -118,10 +119,10 @@ describe("Localization", () => {
     expect(patchRes.status).toBe(200);
 
     const english = await gqlQuery(handler, `{
-      article(id: "${id}", locale: "en") { title }
+      article(id: "${id}", locale: en) { title }
     }`);
     const icelandic = await gqlQuery(handler, `{
-      article(id: "${id}", locale: "is") { title }
+      article(id: "${id}", locale: is) { title }
     }`);
 
     expect(english.data.article.title).toBe("Hello World");
@@ -140,10 +141,10 @@ describe("Localization", () => {
     });
 
     const english = await gqlQuery(handler, `{
-      article(id: "${id}", locale: "en") { title }
+      article(id: "${id}", locale: en) { title }
     }`);
     const icelandic = await gqlQuery(handler, `{
-      article(id: "${id}", locale: "is") { title }
+      article(id: "${id}", locale: is) { title }
       allArticles { _locales }
     }`);
 
@@ -178,7 +179,7 @@ describe("Localization", () => {
     });
 
     const result = await gqlQuery(handler, `{
-      article(id: "${id}", locale: "is", fallbackLocales: ["en"]) {
+      article(id: "${id}", locale: is, fallbackLocales: [en]) {
         seoMetadata { title description }
         _allSeoMetadataLocales { locale value { title description } }
       }

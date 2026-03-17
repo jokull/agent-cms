@@ -90,6 +90,7 @@ async function main() {
   console.log(`\n  Scaffolding ./${name}...\n`);
 
   mkdirSync(join(dir, "src"), { recursive: true });
+  mkdirSync(join(dir, "scripts"), { recursive: true });
 
   writeFileSync(
     join(dir, "package.json"),
@@ -102,6 +103,7 @@ async function main() {
         scripts: {
           dev: "wrangler dev",
           deploy: "wrangler deploy",
+          setup: "node scripts/setup.mjs",
         },
         dependencies: {
           "agent-cms": "^0.1.0",
@@ -149,9 +151,11 @@ async function main() {
     join(dir, "src/index.ts"),
     `import { createCMSHandler } from "agent-cms";
 
-export default {
-  fetch(request: Request, env: Env): Promise<Response> {
-    return createCMSHandler({
+let cachedHandler: ReturnType<typeof createCMSHandler> | null = null;
+
+function getHandler(env: Env) {
+  if (!cachedHandler) {
+    cachedHandler = createCMSHandler({
       bindings: {
         db: env.DB,
         assets: env.ASSETS,
@@ -160,7 +164,14 @@ export default {
         readKey: env.CMS_READ_KEY,
         writeKey: env.CMS_WRITE_KEY,
       },
-    }).fetch(request);
+    });
+  }
+  return cachedHandler;
+}
+
+export default {
+  fetch(request: Request, env: Env): Promise<Response> {
+    return getHandler(env).fetch(request);
   },
 };
 
@@ -195,6 +206,33 @@ interface Env {
       null,
       2
     )
+  );
+
+  writeFileSync(
+    join(dir, "scripts/setup.mjs"),
+    `const url = process.argv[2] ?? "http://127.0.0.1:8787";
+const token = process.env.CMS_WRITE_KEY;
+
+const headers = { "Content-Type": "application/json" };
+if (token) {
+  headers.Authorization = \`Bearer \${token}\`;
+}
+
+const response = await fetch(new URL("/api/setup", url), {
+  method: "POST",
+  headers,
+});
+
+if (!response.ok) {
+  const body = await response.text();
+  console.error(\`Setup failed: \${response.status} \${response.statusText}\\n\${body}\`);
+  process.exit(1);
+}
+
+const body = await response.json();
+console.log(\`Setup complete at \${url}\`);
+console.log(JSON.stringify(body, null, 2));
+`
   );
 
   console.log("  Files created.\n");
@@ -239,8 +277,10 @@ interface Env {
 
   console.log(`  Ready!\n`);
   console.log(`  cd ${name}`);
-  console.log(`  npm run dev\n`);
-  console.log(`  The database schema is created automatically on first request.\n`);
+  console.log(`  npm run dev`);
+  console.log(`  npm run setup -- http://127.0.0.1:8787\n`);
+  console.log(`  For deployed workers, run:`);
+  console.log(`  CMS_WRITE_KEY=... npm run setup -- https://<your-worker-url>\n`);
   console.log(`  Connect an MCP client:\n`);
   console.log(`  {`);
   console.log(`    "mcpServers": {`);

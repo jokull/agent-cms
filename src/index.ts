@@ -1,7 +1,5 @@
-import { Effect } from "effect";
 import { D1Client } from "@effect/sql-d1";
 import { createWebHandler } from "./http/router.js";
-import { ensureSchema } from "./migrations.js";
 import type { AiBinding, VectorizeBinding } from "./search/vectorize.js";
 import type { CmsHooks } from "./hooks.js";
 
@@ -32,31 +30,79 @@ export interface CmsHandlerConfig {
   hooks?: CmsHooks;
 }
 
+type CachedCmsHandler = ReturnType<typeof createCMSHandlerUncached>;
+
+const objectIds = new WeakMap<object, number>();
+let nextObjectId = 1;
+const handlerCache = new Map<string, CachedCmsHandler>();
+
+function getObjectId(value: object | undefined): number {
+  if (!value) return 0;
+  const existing = objectIds.get(value);
+  if (existing) return existing;
+  const id = nextObjectId++;
+  objectIds.set(value, id);
+  return id;
+}
+
+function cacheKey(config: CmsHandlerConfig): string {
+  const { bindings, hooks } = config;
+  return [
+    getObjectId(bindings.db as unknown as object),
+    getObjectId(bindings.assets as unknown as object | undefined),
+    getObjectId(bindings.ai as unknown as object | undefined),
+    getObjectId(bindings.vectorize as unknown as object | undefined),
+    getObjectId(hooks as unknown as object | undefined),
+    bindings.environment ?? "",
+    bindings.assetBaseUrl ?? "",
+    bindings.readKey ?? "",
+    bindings.writeKey ?? "",
+  ].join("|");
+}
+
 /**
  * Create the agent-cms fetch handler.
- * Auto-migrates the D1 database on first request (fast no-op on subsequent requests).
  *
  * Usage in your Worker's src/index.ts:
  * ```typescript
  * import { createCMSHandler } from "agent-cms";
  *
  * export default {
- *   fetch: (request, env) => createCMSHandler({
- *     bindings: {
- *       db: env.DB,
- *       assets: env.ASSETS,
- *       environment: env.ENVIRONMENT,
- *       assetBaseUrl: env.ASSET_BASE_URL,
- *       readKey: env.CMS_READ_KEY,
- *       writeKey: env.CMS_WRITE_KEY,
- *       ai: env.AI,
- *       vectorize: env.VECTORIZE,
- *     },
- *   }).fetch(request),
+ *   fetch: (request, env) => getHandler(env).fetch(request),
  * };
+ *
+ * let cachedHandler: ReturnType<typeof createCMSHandler> | null = null;
+ *
+ * function getHandler(env: Env) {
+ *   if (!cachedHandler) {
+ *     cachedHandler = createCMSHandler({
+ *       bindings: {
+ *         db: env.DB,
+ *         assets: env.ASSETS,
+ *         environment: env.ENVIRONMENT,
+ *         assetBaseUrl: env.ASSET_BASE_URL,
+ *         readKey: env.CMS_READ_KEY,
+ *         writeKey: env.CMS_WRITE_KEY,
+ *         ai: env.AI,
+ *         vectorize: env.VECTORIZE,
+ *       },
+ *     });
+ *   }
+ *   return cachedHandler;
+ * }
  * ```
  */
 export function createCMSHandler(config: CmsHandlerConfig) {
+  const key = cacheKey(config);
+  const cached = handlerCache.get(key);
+  if (cached) return cached;
+
+  const handler = createCMSHandlerUncached(config);
+  handlerCache.set(key, handler);
+  return handler;
+}
+
+function createCMSHandlerUncached(config: CmsHandlerConfig) {
   const { bindings, hooks } = config;
   const sqlLayer = D1Client.layer({ db: bindings.db });
   const handler = createWebHandler(sqlLayer, {
@@ -70,16 +116,7 @@ export function createCMSHandler(config: CmsHandlerConfig) {
     hooks,
   });
 
-  // Auto-migrate: once per isolate (persists across requests in the same Worker instance)
-  let migrated = false;
-
   return {
-    fetch: async (request: Request): Promise<Response> => {
-      if (!migrated) {
-        await Effect.runPromise(ensureSchema().pipe(Effect.provide(sqlLayer)));
-        migrated = true;
-      }
-      return handler(request);
-    },
+    fetch: (request: Request): Promise<Response> => handler(request),
   };
 }

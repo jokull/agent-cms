@@ -11,9 +11,8 @@ Before connecting the agent, the developer needs to set up infrastructure:
 ```bash
 cd cms
 npm install
-npm run db:migrate        # apply local migrations
 npx wrangler deploy       # deploy to Cloudflare
-npm run db:migrate:remote # apply migrations to remote D1
+CMS_WRITE_KEY=... npm run setup -- https://<your-cms-url>
 ```
 
 ### 2. Custom Domain (required for image resizing)

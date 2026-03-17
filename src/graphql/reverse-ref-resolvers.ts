@@ -59,7 +59,7 @@ export function buildReverseRefResolvers(
   const { models, fieldsByModelId, resolvers, typeDefs, runSql, defaultLocale } = ctx;
 
   for (const [targetApiKey, refs] of reverseRefs) {
-    const targetTypeName = toTypeName(targetApiKey);
+    const targetTypeName = ctx.typeNames.get(targetApiKey) ?? toTypeName(targetApiKey);
 
     // Group refs by source model (multiple fields from same source model share one field)
     const bySource = new Map<string, ReverseRef[]>();
@@ -74,8 +74,9 @@ export function buildReverseRefResolvers(
     for (const [sourceApiKey, sourceRefs] of bySource) {
       const sourceTypeName = toTypeName(sourceApiKey);
       const fieldName = `_allReferencing${sourceTypeName}s`;
+      const sourceRecordTypeName = ctx.typeNames.get(sourceApiKey) ?? sourceTypeName;
       extendFields.push(
-        `${fieldName}(locale: String, fallbackLocales: [String!], filter: ${sourceTypeName}Filter, orderBy: [${sourceTypeName}OrderBy!], first: Int, skip: Int): [${sourceTypeName}!]!`
+        `${fieldName}(locale: SiteLocale, fallbackLocales: [SiteLocale!], filter: ${sourceTypeName}Filter, orderBy: [${sourceTypeName}OrderBy!], first: Int, skip: Int): [${sourceRecordTypeName}!]!`
       );
 
       const sourceTableName = sourceRefs[0].sourceTableName;

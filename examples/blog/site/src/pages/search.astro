@@ -5,11 +5,12 @@ import { gqlFetch } from "../graphql/client";
 import { SITE_SETTINGS_QUERY } from "../graphql/queries";
 
 const cms = env.CMS;
+const trace = Astro.locals.cmsTrace;
 
 const url = new URL(Astro.request.url);
 const query = url.searchParams.get("q")?.trim() ?? "";
 
-const settings = await gqlFetch(cms, SITE_SETTINGS_QUERY);
+const settings = await gqlFetch(cms, SITE_SETTINGS_QUERY, { trace });
 const site = settings.siteSettings;
 
 interface SearchResult {

@@ -75,6 +75,7 @@ export interface ReverseRef {
 
 /** Per-model metadata collected during schema building */
 export interface ModelQueryMeta {
+  baseTypeName: string;
   typeName: string;
   tableName: string;
   model: ModelRow;

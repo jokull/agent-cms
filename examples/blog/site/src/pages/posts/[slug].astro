@@ -7,8 +7,9 @@ import { POST_BY_SLUG_QUERY } from "../../graphql/queries";
 
 const { slug } = Astro.params;
 const cms = env.CMS;
+const trace = Astro.locals.cmsTrace;
 
-const data = await gqlFetch(cms, POST_BY_SLUG_QUERY, { slug: slug! });
+const data = await gqlFetch(cms, POST_BY_SLUG_QUERY, { slug: slug! }, { trace });
 const post = data.post;
 
 if (!post) {

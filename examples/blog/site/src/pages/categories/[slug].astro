@@ -6,14 +6,15 @@ import { CATEGORY_BY_SLUG_QUERY, POSTS_BY_CATEGORY_QUERY } from "../../graphql/q
 
 const { slug } = Astro.params;
 const cms = env.CMS;
+const trace = Astro.locals.cmsTrace;
 
-const categoryData = await gqlFetch(cms, CATEGORY_BY_SLUG_QUERY, { slug: slug! });
+const categoryData = await gqlFetch(cms, CATEGORY_BY_SLUG_QUERY, { slug: slug! }, { trace });
 const category = categoryData.category;
 if (!category) {
   return Astro.redirect("/404");
 }
 
-const postsData = await gqlFetch(cms, POSTS_BY_CATEGORY_QUERY, { categoryId: category.id });
+const postsData = await gqlFetch(cms, POSTS_BY_CATEGORY_QUERY, { categoryId: category.id }, { trace });
 const posts = postsData.allPosts;
 ---
 

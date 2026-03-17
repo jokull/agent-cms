@@ -4,6 +4,7 @@
 
 /** Base type definitions: scalars, assets, responsive image, SEO, color, lat_lon, etc. */
 export const BASE_TYPE_DEFS = `scalar JSON
+scalar ItemId
 
 """Cloudflare Image Resizing transform parameters"""
 input ImageTransformParams {
@@ -89,9 +90,9 @@ type ResponsiveImage {
   sizes: String
 }
 type SiteInfo {
-  locales: [String!]!
+  locales: [SiteLocale!]!
   faviconMetaTags: [Tag!]!
-  globalSeo(locale: String, fallbackLocales: [String!]): GlobalSeoField
+  globalSeo(locale: SiteLocale, fallbackLocales: [SiteLocale!]): GlobalSeoField
   noIndex: Boolean!
 }
 type GlobalSeoField {
@@ -141,12 +142,12 @@ type StructuredText {
   inlineBlocks: [JSON!]!
   links: [JSON!]!
 }
-type StringMultiLocaleField { locale: String!, value: String }
-type IntMultiLocaleField { locale: String!, value: Int }
-type FloatMultiLocaleField { locale: String!, value: Float }
-type BooleanMultiLocaleField { locale: String!, value: Boolean }
-type JsonMultiLocaleField { locale: String!, value: JSON }
-type SeoMultiLocaleField { locale: String!, value: SeoField }
+type StringMultiLocaleField { locale: SiteLocale!, value: String }
+type IntMultiLocaleField { locale: SiteLocale!, value: Int }
+type FloatMultiLocaleField { locale: SiteLocale!, value: Float }
+type BooleanMultiLocaleField { locale: SiteLocale!, value: Boolean }
+type JsonMultiLocaleField { locale: SiteLocale!, value: JSON }
+type SeoMultiLocaleField { locale: SiteLocale!, value: SeoField }
 enum ItemStatus { draft published updated }
 input MatchesFilter { pattern: String!, caseSensitive: Boolean }
 input StringFilter { eq: String, neq: String, in: [String!], notIn: [String!], matches: String, notMatches: String, isBlank: Boolean, isPresent: Boolean, exists: Boolean }
@@ -157,18 +158,18 @@ input BooleanFilter { eq: Boolean, exists: Boolean }
 input StatusFilter { eq: ItemStatus, neq: ItemStatus, in: [ItemStatus!], notIn: [ItemStatus!], exists: Boolean }
 input DateTimeFilter { eq: String, neq: String, gt: String, lt: String, gte: String, lte: String, exists: Boolean }
 """Filter for single-reference fields (link, media) by record/asset ID"""
-input LinkFilter { eq: ID, neq: ID, in: [ID!], notIn: [ID!], exists: Boolean }
+input LinkFilter { eq: ItemId, neq: ItemId, in: [ItemId!], notIn: [ItemId!], exists: Boolean }
 """Filter for multi-reference fields (links, media_gallery) stored as JSON arrays"""
-input LinksFilter { eq: [ID!], allIn: [ID!], anyIn: [ID!], notIn: [ID!], exists: Boolean }
+input LinksFilter { eq: [ItemId!], allIn: [ItemId!], anyIn: [ItemId!], notIn: [ItemId!], exists: Boolean }
 """Filter for geolocation fields"""
 input NearFilter { latitude: Float!, longitude: Float!, radius: Float! }
 input LatLonFilter { near: NearFilter, exists: Boolean }
 """Filter for fields that only support existence checks (seo, json, color)"""
 input ExistsFilter { exists: Boolean }
 """Filter records by which locales have content"""
-input LocalesFilter { allIn: [String!], anyIn: [String!], notIn: [String!] }
+input LocalesFilter { allIn: [SiteLocale!], anyIn: [SiteLocale!], notIn: [SiteLocale!] }
 """Filter for tree model parent field"""
-input ParentFilter { eq: ID, exists: Boolean }
+input ParentFilter { eq: ItemId, exists: Boolean }
 input PositionFilter { eq: Int, neq: Int, gt: Int, lt: Int, gte: Int, lte: Int }`;
 
 /** Upload-related type definitions */

@@ -67,6 +67,7 @@ export function buildContentModelResolvers(
 
   for (const model of models) {
     const fields = fieldsByModelId.get(model.id) ?? [];
+    const baseTypeName = toTypeName(model.api_key);
     const typeName = typeNames.get(model.api_key)!;
     const tableName = `content_${model.api_key}`;
 
@@ -103,7 +104,7 @@ export function buildContentModelResolvers(
       if (f.localized) localizedCamelKeys.add(toCamelCase(f.api_key));
     }
     if (localizedCamelKeys.size > 0) {
-      fieldDefs.push("_locales: [String!]!");
+      fieldDefs.push("_locales: [SiteLocale!]!");
     }
 
     // _all<Field>Locales for each localized field
@@ -503,6 +504,7 @@ export function buildContentModelResolvers(
     );
 
     modelMetas.push({
+      baseTypeName,
       typeName,
       tableName,
       model,

@@ -74,6 +74,11 @@ function localizedSeoValue(value) {
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+function localizedIds(value) {
+  const resolved = localizedValue(value);
+  return Array.isArray(resolved) ? resolved : [];
+}
+
 function assetFromUploadRef(value) {
   if (!value?.upload_id) return null;
   return {
@@ -498,12 +503,39 @@ async function importLocationById(id) {
 async function importPlaceById(id) {
   await importRecordOnce("place", id, async () => {
     const place = await datoGetItem(id);
-    await importAssetRefs(place.attributes.hero_image);
+    const content = place.attributes.content?.[IMPORT_LOCALE] ?? null;
+    await importAssetRefs(place.attributes.hero_image, ...(place.attributes.gallery ?? []));
+    for (const locationId of place.attributes.locations ?? []) {
+      await importLocationById(locationId);
+    }
+    for (const tourId of place.attributes.tours ?? []) {
+      await importTourById(tourId);
+    }
+    for (const articleId of place.attributes.blogs ?? []) {
+      await importArticleById(articleId);
+    }
+    for (const nearbyPlaceId of place.attributes.nearby_places ?? []) {
+      await importPlaceById(nearbyPlaceId);
+    }
+    for (const qaId of localizedIds(place.attributes.questions)) {
+      await importQaById(qaId);
+    }
+    if (content) {
+      await importDependenciesFromRawBody(content);
+    }
     await upsertImportedRecord("place", place.id, {
       ...(localizedInput(localizedValue(place.attributes.title)) ? { title: localizedInput(localizedValue(place.attributes.title)) } : {}),
       ...(place.attributes.slug == null ? {} : { slug: place.attributes.slug }),
       ...(place.attributes.google_places_id == null ? {} : { google_places_id: place.attributes.google_places_id }),
       ...(assetFromUploadRef(place.attributes.hero_image)?.id == null ? {} : { hero_image: assetFromUploadRef(place.attributes.hero_image).id }),
+      ...(Array.isArray(place.attributes.gallery) && place.attributes.gallery.length > 0 ? { gallery: place.attributes.gallery.map((asset) => asset.upload_id).filter(Boolean) } : {}),
+      ...(Array.isArray(place.attributes.locations) && place.attributes.locations.length > 0 ? { locations: place.attributes.locations } : {}),
+      ...(content ? { content: { [IMPORT_LOCALE]: await transformStructuredTextRaw(content, `${place.id}__content__${IMPORT_LOCALE}`) } } : {}),
+      ...(localizedSeoValue(place.attributes.seo) ? { seo: localizedSeoValue(place.attributes.seo) } : {}),
+      ...(Array.isArray(place.attributes.tours) && place.attributes.tours.length > 0 ? { tours: place.attributes.tours } : {}),
+      ...(Array.isArray(place.attributes.nearby_places) && place.attributes.nearby_places.length > 0 ? { nearby_places: place.attributes.nearby_places } : {}),
+      ...(Array.isArray(place.attributes.blogs) && place.attributes.blogs.length > 0 ? { blogs: place.attributes.blogs } : {}),
+      ...(localizedIds(place.attributes.questions).length > 0 ? { questions: localizedIds(place.attributes.questions) } : {}),
     }, toRecordOverrides(place.meta));
   });
 }
@@ -520,11 +552,57 @@ async function importTourById(id) {
       ...(tour.attributes.slug == null ? {} : { slug: tour.attributes.slug }),
       ...(localizedInput(localizedValue(tour.attributes.summary)) ? { summary: localizedInput(localizedValue(tour.attributes.summary)) } : {}),
       ...(tour.attributes.duration == null ? {} : { duration: tour.attributes.duration }),
+      ...(tour.attributes.per_person == null ? {} : { per_person: tour.attributes.per_person }),
       ...(tour.attributes.tripadvisor_review_count == null ? {} : { tripadvisor_review_count: tour.attributes.tripadvisor_review_count }),
       ...(tour.attributes.tripadvisor_rating == null ? {} : { tripadvisor_rating: tour.attributes.tripadvisor_rating }),
       ...(assetFromUploadRef(tour.attributes.hero_image)?.id == null ? {} : { hero_image: assetFromUploadRef(tour.attributes.hero_image).id }),
       ...(tour.attributes.location == null ? {} : { location: tour.attributes.location }),
     }, toRecordOverrides(tour.meta));
+  });
+}
+
+async function importQaById(id) {
+  await importRecordOnce("qa", id, async () => {
+    const qa = await datoGetItem(id);
+    await upsertImportedRecord("qa", qa.id, {
+      ...(qa.attributes.question == null ? {} : { question: qa.attributes.question }),
+      ...(qa.attributes.answer == null ? {} : { answer: qa.attributes.answer }),
+    }, toRecordOverrides(qa.meta));
+  });
+}
+
+async function importArticleById(id) {
+  await importRecordOnce("article", id, async () => {
+    const article = await datoGetItem(id);
+    const body = article.attributes.body?.[IMPORT_LOCALE] ?? null;
+    if (article.attributes.contributor) {
+      await importContributorById(article.attributes.contributor);
+    }
+    if (article.attributes.location) {
+      await importLocationById(article.attributes.location);
+    }
+    for (const qaId of localizedIds(article.attributes.questions)) {
+      await importQaById(qaId);
+    }
+    if (body) {
+      await importDependenciesFromRawBody(body);
+    }
+    await importAssetRefs(article.attributes.hero, article.attributes.thumbnail);
+    await upsertImportedRecord("article", article.id, {
+      ...(localizedInput(localizedValue(article.attributes.title)) ? { title: localizedInput(localizedValue(article.attributes.title)) } : {}),
+      ...(article.attributes.slug == null ? {} : { slug: article.attributes.slug }),
+      ...(localizedInput(localizedValue(article.attributes.summary)) ? { summary: localizedInput(localizedValue(article.attributes.summary)) } : {}),
+      ...(body ? { body: { [IMPORT_LOCALE]: await transformStructuredTextRaw(body, `${article.id}__body__${IMPORT_LOCALE}`) } } : {}),
+      ...(article.attributes.date == null ? {} : { date: article.attributes.date }),
+      ...(article.attributes.redirect_url == null ? {} : { redirect_url: article.attributes.redirect_url }),
+      ...(article.attributes.toc_is_visible == null ? {} : { toc_is_visible: article.attributes.toc_is_visible }),
+      ...(localizedSeoValue(article.attributes.seo_metadata) ? { seo_metadata: localizedSeoValue(article.attributes.seo_metadata) } : {}),
+      ...(assetFromUploadRef(article.attributes.hero)?.id == null ? {} : { hero: assetFromUploadRef(article.attributes.hero).id }),
+      ...(assetFromUploadRef(article.attributes.thumbnail)?.id == null ? {} : { thumbnail: assetFromUploadRef(article.attributes.thumbnail).id }),
+      ...(article.attributes.contributor == null ? {} : { contributor: article.attributes.contributor }),
+      ...(article.attributes.location == null ? {} : { location: article.attributes.location }),
+      ...(localizedIds(article.attributes.questions).length > 0 ? { questions: localizedIds(article.attributes.questions) } : {}),
+    }, toRecordOverrides(article.meta));
   });
 }
 
@@ -809,6 +887,14 @@ async function importPlace(record) {
     ...(record.slug == null ? {} : { slug: record.slug }),
     ...(record.googlePlacesId == null ? {} : { google_places_id: record.googlePlacesId }),
     ...(record.heroImage?.id == null ? {} : { hero_image: record.heroImage.id }),
+    ...(Array.isArray(record.gallery) && record.gallery.length > 0 ? { gallery: record.gallery.map((asset) => asset.id).filter(Boolean) } : {}),
+    ...(Array.isArray(record.locations) && record.locations.length > 0 ? { locations: record.locations.map((entry) => entry.id).filter(Boolean) } : {}),
+    ...(record.content ? { content: { [IMPORT_LOCALE]: record.content } } : {}),
+    ...(record.seo ? { seo: record.seo } : {}),
+    ...(Array.isArray(record.tours) && record.tours.length > 0 ? { tours: record.tours.map((entry) => entry.id).filter(Boolean) } : {}),
+    ...(Array.isArray(record.nearbyPlaces) && record.nearbyPlaces.length > 0 ? { nearby_places: record.nearbyPlaces.map((entry) => entry.id).filter(Boolean) } : {}),
+    ...(Array.isArray(record.blogs) && record.blogs.length > 0 ? { blogs: record.blogs.map((entry) => entry.id).filter(Boolean) } : {}),
+    ...(Array.isArray(record.questions) && record.questions.length > 0 ? { questions: record.questions.map((entry) => entry.id).filter(Boolean) } : {}),
   }, record.overrides);
 }
 
@@ -825,6 +911,7 @@ async function importArticle(record) {
     ...(record.thumbnail?.id == null ? {} : { thumbnail: record.thumbnail.id }),
     ...(record.contributor?.id == null ? {} : { contributor: record.contributor.id }),
     ...(record.location?.id == null ? {} : { location: record.location.id }),
+    ...(Array.isArray(record.questions) && record.questions.length > 0 ? { questions: record.questions.map((entry) => entry.id).filter(Boolean) } : {}),
     ...(record.seoMetadata ? { seo_metadata: record.seoMetadata } : {}),
     ...(record.tocIsVisible == null ? {} : { toc_is_visible: record.tocIsVisible }),
   }, record.overrides);
@@ -859,13 +946,44 @@ async function listSourceRecords(modelApiKey) {
   }
 
   if (modelApiKey === "place") {
-    return (await datoListItemsByType("place", { limit, offset: skip })).map((item) => ({
-      id: item.id,
-      overrides: toRecordOverrides(item.meta),
-      slug: item.attributes.slug ?? null,
-      title: localizedValue(item.attributes.title),
-      googlePlacesId: item.attributes.google_places_id ?? null,
-      heroImage: assetFromUploadRef(item.attributes.hero_image),
+    const items = await datoListItemsByType("place", { limit, offset: skip });
+    return Promise.all(items.map(async (item) => {
+      const content = item.attributes.content?.[IMPORT_LOCALE] ?? null;
+      for (const locationId of item.attributes.locations ?? []) {
+        await importLocationById(locationId);
+      }
+      for (const tourId of item.attributes.tours ?? []) {
+        await importTourById(tourId);
+      }
+      for (const articleId of item.attributes.blogs ?? []) {
+        await importArticleById(articleId);
+      }
+      for (const nearbyPlaceId of item.attributes.nearby_places ?? []) {
+        await importPlaceById(nearbyPlaceId);
+      }
+      for (const qaId of localizedIds(item.attributes.questions)) {
+        await importQaById(qaId);
+      }
+      if (content) {
+        await importDependenciesFromRawBody(content);
+      }
+      await importAssetRefs(item.attributes.hero_image, ...(item.attributes.gallery ?? []));
+      return {
+        id: item.id,
+        overrides: toRecordOverrides(item.meta),
+        slug: item.attributes.slug ?? null,
+        title: localizedValue(item.attributes.title),
+        googlePlacesId: item.attributes.google_places_id ?? null,
+        heroImage: assetFromUploadRef(item.attributes.hero_image),
+        gallery: (item.attributes.gallery ?? []).map(assetFromUploadRef).filter(Boolean),
+        locations: (item.attributes.locations ?? []).map((id) => ({ id })),
+        content: content ? await transformStructuredTextRaw(content, `${item.id}__content__${IMPORT_LOCALE}`) : null,
+        seo: localizedSeoValue(item.attributes.seo),
+        tours: (item.attributes.tours ?? []).map((id) => ({ id })),
+        nearbyPlaces: (item.attributes.nearby_places ?? []).map((id) => ({ id })),
+        blogs: (item.attributes.blogs ?? []).map((id) => ({ id })),
+        questions: localizedIds(item.attributes.questions).map((id) => ({ id })),
+      };
     }));
   }
 
@@ -878,6 +996,9 @@ async function listSourceRecords(modelApiKey) {
       }
       if (item.attributes.location) {
         await importLocationById(item.attributes.location);
+      }
+      for (const qaId of localizedIds(item.attributes.questions)) {
+        await importQaById(qaId);
       }
       if (body) {
         await importDependenciesFromRawBody(body);
@@ -897,6 +1018,7 @@ async function listSourceRecords(modelApiKey) {
         thumbnail: assetFromUploadRef(item.attributes.thumbnail),
         contributor: item.attributes.contributor ? { id: item.attributes.contributor } : null,
         location: item.attributes.location ? { id: item.attributes.location } : null,
+        questions: localizedIds(item.attributes.questions).map((id) => ({ id })),
         body: body ? await transformStructuredTextRaw(body, `${item.id}__body__${IMPORT_LOCALE}`) : null,
       };
     }));

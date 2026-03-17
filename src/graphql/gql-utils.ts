@@ -12,6 +12,11 @@ export function toTypeName(apiKey: string): string {
     apiKey.slice(1).replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
 }
 
+/** Dato-compatible content model type names use a Record suffix. */
+export function toContentTypeName(apiKey: string): string {
+  return `${toTypeName(apiKey)}Record`;
+}
+
 /** Naive English pluralization for GraphQL query names */
 export function pluralize(word: string): string {
   if (word.endsWith("y") && !/[aeiou]y$/i.test(word)) {

@@ -223,7 +223,15 @@ import { createCMSHandler } from "agent-cms";
 
 export default {
   fetch(request: Request, env: Env) {
-    return createCMSHandler({
+    return getHandler(env).fetch(request);
+  },
+};
+
+let cachedHandler: ReturnType<typeof createCMSHandler> | null = null;
+
+function getHandler(env: Env) {
+  if (!cachedHandler) {
+    cachedHandler = createCMSHandler({
       bindings: {
         db: env.DB,
         assets: env.ASSETS,
@@ -241,9 +249,10 @@ export default {
           // Send a Slack notification, sync to analytics, etc.
         },
       },
-    }).fetch(request);
-  },
-};
+    });
+  }
+  return cachedHandler;
+}
 
 interface Env {
   DB: D1Database;
@@ -258,9 +267,16 @@ interface Env {
 
 Available hooks: `onRecordCreate`, `onRecordUpdate`, `onRecordDelete`, `onPublish`, `onUnpublish`. All receive `{ modelApiKey, recordId }`. Hooks are fire-and-forget — errors are logged, not propagated to the caller.
 
+## Worker pattern
+
+Use a module-scoped handler/factory. Do not call `createCMSHandler()` directly inside `fetch()` on every request.
+
+- Cache the handler at module scope.
+- Run setup explicitly before serving traffic. Reads should stay read-only.
+
 ## Stack
 
-- **Runtime**: Cloudflare Workers (edge, no cold starts)
+- **Runtime**: Cloudflare Workers
 - **Database**: D1 (managed SQLite)
 - **Assets**: R2 + Cloudflare Image Resizing
 - **Search**: SQLite FTS5 + Cloudflare Vectorize

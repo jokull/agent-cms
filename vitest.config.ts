@@ -4,6 +4,17 @@ import path from "path";
 export default defineConfig({
   test: {
     globals: true,
+    include: ["test/**/*.test.ts"],
+    exclude: [
+      "**/node_modules/**",
+      "**/dist/**",
+      "**/.git/**",
+      "**/.wrangler/**",
+      "**/.claude/**",
+      "**/.reference/**",
+      "**/examples/**",
+      "**/packages/**",
+    ],
   },
   resolve: {
     alias: {
