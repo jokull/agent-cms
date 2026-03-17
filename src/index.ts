@@ -17,8 +17,8 @@ export interface CmsBindings {
    *  Pass from your secret/binding of choice. */
   readKey?: string;
   /** Write API key — required for REST writes, MCP, publish/unpublish.
-   *  Like DatoCMS CMA token. Pass from your secret/binding of choice. */
-  writeKey?: string;
+   *  Like DatoCMS CMA token. Use any string for local dev (e.g. "dev"). */
+  writeKey: string;
   /** Workers AI binding for embedding generation (optional — enables vector search) */
   ai?: AiBinding;
   /** Vectorize index binding (optional — enables semantic search) */
