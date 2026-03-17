@@ -12,7 +12,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
  * Create an HTTP handler for the MCP server.
  * Returns a function that handles Web Standard Request → Response.
  */
-export function createMcpHttpHandler(server: McpServer) {
+export function createMcpHttpHandler(createServer: () => McpServer) {
   return async (request: Request): Promise<Response> => {
     // Create a stateless transport for each request
     const transport = new WebStandardStreamableHTTPServerTransport({
@@ -20,12 +20,16 @@ export function createMcpHttpHandler(server: McpServer) {
       enableJsonResponse: true, // Simpler for request/response tool calls
     });
 
-    // Connect the MCP server to the transport
-    await server.connect(transport);
+    // Stateless Streamable HTTP requires a fresh server/transport pair per request.
+    // Reusing a connected McpServer across requests breaks the initialize → initialized flow.
+    const server = createServer();
 
-    // Handle the request
-    const response = await transport.handleRequest(request);
-
-    return response;
+    try {
+      await server.connect(transport);
+      return await transport.handleRequest(request);
+    } finally {
+      await transport.close();
+      await server.close();
+    }
   };
 }

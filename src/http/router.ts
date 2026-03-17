@@ -670,8 +670,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
         if (!mcpHandler) {
           const { createMcpServer } = await import("../mcp/server.js");
           const { createMcpHttpHandler } = await import("../mcp/http-transport.js");
-          const mcpServer = createMcpServer(fullLayer);
-          mcpHandler = createMcpHttpHandler(mcpServer);
+          mcpHandler = createMcpHttpHandler(() => createMcpServer(fullLayer));
         }
         const response = await mcpHandler(instrumentedRequest);
         return finish(response);
