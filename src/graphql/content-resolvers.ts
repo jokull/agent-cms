@@ -78,7 +78,7 @@ export function buildContentModelResolvers(
 
     // Object type
     const fieldDefs = [
-      "id: ID!", "_modelApiKey: String!", "_status: String", "_isValid: Boolean!", "_createdAt: String", "_updatedAt: String",
+      "id: ID!", "_modelApiKey: String!", "_status: ItemStatus", "_isValid: Boolean!", "_createdAt: String", "_updatedAt: String",
       "_publishedAt: String", "_firstPublishedAt: String", "_seoMetaTags: [Tag!]!",
     ];
     if (model.sortable || model.tree) {

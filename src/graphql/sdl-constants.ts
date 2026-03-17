@@ -30,6 +30,37 @@ input ImageTrimParams {
   width: Int
   height: Int
 }
+"""
+Legacy DatoCMS/imgix compatibility shim.
+Accepted only to smooth migrations; values are translated best-effort to
+Cloudflare image transforms and do not imply full imgix parity.
+"""
+input ImgixParamsShim {
+  w: Float
+  h: Float
+  fit: ImgixFitShim
+  auto: [ImgixAutoValueShim!]
+  q: Int
+  dpr: Float
+  blur: Int
+  bg: String
+  rot: Float
+  facepad: Float
+  maxW: Int
+  maxH: Int
+}
+enum ImgixFitShim {
+  crop
+  clip
+  fill
+  facearea
+  scale
+  max
+}
+enum ImgixAutoValueShim {
+  format
+  compress
+}
 type Asset {
   id: ID!
   filename: String!
@@ -42,7 +73,7 @@ type Asset {
   url: String!
   blurhash: String
   customData: JSON
-  responsiveImage(transforms: ImageTransformParams, cfImagesParams: ImageTransformParams, imgixParams: ImageTransformParams): ResponsiveImage
+  responsiveImage(transforms: ImageTransformParams, cfImagesParams: ImageTransformParams, imgixParams: ImgixParamsShim): ResponsiveImage
 }
 type ResponsiveImage {
   src: String!
@@ -107,12 +138,14 @@ type FloatMultiLocaleField { locale: String!, value: Float }
 type BooleanMultiLocaleField { locale: String!, value: Boolean }
 type JsonMultiLocaleField { locale: String!, value: JSON }
 type SeoMultiLocaleField { locale: String!, value: SeoField }
+enum ItemStatus { draft published updated }
 input MatchesFilter { pattern: String!, caseSensitive: Boolean }
 input StringFilter { eq: String, neq: String, in: [String!], notIn: [String!], matches: String, notMatches: String, isBlank: Boolean, isPresent: Boolean, exists: Boolean }
 input TextFilter { matches: String, notMatches: String, isBlank: Boolean, isPresent: Boolean, exists: Boolean }
 input IntFilter { eq: Int, neq: Int, gt: Int, lt: Int, gte: Int, lte: Int, exists: Boolean }
 input FloatFilter { eq: Float, neq: Float, gt: Float, lt: Float, gte: Float, lte: Float, exists: Boolean }
 input BooleanFilter { eq: Boolean, exists: Boolean }
+input StatusFilter { eq: ItemStatus, neq: ItemStatus, in: [ItemStatus!], notIn: [ItemStatus!], exists: Boolean }
 input DateTimeFilter { eq: String, neq: String, gt: String, lt: String, gte: String, lte: String, exists: Boolean }
 """Filter for single-reference fields (link, media) by record/asset ID"""
 input LinkFilter { eq: ID, neq: ID, in: [ID!], notIn: [ID!], exists: Boolean }

@@ -97,7 +97,7 @@ describe("Meta field filtering and ordering", () => {
     await jsonRequest(handler, "POST", `/api/records/${r1.id}/publish?modelApiKey=article`);
 
     const result = await gqlQuery(handler, `{
-      allArticles(filter: { _status: { eq: "published" } }) { title }
+      allArticles(filter: { _status: { eq: published } }) { title }
     }`, { includeDrafts: true });
 
     expect(result.errors).toBeUndefined();

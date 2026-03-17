@@ -10,10 +10,10 @@ import { UPLOAD_TYPE_DEFS } from "./sdl-constants.js";
 import type { SchemaBuilderContext, DynamicRow, AssetObject } from "./gql-types.js";
 
 /**
- * Map imgix params to Cloudflare Image Resizing equivalents.
- * CF supports: width, height, fit (scale-down|contain|cover|crop|pad), gravity (auto|face|left|...),
- * quality, format (auto|webp|avif|json), dpr, sharpen, blur, background, rotate, trim.
- * imgix fit values: crop→cover, facearea→cover+gravity:face, clip→contain, fill→pad, scale→scale-down.
+ * Legacy DatoCMS/imgix compatibility shim.
+ * This only translates the small subset of imgix-style params used by the
+ * migrated frontend into Cloudflare Image Resizing equivalents.
+ * It is intentionally best-effort, not a full imgix emulation layer.
  */
 function normalizeImgixParams(raw: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -25,7 +25,16 @@ function normalizeImgixParams(raw: Record<string, unknown>): Record<string, unkn
   if (raw.height != null) out.height = raw.height;
 
   // Format: imgix auto=format → CF format=auto
-  if (raw.auto === "format" || raw.auto === "compress,format" || raw.auto === "format,compress") {
+  const autoValues = Array.isArray(raw.auto)
+    ? raw.auto.map(String)
+    : raw.auto == null
+      ? []
+      : [String(raw.auto)];
+  if (
+    autoValues.includes("format") ||
+    autoValues.join(",") === "compress,format" ||
+    autoValues.join(",") === "format,compress"
+  ) {
     out.format = "auto";
   } else if (raw.format != null) {
     out.format = raw.format;
@@ -67,6 +76,8 @@ function normalizeImgixParams(raw: Record<string, unknown>): Record<string, unkn
   if (raw.bg != null) out.background = raw.bg;
   if (raw.background != null) out.background = raw.background;
   if (raw.trim != null) out.trim = raw.trim;
+  if (raw.maxW != null && out.width == null) out.width = raw.maxW;
+  if (raw.maxH != null && out.height == null) out.height = raw.maxH;
 
   // facepad → zoom (CF face gravity zoom: 0=tight, 1=wide; imgix facepad: 1=tight, higher=wider)
   // Approximate inverse mapping
@@ -243,7 +254,7 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
   resolvers.Asset = {
     responsiveImage: (asset: AssetObject, args: DynamicRow) => {
       if (!asset.width || !asset.height) return null;
-      // Accept transforms (native), cfImagesParams (alias), or imgixParams (DatoCMS compat)
+      // Accept transforms (native), cfImagesParams (alias), or imgixParams (legacy migration shim)
       const rawParams = (args?.transforms ?? args?.cfImagesParams ?? args?.imgixParams ?? {}) as Record<string, unknown>;
       const params = args?.imgixParams ? normalizeImgixParams(rawParams) : rawParams;
 

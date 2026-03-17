@@ -20,7 +20,7 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
 
     // Filter/OrderBy/Meta types (all use camelCase field names)
     const filterFields = [
-      "id: StringFilter", "_status: StringFilter",
+      "id: StringFilter", "_status: StatusFilter",
       "_createdAt: DateTimeFilter", "_updatedAt: DateTimeFilter",
       "_publishedAt: DateTimeFilter", "_firstPublishedAt: DateTimeFilter",
     ];
@@ -160,6 +160,9 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
 
     (resolvers.Query as Record<string, unknown>)[listName] = async (_: unknown, args: DynamicRow, context: GqlContext) => {
       const includeDrafts = context?.includeDrafts ?? false;
+      const excludeInvalid = typeof args.excludeInvalid === "boolean"
+        ? args.excludeInvalid
+        : (context?.excludeInvalid ?? false);
       const locale = (args.locale as string) ?? context?.locale ?? defaultLocale;
       // Store locale for nested field resolvers (per-query, not shared across root fields)
       if (args.locale) context.locale = args.locale as string;
@@ -169,7 +172,7 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
         includeDrafts,
         locale ?? undefined
       );
-      if (args.excludeInvalid) {
+      if (excludeInvalid) {
         const validity = await Promise.all(results.map(async (record) => {
           const required = computeIsValid(record, fields, defaultLocale);
           if (!required.valid) return false;
@@ -224,7 +227,10 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
 
     (resolvers.Query as Record<string, unknown>)[metaName] = async (_: unknown, args: DynamicRow, context: GqlContext) => {
       const includeDrafts = context?.includeDrafts ?? false;
-      if (args.excludeInvalid) {
+      const excludeInvalid = typeof args.excludeInvalid === "boolean"
+        ? args.excludeInvalid
+        : (context?.excludeInvalid ?? false);
+      if (excludeInvalid) {
         // Need to fetch all records and filter in JS for accurate count
         const allRecords = await queryWithFilter(
           { filter: args.filter as DynamicRow, first: 500 },

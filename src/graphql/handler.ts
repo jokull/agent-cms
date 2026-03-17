@@ -8,6 +8,7 @@ import { getSqlMetrics, withSqlMetrics } from "./sql-metrics.js";
 
 export interface GraphQLContext {
   includeDrafts: boolean;
+  excludeInvalid: boolean;
 }
 
 export interface GraphQLHandlerOptions {
@@ -18,7 +19,7 @@ export interface GraphQLHandlerOptions {
 
 /**
  * Create a GraphQL Yoga web handler.
- * Reads X-Include-Drafts header and passes it to resolvers via context.
+ * Reads X-Include-Drafts / X-Exclude-Invalid headers and passes them to resolvers via context.
  * Schema is built async (required for D1's async SqlClient).
  */
 export function createGraphQLHandler(
@@ -64,7 +65,8 @@ export function createGraphQLHandler(
     }],
     context: ({ request }: { request: Request }) => {
       const includeDrafts = request.headers.get("X-Include-Drafts") === "true";
-      return { includeDrafts } satisfies GraphQLContext;
+      const excludeInvalid = request.headers.get("X-Exclude-Invalid") === "true";
+      return { includeDrafts, excludeInvalid } satisfies GraphQLContext;
     },
   });
 

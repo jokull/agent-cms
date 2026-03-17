@@ -148,6 +148,65 @@ describe("responsiveImage with transforms", () => {
     expect(img.src).toContain("quality=80");
   });
 
+  it("accepts legacy imgixParams shim with bare enum values", async () => {
+    const result = await gqlQuery(handler, `{
+      allPosts {
+        cover {
+          responsiveImage(imgixParams: {
+            auto: format
+            fit: crop
+            w: 700
+            h: 420
+            q: 75
+            bg: "white"
+            rot: 90
+          }) {
+            src
+            width
+            height
+          }
+        }
+      }
+    }`, { includeDrafts: true });
+
+    expect(result.errors).toBeUndefined();
+    const img = result.data.allPosts[0].cover.responsiveImage;
+    expect(img.width).toBe(700);
+    expect(img.height).toBe(420);
+    expect(img.src).toContain("format=auto");
+    expect(img.src).toContain("fit=cover");
+    expect(img.src).toContain("quality=75");
+    expect(img.src).toContain("background=white");
+    expect(img.src).toContain("rotate=90");
+  });
+
+  it("maps imgix facearea + facepad to face gravity zoom best-effort", async () => {
+    const result = await gqlQuery(handler, `{
+      allPosts {
+        cover {
+          responsiveImage(imgixParams: {
+            auto: format
+            fit: facearea
+            facepad: 10
+            w: 45
+            h: 45
+          }) {
+            src
+            width
+            height
+          }
+        }
+      }
+    }`, { includeDrafts: true });
+
+    expect(result.errors).toBeUndefined();
+    const img = result.data.allPosts[0].cover.responsiveImage;
+    expect(img.width).toBe(45);
+    expect(img.height).toBe(45);
+    expect(img.src).toContain("gravity=face");
+    expect(img.src).toContain("zoom=0.1");
+  });
+
   it("passes through Cloudflare-native transform options", async () => {
     const result = await gqlQuery(handler, `{
       allPosts {

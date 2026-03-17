@@ -36,12 +36,18 @@ export async function gqlQuery(
   handler: (req: Request) => Promise<Response>,
   query: string,
   variables?: Record<string, any>,
-  options?: { includeDrafts?: boolean }
+  options?: { includeDrafts?: boolean; excludeInvalid?: boolean; headers?: Record<string, string> }
 ) {
   const includeDrafts = options?.includeDrafts ?? true; // Default to true for tests
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (includeDrafts) {
     headers["X-Include-Drafts"] = "true";
+  }
+  if (options?.excludeInvalid) {
+    headers["X-Exclude-Invalid"] = "true";
+  }
+  if (options?.headers) {
+    Object.assign(headers, options.headers);
   }
   const res = await handler(
     new Request("http://localhost/graphql", {

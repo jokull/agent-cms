@@ -472,7 +472,7 @@ describe("Filter compiler — comprehensive", () => {
   // -----------------------------------------------------------------------
   describe("meta field filters", () => {
     it("_status filter", async () => {
-      const r = await q(`{ allArticles(filter: { _status: { eq: "draft" } }) { title } }`, { includeDrafts: true });
+      const r = await q(`{ allArticles(filter: { _status: { eq: draft } }) { title } }`, { includeDrafts: true });
       expect(r.data.allArticles).toHaveLength(3); // All start as draft
     });
 

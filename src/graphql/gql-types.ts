@@ -14,6 +14,7 @@ export type DastDocInput = { document: { children: readonly unknown[] } };
 /** GraphQL resolver context passed through from Yoga */
 export interface GqlContext {
   includeDrafts?: boolean;
+  excludeInvalid?: boolean;
   locale?: string;
   fallbackLocales?: string[];
   linkedRecordCache?: Map<string, Promise<DynamicRow | null>>;
