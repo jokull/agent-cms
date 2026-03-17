@@ -384,3 +384,45 @@ function walkLinkNodes(nodes: unknown[], ids: string[]) {
     if (children) walkLinkNodes(children, ids);
   }
 }
+
+/**
+ * Remove block/inlineBlock nodes whose item ID is in the given set.
+ * Returns a deep-cloned document with those nodes pruned from the tree.
+ */
+export function pruneBlockNodes(
+  doc: { schema: string; document: { type: string; children: readonly unknown[] } },
+  blockIdsToRemove: ReadonlySet<string>
+): { schema: string; document: { type: string; children: unknown[] } } {
+  function filterChildren(nodes: readonly unknown[]): unknown[] {
+    const result: unknown[] = [];
+    for (const node of nodes) {
+      if (!isRecord(node)) {
+        result.push(node);
+        continue;
+      }
+      if (
+        (node.type === "block" || node.type === "inlineBlock") &&
+        typeof node.item === "string" &&
+        blockIdsToRemove.has(node.item)
+      ) {
+        continue; // prune
+      }
+      const children = getArray(node, "children");
+      if (children) {
+        const filtered = filterChildren(children);
+        result.push({ ...node, children: filtered });
+      } else {
+        result.push(node);
+      }
+    }
+    return result;
+  }
+
+  return {
+    schema: doc.schema,
+    document: {
+      type: doc.document.type,
+      children: filterChildren(doc.document.children),
+    },
+  };
+}

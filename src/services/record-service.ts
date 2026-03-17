@@ -10,7 +10,7 @@ import {
   updateRecord as sqlUpdateRecord,
   deleteRecord as sqlDeleteRecord,
 } from "../schema-engine/sql-records.js";
-import { writeStructuredText, deleteBlocksForField, getStructuredTextStorageKey } from "./structured-text-service.js";
+import { writeStructuredText, deleteBlocksForField, getStructuredTextStorageKey, materializeStructuredTextValue } from "./structured-text-service.js";
 import type { ModelRow, FieldRow, ParsedFieldRow } from "../db/row-types.js";
 import { parseFieldValidators, isContentRow } from "../db/row-types.js";
 import { getSlugSource, getBlockWhitelist, getBlocksOnly, isRequired, findUniqueConstraintViolations, isUnique } from "../db/validators.js";
@@ -19,6 +19,7 @@ import { CreateRecordInput, PatchRecordInput } from "./input-schemas.js";
 import { getFieldTypeDef } from "../field-types.js";
 import { isFieldType } from "../types.js";
 import { StructuredTextWriteInput } from "../dast/schema.js";
+import { pruneBlockNodes } from "../dast/index.js";
 import { fireHook } from "../hooks.js";
 import * as VersionService from "./version-service.js";
 
@@ -858,6 +859,180 @@ export function bulkCreateRecords(rawBody: unknown) {
     }
 
     return { created: created.length, records: created };
+  });
+}
+
+/**
+ * Partial block update for a structured text field.
+ *
+ * Patch map semantics:
+ * - Key with string value (equal to the block ID) → keep block unchanged
+ * - Key with object value → partial merge into existing block (only specified fields updated)
+ * - Key with null → delete block and prune from DAST
+ * - Key absent from patch → keep block unchanged
+ *
+ * Optionally accepts a new DAST `value`. If omitted, keeps existing DAST
+ * (with deleted blocks auto-pruned).
+ */
+export function patchBlocksForField(rawBody: unknown) {
+  return Effect.gen(function* () {
+    const body = yield* Schema.decodeUnknown(Schema.Struct({
+      recordId: Schema.NonEmptyString,
+      modelApiKey: Schema.NonEmptyString,
+      fieldApiKey: Schema.NonEmptyString,
+      value: Schema.optional(Schema.Unknown),
+      blocks: Schema.Record({ key: Schema.String, value: Schema.NullOr(Schema.Unknown) }),
+    }))(rawBody).pipe(
+      Effect.mapError((e) => new ValidationError({ message: `Invalid input: ${e.message}` }))
+    );
+
+    const model = yield* getModelByApiKey(body.modelApiKey);
+    if (!model) return yield* new NotFoundError({ entity: "Model", id: body.modelApiKey });
+
+    const tableName = `content_${model.api_key}`;
+    const existing = yield* selectById(tableName, body.recordId);
+    if (!existing) return yield* new NotFoundError({ entity: "Record", id: body.recordId });
+
+    const modelFields = yield* getModelFields(model.id);
+    const field = modelFields.find((f) => f.api_key === body.fieldApiKey);
+    if (!field) return yield* new NotFoundError({ entity: "Field", id: body.fieldApiKey });
+    if (field.field_type !== "structured_text") {
+      return yield* new ValidationError({
+        message: `Field '${body.fieldApiKey}' is not a structured_text field`,
+        field: body.fieldApiKey,
+      });
+    }
+
+    // Materialize existing structured text to get current blocks
+    const existingEnvelope = yield* materializeStructuredTextValue({
+      allowedBlockApiKeys: getBlockWhitelist(field.validators) ?? [],
+      parentContainerModelApiKey: model.api_key,
+      parentBlockId: null,
+      parentFieldApiKey: field.api_key,
+      rootRecordId: body.recordId,
+      rootFieldApiKey: field.api_key,
+      rawValue: existing[field.api_key],
+    });
+
+    if (!existingEnvelope) {
+      return yield* new ValidationError({
+        message: `Field '${body.fieldApiKey}' has no structured text content to patch`,
+        field: body.fieldApiKey,
+      });
+    }
+
+    const existingBlocks = existingEnvelope.blocks;
+    const blockIdsToDelete = new Set<string>();
+    const mergedBlocks: Record<string, Record<string, unknown>> = {};
+
+    // Start with all existing blocks as-is
+    for (const [blockId, blockData] of Object.entries(existingBlocks)) {
+      mergedBlocks[blockId] = blockData as Record<string, unknown>;
+    }
+
+    // Apply patch
+    for (const [blockId, patchValue] of Object.entries(body.blocks)) {
+      if (patchValue === null) {
+        // Delete this block
+        blockIdsToDelete.add(blockId);
+        delete mergedBlocks[blockId];
+      } else if (typeof patchValue === "string") {
+        // Keep unchanged — verify it exists
+        if (!existingBlocks[blockId]) {
+          return yield* new ValidationError({
+            message: `Block '${blockId}' referenced in patch does not exist`,
+            field: body.fieldApiKey,
+          });
+        }
+      } else if (typeof patchValue === "object" && !Array.isArray(patchValue)) {
+        // Partial merge
+        const patchObj = patchValue as Record<string, unknown>;
+        const existingBlock = existingBlocks[blockId];
+        if (!existingBlock) {
+          return yield* new ValidationError({
+            message: `Block '${blockId}' referenced in patch does not exist`,
+            field: body.fieldApiKey,
+          });
+        }
+        // Merge: existing block data + patch (patch wins)
+        mergedBlocks[blockId] = {
+          ...(existingBlock as Record<string, unknown>),
+          ...patchObj,
+        };
+      } else {
+        return yield* new ValidationError({
+          message: `Invalid patch value for block '${blockId}': expected string, object, or null`,
+          field: body.fieldApiKey,
+        });
+      }
+    }
+
+    // Build final DAST value
+    let finalDastValue: unknown;
+    if (body.value !== undefined) {
+      finalDastValue = body.value;
+    } else if (blockIdsToDelete.size > 0) {
+      // Auto-prune deleted blocks from existing DAST
+      const existingDast = existingEnvelope.value as {
+        schema: string;
+        document: { type: string; children: readonly unknown[] };
+      };
+      finalDastValue = pruneBlockNodes(existingDast, blockIdsToDelete);
+    } else {
+      finalDastValue = existingEnvelope.value;
+    }
+
+    // Now do the standard delete-all + rewrite using the merged data
+    yield* deleteBlocksForField({ rootRecordId: body.recordId, fieldApiKey: field.api_key });
+
+    const allowedBlockTypes = getBlockWhitelist(field.validators);
+    const blocksOnly = getBlocksOnly(field.validators);
+
+    const dast = yield* writeStructuredText({
+      rootModelApiKey: model.api_key,
+      fieldApiKey: field.api_key,
+      rootRecordId: body.recordId,
+      value: finalDastValue,
+      blocks: mergedBlocks,
+      allowedBlockTypes: allowedBlockTypes ?? [],
+      blocksOnly,
+    });
+
+    // Update the content table
+    const sql = yield* SqlClient.SqlClient;
+    const now = new Date().toISOString();
+    yield* sql.unsafe(
+      `UPDATE "${tableName}" SET "${field.api_key}" = ?, _updated_at = ? WHERE id = ?`,
+      [JSON.stringify(dast), now, body.recordId]
+    );
+
+    // Status transition: published → updated on content edit (draft models only)
+    if (isContentRow(existing) && existing._status === "published" && model.has_draft) {
+      yield* sql.unsafe(
+        `UPDATE "${tableName}" SET _status = 'updated' WHERE id = ?`,
+        [body.recordId]
+      );
+    }
+
+    // Auto-re-publish for has_draft=false models
+    if (!model.has_draft) {
+      const updated = yield* selectById(tableName, body.recordId);
+      if (updated) {
+        const snap: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(updated)) {
+          if (!key.startsWith("_") && key !== "id") snap[key] = value;
+        }
+        yield* sql.unsafe(
+          `UPDATE "${tableName}" SET _published_snapshot = ?, _published_at = ?, _status = 'published' WHERE id = ?`,
+          [JSON.stringify(snap), now, body.recordId]
+        );
+      }
+    }
+
+    yield* SearchService.reindexRecord(body.modelApiKey, body.recordId, modelFields).pipe(Effect.ignore);
+    yield* fireHook("onRecordUpdate", { modelApiKey: body.modelApiKey, recordId: body.recordId });
+
+    return yield* selectById(tableName, body.recordId);
   });
 }
 
