@@ -47,6 +47,10 @@ export interface StructuredTextEnvelope {
   blocks: Record<string, DynamicRow>;
 }
 
+export function getStructuredTextStorageKey(fieldApiKey: string, localeCode?: string | null) {
+  return localeCode ? `${fieldApiKey}:${localeCode}` : fieldApiKey;
+}
+
 function mergeRowMaps(target: Map<string, DynamicRow[]>, source: Map<string, DynamicRow[]>) {
   for (const [tableName, rows] of source) {
     const existing = target.get(tableName);
@@ -351,6 +355,7 @@ function collectDescendantBlockIds(sql: SqlClient.SqlClient, startIds: string[])
 export function writeStructuredText(params: {
   rootModelApiKey: string;
   fieldApiKey: string;
+  rootFieldStorageKey?: string;
   rootRecordId: string;
   value: unknown;
   blocks?: Record<string, unknown>;
@@ -367,7 +372,7 @@ export function writeStructuredText(params: {
       {
         sql,
         rootRecordId: params.rootRecordId,
-        rootFieldApiKey: params.fieldApiKey,
+        rootFieldApiKey: params.rootFieldStorageKey ?? params.fieldApiKey,
         rootModelApiKey: params.rootModelApiKey,
         seenBlockIds: new Set<string>(),
       },
@@ -392,15 +397,25 @@ export function writeStructuredText(params: {
 export function deleteBlocksForField(params: {
   rootRecordId: string;
   fieldApiKey: string;
+  includeLocalizedVariants?: boolean;
 }): Effect.Effect<void, unknown, SqlClient.SqlClient> {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const blockModels = yield* fetchBlockModels(sql);
     for (const model of blockModels) {
-      yield* sql.unsafe(
-        `DELETE FROM "block_${model.api_key}" WHERE _root_record_id = ? AND _root_field_api_key = ?`,
-        [params.rootRecordId, params.fieldApiKey]
-      );
+      if (params.includeLocalizedVariants) {
+        yield* sql.unsafe(
+          `DELETE FROM "block_${model.api_key}"
+           WHERE _root_record_id = ?
+             AND (_root_field_api_key = ? OR _root_field_api_key LIKE ?)`,
+          [params.rootRecordId, params.fieldApiKey, `${params.fieldApiKey}:%`]
+        );
+      } else {
+        yield* sql.unsafe(
+          `DELETE FROM "block_${model.api_key}" WHERE _root_record_id = ? AND _root_field_api_key = ?`,
+          [params.rootRecordId, params.fieldApiKey]
+        );
+      }
     }
   });
 }
@@ -523,10 +538,46 @@ export function materializeRecordStructuredTextFields(params: {
       if (field.field_type !== "structured_text") continue;
       const rawValue = params.record[field.api_key];
       if (rawValue === null || rawValue === undefined) continue;
+      const materializeContext = { blockModelSchemas: new Map<string, BlockModelSchema>() };
+      if (field.localized) {
+        let localeMap = rawValue;
+        if (typeof localeMap === "string") {
+          try {
+            localeMap = JSON.parse(localeMap);
+          } catch {
+            continue;
+          }
+        }
+        if (typeof localeMap !== "object" || localeMap === null || Array.isArray(localeMap)) {
+          continue;
+        }
+
+        const localized: Record<string, unknown> = {};
+        for (const [localeCode, localeValue] of Object.entries(localeMap as Record<string, unknown>)) {
+          if (localeValue === null || localeValue === undefined) {
+            localized[localeCode] = localeValue;
+            continue;
+          }
+          const envelope = yield* materializeStructuredTextValue({
+            allowedBlockApiKeys: getBlockWhitelist(field.validators) ?? [],
+            parentContainerModelApiKey: params.modelApiKey,
+            materializeContext,
+            parentBlockId: null,
+            parentFieldApiKey: field.api_key,
+            rootRecordId: String(params.record.id),
+            rootFieldApiKey: getStructuredTextStorageKey(field.api_key, localeCode),
+            rawValue: localeValue,
+          });
+          localized[localeCode] = envelope;
+        }
+        materialized[field.api_key] = localized;
+        continue;
+      }
+
       const envelope = yield* materializeStructuredTextValue({
         allowedBlockApiKeys: getBlockWhitelist(field.validators) ?? [],
         parentContainerModelApiKey: params.modelApiKey,
-        materializeContext: { blockModelSchemas: new Map<string, BlockModelSchema>() },
+        materializeContext,
         parentBlockId: null,
         parentFieldApiKey: field.api_key,
         rootRecordId: String(params.record.id),

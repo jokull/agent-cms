@@ -237,6 +237,72 @@ describe("Schema Lifecycle", () => {
       expect(records[1].status).toBe("active");
     });
 
+    it("preserves falsy boolean default_value metadata and populates existing records", async () => {
+      ({ handler, sqlLayer } = createTestApp());
+      const modelRes = await jsonRequest(handler, "POST", "/api/models", { name: "Flag", apiKey: "flag" });
+      const model = await modelRes.json();
+      await jsonRequest(handler, "POST", `/api/models/${model.id}/fields`, {
+        label: "Title", apiKey: "title", fieldType: "string",
+      });
+      await jsonRequest(handler, "POST", "/api/records", { modelApiKey: "flag", data: { title: "One" } });
+
+      const res = await jsonRequest(handler, "POST", `/api/models/${model.id}/fields`, {
+        label: "Enabled", apiKey: "enabled", fieldType: "boolean",
+        validators: { required: true },
+        defaultValue: false,
+      });
+      expect(res.status).toBe(201);
+      const field = await res.json();
+      expect(field.defaultValue).toBe(false);
+
+      const records = await Effect.runPromise(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          const rows = yield* sql.unsafe<{ enabled: number }>('SELECT enabled FROM "content_flag"');
+          const fields = yield* sql.unsafe<{ default_value: string | null }>(
+            "SELECT default_value FROM fields WHERE model_id = ? AND api_key = ?",
+            [model.id, "enabled"]
+          );
+          return { rows, field: fields[0] };
+        }).pipe(Effect.provide(sqlLayer))
+      );
+      expect(records.rows[0].enabled).toBe(0);
+      expect(records.field.default_value).toBe("false");
+    });
+
+    it("preserves zero default_value metadata and populates existing records", async () => {
+      ({ handler, sqlLayer } = createTestApp());
+      const modelRes = await jsonRequest(handler, "POST", "/api/models", { name: "Counter", apiKey: "counter" });
+      const model = await modelRes.json();
+      await jsonRequest(handler, "POST", `/api/models/${model.id}/fields`, {
+        label: "Title", apiKey: "title", fieldType: "string",
+      });
+      await jsonRequest(handler, "POST", "/api/records", { modelApiKey: "counter", data: { title: "One" } });
+
+      const res = await jsonRequest(handler, "POST", `/api/models/${model.id}/fields`, {
+        label: "Count", apiKey: "count", fieldType: "integer",
+        validators: { required: true },
+        defaultValue: 0,
+      });
+      expect(res.status).toBe(201);
+      const field = await res.json();
+      expect(field.defaultValue).toBe(0);
+
+      const records = await Effect.runPromise(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          const rows = yield* sql.unsafe<{ count: number }>('SELECT count FROM "content_counter"');
+          const fields = yield* sql.unsafe<{ default_value: string | null }>(
+            "SELECT default_value FROM fields WHERE model_id = ? AND api_key = ?",
+            [model.id, "count"]
+          );
+          return { rows, field: fields[0] };
+        }).pipe(Effect.provide(sqlLayer))
+      );
+      expect(records.rows[0].count).toBe(0);
+      expect(records.field.default_value).toBe("0");
+    });
+
     it("allows adding required field to empty model without default", async () => {
       const modelRes = await jsonRequest(handler, "POST", "/api/models", { name: "Post", apiKey: "post" });
       const model = await modelRes.json();

@@ -34,10 +34,19 @@ export const CreateFieldInput = Schema.Struct({
 export type CreateFieldInput = typeof CreateFieldInput.Type;
 
 export const CreateRecordInput = Schema.Struct({
+  id: Schema.optional(Schema.String),
   modelApiKey: Schema.NonEmptyString,
   data: Schema.optionalWith(
     Schema.Record({ key: Schema.String, value: Schema.Unknown }),
     { default: () => ({}) }
+  ),
+  overrides: Schema.optional(
+    Schema.Struct({
+      createdAt: Schema.optional(Schema.String),
+      updatedAt: Schema.optional(Schema.String),
+      publishedAt: Schema.optional(Schema.String),
+      firstPublishedAt: Schema.optional(Schema.String),
+    })
   ),
 });
 export type CreateRecordInput = typeof CreateRecordInput.Type;
@@ -48,10 +57,19 @@ export const PatchRecordInput = Schema.Struct({
     Schema.Record({ key: Schema.String, value: Schema.Unknown }),
     { default: () => ({}) }
   ),
+  overrides: Schema.optional(
+    Schema.Struct({
+      createdAt: Schema.optional(Schema.String),
+      updatedAt: Schema.optional(Schema.String),
+      publishedAt: Schema.optional(Schema.String),
+      firstPublishedAt: Schema.optional(Schema.String),
+    })
+  ),
 });
 export type PatchRecordInput = typeof PatchRecordInput.Type;
 
 export const CreateAssetInput = Schema.Struct({
+  id: Schema.optional(Schema.String),
   filename: Schema.NonEmptyString,
   mimeType: Schema.NonEmptyString,
   size: Schema.optionalWith(Schema.Number, { default: () => 0 }),

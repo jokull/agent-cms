@@ -24,12 +24,18 @@ describe("Localization", () => {
     await jsonRequest(handler, "POST", `/api/models/${model.id}/fields`, {
       label: "Views", apiKey: "views", fieldType: "integer", // Not localized
     });
+    await jsonRequest(handler, "POST", `/api/models/${model.id}/fields`, {
+      label: "SEO", apiKey: "seo_metadata", fieldType: "seo", localized: true,
+    });
 
     // Create record with localized data
     await jsonRequest(handler, "POST", "/api/records", {
       modelApiKey: "article",
       data: {
         title: { en: "Hello World", is: "Halló heimur" },
+        seo_metadata: {
+          en: { title: "Hello SEO", description: "Hello Desc" },
+        },
         views: 42,
       },
     });
@@ -97,5 +103,92 @@ describe("Localization", () => {
       article(id: "${id}", locale: "is") { title }
     }`);
     expect(result.data.article.title).toBe("Halló heimur");
+  });
+
+  it("patch merges localized field maps instead of replacing them", async () => {
+    const all = await gqlQuery(handler, `{ allArticles { id title } }`);
+    const id = all.data.allArticles[0].id;
+
+    const patchRes = await jsonRequest(handler, "PATCH", `/api/records/${id}`, {
+      modelApiKey: "article",
+      data: {
+        title: { is: "Halló uppfært" },
+      },
+    });
+    expect(patchRes.status).toBe(200);
+
+    const english = await gqlQuery(handler, `{
+      article(id: "${id}", locale: "en") { title }
+    }`);
+    const icelandic = await gqlQuery(handler, `{
+      article(id: "${id}", locale: "is") { title }
+    }`);
+
+    expect(english.data.article.title).toBe("Hello World");
+    expect(icelandic.data.article.title).toBe("Halló uppfært");
+  });
+
+  it("patch ignores stale non-locale keys when merging localized fields", async () => {
+    const all = await gqlQuery(handler, `{ allArticles { id } }`);
+    const id = all.data.allArticles[0].id;
+
+    await jsonRequest(handler, "PATCH", `/api/records/${id}`, {
+      modelApiKey: "article",
+      data: {
+        title: { title: "stale", description: "stale", is: "Halló hreinsað" },
+      },
+    });
+
+    const english = await gqlQuery(handler, `{
+      article(id: "${id}", locale: "en") { title }
+    }`);
+    const icelandic = await gqlQuery(handler, `{
+      article(id: "${id}", locale: "is") { title }
+      allArticles { _locales }
+    }`);
+
+    expect(english.data.article.title).toBe("Hello World");
+    expect(icelandic.data.article.title).toBe("Halló hreinsað");
+    expect(icelandic.data.allArticles[0]._locales).not.toContain("title");
+    expect(icelandic.data.allArticles[0]._locales).not.toContain("description");
+  });
+
+  it("patch heals stale non-localized seo object into a clean localized map", async () => {
+    const all = await gqlQuery(handler, `{ allArticles { id } }`);
+    const id = all.data.allArticles[0].id;
+
+    await jsonRequest(handler, "PATCH", `/api/records/${id}`, {
+      modelApiKey: "article",
+      data: {
+        seo_metadata: {
+          title: "stale title",
+          description: "stale description",
+          en: { title: "Hello SEO", description: "Hello Desc" },
+        },
+      },
+    });
+
+    await jsonRequest(handler, "PATCH", `/api/records/${id}`, {
+      modelApiKey: "article",
+      data: {
+        seo_metadata: {
+          is: { title: "Halló SEO", description: "Halló Lýsing" },
+        },
+      },
+    });
+
+    const result = await gqlQuery(handler, `{
+      article(id: "${id}", locale: "is", fallbackLocales: ["en"]) {
+        seoMetadata { title description }
+        _allSeoMetadataLocales { locale value { title description } }
+      }
+    }`);
+
+    expect(result.errors).toBeUndefined();
+    expect(result.data.article.seoMetadata.title).toBe("Halló SEO");
+    expect(result.data.article._allSeoMetadataLocales).toEqual([
+      { locale: "en", value: { title: "Hello SEO", description: "Hello Desc" } },
+      { locale: "is", value: { title: "Halló SEO", description: "Halló Lýsing" } },
+    ]);
   });
 });

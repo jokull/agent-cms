@@ -88,6 +88,7 @@ Canonical record of all settled decisions for agent-cms. This file is the comple
 | D50 | Cache tags / CDN invalidation | None | Scoped out. D1 edge locality plus frontend-framework revalidation and lifecycle hooks are sufficient. No application-level cache tag system. |
 | D51 | GraphQL subscriptions | None | Scoped out. Not needed for the intended workflow. Lifecycle hooks cover mutation-driven integrations without maintaining a subscription protocol. |
 | D52 | Per-field locale argument | None | Scoped out. Locale selection happens at the query level; per-field locale overrides add complexity for limited value. |
+| D53 | Asset binary ingestion | Direct to R2, not through the Worker | Original binaries should be uploaded straight to object storage. agent-cms owns asset metadata and delivery, not the binary upload stream. Local imports should target Miniflare R2 directly; deployed tooling should use the R2 S3 API or signed direct uploads. |
 
 ## System Table Schemas
 

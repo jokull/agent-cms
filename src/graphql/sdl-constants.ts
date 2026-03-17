@@ -14,6 +14,21 @@ input ImageTransformParams {
   format: String
   gravity: String
   dpr: Int
+  zoom: Float
+  background: String
+  blur: Int
+  sharpen: Float
+  rotate: Int
+  anim: Boolean
+  trim: ImageTrimParams
+}
+input ImageTrimParams {
+  top: Int
+  right: Int
+  bottom: Int
+  left: Int
+  width: Int
+  height: Int
 }
 type Asset {
   id: ID!
@@ -90,6 +105,8 @@ type StringMultiLocaleField { locale: String!, value: String }
 type IntMultiLocaleField { locale: String!, value: Int }
 type FloatMultiLocaleField { locale: String!, value: Float }
 type BooleanMultiLocaleField { locale: String!, value: Boolean }
+type JsonMultiLocaleField { locale: String!, value: JSON }
+type SeoMultiLocaleField { locale: String!, value: SeoField }
 input MatchesFilter { pattern: String!, caseSensitive: Boolean }
 input StringFilter { eq: String, neq: String, in: [String!], notIn: [String!], matches: String, notMatches: String, isBlank: Boolean, isPresent: Boolean, exists: Boolean }
 input TextFilter { matches: String, notMatches: String, isBlank: Boolean, isPresent: Boolean, exists: Boolean }

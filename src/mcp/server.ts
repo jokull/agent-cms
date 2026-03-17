@@ -11,6 +11,7 @@ import * as FieldService from "../services/field-service.js";
 import * as RecordService from "../services/record-service.js";
 import * as PublishService from "../services/publish-service.js";
 import * as AssetService from "../services/asset-service.js";
+import * as VersionService from "../services/version-service.js";
 import * as SchemaLifecycle from "../services/schema-lifecycle.js";
 import * as SchemaIO from "../services/schema-io.js";
 import * as SearchService from "../search/search-service.js";
@@ -298,6 +299,30 @@ All records must belong to the same model. Slugs are auto-generated. Returns arr
     async ({ recordId, modelApiKey }) => run(PublishService.unpublishRecord(modelApiKey, recordId))
   );
 
+  // --- Versions ---
+
+  server.tool("list_record_versions", "List all version snapshots for a record, newest first. Versions are created on each publish or auto-republish.",
+    {
+      modelApiKey: z.string().describe("The model's api_key"),
+      recordId: z.string().describe("The record ID"),
+    },
+    async ({ modelApiKey, recordId }) => run(VersionService.listVersions(modelApiKey, recordId))
+  );
+
+  server.tool("get_record_version", "Get a specific version snapshot by version ID",
+    { versionId: z.string().describe("The version ID") },
+    async ({ versionId }) => run(VersionService.getVersion(versionId))
+  );
+
+  server.tool("restore_record_version", "Restore a record to a previous version. The current state is versioned first, so restore is always reversible. For has_draft models, the record returns to draft status (needs re-publish). For non-draft models, the record is auto-republished.",
+    {
+      modelApiKey: z.string().describe("The model's api_key"),
+      recordId: z.string().describe("The record ID"),
+      versionId: z.string().describe("The version ID to restore"),
+    },
+    async ({ modelApiKey, recordId, versionId }) => run(VersionService.restoreVersion(modelApiKey, recordId, versionId))
+  );
+
   server.tool("reorder_records", "Reorder records in a sortable/tree model by providing ordered record IDs",
     {
       modelApiKey: z.string(),
@@ -378,12 +403,12 @@ All records must belong to the same model. Slugs are auto-generated. Returns arr
   // --- Assets ---
 
   server.tool("upload_asset",
-    `Register an asset after uploading the file to R2 via wrangler CLI.
+    `Register an asset after uploading the original file to R2 out of band.
 
 Upload flow:
-1. Tell the user to run: wrangler r2 object put <bucket>/uploads/<filename> --file=<local-path> --content-type=<mime-type>
+1. Upload the original file to R2 (for local dev this is usually: wrangler r2 object put <bucket>/uploads/<filename> --file=<local-path> --content-type=<mime-type>)
 2. Call this tool with the r2Key, filename, mimeType, and image dimensions
-3. The asset is registered and can be referenced in media fields by its ID
+3. The asset metadata is registered and can be referenced in media fields by its ID
 
 Example r2Key: "uploads/hero.jpg"`,
     {
@@ -405,10 +430,10 @@ Example r2Key: "uploads/hero.jpg"`,
   );
 
   server.tool("replace_asset",
-    `Replace an asset's file while keeping the same ID and URL. All content references remain stable.
+    `Replace an asset's file metadata while keeping the same ID and URL. All content references remain stable.
 
 Flow:
-1. Upload new file to R2: wrangler r2 object put <bucket>/uploads/<new-filename> --file=<path>
+1. Upload the new original file to R2
 2. Call this tool with the asset ID and new file metadata
 3. The asset URL stays the same — no broken links in content`,
     {

@@ -1,0 +1,6 @@
+[
+  {
+    "type": "deferred_publish",
+    "detail": "Skipped auto-publish for locale 'ja'. Non-default locale imports only merge localized values onto existing records."
+  }
+]

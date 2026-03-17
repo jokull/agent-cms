@@ -8,6 +8,20 @@ import type { ModelRow, FieldRow } from "../db/row-types.js";
 import { parseFieldValidators } from "../db/row-types.js";
 import { CreateFieldInput } from "./input-schemas.js";
 import { deleteBlockSubtrees } from "./structured-text-service.js";
+import { isUnique, supportsUniqueValidation } from "../db/validators.js";
+
+function serializeDefaultValueForFieldMetadata(value: unknown): string | null {
+  if (value === undefined) return null;
+  if (typeof value === "string") return value;
+  return JSON.stringify(value);
+}
+
+function serializeDefaultValueForRecordColumn(value: unknown): unknown {
+  if (value === undefined) return null;
+  if (typeof value === "object" && value !== null) return JSON.stringify(value);
+  if (typeof value === "boolean") return value ? 1 : 0;
+  return value;
+}
 
 function syncTable(modelId: string) {
   return Effect.gen(function* () {
@@ -75,6 +89,12 @@ export function createField(modelId: string, rawBody: unknown) {
 
     // Validate required field + defaultValue BEFORE any mutations
     const parsedValidators = body.validators ?? {};
+    if (isUnique(parsedValidators) && !supportsUniqueValidation(body.fieldType)) {
+      return yield* new ValidationError({
+        message: `unique validator is not supported for field type '${body.fieldType}'`,
+        field: body.apiKey,
+      });
+    }
     if (parsedValidators.required) {
       const modelInfo = yield* sql.unsafe<{ api_key: string; is_block: number }>(
         "SELECT api_key, is_block FROM models WHERE id = ?", [modelId]
@@ -103,7 +123,7 @@ export function createField(modelId: string, rawBody: unknown) {
       [
         id, modelId, body.label, body.apiKey, body.fieldType,
         position, body.localized ? 1 : 0, validators,
-        body.defaultValue ? JSON.stringify(body.defaultValue) : null,
+        serializeDefaultValueForFieldMetadata(body.defaultValue),
         body.appearance ? JSON.stringify(body.appearance) : null,
         body.hint ?? null, body.fieldsetId ?? null,
         now, now,
@@ -119,11 +139,7 @@ export function createField(modelId: string, rawBody: unknown) {
       );
       if (modelInfo.length > 0) {
         const tableName = modelInfo[0].is_block ? `block_${modelInfo[0].api_key}` : `content_${modelInfo[0].api_key}`;
-        const serialized = typeof body.defaultValue === "object" && body.defaultValue !== null
-          ? JSON.stringify(body.defaultValue)
-          : typeof body.defaultValue === "boolean"
-            ? (body.defaultValue ? 1 : 0)
-            : body.defaultValue;
+        const serialized = serializeDefaultValueForRecordColumn(body.defaultValue);
         yield* sql.unsafe(
           `UPDATE "${tableName}" SET "${body.apiKey}" = ? WHERE "${body.apiKey}" IS NULL`,
           [serialized]
@@ -148,6 +164,16 @@ export function updateField(fieldId: string, body: Record<string, unknown>) {
     if (fields.length === 0) return yield* new NotFoundError({ entity: "Field", id: fieldId });
 
     const field = fields[0];
+    const nextFieldType = typeof body.fieldType === "string" ? body.fieldType : field.field_type;
+    const nextValidators = typeof body.validators === "object" && body.validators !== null
+      ? body.validators as Record<string, unknown>
+      : parseFieldValidators(field).validators;
+    if (isUnique(nextValidators) && !supportsUniqueValidation(nextFieldType)) {
+      return yield* new ValidationError({
+        message: `unique validator is not supported for field type '${nextFieldType}'`,
+        field: field.api_key,
+      });
+    }
 
     // Reject field type changes if field has data
     if (body.fieldType !== undefined && body.fieldType !== field.field_type) {

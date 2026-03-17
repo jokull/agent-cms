@@ -4,9 +4,10 @@ import { NotFoundError, ValidationError } from "../errors.js";
 import { selectById } from "../schema-engine/sql-records.js";
 import type { ModelRow, ContentRow, FieldRow } from "../db/row-types.js";
 import { parseFieldValidators } from "../db/row-types.js";
-import { computeIsValid } from "../db/validators.js";
+import { computeIsValid, findUniqueConstraintViolations } from "../db/validators.js";
 import { materializeRecordStructuredTextFields } from "./structured-text-service.js";
 import { fireHook } from "../hooks.js";
+import * as VersionService from "./version-service.js";
 
 export function publishRecord(modelApiKey: string, recordId: string) {
   return Effect.gen(function* () {
@@ -34,9 +35,18 @@ export function publishRecord(modelApiKey: string, recordId: string) {
     );
     const defaultLocale = localeRows.length > 0 ? localeRows[0].code : null;
     const { valid, missingFields } = computeIsValid(record, parsedFields, defaultLocale);
-    if (!valid) {
+    const uniqueViolations = yield* findUniqueConstraintViolations({
+      tableName,
+      record,
+      fields: parsedFields,
+      excludeId: recordId,
+    });
+    if (!valid || uniqueViolations.length > 0) {
       return yield* new ValidationError({
-        message: `Cannot publish: missing required fields: ${missingFields.join(", ")}`,
+        message: `Cannot publish: invalid fields: ${[
+          ...missingFields.map((field) => `${field} (required)`),
+          ...uniqueViolations.map((field) => `${field} (unique)`),
+        ].join(", ")}`,
       });
     }
 
@@ -45,6 +55,14 @@ export function publishRecord(modelApiKey: string, recordId: string) {
       record,
       fields: parsedFields,
     });
+
+    // Version the previous published state (skip on first publish)
+    if (record._published_snapshot) {
+      const prevSnapshot = typeof record._published_snapshot === "string"
+        ? record._published_snapshot
+        : JSON.stringify(record._published_snapshot);
+      yield* VersionService.createVersion(modelApiKey, recordId, prevSnapshot);
+    }
 
     // Build snapshot from current field values (exclude system columns)
     const snapshot: Record<string, unknown> = {};

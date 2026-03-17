@@ -11,6 +11,35 @@ import { toTypeName, toCamelCase, fieldToSDL, getRegistryDef } from "./gql-utils
 import { resolveStructuredTextValue } from "./structured-text-resolver.js";
 import { loadLinkedRecords } from "./linked-record-loader.js";
 
+function pickLocalizedEntry(rawValue: unknown, context: GqlContext) {
+  if (rawValue === null || rawValue === undefined) return { locale: null, value: null };
+  let localeMap = rawValue;
+  if (typeof localeMap === "string") {
+    try {
+      localeMap = JSON.parse(localeMap);
+    } catch {
+      return { locale: null, value: rawValue };
+    }
+  }
+  if (typeof localeMap !== "object" || localeMap === null || Array.isArray(localeMap)) {
+    return { locale: null, value: rawValue };
+  }
+
+  const locMap = localeMap as Record<string, unknown>;
+  const locale = context?.locale ?? null;
+  const fallbacks = context?.fallbackLocales ?? [];
+  if (locale && locMap[locale] !== undefined && locMap[locale] !== null && locMap[locale] !== "") {
+    return { locale, value: locMap[locale] };
+  }
+  for (const fb of fallbacks) {
+    if (locMap[fb] !== undefined && locMap[fb] !== null && locMap[fb] !== "") {
+      return { locale: fb, value: locMap[fb] };
+    }
+  }
+  const [firstLocale, firstValue] = Object.entries(locMap)[0] ?? [null, null];
+  return { locale: firstLocale, value: firstValue };
+}
+
 /**
  * Build block model resolvers, compute structured text union types,
  * and emit deferred block SDL. Returns the structuredTextFieldTypes map.
@@ -80,13 +109,18 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
         }
       } else if (f.field_type === "structured_text") {
         bmResolvers[gqlName] = async (parent: DynamicRow, _args: unknown, context: GqlContext) => {
-          const raw = parent[f.api_key];
+          const localized = f.localized
+            ? pickLocalizedEntry(parent[f.api_key], context)
+            : { locale: null, value: parent[f.api_key] };
+          const raw = localized.value;
           if (!raw) return null;
           return await resolveStructuredTextValue({
             runSql,
             rawValue: raw,
             rootRecordId: typeof parent._root_record_id === "string" ? parent._root_record_id : undefined,
-            rootFieldApiKey: typeof parent._root_field_api_key === "string" ? parent._root_field_api_key : undefined,
+            rootFieldApiKey: typeof parent._root_field_api_key === "string"
+              ? parent._root_field_api_key
+              : undefined,
             parentContainerModelApiKey: bm.api_key,
             parentBlockId: String(parent.id),
             parentFieldApiKey: f.api_key,

@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "trip-migration-cms",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-12-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "trip-migration-cms-db",
+      "database_id": "11111111-1111-1111-1111-111111111111",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ASSETS",
+      "bucket_name": "trip-migration-assets"
+    }
+  ],
+  "vars": {
+    "ENVIRONMENT": "development",
+    "ASSET_BASE_URL": "http://127.0.0.1:8791"
+  }
+}

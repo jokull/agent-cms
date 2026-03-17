@@ -1,0 +1,29 @@
+{
+  "_site": {
+    "locales": [
+      "en",
+      "ko",
+      "ja",
+      "zh_CN",
+      "es"
+    ]
+  },
+  "_allArticlesMeta": {
+    "count": 615
+  },
+  "_allLocationsMeta": {
+    "count": 139
+  },
+  "_allGuidesMeta": {
+    "count": 66
+  },
+  "_allPlacesMeta": {
+    "count": 2835
+  },
+  "_allToursMeta": {
+    "count": 874
+  },
+  "_allTripsMeta": {
+    "count": 586
+  }
+}

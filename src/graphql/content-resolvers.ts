@@ -4,13 +4,51 @@
 import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
 import type { AssetRow } from "../db/row-types.js";
-import { getLinkTargets, getLinksTargets, computeIsValid } from "../db/validators.js";
+import { getLinkTargets, getLinksTargets, computeIsValid, findUniqueConstraintViolations } from "../db/validators.js";
 import type { SchemaBuilderContext, ModelQueryMeta, DynamicRow, GqlContext, AssetObject } from "./gql-types.js";
 import { toTypeName, toCamelCase, fieldToSDL, getRegistryDef, deserializeRecord } from "./gql-utils.js";
 import { resolveStructuredTextValue } from "./structured-text-resolver.js";
 import { loadLinkedRecords } from "./linked-record-loader.js";
 import { loadStructuredTextEnvelope } from "./structured-text-loader.js";
 import { getBlockWhitelist } from "../db/validators.js";
+
+function pickLocalizedEntry(rawValue: unknown, context: GqlContext, defaultLocale?: string | null) {
+  if (rawValue === null || rawValue === undefined) return { locale: null, value: null };
+
+  let localeMap = rawValue;
+  if (typeof localeMap === "string") {
+    try {
+      localeMap = JSON.parse(localeMap);
+    } catch {
+      return { locale: null, value: rawValue };
+    }
+  }
+  if (typeof localeMap !== "object" || localeMap === null || Array.isArray(localeMap)) {
+    return { locale: null, value: rawValue };
+  }
+
+  const locMap = localeMap as Record<string, unknown>;
+  const locale = context?.locale ?? defaultLocale;
+  const fallbacks = context?.fallbackLocales ?? [];
+
+  if (locale && locMap[locale] !== undefined && locMap[locale] !== null && locMap[locale] !== "") {
+    return { locale, value: locMap[locale] };
+  }
+  for (const fb of fallbacks) {
+    if (locMap[fb] !== undefined && locMap[fb] !== null && locMap[fb] !== "") {
+      return { locale: fb, value: locMap[fb] };
+    }
+  }
+  if (defaultLocale && locMap[defaultLocale] !== undefined) {
+    return { locale: defaultLocale, value: locMap[defaultLocale] };
+  }
+  const [firstLocale, firstValue] = Object.entries(locMap)[0] ?? [null, null];
+  return { locale: firstLocale, value: firstValue };
+}
+
+function pickLocalizedValue(rawValue: unknown, context: GqlContext, defaultLocale?: string | null) {
+  return pickLocalizedEntry(rawValue, context, defaultLocale).value;
+}
 
 /**
  * Build content model types and field resolvers.
@@ -87,7 +125,17 @@ export function buildContentModelResolvers(
     typeResolvers._updatedAt = (p: DynamicRow) => p._updated_at;
     typeResolvers._publishedAt = (p: DynamicRow) => p._published_at;
     typeResolvers._firstPublishedAt = (p: DynamicRow) => p._first_published_at;
-    typeResolvers._isValid = (parent: DynamicRow) => computeIsValid(parent, fields, defaultLocale).valid;
+    typeResolvers._isValid = async (parent: DynamicRow) => {
+      const required = computeIsValid(parent, fields, defaultLocale);
+      if (!required.valid) return false;
+      const uniqueViolations = await runSql(findUniqueConstraintViolations({
+        tableName,
+        record: parent,
+        fields,
+        excludeId: typeof parent.id === "string" ? parent.id : null,
+      }));
+      return uniqueViolations.length === 0;
+    };
 
     // _seoMetaTags resolver: auto-generate meta tags from seo field or heuristic field selection
     const seoField = fields.find((f) => f.field_type === "seo");
@@ -105,7 +153,9 @@ export function buildContentModelResolvers(
       let twitterCard: string | null = null;
 
       if (seoField) {
-        let seo = parent[seoField.api_key];
+        let seo = seoField.localized
+          ? pickLocalizedValue(parent[seoField.api_key], {} as GqlContext, defaultLocale)
+          : parent[seoField.api_key];
         if (typeof seo === "string") { try { seo = JSON.parse(seo); } catch { seo = null; } }
         if (seo && typeof seo === "object") {
           const seoObj = seo as DynamicRow;
@@ -241,38 +291,7 @@ export function buildContentModelResolvers(
       const locDef = getRegistryDef(f.field_type);
       if (f.localized && locDef?.localizable) {
         typeResolvers[toCamelCase(f.api_key)] = (parent: DynamicRow, _args: unknown, context: GqlContext) => {
-          const rawValue = parent[f.api_key];
-          if (rawValue === null || rawValue === undefined) return null;
-
-          // Parse JSON if needed
-          let localeMap = rawValue;
-          if (typeof localeMap === "string") {
-            try { localeMap = JSON.parse(localeMap); } catch { return rawValue; }
-          }
-          if (typeof localeMap !== "object" || localeMap === null) return rawValue;
-
-          const locMap = localeMap as Record<string, unknown>;
-          // Resolve locale: query arg > context > default
-          const locale = context?.locale ?? defaultLocale;
-          const fallbacks = context?.fallbackLocales ?? [];
-
-          // Try primary locale
-          if (locale && locMap[locale] !== undefined && locMap[locale] !== null && locMap[locale] !== "") {
-            return locMap[locale];
-          }
-          // Try fallbacks
-          for (const fb of fallbacks) {
-            if (locMap[fb] !== undefined && locMap[fb] !== null && locMap[fb] !== "") {
-              return locMap[fb];
-            }
-          }
-          // Try default locale as final fallback
-          if (defaultLocale && locMap[defaultLocale] !== undefined) {
-            return locMap[defaultLocale];
-          }
-          // Return first available value
-          const values = Object.values(locMap);
-          return values.length > 0 ? values[0] : null;
+          return pickLocalizedValue(parent[f.api_key], context, defaultLocale);
         };
       }
     }
@@ -368,8 +387,10 @@ export function buildContentModelResolvers(
       }
       // SEO field resolver: return parsed JSON with image asset resolution
       if (f.field_type === "seo") {
-        typeResolvers[gqlName] = async (parent: DynamicRow) => {
-          let seo = parent[f.api_key];
+        typeResolvers[gqlName] = async (parent: DynamicRow, _args: unknown, context: GqlContext) => {
+          let seo = f.localized
+            ? pickLocalizedValue(parent[f.api_key], context, defaultLocale)
+            : parent[f.api_key];
           if (!seo) return null;
           if (typeof seo === "string") {
             try { seo = JSON.parse(seo); } catch { return null; }
@@ -403,12 +424,19 @@ export function buildContentModelResolvers(
       // StructuredText resolver: return { value, blocks, links }
       if (f.field_type === "structured_text") {
         typeResolvers[gqlName] = async (parent: DynamicRow, _args: unknown, context: GqlContext) => {
-          let dast = parent[f.api_key];
+          const localized = f.localized
+            ? pickLocalizedEntry(parent[f.api_key], context, defaultLocale)
+            : { locale: null, value: parent[f.api_key] };
+          let dast = localized.value;
           if (!dast) return null;
           const includeDrafts = context?.includeDrafts ?? false;
           const isEnvelope = typeof dast === "object" && dast !== null && !Array.isArray(dast)
             && "value" in (dast as Record<string, unknown>)
             && "blocks" in (dast as Record<string, unknown>);
+          const resolvedLocale = f.localized ? localized.locale : null;
+          const rootFieldApiKey = f.localized
+            ? `${f.api_key}:${resolvedLocale ?? defaultLocale ?? ""}`.replace(/:$/, "")
+            : f.api_key;
           if (includeDrafts && !isEnvelope) {
             dast = await loadStructuredTextEnvelope({
               runSql,
@@ -418,7 +446,7 @@ export function buildContentModelResolvers(
               parentBlockId: null,
               parentFieldApiKey: f.api_key,
               rootRecordId: String(parent.id),
-              rootFieldApiKey: f.api_key,
+              rootFieldApiKey,
               rawValue: dast,
             });
           }
@@ -426,7 +454,7 @@ export function buildContentModelResolvers(
             runSql,
             rawValue: dast,
             rootRecordId: String(parent.id),
-            rootFieldApiKey: f.api_key,
+            rootFieldApiKey,
             parentContainerModelApiKey: model.api_key,
             parentBlockId: null,
             parentFieldApiKey: f.api_key,

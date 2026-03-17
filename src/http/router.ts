@@ -5,7 +5,7 @@ import {
   HttpApp,
   HttpServerError,
 } from "@effect/platform";
-import { Effect, Layer, Schema, Option } from "effect";
+import { Cause, Effect, Layer, Schema, Option } from "effect";
 import { SqlClient } from "@effect/sql";
 import * as ModelService from "../services/model-service.js";
 import * as FieldService from "../services/field-service.js";
@@ -17,10 +17,39 @@ import { isCmsError, errorToResponse } from "../errors.js";
 import { ReorderInput } from "../services/input-schemas.js";
 import { ValidationError } from "../errors.js";
 import * as SchemaIO from "../services/schema-io.js";
+import * as VersionService from "../services/version-service.js";
 import * as SearchService from "../search/search-service.js";
 import type { AiBinding, VectorizeBinding } from "../search/vectorize.js";
 import { VectorizeContext } from "../search/vectorize-context.js";
 import { HooksContext, type CmsHooks } from "../hooks.js";
+
+function describeUnknown(error: unknown): string {
+  if (error instanceof Error) return `${error.name}: ${error.message}`;
+  if (typeof error === "string") return error;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function getRequestIdFromHeaders(headers: Headers | globalThis.Headers): string {
+  return headers.get("x-request-id") ?? headers.get("cf-ray") ?? crypto.randomUUID();
+}
+
+function logEvent(level: "info" | "error", message: string, fields: Record<string, unknown>) {
+  const payload = {
+    level,
+    message,
+    ...fields,
+  };
+  const line = JSON.stringify(payload);
+  if (level === "error") {
+    console.error(line);
+  } else {
+    console.info(line);
+  }
+}
 
 /** Helper: run a CMS Effect and return an HTTP response */
 function handle<A>(
@@ -29,6 +58,7 @@ function handle<A>(
 ) {
   return effect.pipe(
     Effect.flatMap((result) => HttpServerResponse.json(result, { status })),
+    Effect.tapErrorCause((cause) => Effect.logError("REST effect failed", Cause.pretty(cause))),
     Effect.catchAll((error: unknown) => {
       if (isCmsError(error)) {
         const mapped = errorToResponse(error);
@@ -162,6 +192,33 @@ const recordsRouter = HttpRouter.empty.pipe(
     Effect.gen(function* () {
       const modelApiKey = yield* queryParam("modelApiKey");
       return yield* handle(RecordService.listRecords(modelApiKey));
+    })
+  ),
+
+  // --- Versions (must be before /records/:id) ---
+  HttpRouter.get(
+    "/records/:id/versions",
+    Effect.gen(function* () {
+      const params = yield* HttpRouter.params;
+      const modelApiKey = yield* queryParam("modelApiKey");
+      return yield* handle(VersionService.listVersions(modelApiKey, param(params, "id")));
+    })
+  ),
+
+  HttpRouter.get(
+    "/records/:id/versions/:versionId",
+    Effect.gen(function* () {
+      const params = yield* HttpRouter.params;
+      return yield* handle(VersionService.getVersion(param(params, "versionId")));
+    })
+  ),
+
+  HttpRouter.post(
+    "/records/:id/versions/:versionId/restore",
+    Effect.gen(function* () {
+      const params = yield* HttpRouter.params;
+      const modelApiKey = yield* queryParam("modelApiKey");
+      return yield* handle(VersionService.restoreVersion(modelApiKey, param(params, "id"), param(params, "versionId")));
     })
   ),
 
@@ -416,6 +473,19 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
   let graphqlHandler: ((req: Request) => Promise<Response>) | null = null;
   let mcpHandler: ((req: Request) => Promise<Response>) | null = null;
 
+  function invalidateGraphqlSchemaCache() {
+    graphqlHandler = null;
+  }
+
+  function isSchemaMutationRequest(url: URL, method: string): boolean {
+    if (!["POST", "PATCH", "DELETE"].includes(method)) return false;
+    return (
+      url.pathname.startsWith("/api/models") ||
+      url.pathname.startsWith("/api/locales") ||
+      url.pathname.startsWith("/api/schema")
+    );
+  }
+
   /** Add CORS headers to a response */
   function withCors(response: Response, request: Request): Response {
     const origin = request.headers.get("Origin") ?? "*";
@@ -466,96 +536,140 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
   }
 
   return async (request: Request): Promise<Response> => {
-    // Handle CORS preflight
-    if (request.method === "OPTIONS") {
-      return withCors(new Response(null, { status: 204 }), request);
-    }
+    const requestId = getRequestIdFromHeaders(request.headers);
+    const headers = new Headers(request.headers);
+    headers.set("x-request-id", requestId);
+    const instrumentedRequest = new Request(request, { headers });
+    const startedAt = Date.now();
 
-    const url = new URL(request.url);
-
-    // /assets/{id}/{filename} — serve files from R2 (no auth, public, immutable cache)
-    if (url.pathname.startsWith("/assets/") && options?.r2Bucket) {
-      // Extract asset ID from path, look up r2Key from DB
-      const pathParts = url.pathname.replace("/assets/", "").split("/");
-      const assetId = pathParts[0];
-      if (assetId) {
-        // Look up the r2Key from the assets table
-        const r2Key = await Effect.runPromise(
-          Effect.gen(function* () {
-            const sql = yield* SqlClient.SqlClient;
-            const rows = yield* sql.unsafe<{ r2_key: string }>(
-              "SELECT r2_key FROM assets WHERE id = ?", [assetId]
-            );
-            return rows[0]?.r2_key ?? null;
-          }).pipe(Effect.provide(fullLayer), Effect.orDie)
-        );
-        if (r2Key) {
-          const object = await options.r2Bucket.get(r2Key);
-          if (object) {
-            const headers = new Headers();
-            headers.set("Content-Type", object.httpMetadata?.contentType || "application/octet-stream");
-            headers.set("Cache-Control", "public, max-age=31536000, immutable");
-            return withCors(new Response(object.body, { headers }), request);
-          }
-        }
-      }
-      return withCors(new Response("Not found", { status: 404 }), request);
-    }
-
-    // /health — no auth
-    if (url.pathname === "/health") {
-      return withCors(new Response(JSON.stringify({ status: "ok" }), {
-        headers: { "Content-Type": "application/json" },
-      }), request);
-    }
-
-    // /graphql GET (GraphiQL playground) — no auth
-    if (url.pathname === "/graphql" && request.method === "GET") {
-      // Fall through to graphql handler below (landingPage: true serves GraphiQL)
-    }
-    // /graphql POST — read auth
-    else if (url.pathname === "/graphql" && request.method === "POST") {
-      const denied = checkAuth(request, "read");
-      if (denied) return withCors(denied, request);
-    }
-    // /mcp — write auth
-    else if (url.pathname === "/mcp") {
-      const denied = checkAuth(request, "write");
-      if (denied) return withCors(denied, request);
-    }
-    // /api/* — write auth
-    else if (url.pathname.startsWith("/api/")) {
-      const denied = checkAuth(request, "write");
-      if (denied) return withCors(denied, request);
-    }
-
-    // Route /mcp to MCP HTTP transport
-    if (url.pathname === "/mcp") {
-      if (!mcpHandler) {
-        const { createMcpServer } = await import("../mcp/server.js");
-        const { createMcpHttpHandler } = await import("../mcp/http-transport.js");
-        const mcpServer = createMcpServer(fullLayer);
-        mcpHandler = createMcpHttpHandler(mcpServer);
-      }
-      const response = await mcpHandler(request);
-      return withCors(response, request);
-    }
-
-    // Route /graphql to Yoga
-    if (url.pathname === "/graphql") {
-      if (!graphqlHandler) {
-        const { createGraphQLHandler } = await import("../graphql/handler.js");
-        graphqlHandler = createGraphQLHandler(sqlLayer, {
-          assetBaseUrl: options?.assetBaseUrl,
-          isProduction: options?.isProduction,
+    const finish = (response: Response) => {
+      const corsResponse = withCors(response, instrumentedRequest);
+      const responseHeaders = new Headers(corsResponse.headers);
+      responseHeaders.set("x-request-id", requestId);
+      const wrapped = new Response(corsResponse.body, {
+        status: corsResponse.status,
+        statusText: corsResponse.statusText,
+        headers: responseHeaders,
+      });
+      const durationMs = Date.now() - startedAt;
+      if (wrapped.status >= 500 || instrumentedRequest.url.includes("/api/assets/")) {
+        logEvent(wrapped.status >= 500 ? "error" : "info", "worker request completed", {
+          requestId,
+          method: instrumentedRequest.method,
+          path: new URL(instrumentedRequest.url).pathname,
+          status: wrapped.status,
+          durationMs,
         });
       }
-      const response = await graphqlHandler(request);
-      return withCors(response, request);
-    }
+      return wrapped;
+    };
 
-    // Everything else to the Effect router
-    const response = await restHandler(request);
-    return withCors(response, request);
+    // Handle CORS preflight
+    try {
+      if (instrumentedRequest.method === "OPTIONS") {
+        return finish(new Response(null, { status: 204 }));
+      }
+
+      const url = new URL(instrumentedRequest.url);
+
+      // /assets/{id}/{filename} — serve files from R2 (no auth, public, immutable cache)
+      if (url.pathname.startsWith("/assets/") && options?.r2Bucket) {
+        // Extract asset ID from path, look up r2Key from DB
+        const pathParts = url.pathname.replace("/assets/", "").split("/");
+        const assetId = pathParts[0];
+        if (assetId) {
+          // Look up the r2Key from the assets table
+          const r2Key = await Effect.runPromise(
+            Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient;
+              const rows = yield* sql.unsafe<{ r2_key: string }>(
+                "SELECT r2_key FROM assets WHERE id = ?", [assetId]
+              );
+              return rows[0]?.r2_key ?? null;
+            }).pipe(Effect.provide(fullLayer), Effect.orDie)
+          );
+          if (r2Key) {
+            const object = await options.r2Bucket.get(r2Key);
+            if (object) {
+              const headers = new Headers();
+              headers.set("Content-Type", object.httpMetadata?.contentType || "application/octet-stream");
+              headers.set("Cache-Control", "public, max-age=31536000, immutable");
+              return finish(new Response(object.body, { headers }));
+            }
+          }
+        }
+        return finish(new Response("Not found", { status: 404 }));
+      }
+
+      // /health — no auth
+      if (url.pathname === "/health") {
+        return finish(new Response(JSON.stringify({ status: "ok" }), {
+          headers: { "Content-Type": "application/json" },
+        }));
+      }
+
+      // /graphql GET (GraphiQL playground) — no auth
+      if (url.pathname === "/graphql" && instrumentedRequest.method === "GET") {
+        // Fall through to graphql handler below (landingPage: true serves GraphiQL)
+      }
+      // /graphql POST — read auth
+      else if (url.pathname === "/graphql" && instrumentedRequest.method === "POST") {
+        const denied = checkAuth(instrumentedRequest, "read");
+        if (denied) return finish(denied);
+      }
+      // /mcp — write auth
+      else if (url.pathname === "/mcp") {
+        const denied = checkAuth(instrumentedRequest, "write");
+        if (denied) return finish(denied);
+      }
+      // /api/* — write auth
+      else if (url.pathname.startsWith("/api/")) {
+        const denied = checkAuth(instrumentedRequest, "write");
+        if (denied) return finish(denied);
+      }
+
+      // Route /mcp to MCP HTTP transport
+      if (url.pathname === "/mcp") {
+        if (!mcpHandler) {
+          const { createMcpServer } = await import("../mcp/server.js");
+          const { createMcpHttpHandler } = await import("../mcp/http-transport.js");
+          const mcpServer = createMcpServer(fullLayer);
+          mcpHandler = createMcpHttpHandler(mcpServer);
+        }
+        const response = await mcpHandler(instrumentedRequest);
+        return finish(response);
+      }
+
+      // Route /graphql to Yoga
+      if (url.pathname === "/graphql") {
+        if (!graphqlHandler) {
+          const { createGraphQLHandler } = await import("../graphql/handler.js");
+          graphqlHandler = createGraphQLHandler(sqlLayer, {
+            assetBaseUrl: options?.assetBaseUrl,
+            isProduction: options?.isProduction,
+          });
+        }
+        const response = await graphqlHandler(instrumentedRequest);
+        return finish(response);
+      }
+
+      // Everything else to the Effect router
+      const response = await restHandler(instrumentedRequest);
+      if (response.status < 400 && isSchemaMutationRequest(url, instrumentedRequest.method)) {
+        invalidateGraphqlSchemaCache();
+      }
+      return finish(response);
+    } catch (error) {
+      logEvent("error", "worker request crashed", {
+        requestId,
+        method: instrumentedRequest.method,
+        path: new URL(instrumentedRequest.url).pathname,
+        error: describeUnknown(error),
+      });
+      return finish(new Response(JSON.stringify({ error: "Internal server error" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      }));
+    }
   };
 }

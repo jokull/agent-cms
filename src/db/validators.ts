@@ -1,3 +1,6 @@
+import { Effect } from "effect";
+import { SqlClient } from "@effect/sql";
+
 /**
  * Typed access to field validator properties.
  * Instead of casting with `as`, these functions safely extract
@@ -26,6 +29,11 @@ export function isRequired(validators: Record<string, unknown>): boolean {
   return validators.required === true;
 }
 
+/** Safely check if field must be unique */
+export function isUnique(validators: Record<string, unknown>): boolean {
+  return validators.unique === true;
+}
+
 /** Safely get link target model types (for `link` fields) */
 export function getLinkTargets(validators: Record<string, unknown>): string[] | undefined {
   const v = validators.item_item_type;
@@ -41,6 +49,22 @@ export function getLinksTargets(validators: Record<string, unknown>): string[] |
 /** Check if field is searchable (default: true — opt out with {"searchable": false}) */
 export function isSearchable(validators: Record<string, unknown>): boolean {
   return validators.searchable !== false;
+}
+
+/** Field types where exact-value uniqueness is supported */
+export function supportsUniqueValidation(fieldType: string): boolean {
+  return [
+    "string",
+    "text",
+    "slug",
+    "integer",
+    "float",
+    "boolean",
+    "date",
+    "date_time",
+    "link",
+    "media",
+  ].includes(fieldType);
 }
 
 /**
@@ -78,4 +102,78 @@ export function computeIsValid(
     }
   }
   return { valid: missingFields.length === 0, missingFields };
+}
+
+export function findUniqueConstraintViolations(options: {
+  tableName: string;
+  record: Record<string, unknown>;
+  fields: ReadonlyArray<{ api_key: string; localized: number; field_type: string; validators: Record<string, unknown> }>;
+  excludeId?: string | null;
+  onlyFieldApiKeys?: ReadonlySet<string>;
+}) {
+  return Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const invalidFields = new Set<string>();
+
+    for (const field of options.fields) {
+      if (!isUnique(field.validators) || !supportsUniqueValidation(field.field_type)) continue;
+      if (options.onlyFieldApiKeys && !options.onlyFieldApiKeys.has(field.api_key)) continue;
+
+      const value = options.record[field.api_key];
+      if (field.localized) {
+        const localeMap = parseLocaleMap(value);
+        for (const [localeCode, localeValue] of Object.entries(localeMap)) {
+          if (!hasMeaningfulValue(localeValue)) continue;
+          const path = `$."${localeCode.replace(/"/g, '\\"')}"`;
+          const rows = yield* sql.unsafe<{ id: string }>(
+            `SELECT id FROM "${options.tableName}" WHERE json_extract("${field.api_key}", ?) = ?${options.excludeId ? " AND id != ?" : ""} LIMIT 1`,
+            options.excludeId
+              ? [path, serializeUniqueValue(localeValue), options.excludeId]
+              : [path, serializeUniqueValue(localeValue)]
+          );
+          if (rows.length > 0) {
+            invalidFields.add(field.api_key);
+            break;
+          }
+        }
+        continue;
+      }
+
+      if (!hasMeaningfulValue(value)) continue;
+      const rows = yield* sql.unsafe<{ id: string }>(
+        `SELECT id FROM "${options.tableName}" WHERE "${field.api_key}" = ?${options.excludeId ? " AND id != ?" : ""} LIMIT 1`,
+        options.excludeId
+          ? [serializeUniqueValue(value), options.excludeId]
+          : [serializeUniqueValue(value)]
+      );
+      if (rows.length > 0) {
+        invalidFields.add(field.api_key);
+      }
+    }
+
+    return [...invalidFields];
+  });
+}
+
+function parseLocaleMap(value: unknown): Record<string, unknown> {
+  if (value === null || value === undefined) return {};
+  let parsed = value;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return {};
+    }
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+  return parsed as Record<string, unknown>;
+}
+
+function hasMeaningfulValue(value: unknown): boolean {
+  return value !== null && value !== undefined && value !== "";
+}
+
+function serializeUniqueValue(value: unknown): unknown {
+  if (typeof value === "boolean") return value ? 1 : 0;
+  return value;
 }

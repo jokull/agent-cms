@@ -176,6 +176,20 @@ Only `DB` is required. Everything else is optional — each binding unlocks capa
 | `CMS_WRITE_KEY` | Secret | API key required for REST writes, MCP, and publish/unpublish. Without it, writes are open. |
 | `ASSET_BASE_URL` | Variable | Public URL prefix for asset URLs and Cloudflare Image Resizing. Must be a custom domain (not `workers.dev`) for image transforms. |
 
+## Assets
+
+Asset binaries live in your R2 bucket. agent-cms stores asset metadata in D1 and serves registered assets from `/assets/:id/:filename`.
+
+The canonical flow is:
+
+1. Upload the original file to R2
+2. Register the asset in agent-cms via `/api/assets`
+3. Reference the asset by ID from content
+
+agent-cms does not accept binary uploads through the Worker. This is intentional: direct-to-R2 upload is the default ingestion model. See [`docs/architecture/assets.md`](./docs/architecture/assets.md) for the full rationale.
+
+For DatoCMS migrations specifically, see [`docs/migrations/dato-import.md`](./docs/migrations/dato-import.md).
+
 Example `wrangler.jsonc` with all bindings:
 
 ```jsonc

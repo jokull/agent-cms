@@ -5,7 +5,7 @@
 import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
 import { compileFilterToSql, compileOrderBy, type FilterCompilerOpts } from "./filter-compiler.js";
-import { computeIsValid } from "../db/validators.js";
+import { computeIsValid, findUniqueConstraintViolations } from "../db/validators.js";
 import type { SchemaBuilderContext, ModelQueryMeta, DynamicRow, GqlContext } from "./gql-types.js";
 import { toCamelCase, pluralize, getRegistryDef, deserializeRecord, decodeSnapshot } from "./gql-utils.js";
 
@@ -170,7 +170,18 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
         locale ?? undefined
       );
       if (args.excludeInvalid) {
-        results = results.filter(r => computeIsValid(r, fields, defaultLocale).valid);
+        const validity = await Promise.all(results.map(async (record) => {
+          const required = computeIsValid(record, fields, defaultLocale);
+          if (!required.valid) return false;
+          const uniqueViolations = await runSql(findUniqueConstraintViolations({
+            tableName,
+            record,
+            fields,
+            excludeId: typeof record.id === "string" ? record.id : null,
+          }));
+          return uniqueViolations.length === 0;
+        }));
+        results = results.filter((_, index) => validity[index]);
       }
       return results;
     };
@@ -219,7 +230,18 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
           { filter: args.filter as DynamicRow, first: 500 },
           includeDrafts
         );
-        const validCount = allRecords.filter(r => computeIsValid(r, fields, defaultLocale).valid).length;
+        const validity = await Promise.all(allRecords.map(async (record) => {
+          const required = computeIsValid(record, fields, defaultLocale);
+          if (!required.valid) return false;
+          const uniqueViolations = await runSql(findUniqueConstraintViolations({
+            tableName,
+            record,
+            fields,
+            excludeId: typeof record.id === "string" ? record.id : null,
+          }));
+          return uniqueViolations.length === 0;
+        }));
+        const validCount = validity.filter(Boolean).length;
         return { count: validCount };
       }
       return { count: countWithFilter(args.filter as DynamicRow | undefined, includeDrafts) };

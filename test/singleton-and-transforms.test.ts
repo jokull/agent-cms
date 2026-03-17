@@ -148,6 +148,41 @@ describe("responsiveImage with transforms", () => {
     expect(img.src).toContain("quality=80");
   });
 
+  it("passes through Cloudflare-native transform options", async () => {
+    const result = await gqlQuery(handler, `{
+      allPosts {
+        cover {
+          responsiveImage(transforms: {
+            width: 900
+            height: 500
+            fit: "cover"
+            gravity: "face"
+            zoom: 0.6
+            background: "white"
+            blur: 12
+            sharpen: 1.2
+            rotate: 90
+          }) {
+            src
+            width
+            height
+          }
+        }
+      }
+    }`, { includeDrafts: true });
+
+    expect(result.errors).toBeUndefined();
+    const img = result.data.allPosts[0].cover.responsiveImage;
+    expect(img.width).toBe(900);
+    expect(img.height).toBe(500);
+    expect(img.src).toContain("gravity=face");
+    expect(img.src).toContain("zoom=0.6");
+    expect(img.src).toContain("background=white");
+    expect(img.src).toContain("blur=12");
+    expect(img.src).toContain("sharpen=1.2");
+    expect(img.src).toContain("rotate=90");
+  });
+
   it("exposes blurhash on Asset type", async () => {
     // Create asset with blurhash
     const assetRes = await jsonRequest(handler, "POST", "/api/assets", {

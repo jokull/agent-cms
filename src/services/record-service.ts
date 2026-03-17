@@ -10,16 +10,35 @@ import {
   updateRecord as sqlUpdateRecord,
   deleteRecord as sqlDeleteRecord,
 } from "../schema-engine/sql-records.js";
-import { writeStructuredText, deleteBlocksForField } from "./structured-text-service.js";
+import { writeStructuredText, deleteBlocksForField, getStructuredTextStorageKey } from "./structured-text-service.js";
 import type { ModelRow, FieldRow, ParsedFieldRow, ContentRow } from "../db/row-types.js";
 import { parseFieldValidators, isContentRow } from "../db/row-types.js";
-import { getSlugSource, getBlockWhitelist, getBlocksOnly, isRequired } from "../db/validators.js";
+import { getSlugSource, getBlockWhitelist, getBlocksOnly, isRequired, findUniqueConstraintViolations, isUnique } from "../db/validators.js";
 import * as SearchService from "../search/search-service.js";
 import { CreateRecordInput, PatchRecordInput } from "./input-schemas.js";
 import { getFieldTypeDef } from "../field-types.js";
 import { isFieldType } from "../types.js";
 import { StructuredTextWriteInput } from "../dast/schema.js";
 import { fireHook } from "../hooks.js";
+import * as VersionService from "./version-service.js";
+
+function validateRequestedId(id: string | undefined) {
+  if (id === undefined) return null;
+  return id.trim().length > 0 ? id : null;
+}
+
+function applyRecordOverrides(target: Record<string, unknown>, overrides: {
+  createdAt?: string;
+  updatedAt?: string;
+  publishedAt?: string;
+  firstPublishedAt?: string;
+} | undefined) {
+  if (!overrides) return;
+  if (overrides.createdAt !== undefined) target._created_at = overrides.createdAt;
+  if (overrides.updatedAt !== undefined) target._updated_at = overrides.updatedAt;
+  if (overrides.publishedAt !== undefined) target._published_at = overrides.publishedAt;
+  if (overrides.firstPublishedAt !== undefined) target._first_published_at = overrides.firstPublishedAt;
+}
 
 function getModelByApiKey(apiKey: string) {
   return Effect.gen(function* () {
@@ -41,6 +60,90 @@ function getModelFields(modelId: string) {
     );
     return fields.map(parseFieldValidators);
   });
+}
+
+function decodeLocalizedStructuredTextMap(field: ParsedFieldRow, rawValue: unknown) {
+  return Schema.decodeUnknown(
+    Schema.Record({ key: Schema.String, value: Schema.NullOr(Schema.Unknown) })
+  )(rawValue).pipe(
+    Effect.mapError((e) => new ValidationError({
+      message: `Invalid localized StructuredText for field '${field.api_key}': ${e.message}`,
+      field: field.api_key,
+    }))
+  );
+}
+
+function decodeLocalizedFieldMap(field: ParsedFieldRow, rawValue: unknown) {
+  return Schema.decodeUnknown(
+    Schema.Record({ key: Schema.String, value: Schema.Unknown })
+  )(rawValue).pipe(
+    Effect.map((localeMap) => sanitizeLocaleMap(localeMap)),
+    Effect.mapError((e) => new ValidationError({
+      message: `Invalid localized value for field '${field.api_key}': ${e.message}`,
+      field: field.api_key,
+    }))
+  );
+}
+
+function parseExistingLocaleMap(rawValue: unknown): Record<string, unknown> {
+  if (rawValue === null || rawValue === undefined) return {};
+  let parsed = rawValue;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return {};
+    }
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+  return sanitizeLocaleMap(parsed as Record<string, unknown>);
+}
+
+function sanitizeLocaleMap(localeMap: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(localeMap).filter(([key]) => isLocaleKey(key))
+  );
+}
+
+function isLocaleKey(key: string): boolean {
+  return /^[a-z]{2,3}(?:[_-][A-Za-z0-9]{2,8})*$/.test(key);
+}
+
+function scopeStructuredTextIds<T>(value: T, scope: string): T {
+  if (!value || typeof value !== "object") return value;
+
+  const clone = JSON.parse(JSON.stringify(value)) as {
+    value: { document?: unknown };
+    blocks?: Record<string, unknown>;
+  };
+  const originalIds = Object.keys(clone.blocks ?? {});
+  if (originalIds.length === 0) return clone as T;
+
+  const idMap = new Map(originalIds.map((id) => [id, `${scope}:${id}`]));
+
+  const rewriteNode = (node: unknown): unknown => {
+    if (!node || typeof node !== "object") return node;
+    if (Array.isArray(node)) return node.map(rewriteNode);
+
+    const next: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(node as Record<string, unknown>)) {
+      next[key] = rewriteNode(child);
+    }
+    if ((next.type === "block" || next.type === "inlineBlock") && typeof next.item === "string") {
+      next.item = idMap.get(next.item) ?? next.item;
+    }
+    return next;
+  };
+
+  clone.value = rewriteNode(clone.value) as typeof clone.value;
+  clone.blocks = Object.fromEntries(
+    Object.entries(clone.blocks ?? {}).map(([blockId, blockValue]) => [
+      idMap.get(blockId) ?? blockId,
+      blockValue,
+    ])
+  );
+
+  return clone as T;
 }
 
 export function createRecord(rawBody: unknown) {
@@ -73,8 +176,16 @@ export function createRecord(rawBody: unknown) {
     }
 
     const now = new Date().toISOString();
-    const id = ulid();
+    const requestedId = validateRequestedId(body.id);
+    const id = requestedId ?? ulid();
     const sql = yield* SqlClient.SqlClient;
+    const duplicateId = yield* sql.unsafe<{ id: string }>(
+      `SELECT id FROM "${tableName}" WHERE id = ?`,
+      [id]
+    );
+    if (duplicateId.length > 0) {
+      return yield* new DuplicateError({ message: `Record with id '${id}' already exists on model '${body.modelApiKey}'` });
+    }
     // Models with hasDraft=false skip draft state, publish immediately
     const initialStatus = model.has_draft ? "draft" : "published";
     const record: Record<string, unknown> = {
@@ -84,6 +195,7 @@ export function createRecord(rawBody: unknown) {
       _updated_at: now,
       ...(!model.has_draft ? { _published_at: now, _first_published_at: now } : {}),
     };
+    applyRecordOverrides(record, body.overrides);
 
     // Sortable/tree models: auto-assign _position
     if (model.sortable || model.tree) {
@@ -103,6 +215,42 @@ export function createRecord(rawBody: unknown) {
     for (const field of modelFields) {
       // StructuredText: validate DAST + write blocks
       if (field.field_type === "structured_text" && data[field.api_key] !== undefined && data[field.api_key] !== null) {
+        if (field.localized) {
+          const localeMap = yield* decodeLocalizedStructuredTextMap(field, data[field.api_key]);
+          const localizedDast: Record<string, unknown> = {};
+          for (const [localeCode, localeValue] of Object.entries(localeMap)) {
+            if (localeValue === null) {
+              localizedDast[localeCode] = null;
+              continue;
+            }
+            const stInput = yield* Schema.decodeUnknown(StructuredTextWriteInput)(scopeStructuredTextIds(localeValue, `${field.api_key}:${localeCode}`)).pipe(
+              Effect.mapError((e) => new ValidationError({
+                message: `Invalid StructuredText for field '${field.api_key}' locale '${localeCode}': ${e.message}`,
+                field: field.api_key,
+              }))
+            );
+
+            const allowedBlockTypes = getBlockWhitelist(field.validators);
+            const blocksOnly = getBlocksOnly(field.validators);
+
+            const dast = yield* writeStructuredText({
+              rootModelApiKey: model.api_key,
+              fieldApiKey: field.api_key,
+              rootFieldStorageKey: getStructuredTextStorageKey(field.api_key, localeCode),
+              rootRecordId: id,
+              value: stInput.value,
+              blocks: stInput.blocks,
+              allowedBlockTypes: allowedBlockTypes ?? [],
+              blocksOnly,
+            });
+
+            localizedDast[localeCode] = dast;
+          }
+          data[field.api_key] = localizedDast;
+          record[field.api_key] = localizedDast;
+          continue;
+        }
+
         const stInput = yield* Schema.decodeUnknown(StructuredTextWriteInput)(data[field.api_key]).pipe(
           Effect.mapError((e) => new ValidationError({
             message: `Invalid StructuredText for field '${field.api_key}': ${e.message}`,
@@ -155,12 +303,25 @@ export function createRecord(rawBody: unknown) {
       if (isFieldType(field.field_type) && data[field.api_key] !== undefined && data[field.api_key] !== null) {
         const fieldDef = getFieldTypeDef(field.field_type);
         if (fieldDef.inputSchema) {
-          yield* Schema.decodeUnknown(fieldDef.inputSchema)(data[field.api_key]).pipe(
-            Effect.mapError((e) => new ValidationError({
-              message: `Invalid ${field.field_type} for field '${field.api_key}': ${e.message}`,
-              field: field.api_key,
-            }))
-          );
+          if (field.localized) {
+            const localeMap = yield* decodeLocalizedFieldMap(field, data[field.api_key]);
+            for (const [localeCode, localeValue] of Object.entries(localeMap)) {
+              if (localeValue === null) continue;
+              yield* Schema.decodeUnknown(fieldDef.inputSchema)(localeValue).pipe(
+                Effect.mapError((e) => new ValidationError({
+                  message: `Invalid ${field.field_type} for field '${field.api_key}' locale '${localeCode}': ${e.message}`,
+                  field: field.api_key,
+                }))
+              );
+            }
+          } else {
+            yield* Schema.decodeUnknown(fieldDef.inputSchema)(data[field.api_key]).pipe(
+              Effect.mapError((e) => new ValidationError({
+                message: `Invalid ${field.field_type} for field '${field.api_key}': ${e.message}`,
+                field: field.api_key,
+              }))
+            );
+          }
         }
       }
 
@@ -169,7 +330,36 @@ export function createRecord(rawBody: unknown) {
       }
     }
 
+    const createUniqueViolations = yield* findUniqueConstraintViolations({
+      tableName,
+      record: record,
+      fields: modelFields,
+      onlyFieldApiKeys: new Set(
+        modelFields
+          .filter((field) => isUnique(field.validators) && data[field.api_key] !== undefined)
+          .map((field) => field.api_key)
+      ),
+    });
+    if (createUniqueViolations.length > 0) {
+      return yield* new ValidationError({
+        message: `Unique constraint violation for field(s): ${createUniqueViolations.join(", ")}`,
+        field: createUniqueViolations[0],
+      });
+    }
+
     yield* insertRecord(tableName, record);
+
+    // For has_draft=false models, build _published_snapshot from inserted values
+    if (!model.has_draft) {
+      const snap: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(record)) {
+        if (!key.startsWith("_") && key !== "id") snap[key] = value;
+      }
+      yield* sql.unsafe(
+        `UPDATE "${tableName}" SET _published_snapshot = ? WHERE id = ?`,
+        [JSON.stringify(snap), id]
+      );
+    }
 
     // Index for search
     yield* SearchService.indexRecord(body.modelApiKey, id, record, modelFields).pipe(Effect.ignore);
@@ -214,14 +404,26 @@ export function patchRecord(id: string, rawBody: unknown) {
     if (!existing) return yield* new NotFoundError({ entity: "Record", id });
 
     const modelFields = yield* getModelFields(model.id);
+    const data: Record<string, unknown> = { ...(body.data ?? {}) };
     const updates: Record<string, unknown> = { _updated_at: new Date().toISOString() };
 
-    // Status transition: published → updated on edit
-    if (isContentRow(existing) && existing._status === "published") {
-      updates._status = "updated";
-    }
+    const hasExplicitDataUpdates = Object.keys(data).length > 0;
 
-    const data: Record<string, unknown> = { ...(body.data ?? {}) };
+    // Status transition: published → updated on content edit (draft models only)
+    if (hasExplicitDataUpdates && isContentRow(existing) && existing._status === "published") {
+      if (model.has_draft) {
+        updates._status = "updated";
+      } else {
+        // Auto-re-publish: version old state, snapshot will be rebuilt after field processing
+        if (existing._published_snapshot) {
+          const prevSnapshot = typeof existing._published_snapshot === "string"
+            ? existing._published_snapshot
+            : JSON.stringify(existing._published_snapshot);
+          yield* VersionService.createVersion(body.modelApiKey, id, prevSnapshot);
+        }
+      }
+    }
+    applyRecordOverrides(updates, body.overrides);
 
     // Tree models: accept _parent_id update
     if (model.tree && data._parent_id !== undefined) {
@@ -241,8 +443,57 @@ export function patchRecord(id: string, rawBody: unknown) {
       if (field.field_type === "structured_text" && data[field.api_key] !== undefined) {
         if (data[field.api_key] === null) {
           // Clearing the field
-          yield* deleteBlocksForField({ rootRecordId: id, fieldApiKey: field.api_key });
+          yield* deleteBlocksForField({
+            rootRecordId: id,
+            fieldApiKey: field.api_key,
+            includeLocalizedVariants: field.localized,
+          });
         } else {
+          if (field.localized) {
+            const localeMap = yield* decodeLocalizedStructuredTextMap(field, data[field.api_key]);
+            const existingLocaleMap = parseExistingLocaleMap(existing[field.api_key]);
+            const nextLocaleMap = { ...existingLocaleMap };
+
+            for (const [localeCode, localeValue] of Object.entries(localeMap)) {
+              yield* deleteBlocksForField({
+                rootRecordId: id,
+                fieldApiKey: getStructuredTextStorageKey(field.api_key, localeCode),
+              });
+
+              if (localeValue === null) {
+                nextLocaleMap[localeCode] = null;
+                continue;
+              }
+
+              const stInput = yield* Schema.decodeUnknown(StructuredTextWriteInput)(scopeStructuredTextIds(localeValue, `${field.api_key}:${localeCode}`)).pipe(
+                Effect.mapError((e) => new ValidationError({
+                  message: `Invalid StructuredText for field '${field.api_key}' locale '${localeCode}': ${e.message}`,
+                  field: field.api_key,
+                }))
+              );
+
+              const allowedBlockTypes = getBlockWhitelist(field.validators);
+              const blocksOnly = getBlocksOnly(field.validators);
+
+              const dast = yield* writeStructuredText({
+                rootModelApiKey: model.api_key,
+                fieldApiKey: field.api_key,
+                rootFieldStorageKey: getStructuredTextStorageKey(field.api_key, localeCode),
+                rootRecordId: id,
+                value: stInput.value,
+                blocks: stInput.blocks,
+                allowedBlockTypes: allowedBlockTypes ?? [],
+                blocksOnly,
+              });
+
+              nextLocaleMap[localeCode] = dast;
+            }
+
+            data[field.api_key] = nextLocaleMap;
+            updates[field.api_key] = nextLocaleMap;
+            continue;
+          }
+
           const stInput = yield* Schema.decodeUnknown(StructuredTextWriteInput)(data[field.api_key]).pipe(
             Effect.mapError((e) => new ValidationError({
               message: `Invalid StructuredText for field '${field.api_key}': ${e.message}`,
@@ -297,13 +548,39 @@ export function patchRecord(id: string, rawBody: unknown) {
       if (isFieldType(field.field_type) && data[field.api_key] !== undefined && data[field.api_key] !== null) {
         const fieldDef = getFieldTypeDef(field.field_type);
         if (fieldDef.inputSchema) {
-          yield* Schema.decodeUnknown(fieldDef.inputSchema)(data[field.api_key]).pipe(
-            Effect.mapError((e) => new ValidationError({
-              message: `Invalid ${field.field_type} for field '${field.api_key}': ${e.message}`,
-              field: field.api_key,
-            }))
-          );
+          if (field.localized) {
+            const localeMap = yield* decodeLocalizedFieldMap(field, data[field.api_key]);
+            const existingLocaleMap = parseExistingLocaleMap(existing[field.api_key]);
+            const nextLocaleMap = { ...existingLocaleMap, ...localeMap };
+            for (const [localeCode, localeValue] of Object.entries(localeMap)) {
+              if (localeValue === null) continue;
+              yield* Schema.decodeUnknown(fieldDef.inputSchema)(localeValue).pipe(
+                Effect.mapError((e) => new ValidationError({
+                  message: `Invalid ${field.field_type} for field '${field.api_key}' locale '${localeCode}': ${e.message}`,
+                  field: field.api_key,
+                }))
+              );
+            }
+            data[field.api_key] = nextLocaleMap;
+          } else {
+            yield* Schema.decodeUnknown(fieldDef.inputSchema)(data[field.api_key]).pipe(
+              Effect.mapError((e) => new ValidationError({
+                message: `Invalid ${field.field_type} for field '${field.api_key}': ${e.message}`,
+                field: field.api_key,
+              }))
+            );
+          }
         }
+      }
+
+      if (
+        field.localized &&
+        field.field_type !== "structured_text" &&
+        data[field.api_key] !== undefined
+      ) {
+        const localeMap = yield* decodeLocalizedFieldMap(field, data[field.api_key]);
+        const existingLocaleMap = parseExistingLocaleMap(existing[field.api_key]);
+        data[field.api_key] = { ...existingLocaleMap, ...localeMap };
       }
 
       if (data[field.api_key] !== undefined) {
@@ -311,7 +588,45 @@ export function patchRecord(id: string, rawBody: unknown) {
       }
     }
 
+    const uniqueFieldsTouched = new Set(
+      modelFields
+        .filter((field) => isUnique(field.validators) && data[field.api_key] !== undefined)
+        .map((field) => field.api_key)
+    );
+    if (uniqueFieldsTouched.size > 0) {
+      const nextRecord = { ...existing, ...updates };
+      const patchUniqueViolations = yield* findUniqueConstraintViolations({
+        tableName,
+        record: nextRecord,
+        fields: modelFields,
+        excludeId: id,
+        onlyFieldApiKeys: uniqueFieldsTouched,
+      });
+      if (patchUniqueViolations.length > 0) {
+        return yield* new ValidationError({
+          message: `Unique constraint violation for field(s): ${patchUniqueViolations.join(", ")}`,
+          field: patchUniqueViolations[0],
+        });
+      }
+    }
+
     yield* sqlUpdateRecord(tableName, id, updates);
+
+    // Auto-re-publish for has_draft=false models
+    if (!model.has_draft && hasExplicitDataUpdates) {
+      const updated = yield* selectById(tableName, id);
+      if (updated) {
+        const snap: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(updated)) {
+          if (!key.startsWith("_") && key !== "id") snap[key] = value;
+        }
+        yield* sql.unsafe(
+          `UPDATE "${tableName}" SET _published_snapshot = ?, _published_at = ?, _status = 'published' WHERE id = ?`,
+          [JSON.stringify(snap), new Date().toISOString(), id]
+        );
+      }
+    }
+
     yield* SearchService.reindexRecord(body.modelApiKey, id, modelFields).pipe(Effect.ignore);
     yield* fireHook("onRecordUpdate", { modelApiKey: body.modelApiKey, recordId: id });
     return yield* selectById(tableName, id);
@@ -341,6 +656,7 @@ export function removeRecord(modelApiKey: string, id: string) {
     }
 
     yield* sqlDeleteRecord(tableName, id);
+    yield* VersionService.deleteVersionsForRecord(modelApiKey, id).pipe(Effect.ignore);
     yield* SearchService.deindexRecord(modelApiKey, id).pipe(Effect.ignore);
     yield* fireHook("onRecordDelete", { modelApiKey, recordId: id });
     return { deleted: true };
@@ -400,7 +716,16 @@ export function bulkCreateRecords(rawBody: unknown) {
           return yield* new ValidationError({ message: `Record ${idx}: field '${field.api_key}' is required`, field: field.api_key });
       }
 
-      const id = ulid();
+      const requestedId = typeof data.id === "string" && data.id.trim().length > 0 ? data.id : undefined;
+      if (requestedId) delete data.id;
+      const id = requestedId ?? ulid();
+      const duplicateId = yield* sql.unsafe<{ id: string }>(
+        `SELECT id FROM "${tableName}" WHERE id = ?`,
+        [id]
+      );
+      if (duplicateId.length > 0) {
+        return yield* new DuplicateError({ message: `Record ${idx}: id '${id}' already exists on model '${modelApiKey}'` });
+      }
       const record: Record<string, unknown> = {
         id,
         _status: initialStatus,
@@ -408,6 +733,7 @@ export function bulkCreateRecords(rawBody: unknown) {
         _updated_at: now,
         ...(!model.has_draft ? { _published_at: now, _first_published_at: now } : {}),
       };
+      applyRecordOverrides(record, undefined);
 
       if (model.sortable || model.tree) {
         record._position = nextPosition++;
@@ -417,6 +743,44 @@ export function bulkCreateRecords(rawBody: unknown) {
       for (const field of modelFields) {
         // StructuredText: validate DAST + write blocks
         if (field.field_type === "structured_text" && data[field.api_key] !== undefined && data[field.api_key] !== null) {
+          if (field.localized) {
+            const localeMap = yield* decodeLocalizedStructuredTextMap(field, data[field.api_key]);
+            const localizedDast: Record<string, unknown> = {};
+            for (const [localeCode, localeValue] of Object.entries(localeMap)) {
+              if (localeValue === null) {
+                localizedDast[localeCode] = null;
+                continue;
+              }
+
+              const stInput = yield* Schema.decodeUnknown(StructuredTextWriteInput)(scopeStructuredTextIds(localeValue, `${field.api_key}:${localeCode}`)).pipe(
+                Effect.mapError((e) => new ValidationError({
+                  message: `Record ${idx}: invalid StructuredText for field '${field.api_key}' locale '${localeCode}': ${e.message}`,
+                  field: field.api_key,
+                }))
+              );
+
+              const allowedBlockTypes = getBlockWhitelist(field.validators);
+              const blocksOnly = getBlocksOnly(field.validators);
+
+              const dast = yield* writeStructuredText({
+                rootModelApiKey: model.api_key,
+                fieldApiKey: field.api_key,
+                rootFieldStorageKey: getStructuredTextStorageKey(field.api_key, localeCode),
+                rootRecordId: id,
+                value: stInput.value,
+                blocks: stInput.blocks,
+                allowedBlockTypes: allowedBlockTypes ?? [],
+                blocksOnly,
+              });
+
+              localizedDast[localeCode] = dast;
+            }
+
+            data[field.api_key] = localizedDast;
+            record[field.api_key] = localizedDast;
+            continue;
+          }
+
           const stInput = yield* Schema.decodeUnknown(StructuredTextWriteInput)(data[field.api_key]).pipe(
             Effect.mapError((e) => new ValidationError({
               message: `Record ${idx}: invalid StructuredText for field '${field.api_key}': ${e.message}`,

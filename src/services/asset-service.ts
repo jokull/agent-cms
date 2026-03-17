@@ -14,7 +14,12 @@ export function createAsset(rawBody: unknown) {
     );
 
     const now = new Date().toISOString();
-    const id = ulid();
+    const id = body.id ?? ulid();
+
+    const existing = yield* sql.unsafe<{ id: string }>("SELECT id FROM assets WHERE id = ?", [id]);
+    if (existing.length > 0) {
+      return yield* new ValidationError({ message: `Asset with id '${id}' already exists` });
+    }
 
     yield* sql.unsafe(
       `INSERT INTO assets (id, filename, mime_type, size, width, height, alt, title, r2_key, blurhash, colors, focal_point, tags, created_at)

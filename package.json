@@ -24,6 +24,9 @@
     "test:run": "vitest run",
     "typecheck": "tsc --noEmit",
     "bench:blog": "node scripts/bench-blog.mjs",
+    "trip:migration:inspect": "node scripts/trip-migration/inspect.mjs",
+    "trip:migration:bootstrap": "node scripts/trip-migration/bootstrap-cms.mjs",
+    "trip:migration:import": "node scripts/trip-migration/import-batch.mjs",
     "prepublishOnly": "npm run build",
     "db:migrate": "wrangler d1 migrations apply agent-cms-db --local",
     "prepare": "effect-language-service patch"
@@ -66,6 +69,7 @@
     "@effect/vitest": "^0.27.0",
     "@types/better-sqlite3": "^7.6.13",
     "better-sqlite3": "^12.8.0",
+    "miniflare": "^4.20260317.1",
     "tsdown": "^0.21.4",
     "typescript": "^5.9.3",
     "vitest": "^4.1.0",

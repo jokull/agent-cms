@@ -60,6 +60,14 @@ function normalizeImgixParams(raw: Record<string, unknown>): Record<string, unkn
   // DPR
   if (raw.dpr != null) out.dpr = raw.dpr;
 
+  if (raw.blur != null) out.blur = raw.blur;
+  if (raw.sharpen != null) out.sharpen = raw.sharpen;
+  if (raw.rot != null) out.rotate = raw.rot;
+  if (raw.rotate != null) out.rotate = raw.rotate;
+  if (raw.bg != null) out.background = raw.bg;
+  if (raw.background != null) out.background = raw.background;
+  if (raw.trim != null) out.trim = raw.trim;
+
   // facepad → zoom (CF face gravity zoom: 0=tight, 1=wide; imgix facepad: 1=tight, higher=wider)
   // Approximate inverse mapping
   if (raw.facepad != null && out.gravity === "face") {
@@ -72,6 +80,33 @@ function normalizeImgixParams(raw: Record<string, unknown>): Record<string, unkn
 }
 
 type RunSqlFn = SchemaBuilderContext["runSql"];
+
+function pickLocalizedSiteValue(rawValue: unknown, locale?: string | null, fallbackLocales: string[] = []) {
+  if (rawValue == null) return null;
+  let localeMap = rawValue;
+  if (typeof localeMap === "string") {
+    try {
+      localeMap = JSON.parse(localeMap);
+    } catch {
+      return rawValue;
+    }
+  }
+  if (typeof localeMap !== "object" || localeMap === null || Array.isArray(localeMap)) {
+    return rawValue;
+  }
+
+  const values = localeMap as Record<string, unknown>;
+  if (locale && values[locale] !== undefined && values[locale] !== null && values[locale] !== "") {
+    return values[locale];
+  }
+  for (const fallback of fallbackLocales) {
+    if (values[fallback] !== undefined && values[fallback] !== null && values[fallback] !== "") {
+      return values[fallback];
+    }
+  }
+  const [_, firstValue] = Object.entries(values)[0] ?? [null, null];
+  return firstValue ?? null;
+}
 
 /** Generate favicon meta tags from a favicon asset */
 async function buildFaviconMetaTags(runSql: RunSqlFn, faviconId: string) {
@@ -115,7 +150,7 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
 
   // _site query - DatoCMS-compatible site info with globalSeo and faviconMetaTags
   queryFieldDefs.push("_site: SiteInfo!");
-  (resolvers.Query as Record<string, unknown>)._site = async () => {
+  (resolvers.Query as Record<string, unknown>)._site = async (_parent: unknown, args: DynamicRow, context: DynamicRow) => {
     // Load site settings from DB (returns defaults if table/row doesn't exist)
     const settings = await runSql(
       Effect.gen(function* () {
@@ -130,20 +165,28 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
       })
     );
 
+    const locale = typeof args?.locale === "string" ? args.locale : (context?.locale as string | undefined) ?? null;
+    const fallbackLocales = Array.isArray(args?.fallbackLocales)
+      ? (args.fallbackLocales as string[])
+      : Array.isArray(context?.fallbackLocales)
+        ? (context.fallbackLocales as string[])
+        : [];
+    const fallbackSeo = pickLocalizedSiteValue(settings?.fallback_seo, locale, fallbackLocales) as Record<string, unknown> | null;
+
     return {
       locales: locales.map((l) => l.code),
       noIndex: settings?.no_index === 1 || settings?.no_index === true || false,
-      faviconMetaTags: settings?.favicon_id ? await buildFaviconMetaTags(runSql, settings.favicon_id as string) : [],
+      faviconMetaTags: settings?.favicon ? await buildFaviconMetaTags(runSql, settings.favicon as string) : [],
       globalSeo: settings ? {
-        siteName: settings.site_name ?? null,
-        titleSuffix: settings.title_suffix ?? null,
-        facebookPageUrl: settings.facebook_page_url ?? null,
-        twitterAccount: settings.twitter_account ?? null,
-        fallbackSeo: settings.fallback_seo_title || settings.fallback_seo_description || settings.fallback_seo_image_id ? {
-          title: settings.fallback_seo_title ?? null,
-          description: settings.fallback_seo_description ?? null,
-          twitterCard: settings.fallback_seo_twitter_card ?? null,
-          image: settings.fallback_seo_image_id ?? null, // Resolved by SeoField.image resolver
+        siteName: pickLocalizedSiteValue(settings.site_name, locale, fallbackLocales) as string | null,
+        titleSuffix: pickLocalizedSiteValue(settings.title_suffix, locale, fallbackLocales) as string | null,
+        facebookPageUrl: pickLocalizedSiteValue(settings.facebook_page_url, locale, fallbackLocales) as string | null,
+        twitterAccount: pickLocalizedSiteValue(settings.twitter_account, locale, fallbackLocales) as string | null,
+        fallbackSeo: fallbackSeo ? {
+          title: fallbackSeo.title ?? null,
+          description: fallbackSeo.description ?? null,
+          twitterCard: fallbackSeo.twitterCard ?? null,
+          image: fallbackSeo.image ?? null,
         } : null,
       } : null,
     };
@@ -211,6 +254,13 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
       const quality = (params.quality ?? params.q ?? null) as number | null;
       const format = (params.format ?? params.auto ?? "auto") as string;
       const gravity = (params.gravity ?? null) as string | null;
+      const zoom = (params.zoom ?? null) as number | null;
+      const background = (params.background ?? null) as string | null;
+      const blur = (params.blur ?? null) as number | null;
+      const sharpen = (params.sharpen ?? null) as number | null;
+      const rotate = (params.rotate ?? null) as number | null;
+      const anim = (params.anim ?? null) as boolean | null;
+      const trim = (params.trim ?? null) as Record<string, unknown> | null;
 
       // Compute output dimensions
       const origW = asset.width;
@@ -230,6 +280,19 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
         const fmt = targetFormat ?? format;
         if (fmt) p.format = fmt;
         if (gravity) p.gravity = gravity;
+        if (zoom != null) p.zoom = zoom;
+        if (background) p.background = background;
+        if (blur != null) p.blur = blur;
+        if (sharpen != null) p.sharpen = sharpen;
+        if (rotate != null) p.rotate = rotate;
+        if (anim != null) p.anim = anim ? "true" : "false";
+        if (trim && typeof trim === "object") {
+          if (trim.top != null) p.trim = `border`;
+          for (const key of ["top", "right", "bottom", "left", "width", "height"] as const) {
+            const value = trim[key];
+            if (typeof value === "number") p[`trim.${key}`] = value;
+          }
+        }
         return cfImageUrl(baseAssetPath, p);
       }
 

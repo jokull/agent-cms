@@ -76,6 +76,15 @@ export interface ContentRow {
   readonly [fieldKey: string]: unknown;
 }
 
+export interface VersionRow {
+  readonly id: string;
+  readonly model_api_key: string;
+  readonly record_id: string;
+  readonly version_number: number;
+  readonly snapshot: string;
+  readonly created_at: string;
+}
+
 /** A dynamic block table row */
 export interface BlockRow {
   readonly id: string;
