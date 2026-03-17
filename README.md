@@ -17,10 +17,11 @@ npm create agent-cms my-cms
 cd my-cms
 ```
 
-The scaffold creates a Cloudflare Worker, provisions a D1 database and R2 bucket, runs migrations, and installs dependencies. When it's done:
+The scaffold creates a Cloudflare Worker, provisions a D1 database and R2 bucket, and installs dependencies. Then bootstrap the CMS explicitly:
 
 ```bash
 npm run dev
+npm run setup -- http://127.0.0.1:8787
 ```
 
 Connect Claude to the MCP server:

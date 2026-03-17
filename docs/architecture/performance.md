@@ -20,6 +20,7 @@ What changed recently:
 - linked record resolution is request-batched
 - preview StructuredText envelope materialization is request-batched
 - schema/bootstrap overhead is cached instead of rebuilt every request
+- system-table setup moved to an explicit setup step instead of the read path
 
 The result is that many previously multiplicative resolver patterns now behave roughly linearly in the amount of returned data.
 
@@ -42,6 +43,26 @@ Relevant files:
 - [`src/graphql/block-resolvers.ts`](/Users/jokull/Code/agent-cms/src/graphql/block-resolvers.ts)
 - [`src/graphql/structured-text-resolver.ts`](/Users/jokull/Code/agent-cms/src/graphql/structured-text-resolver.ts)
 - [`src/services/structured-text-service.ts`](/Users/jokull/Code/agent-cms/src/services/structured-text-service.ts)
+- [`src/http/router.ts`](/Users/jokull/Code/agent-cms/src/http/router.ts)
+- [`src/index.ts`](/Users/jokull/Code/agent-cms/src/index.ts)
+
+## Runtime Boundary
+
+The runtime now has three phases:
+
+1. explicit setup
+2. first schema initialization in a fresh isolate
+3. warm read-path execution
+
+That boundary is intentional.
+
+System tables are created explicitly through `POST /api/setup` or a setup script that calls it. Normal reads should not discover or create system tables. After setup:
+
+- reads stay read-only
+- the Worker caches the handler and GraphQL schema at module scope
+- the warm path is just GraphQL execution plus D1 access
+
+A one-time setup command is a better DX tradeoff than hiding bootstrap work inside the first user request.
 
 ## Mental Model
 
@@ -127,6 +148,36 @@ So this codebase prefers:
 - in-memory reconstruction of the nested response
 
 This keeps SQL simple and indexable while still serving a nested GraphQL API.
+
+## Service Binding vs D1
+
+These are different latency domains.
+
+### Worker-to-worker service binding
+
+Service bindings are effectively internal calls. In our measurements, warm site requests track CMS internal timings closely, which is what you would expect if the binding overhead is negligible.
+
+### D1
+
+D1 uses SQLite semantics, but deployed D1 is not the same as opening a local SQLite file in-process.
+
+The practical model is:
+
+- local SQLite / local Miniflare: close to raw SQLite planner and index behavior
+- deployed D1 binding: the fastest and correct production integration, but still a managed database service with real end-to-end request latency
+
+So the answer to "is D1 basically SQLite query time?" is:
+
+- locally: close enough for query-plan and index work
+- deployed: no
+
+Deployed D1 cost is better thought of as:
+
+- SQL execution time
+- plus service/request overhead
+- plus cold/first-touch variance
+
+That is why local SQLite measurements are useful for query-shape work, but real Workers + D1 measurements are still necessary.
 
 ## GraphQL To SQL
 
@@ -292,7 +343,8 @@ Fast because:
 - published StructuredText is pre-materialized
 - link resolution is batched
 - top-level queries hit indexed content tables
-- GraphQL schema/bootstrap work is cached
+- GraphQL schema work is cached
+- setup/bootstrap is explicit and kept off the read path
 
 ## What Is Expensive
 
