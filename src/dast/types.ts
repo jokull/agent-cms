@@ -10,21 +10,21 @@ export type Mark = "strong" | "emphasis" | "underline" | "strikethrough" | "code
 export interface SpanNode {
   type: "span";
   value: string;
-  marks?: Mark[];
+  marks?: readonly Mark[];
 }
 
 export interface LinkNode {
   type: "link";
   url: string;
-  meta?: Array<{ id: string; value: string }>;
-  children: SpanNode[];
+  meta?: ReadonlyArray<{ id: string; value: string }>;
+  children: readonly SpanNode[];
 }
 
 export interface ItemLinkNode {
   type: "itemLink";
   item: string; // Record ID
-  meta?: Array<{ id: string; value: string }>;
-  children: SpanNode[];
+  meta?: ReadonlyArray<{ id: string; value: string }>;
+  children: readonly SpanNode[];
 }
 
 export interface InlineItemNode {
@@ -43,38 +43,38 @@ export type InlineNode = SpanNode | LinkNode | ItemLinkNode | InlineItemNode | I
 export interface ParagraphNode {
   type: "paragraph";
   style?: string;
-  children: InlineNode[];
+  children: readonly InlineNode[];
 }
 
 export interface HeadingNode {
   type: "heading";
   level: 1 | 2 | 3 | 4 | 5 | 6;
   style?: string;
-  children: InlineNode[];
+  children: readonly InlineNode[];
 }
 
 export interface ListNode {
   type: "list";
   style: "bulleted" | "numbered";
-  children: ListItemNode[];
+  children: readonly ListItemNode[];
 }
 
 export interface ListItemNode {
   type: "listItem";
-  children: (ParagraphNode | ListNode)[];
+  children: readonly (ParagraphNode | ListNode)[];
 }
 
 export interface BlockquoteNode {
   type: "blockquote";
   attribution?: string;
-  children: ParagraphNode[];
+  children: readonly ParagraphNode[];
 }
 
 export interface CodeNode {
   type: "code";
   code: string;
   language?: string;
-  highlight?: number[];
+  highlight?: readonly number[];
 }
 
 export interface ThematicBreakNode {
@@ -86,6 +86,21 @@ export interface BlockNode {
   item: string; // Block ID
 }
 
+export interface TableCellNode {
+  type: "tableCell";
+  children: readonly (ParagraphNode | InlineNode)[];
+}
+
+export interface TableRowNode {
+  type: "tableRow";
+  children: readonly [TableCellNode, ...TableCellNode[]];
+}
+
+export interface TableNode {
+  type: "table";
+  children: readonly [TableRowNode, ...TableRowNode[]];
+}
+
 export type BlockLevelNode =
   | ParagraphNode
   | HeadingNode
@@ -93,12 +108,13 @@ export type BlockLevelNode =
   | BlockquoteNode
   | CodeNode
   | ThematicBreakNode
-  | BlockNode;
+  | BlockNode
+  | TableNode;
 
 // --- Root ---
 export interface RootNode {
   type: "root";
-  children: BlockLevelNode[];
+  children: readonly BlockLevelNode[];
 }
 
 export interface DastDocument {
@@ -109,6 +125,6 @@ export interface DastDocument {
 /** The full StructuredText value as returned by GraphQL */
 export interface StructuredTextValue {
   value: DastDocument;
-  blocks: Record<string, { type: string; [key: string]: unknown }>;
-  links?: Record<string, { id: string; [key: string]: unknown }>;
+  blocks: Readonly<Record<string, { type: string; [key: string]: unknown }>>;
+  links?: Readonly<Record<string, { id: string; [key: string]: unknown }>>;
 }

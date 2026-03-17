@@ -1,8 +1,8 @@
-import { Effect, Schema } from "effect";
+import { Effect, ParseResult, Schema } from "effect";
 import { SqlClient } from "@effect/sql";
-import { validateDast, validateBlocksOnly, extractAllBlockIds } from "../dast/index.js";
+import { validateBlocksOnly, extractAllBlockIds } from "../dast/index.js";
 import { ValidationError } from "../errors.js";
-import { DastDocumentInput, StructuredTextWriteInput } from "../dast/schema.js";
+import { DastDocumentInput, DastDocumentSchema, StructuredTextWriteInput } from "../dast/schema.js";
 import type { FieldRow, ParsedFieldRow } from "../db/row-types.js";
 import { parseFieldValidators } from "../db/row-types.js";
 import { getBlockWhitelist, getBlocksOnly } from "../db/validators.js";
@@ -132,19 +132,16 @@ function fetchBlockModelsCached(ctx: MaterializeContext, sql: SqlClient.SqlClien
   });
 }
 
+function formatDastParseErrors(error: ParseResult.ParseError): string {
+  const formatted = ParseResult.ArrayFormatter.formatErrorSync(error);
+  return formatted.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ");
+}
+
 function validateDastForField(fieldApiKey: string, value: unknown, blocksOnly: boolean) {
   return Effect.gen(function* () {
-    const dastErrors = validateDast(value);
-    if (dastErrors.length > 0) {
-      return yield* new ValidationError({
-        message: `Invalid DAST document: ${dastErrors.map((e) => `${e.path}: ${e.message}`).join("; ")}`,
-        field: fieldApiKey,
-      });
-    }
-
-    const dast = yield* Schema.decodeUnknown(DastDocumentInput)(value).pipe(
+    const dast = yield* Schema.decodeUnknown(DastDocumentSchema)(value).pipe(
       Effect.mapError((e) => new ValidationError({
-        message: `Invalid DAST structure: ${e.message}`,
+        message: `Invalid DAST document: ${formatDastParseErrors(e)}`,
         field: fieldApiKey,
       }))
     );

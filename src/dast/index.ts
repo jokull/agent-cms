@@ -16,9 +16,38 @@ export type {
   CodeNode,
   ThematicBreakNode,
   BlockNode,
+  TableCellNode,
+  TableRowNode,
+  TableNode,
   Mark,
   StructuredTextValue,
 } from "./types.js";
+
+export {
+  DastDocumentSchema,
+  DastDocumentInput,
+  StructuredTextWriteInput,
+  MarkSchema,
+  SpanNodeSchema,
+  LinkNodeSchema,
+  ItemLinkNodeSchema,
+  InlineItemNodeSchema,
+  InlineBlockNodeSchema,
+  InlineNodeSchema,
+  ParagraphNodeSchema,
+  HeadingNodeSchema,
+  ListNodeSchema,
+  ListItemNodeSchema,
+  BlockquoteNodeSchema,
+  CodeNodeSchema,
+  ThematicBreakNodeSchema,
+  BlockRefNodeSchema,
+  TableCellNodeSchema,
+  TableRowNodeSchema,
+  TableNodeSchema,
+  BlockLevelNodeSchema,
+  RootNodeSchema,
+} from "./schema.js";
 
 export { validateDast, validateBlocksOnly, extractBlockIds, extractInlineBlockIds, extractAllBlockIds, extractLinkIds, pruneBlockNodes } from "./validate.js";
 export type { ValidationError } from "./validate.js";
