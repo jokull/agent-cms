@@ -3,18 +3,12 @@ import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { createMcpServer } from "../src/mcp/server.js";
 import { runMigrations } from "./migrate.js";
 import { createTestApp, gqlQuery, jsonRequest } from "./app-helpers.js";
 import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-
-function parse(res: any): any {
-  if (res.isError) throw new Error(`Tool error: ${res.content[0]?.text}`);
-  return JSON.parse(res.content[0]?.text ?? "null");
-}
+import { createTestMcpClient, parseToolResult as parse } from "./mcp-helpers.js";
 
 function createMcpTestApp() {
   const tmpDir = mkdtempSync(join(tmpdir(), "agent-cms-lifecycle-"));
@@ -25,12 +19,8 @@ function createMcpTestApp() {
 }
 
 async function createMcpAgent(sqlLayer: any) {
-  const mcpServer = createMcpServer(sqlLayer);
-  const agent = new Client({ name: "test", version: "1.0" });
-  const [ct, st] = InMemoryTransport.createLinkedPair();
-  await mcpServer.connect(st);
-  await agent.connect(ct);
-  return agent;
+  const { client } = await createTestMcpClient(sqlLayer);
+  return client;
 }
 
 // ─── P1: Published snapshots not cleaned on block removal ───

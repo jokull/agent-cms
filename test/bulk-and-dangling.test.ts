@@ -139,15 +139,10 @@ describe("Bulk insert", () => {
   });
 
   it("MCP bulk_create_records tool works", async () => {
-    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
-    const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
-    const { createMcpServer } = await import("../src/mcp/server.js");
+    const { createTestMcpClient } = await import("./mcp-helpers.js");
 
     const { sqlLayer } = createTestApp();
-    const mcp = createMcpServer(sqlLayer);
-    const [ct, st] = InMemoryTransport.createLinkedPair();
-    const client = new Client({ name: "test", version: "1.0" });
-    await Promise.all([client.connect(ct), mcp.connect(st)]);
+    const { client } = await createTestMcpClient(sqlLayer);
 
     // Create model + field
     const model = JSON.parse((await client.callTool({ name: "create_model", arguments: { name: "Tag", apiKey: "tag" } })).content[0].text as string);

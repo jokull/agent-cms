@@ -242,6 +242,20 @@ const recordsRouter = HttpRouter.empty.pipe(
     })
   ),
 
+  // Partial block update for structured text fields
+  HttpRouter.patch(
+    "/records/:id/blocks",
+    Effect.gen(function* () {
+      const params = yield* HttpRouter.params;
+      const req = yield* HttpServerRequest.HttpServerRequest;
+      const body = yield* req.json;
+      const payload = typeof body === "object" && body !== null
+        ? { ...body, recordId: param(params, "id") }
+        : body;
+      return yield* handle(RecordService.patchBlocksForField(payload));
+    })
+  ),
+
   HttpRouter.del(
     "/records/:id",
     Effect.gen(function* () {
@@ -668,9 +682,8 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
       // Route /mcp to MCP HTTP transport
       if (url.pathname === "/mcp") {
         if (!mcpHandler) {
-          const { createMcpServer } = await import("../mcp/server.js");
           const { createMcpHttpHandler } = await import("../mcp/http-transport.js");
-          mcpHandler = createMcpHttpHandler(() => createMcpServer(fullLayer));
+          mcpHandler = createMcpHttpHandler(fullLayer);
         }
         const response = await mcpHandler(instrumentedRequest);
         return finish(response);

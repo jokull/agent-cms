@@ -2,13 +2,12 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { Effect } from "effect";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { createMcpServer } from "../src/mcp/server.js";
 import { createWebHandler } from "../src/http/router.js";
 import { runMigrations } from "./migrate.js";
 import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { createTestMcpClient } from "./mcp-helpers.js";
 
 /**
  * P5.6: End-to-end MCP test
@@ -28,11 +27,7 @@ describe("P5.6: End-to-end MCP → GraphQL", () => {
     Effect.runSync(runMigrations().pipe(Effect.provide(sqlLayer)));
 
     // MCP server + client
-    const mcpServer = createMcpServer(sqlLayer);
-    agent = new Client({ name: "ai-agent", version: "1.0" });
-    const [ct, st] = InMemoryTransport.createLinkedPair();
-    await mcpServer.connect(st);
-    await agent.connect(ct);
+    ({ client: agent } = await createTestMcpClient(sqlLayer));
 
     // GraphQL handler (same DB)
     graphqlHandler = createWebHandler(sqlLayer).fetch;

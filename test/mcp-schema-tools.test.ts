@@ -2,17 +2,11 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { Effect } from "effect";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { createMcpServer } from "../src/mcp/server.js";
 import { runMigrations } from "./migrate.js";
 import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-
-function parse(res: any): any {
-  if (res.isError) throw new Error(`Tool error: ${res.content[0]?.text}`);
-  return JSON.parse(res.content[0]?.text ?? "null");
-}
+import { createTestMcpClient, parseToolResult as parse } from "./mcp-helpers.js";
 
 describe("MCP schema management tools", () => {
   let agent: Client;
@@ -24,11 +18,7 @@ describe("MCP schema management tools", () => {
     sqlLayer = SqliteClient.layer({ filename: dbPath, disableWAL: true });
     Effect.runSync(runMigrations().pipe(Effect.provide(sqlLayer)));
 
-    const mcpServer = createMcpServer(sqlLayer);
-    agent = new Client({ name: "test", version: "1.0" });
-    const [ct, st] = InMemoryTransport.createLinkedPair();
-    await mcpServer.connect(st);
-    await agent.connect(ct);
+    ({ client: agent } = await createTestMcpClient(sqlLayer));
   });
 
   describe("update_model", () => {

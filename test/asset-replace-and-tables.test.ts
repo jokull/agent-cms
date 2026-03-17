@@ -110,15 +110,10 @@ describe("Asset replace (URL stability)", () => {
   });
 
   it("MCP replace_asset tool works", async () => {
-    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
-    const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
-    const { createMcpServer } = await import("../src/mcp/server.js");
+    const { createTestMcpClient } = await import("./mcp-helpers.js");
 
     const { sqlLayer } = createTestApp();
-    const mcp = createMcpServer(sqlLayer);
-    const [ct, st] = InMemoryTransport.createLinkedPair();
-    const client = new Client({ name: "test", version: "1.0" });
-    await Promise.all([client.connect(ct), mcp.connect(st)]);
+    const { client } = await createTestMcpClient(sqlLayer);
 
     // Create an asset via MCP
     const createResult = await client.callTool({

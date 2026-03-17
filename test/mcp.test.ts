@@ -2,12 +2,13 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { Effect } from "effect";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { createMcpServer } from "../src/mcp/server.js";
 import { runMigrations } from "./migrate.js";
 import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { createTestMcpClient, parseToolResult } from "./mcp-helpers.js";
+
+const getResult = parseToolResult;
 
 async function createTestMcp() {
   const tmpDir = mkdtempSync(join(tmpdir(), "agent-cms-mcp-"));
@@ -16,27 +17,7 @@ async function createTestMcp() {
 
   Effect.runSync(runMigrations().pipe(Effect.provide(sqlLayer)));
 
-  const mcpServer = createMcpServer(sqlLayer);
-  const client = new Client({ name: "test-client", version: "1.0" });
-
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  await mcpServer.connect(serverTransport);
-  await client.connect(clientTransport);
-
-  return { client, mcpServer };
-}
-
-function getResult(response: any): any {
-  if (response.isError) {
-    throw new Error(`MCP tool error: ${response.content[0]?.text}`);
-  }
-  const text = response.content[0]?.text;
-  if (!text) return null;
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new Error(`Failed to parse MCP result: ${text.slice(0, 200)}`);
-  }
+  return createTestMcpClient(sqlLayer);
 }
 
 describe("MCP Server", () => {
@@ -49,7 +30,7 @@ describe("MCP Server", () => {
   describe("Discovery", () => {
     it("list_models returns empty initially", async () => {
       const res = await client.callTool({ name: "list_models", arguments: {} });
-      const models = getResult(res);
+      const models = parseToolResult(res);
       expect(models).toEqual([]);
     });
 
@@ -62,13 +43,13 @@ describe("MCP Server", () => {
       await client.callTool({
         name: "create_field",
         arguments: {
-          modelId: getResult(await client.callTool({ name: "describe_model", arguments: { apiKey: "article" } })).id,
+          modelId: parseToolResult(await client.callTool({ name: "describe_model", arguments: { apiKey: "article" } })).id,
           label: "Title", apiKey: "title", fieldType: "string",
         },
       });
 
       const res = await client.callTool({ name: "list_models", arguments: {} });
-      const models = getResult(res);
+      const models = parseToolResult(res);
       expect(models).toHaveLength(1);
       expect(models[0].apiKey).toBe("article");
       expect(models[0].fields).toHaveLength(1);
@@ -85,7 +66,7 @@ describe("MCP Server", () => {
         name: "describe_model",
         arguments: { apiKey: "post" },
       });
-      const model = getResult(res);
+      const model = parseToolResult(res);
       expect(model.apiKey).toBe("post");
       expect(model.isBlock).toBe(false);
       expect(model.fields).toEqual([]);
@@ -98,7 +79,7 @@ describe("MCP Server", () => {
         name: "create_model",
         arguments: { name: "Blog Post", apiKey: "blog_post" },
       });
-      const model = getResult(modelRes);
+      const model = parseToolResult(modelRes);
       expect(model.apiKey).toBe("blog_post");
 
       const fieldRes = await client.callTool({
@@ -111,7 +92,7 @@ describe("MCP Server", () => {
           validators: { required: true },
         },
       });
-      const field = getResult(fieldRes);
+      const field = parseToolResult(fieldRes);
       expect(field.apiKey).toBe("title");
       expect(field.fieldType).toBe("string");
     });

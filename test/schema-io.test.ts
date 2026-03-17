@@ -171,16 +171,11 @@ describe("Schema import/export", () => {
   });
 
   it("MCP export_schema and import_schema tools work", async () => {
-    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
-    const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
-    const { createMcpServer } = await import("../src/mcp/server.js");
+    const { createTestMcpClient } = await import("./mcp-helpers.js");
 
     // Build schema via MCP on CMS 1
     const { sqlLayer: sqlLayer1 } = createTestApp();
-    const mcpServer1 = createMcpServer(sqlLayer1);
-    const [ct1, st1] = InMemoryTransport.createLinkedPair();
-    const client1 = new Client({ name: "test", version: "1.0" });
-    await Promise.all([client1.connect(ct1), mcpServer1.connect(st1)]);
+    const { client: client1 } = await createTestMcpClient(sqlLayer1);
 
     await client1.callTool({ name: "create_model", arguments: { name: "Item", apiKey: "item" } });
     const models = JSON.parse((await client1.callTool({ name: "list_models", arguments: {} })).content[0].text as string);
@@ -194,10 +189,7 @@ describe("Schema import/export", () => {
 
     // Import into fresh CMS via MCP
     const { sqlLayer: sqlLayer2 } = createTestApp();
-    const mcpServer2 = createMcpServer(sqlLayer2);
-    const [ct2, st2] = InMemoryTransport.createLinkedPair();
-    const client2 = new Client({ name: "test", version: "1.0" });
-    await Promise.all([client2.connect(ct2), mcpServer2.connect(st2)]);
+    const { client: client2 } = await createTestMcpClient(sqlLayer2);
 
     const importResult = await client2.callTool({ name: "import_schema", arguments: { schema: exported } });
     const stats = JSON.parse(importResult.content[0].text as string);
