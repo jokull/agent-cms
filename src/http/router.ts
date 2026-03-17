@@ -14,8 +14,8 @@ import * as PublishService from "../services/publish-service.js";
 import * as AssetService from "../services/asset-service.js";
 import * as LocaleService from "../services/locale-service.js";
 import { isCmsError, errorToResponse } from "../errors.js";
-import { ReorderInput } from "../services/input-schemas.js";
-import { ValidationError } from "../errors.js";
+import { ReindexSearchInput, ReorderInput, SearchInput } from "../services/input-schemas.js";
+import { UnauthorizedError, ValidationError } from "../errors.js";
 import * as SchemaIO from "../services/schema-io.js";
 import * as VersionService from "../services/version-service.js";
 import * as SearchService from "../search/search-service.js";
@@ -86,6 +86,27 @@ function queryParam(name: string) {
     const req = yield* HttpServerRequest.HttpServerRequest;
     const url = new URL(req.url, "http://localhost");
     return url.searchParams.get(name) ?? "";
+  });
+}
+
+function decodeUnknownInput<A, I, R>(
+  schema: Schema.Schema<A, I, R>,
+  input: unknown,
+  message: string = "Invalid input",
+) {
+  return Schema.decodeUnknown(schema)(input).pipe(
+    Effect.mapError((e) => new ValidationError({ message: `${message}: ${e.message}` }))
+  );
+}
+
+function readJsonBody(message: string = "Invalid JSON body") {
+  return Effect.gen(function* () {
+    const req = yield* HttpServerRequest.HttpServerRequest;
+    return yield* req.json.pipe(
+      Effect.mapError((e) => new ValidationError({
+        message: `${message}: ${describeUnknown(e)}`,
+      }))
+    );
   });
 }
 
@@ -288,13 +309,10 @@ const recordsRouter = HttpRouter.empty.pipe(
   HttpRouter.post(
     "/reorder",
     Effect.gen(function* () {
-      const req = yield* HttpServerRequest.HttpServerRequest;
-      const rawBody: unknown = yield* req.json;
+      const rawBody = yield* readJsonBody();
       return yield* handle(
         Effect.gen(function* () {
-          const { modelApiKey, recordIds } = yield* Schema.decodeUnknown(ReorderInput)(rawBody).pipe(
-            Effect.mapError((e) => new ValidationError({ message: `Invalid input: ${e.message}` }))
-          );
+          const { modelApiKey, recordIds } = yield* decodeUnknownInput(ReorderInput, rawBody);
           return yield* RecordService.reorderRecords(modelApiKey, recordIds);
         })
       );
@@ -381,18 +399,8 @@ const searchRouter = HttpRouter.empty.pipe(
   HttpRouter.post(
     "/",
     Effect.gen(function* () {
-      const req = yield* HttpServerRequest.HttpServerRequest;
-      const body = yield* req.json;
-      const SearchInput = Schema.Struct({
-        query: Schema.String,
-        modelApiKey: Schema.optional(Schema.String),
-        first: Schema.optional(Schema.Number),
-        skip: Schema.optional(Schema.Number),
-        mode: Schema.optional(Schema.Literal("keyword", "semantic", "hybrid")),
-      });
-      const parsed = yield* Schema.decodeUnknown(SearchInput)(body).pipe(
-        Effect.mapError((e) => new ValidationError({ message: `Invalid search input: ${e.message}` }))
-      );
+      const body = yield* readJsonBody();
+      const parsed = yield* decodeUnknownInput(SearchInput, body, "Invalid search input");
       return yield* handle(SearchService.search(parsed));
     })
   ),
@@ -400,14 +408,8 @@ const searchRouter = HttpRouter.empty.pipe(
   HttpRouter.post(
     "/reindex",
     Effect.gen(function* () {
-      const req = yield* HttpServerRequest.HttpServerRequest;
-      const body = yield* req.json;
-      const ReindexInput = Schema.Struct({
-        modelApiKey: Schema.optional(Schema.String),
-      });
-      const parsed = yield* Schema.decodeUnknown(ReindexInput)(body).pipe(
-        Effect.mapError((e) => new ValidationError({ message: `Invalid input: ${e.message}` }))
-      );
+      const body = yield* readJsonBody();
+      const parsed = yield* decodeUnknownInput(ReindexSearchInput, body);
       const modelApiKey = parsed.modelApiKey;
       return yield* handle(SearchService.reindexAll(modelApiKey));
     })
@@ -563,13 +565,13 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
    * Check if a request is authorized for the given access level.
    * If no keys are configured, all requests are allowed (local dev).
    */
-  function checkAuth(request: Request, level: "read" | "write"): Response | null {
+  function checkAuth(request: Request, level: "read" | "write"): UnauthorizedError | null {
     const token = getBearerToken(request);
 
     if (level === "write" && options?.writeKey) {
       if (token !== options.writeKey) {
-        return new Response(JSON.stringify({ error: "Unauthorized. Provide a valid write API key via Authorization: Bearer <key>" }), {
-          status: 401, headers: { "Content-Type": "application/json" },
+        return new UnauthorizedError({
+          message: "Unauthorized. Provide a valid write API key via Authorization: Bearer <key>",
         });
       }
     }
@@ -577,8 +579,8 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
     if (level === "read" && options?.readKey) {
       // Write key also grants read access
       if (token !== options.readKey && token !== options?.writeKey) {
-        return new Response(JSON.stringify({ error: "Unauthorized. Provide a valid API key via Authorization: Bearer <key>" }), {
-          status: 401, headers: { "Content-Type": "application/json" },
+        return new UnauthorizedError({
+          message: "Unauthorized. Provide a valid API key via Authorization: Bearer <key>",
         });
       }
     }
@@ -666,17 +668,35 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
       // /graphql POST — read auth
       else if (url.pathname === "/graphql" && instrumentedRequest.method === "POST") {
         const denied = checkAuth(instrumentedRequest, "read");
-        if (denied) return finish(denied);
+        if (denied) {
+          const mapped = errorToResponse(denied);
+          return finish(new Response(JSON.stringify(mapped.body), {
+            status: mapped.status,
+            headers: { "Content-Type": "application/json" },
+          }));
+        }
       }
       // /mcp — write auth
       else if (url.pathname === "/mcp") {
         const denied = checkAuth(instrumentedRequest, "write");
-        if (denied) return finish(denied);
+        if (denied) {
+          const mapped = errorToResponse(denied);
+          return finish(new Response(JSON.stringify(mapped.body), {
+            status: mapped.status,
+            headers: { "Content-Type": "application/json" },
+          }));
+        }
       }
       // /api/* — write auth
       else if (url.pathname.startsWith("/api/")) {
         const denied = checkAuth(instrumentedRequest, "write");
-        if (denied) return finish(denied);
+        if (denied) {
+          const mapped = errorToResponse(denied);
+          return finish(new Response(JSON.stringify(mapped.body), {
+            status: mapped.status,
+            headers: { "Content-Type": "application/json" },
+          }));
+        }
       }
 
       // Route /mcp to MCP HTTP transport

@@ -92,6 +92,20 @@ export const ReorderInput = Schema.Struct({
 });
 export type ReorderInput = typeof ReorderInput.Type;
 
+export const SearchInput = Schema.Struct({
+  query: Schema.String,
+  modelApiKey: Schema.optional(Schema.String),
+  first: Schema.optional(Schema.Number),
+  skip: Schema.optional(Schema.Number),
+  mode: Schema.optional(Schema.Literal("keyword", "semantic", "hybrid")),
+});
+export type SearchInput = typeof SearchInput.Type;
+
+export const ReindexSearchInput = Schema.Struct({
+  modelApiKey: Schema.optional(Schema.String),
+});
+export type ReindexSearchInput = typeof ReindexSearchInput.Type;
+
 // ColorInput and LatLonInput schemas moved to src/field-types.ts (field type registry)
 
 export const CreateLocaleInput = Schema.Struct({

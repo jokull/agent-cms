@@ -29,13 +29,19 @@ export class SchemaEngineError extends Data.TaggedError("SchemaEngineError")<{
   readonly cause?: unknown;
 }> {}
 
+/** Unauthorized access to a protected API surface */
+export class UnauthorizedError extends Data.TaggedError("UnauthorizedError")<{
+  readonly message: string;
+}> {}
+
 /** Union of all CMS errors */
 export type CmsError =
   | NotFoundError
   | ValidationError
   | ReferenceConflictError
   | DuplicateError
-  | SchemaEngineError;
+  | SchemaEngineError
+  | UnauthorizedError;
 
 /** Runtime type guard for CmsError — uses instanceof, no duck-typing */
 export function isCmsError(error: unknown): error is CmsError {
@@ -44,7 +50,8 @@ export function isCmsError(error: unknown): error is CmsError {
     error instanceof ValidationError ||
     error instanceof ReferenceConflictError ||
     error instanceof DuplicateError ||
-    error instanceof SchemaEngineError
+    error instanceof SchemaEngineError ||
+    error instanceof UnauthorizedError
   );
 }
 
@@ -61,5 +68,7 @@ export function errorToResponse(error: CmsError): { status: number; body: { erro
       return { status: 409, body: { error: error.message } };
     case "SchemaEngineError":
       return { status: 500, body: { error: error.message } };
+    case "UnauthorizedError":
+      return { status: 401, body: { error: error.message } };
   }
 }
