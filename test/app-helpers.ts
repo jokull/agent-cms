@@ -22,9 +22,9 @@ export function createTestApp() {
   // Run embedded migrations (same as production auto-migration)
   Effect.runSync(ensureSchema().pipe(Effect.provide(sqlLayer)));
 
-  const handler = createWebHandler(sqlLayer);
+  const webHandler = createWebHandler(sqlLayer);
 
-  return { handler, sqlLayer };
+  return { handler: webHandler.fetch, sqlLayer };
 }
 
 /**

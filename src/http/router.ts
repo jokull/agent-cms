@@ -482,12 +482,35 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
   const restHandler = HttpApp.toWebHandler(restApp as HttpApp.Default);
 
   // Lazy-import handlers to avoid circular deps
-  let graphqlHandler: ((req: Request) => Promise<Response>) | null = null;
+  let graphqlInstance: {
+    handle: (req: Request) => Promise<Response>;
+    getSchema: () => Promise<import("graphql").GraphQLSchema>;
+    invalidateSchema: () => void;
+    execute: (
+      query: string,
+      variables?: Record<string, unknown>,
+      context?: { includeDrafts?: boolean; excludeInvalid?: boolean }
+    ) => Promise<{ data: unknown; errors?: ReadonlyArray<{ message: string }> }>;
+  } | null = null;
   let mcpHandler: ((req: Request) => Promise<Response>) | null = null;
   let graphqlModulePromise: Promise<typeof import("../graphql/handler.js")> | null = null;
 
   function invalidateGraphqlSchemaCache() {
-    graphqlHandler = null;
+    if (graphqlInstance) graphqlInstance.invalidateSchema();
+  }
+
+  async function getGraphqlInstance() {
+    if (!graphqlInstance) {
+      if (!graphqlModulePromise) {
+        graphqlModulePromise = import("../graphql/handler.js");
+      }
+      const module = await graphqlModulePromise;
+      graphqlInstance = module.createGraphQLHandler(sqlLayer, {
+        assetBaseUrl: options?.assetBaseUrl,
+        isProduction: options?.isProduction,
+      });
+    }
+    return graphqlInstance;
   }
 
   function isSchemaMutationRequest(url: URL, method: string): boolean {
@@ -549,7 +572,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
     return null; // authorized
   }
 
-  return async (request: Request): Promise<Response> => {
+  const fetchHandler = async (request: Request): Promise<Response> => {
     const requestId = getRequestIdFromHeaders(request.headers);
     const headers = new Headers(request.headers);
     headers.set("x-request-id", requestId);
@@ -661,7 +684,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
         let graphqlInitMs = 0;
         let graphqlImportCache: "hit" | "miss" = "hit";
         let graphqlInitCache: "hit" | "miss" = "hit";
-        if (!graphqlHandler) {
+        if (!graphqlInstance) {
           graphqlInitCache = "miss";
           if (!graphqlModulePromise) {
             graphqlImportCache = "miss";
@@ -673,14 +696,13 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
           }
           const module = await graphqlModulePromise;
           const initStartedAt = performance.now();
-          const { createGraphQLHandler } = module;
-          graphqlHandler = createGraphQLHandler(sqlLayer, {
+          graphqlInstance = module.createGraphQLHandler(sqlLayer, {
             assetBaseUrl: options?.assetBaseUrl,
             isProduction: options?.isProduction,
           });
           graphqlInitMs = Number((performance.now() - initStartedAt).toFixed(3));
         }
-        const response = await graphqlHandler(instrumentedRequest);
+        const response = await graphqlInstance.handle(instrumentedRequest);
         if (!traceEnabled) return finish(response);
 
         const headers = new Headers(response.headers);
@@ -713,5 +735,23 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
         headers: { "Content-Type": "application/json" },
       }));
     }
+  };
+
+  return {
+    fetch: fetchHandler,
+
+    /**
+     * Execute a GraphQL query directly, without HTTP serialization.
+     * For in-process queries when CMS and site share a Worker.
+     * Skips CORS, auth, and request logging — caller is trusted.
+     */
+    async execute(
+      query: string,
+      variables?: Record<string, unknown>,
+      context?: { includeDrafts?: boolean; excludeInvalid?: boolean }
+    ): Promise<{ data: unknown; errors?: ReadonlyArray<{ message: string }> }> {
+      const instance = await getGraphqlInstance();
+      return instance.execute(query, variables, context);
+    },
   };
 }

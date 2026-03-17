@@ -10,7 +10,7 @@ describe("/api/setup", () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "agent-cms-setup-"));
     const dbPath = join(tmpDir, "test.db");
     const sqlLayer = SqliteClient.layer({ filename: dbPath, disableWAL: true });
-    const handler = createWebHandler(sqlLayer);
+    const { fetch: handler } = createWebHandler(sqlLayer);
 
     const beforeSetup = await handler(new Request("http://localhost/api/models", {
       method: "POST",

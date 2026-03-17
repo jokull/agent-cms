@@ -35,7 +35,7 @@ describe("P5.6: End-to-end MCP → GraphQL", () => {
     await agent.connect(ct);
 
     // GraphQL handler (same DB)
-    graphqlHandler = createWebHandler(sqlLayer);
+    graphqlHandler = createWebHandler(sqlLayer).fetch;
   });
 
   function parse(res: any): any {

@@ -12,8 +12,8 @@ function createAuthTestApp(readKey?: string, writeKey?: string) {
   const dbPath = join(tmpDir, "test.db");
   const sqlLayer = SqliteClient.layer({ filename: dbPath, disableWAL: true });
   Effect.runSync(runMigrations().pipe(Effect.provide(sqlLayer)));
-  const handler = createWebHandler(sqlLayer, { readKey, writeKey });
-  return handler;
+  const webHandler = createWebHandler(sqlLayer, { readKey, writeKey });
+  return webHandler.fetch;
 }
 
 describe("API key auth", () => {

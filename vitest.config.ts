@@ -20,7 +20,7 @@ export default defineConfig({
     alias: {
       "~": path.resolve(__dirname, "./src"),
       // Ensure only one instance of graphql is loaded (CJS/ESM dedup)
-      graphql: path.resolve(__dirname, "node_modules/graphql/index.mjs"),
+      graphql: path.resolve(__dirname, "node_modules/graphql/index.js"),
     },
   },
 });

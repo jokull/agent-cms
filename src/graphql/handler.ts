@@ -1,6 +1,6 @@
 import { createYoga, type YogaSchemaDefinition } from "graphql-yoga";
 import { Effect, Layer } from "effect";
-import { GraphQLError, type GraphQLSchema } from "graphql";
+import { GraphQLError, type GraphQLSchema, parse, execute as gqlExecute, validate } from "graphql";
 import { SqlClient } from "@effect/sql";
 import { buildGraphQLSchema } from "./schema-builder.js";
 import { enforceQueryLimits } from "./query-limits.js";
@@ -100,7 +100,11 @@ export function createGraphQLHandler(
     },
   });
 
-  return async (request: Request): Promise<Response> => {
+  function invalidateSchema() {
+    schemaPromise = null;
+  }
+
+  const handle = async (request: Request): Promise<Response> => {
     return withSqlMetrics(async () => {
       const traceEnabled = request.headers.get("X-Bench-Trace") === "1" || request.headers.get("X-Debug-Sql") === "true";
       const traceId = request.headers.get("X-Trace-Id") ?? crypto.randomUUID();
@@ -171,4 +175,29 @@ export function createGraphQLHandler(
       });
     });
   };
+
+  async function execute(
+    query: string,
+    variables?: Record<string, unknown>,
+    context?: { includeDrafts?: boolean; excludeInvalid?: boolean }
+  ): Promise<{ data: unknown; errors?: ReadonlyArray<{ message: string }> }> {
+    const schema = await getSchema();
+    const document = parse(query);
+    const validationErrors = validate(schema, document);
+    if (validationErrors.length > 0) {
+      return { data: null, errors: validationErrors.map((e) => ({ message: e.message })) };
+    }
+    const result = await gqlExecute({
+      schema,
+      document,
+      variableValues: variables,
+      contextValue: {
+        includeDrafts: context?.includeDrafts ?? false,
+        excludeInvalid: context?.excludeInvalid ?? false,
+      },
+    });
+    return result as { data: unknown; errors?: ReadonlyArray<{ message: string }> };
+  }
+
+  return { handle, getSchema, invalidateSchema, execute };
 }

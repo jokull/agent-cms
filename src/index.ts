@@ -106,7 +106,7 @@ export function createCMSHandler(config: CmsHandlerConfig) {
 function createCMSHandlerUncached(config: CmsHandlerConfig) {
   const { bindings, hooks } = config;
   const sqlLayer = D1Client.layer({ db: bindings.db }).pipe(Layer.orDie);
-  const handler = createWebHandler(sqlLayer, {
+  const webHandler = createWebHandler(sqlLayer, {
     assetBaseUrl: bindings.assetBaseUrl,
     isProduction: bindings.environment === "production",
     readKey: bindings.readKey,
@@ -118,6 +118,13 @@ function createCMSHandlerUncached(config: CmsHandlerConfig) {
   });
 
   return {
-    fetch: (request: Request): Promise<Response> => handler(request),
+    fetch: (request: Request): Promise<Response> => webHandler.fetch(request),
+
+    /**
+     * Execute a GraphQL query directly, without HTTP serialization.
+     * For in-process queries when CMS and site share a Worker.
+     * Skips CORS, auth, and request logging — caller is trusted.
+     */
+    execute: webHandler.execute,
   };
 }
