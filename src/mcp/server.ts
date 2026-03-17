@@ -121,17 +121,20 @@ export function createMcpServer(sqlLayer: Layer.Layer<SqlClient.SqlClient | Vect
       apiKey: z.string().describe("Snake_case identifier used in code (e.g. 'blog_post')"),
       isBlock: z.boolean().optional().describe("true = block type for StructuredText embedding"),
       singleton: z.boolean().optional().describe("true = only one record allowed (e.g. site settings)"),
+      allLocalesRequired: z.boolean().optional().describe("true = records must have values for all project locales on localized fields"),
     },
     async (args) => run(ModelService.createModel(args))
   );
 
-  server.tool("update_model", "Update model properties (name, apiKey, singleton, sortable)",
+  server.tool("update_model", "Update model properties (name, apiKey, singleton, sortable, hasDraft, allLocalesRequired)",
     {
       modelId: z.string(),
       name: z.string().optional(),
       apiKey: z.string().optional(),
       singleton: z.boolean().optional(),
       sortable: z.boolean().optional(),
+      hasDraft: z.boolean().optional().describe("Enable draft/published system. When disabled, records auto-publish on create/edit."),
+      allLocalesRequired: z.boolean().optional().describe("Require all project locales on localized fields"),
     },
     async ({ modelId, ...rest }) => run(ModelService.updateModel(modelId, rest))
   );
@@ -225,6 +228,7 @@ Key validators by field type:
               singleton: !!m.singleton,
               sortable: !!m.sortable,
               tree: !!m.tree,
+              allLocalesRequired: !!m.all_locales_required,
               ...(includeFieldDetails ? {
                 fields: mFields.map((f) => ({
                   id: f.id,

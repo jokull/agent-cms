@@ -70,19 +70,21 @@ export function supportsUniqueValidation(fieldType: string): boolean {
 /**
  * Compute whether a record is valid (all required fields have values).
  * For localized required fields, checks the default locale key in the JSON map.
+ * When allLocales is provided, checks all locale keys (for all_locales_required models).
  * Returns { valid, missingFields } where missingFields lists api_keys that are missing.
  */
 export function computeIsValid(
   record: Record<string, unknown>,
   fields: ReadonlyArray<{ api_key: string; localized: number; validators: Record<string, unknown> }>,
-  defaultLocale: string | null
+  defaultLocale: string | null,
+  allLocales?: readonly string[]
 ): { valid: boolean; missingFields: string[] } {
   const missingFields: string[] = [];
   for (const field of fields) {
     if (!isRequired(field.validators)) continue;
     const value = record[field.api_key];
     if (field.localized && defaultLocale) {
-      // Localized field: check default locale key in JSON map
+      // Localized field: check locale keys in JSON map
       let localeMap = value;
       if (typeof localeMap === "string") {
         try { localeMap = JSON.parse(localeMap); } catch { missingFields.push(field.api_key); continue; }
@@ -91,9 +93,15 @@ export function computeIsValid(
         missingFields.push(field.api_key);
         continue;
       }
-      const locValue = (localeMap as Record<string, unknown>)[defaultLocale];
-      if (locValue === null || locValue === undefined || locValue === "") {
-        missingFields.push(field.api_key);
+      const map = localeMap as Record<string, unknown>;
+      // When allLocales is set, check every locale; otherwise just the default
+      const localesToCheck = allLocales ?? [defaultLocale];
+      for (const locale of localesToCheck) {
+        const locValue = map[locale];
+        if (locValue === null || locValue === undefined || locValue === "") {
+          missingFields.push(field.api_key);
+          break; // One missing locale is enough to mark the field invalid
+        }
       }
     } else {
       if (value === null || value === undefined || value === "") {

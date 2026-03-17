@@ -80,9 +80,14 @@ describe("[SCHEMA:blog] Blog Schema Integration", () => {
     expect(res.status).toBe(409);
   });
 
-  it("validates required fields", async () => {
+  it("allows saving drafts without required fields, rejects on publish", async () => {
+    // Draft models allow saving without required fields
     const res = await jsonRequest(handler, "POST", "/api/records", { modelApiKey: "post", data: { body: "Missing title" } });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(201);
+    const record = await res.json();
+    // But publishing should fail
+    const pubRes = await jsonRequest(handler, "POST", `/api/records/${record.id}/publish?modelApiKey=post`);
+    expect(pubRes.status).toBe(400);
   });
 
   it("refuses to delete referenced model", async () => {

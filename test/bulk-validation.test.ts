@@ -18,13 +18,29 @@ describe("Bulk create validation", () => {
     });
   });
 
-  it("rejects bulk create when required field is missing", async () => {
+  it("allows bulk create drafts without required fields", async () => {
+    // Draft models allow saving without required fields
     const res = await jsonRequest(handler, "POST", "/api/records/bulk", {
       modelApiKey: "post",
       records: [
         { title: "Good", body: "ok" },
         { body: "missing title" },
       ],
+    });
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.created).toBe(2);
+  });
+
+  it("rejects bulk create on non-draft model when required field is missing", async () => {
+    const ndRes = await jsonRequest(handler, "POST", "/api/models", { name: "Page", apiKey: "page", hasDraft: false });
+    const ndModel = await ndRes.json();
+    await jsonRequest(handler, "POST", `/api/models/${ndModel.id}/fields`, {
+      label: "Title", apiKey: "title", fieldType: "string", validators: { required: true },
+    });
+    const res = await jsonRequest(handler, "POST", "/api/records/bulk", {
+      modelApiKey: "page",
+      records: [{ title: "Good" }, {}],
     });
     expect(res.status).toBe(400);
     const body = await res.json();
@@ -66,7 +82,8 @@ describe("Bulk create validation", () => {
     expect(body.created).toBe(2);
   });
 
-  it("validates all records — first failing record index is reported", async () => {
+  it("allows bulk create drafts with null required fields", async () => {
+    // Draft models allow saving without required fields
     const res = await jsonRequest(handler, "POST", "/api/records/bulk", {
       modelApiKey: "post",
       records: [
@@ -75,8 +92,8 @@ describe("Bulk create validation", () => {
         { title: null },
       ],
     });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(201);
     const body = await res.json();
-    expect(body.error).toContain("Record 2");
+    expect(body.created).toBe(3);
   });
 });

@@ -12,6 +12,7 @@ export interface ModelRow {
   readonly sortable: number;
   readonly tree: number;
   readonly has_draft: number;
+  readonly all_locales_required: number;
   readonly ordering: string | null;
   readonly created_at: string;
   readonly updated_at: string;

@@ -169,10 +169,13 @@ export function createRecord(rawBody: unknown) {
     const modelFields = yield* getModelFields(model.id);
     const data: Record<string, unknown> = { ...(body.data ?? {}) };
 
-    // Validate required fields
-    for (const field of modelFields) {
-      if (isRequired(field.validators) && (data[field.api_key] === undefined || data[field.api_key] === null || data[field.api_key] === ""))
-        return yield* new ValidationError({ message: `Field '${field.api_key}' is required`, field: field.api_key });
+    // Validate required fields only for non-draft models (has_draft=false auto-publishes)
+    // Draft models defer required validation to publish time
+    if (!model.has_draft) {
+      for (const field of modelFields) {
+        if (isRequired(field.validators) && (data[field.api_key] === undefined || data[field.api_key] === null || data[field.api_key] === ""))
+          return yield* new ValidationError({ message: `Field '${field.api_key}' is required`, field: field.api_key });
+      }
     }
 
     const now = new Date().toISOString();
@@ -710,10 +713,12 @@ export function bulkCreateRecords(rawBody: unknown) {
       if (typeof rawRecord !== "object" || rawRecord === null) continue;
       const data: Record<string, unknown> = { ...(rawRecord as Record<string, unknown>) };
 
-      // Validate required fields
-      for (const field of modelFields) {
-        if (isRequired(field.validators) && (data[field.api_key] === undefined || data[field.api_key] === null || data[field.api_key] === ""))
-          return yield* new ValidationError({ message: `Record ${idx}: field '${field.api_key}' is required`, field: field.api_key });
+      // Validate required fields only for non-draft models
+      if (!model.has_draft) {
+        for (const field of modelFields) {
+          if (isRequired(field.validators) && (data[field.api_key] === undefined || data[field.api_key] === null || data[field.api_key] === ""))
+            return yield* new ValidationError({ message: `Record ${idx}: field '${field.api_key}' is required`, field: field.api_key });
+        }
       }
 
       const requestedId = typeof data.id === "string" && data.id.trim().length > 0 ? data.id : undefined;

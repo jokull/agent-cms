@@ -29,12 +29,16 @@ export function publishRecord(modelApiKey: string, recordId: string) {
       "SELECT * FROM fields WHERE model_id = ? ORDER BY position", [model.id]
     );
     const parsedFields = fieldRows.map(parseFieldValidators);
-    // Get default locale for localized field validation
+    // Get locales for validation
     const localeRows = yield* sql.unsafe<{ code: string }>(
-      "SELECT code FROM locales ORDER BY position LIMIT 1", []
+      "SELECT code FROM locales ORDER BY position", []
     );
     const defaultLocale = localeRows.length > 0 ? localeRows[0].code : null;
-    const { valid, missingFields } = computeIsValid(record, parsedFields, defaultLocale);
+    // When all_locales_required, validate all locales; otherwise just default
+    const allLocales = model.all_locales_required && localeRows.length > 0
+      ? localeRows.map((l) => l.code)
+      : undefined;
+    const { valid, missingFields } = computeIsValid(record, parsedFields, defaultLocale, allLocales);
     const uniqueViolations = yield* findUniqueConstraintViolations({
       tableName,
       record,

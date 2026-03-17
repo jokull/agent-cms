@@ -12,6 +12,7 @@ export const CreateModelInput = Schema.Struct({
   sortable: Schema.optionalWith(Schema.Boolean, { default: () => false }),
   tree: Schema.optionalWith(Schema.Boolean, { default: () => false }),
   hasDraft: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  allLocalesRequired: Schema.optionalWith(Schema.Boolean, { default: () => false }),
   ordering: Schema.optional(Schema.String),
 });
 export type CreateModelInput = typeof CreateModelInput.Type;

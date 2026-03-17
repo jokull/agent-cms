@@ -115,6 +115,12 @@ const MIGRATIONS: readonly Migration[] = [
         ON "record_versions" ("model_api_key", "record_id", "version_number" DESC)`,
     ],
   },
+  {
+    version: 4,
+    statements: [
+      `ALTER TABLE "models" ADD COLUMN "all_locales_required" integer DEFAULT 0 NOT NULL`,
+    ],
+  },
 ];
 
 /**

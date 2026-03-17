@@ -126,7 +126,10 @@ export function buildContentModelResolvers(
     typeResolvers._publishedAt = (p: DynamicRow) => p._published_at;
     typeResolvers._firstPublishedAt = (p: DynamicRow) => p._first_published_at;
     typeResolvers._isValid = async (parent: DynamicRow) => {
-      const required = computeIsValid(parent, fields, defaultLocale);
+      const allLocales = model.all_locales_required && ctx.locales.length > 0
+        ? ctx.locales.map((l) => l.code)
+        : undefined;
+      const required = computeIsValid(parent, fields, defaultLocale, allLocales);
       if (!required.valid) return false;
       const uniqueViolations = await runSql(findUniqueConstraintViolations({
         tableName,

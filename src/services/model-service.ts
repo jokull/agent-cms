@@ -62,8 +62,8 @@ export function createModel(rawBody: unknown) {
     const id = ulid();
 
     yield* sql.unsafe(
-      `INSERT INTO models (id, name, api_key, is_block, singleton, sortable, tree, has_draft, ordering, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO models (id, name, api_key, is_block, singleton, sortable, tree, has_draft, all_locales_required, ordering, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id, body.name, body.apiKey,
         body.isBlock ? 1 : 0,
@@ -71,6 +71,7 @@ export function createModel(rawBody: unknown) {
         body.sortable ? 1 : 0,
         body.tree ? 1 : 0,
         body.hasDraft ? 1 : 0,
+        body.allLocalesRequired ? 1 : 0,
         body.ordering ?? null,
         now, now,
       ]
@@ -91,6 +92,7 @@ export function createModel(rawBody: unknown) {
       isBlock: body.isBlock, singleton: body.singleton,
       sortable: body.sortable, tree: body.tree,
       hasDraft: body.hasDraft,
+      allLocalesRequired: body.allLocalesRequired,
       ordering: body.ordering ?? null,
       createdAt: now, updatedAt: now,
     };
@@ -112,6 +114,7 @@ export function updateModel(id: string, body: Record<string, unknown>) {
     if (body.singleton !== undefined) { sets.push("singleton = ?"); values.push(body.singleton ? 1 : 0); }
     if (body.sortable !== undefined) { sets.push("sortable = ?"); values.push(body.sortable ? 1 : 0); }
     if (body.hasDraft !== undefined) { sets.push("has_draft = ?"); values.push(body.hasDraft ? 1 : 0); }
+    if (body.allLocalesRequired !== undefined) { sets.push("all_locales_required = ?"); values.push(body.allLocalesRequired ? 1 : 0); }
 
     // Handle api_key rename → rename the dynamic table
     if (typeof body.apiKey === "string" && body.apiKey !== model.api_key) {

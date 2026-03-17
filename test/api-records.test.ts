@@ -45,11 +45,26 @@ describe("Records REST API", () => {
       expect(res.status).toBe(404);
     });
 
-    it("validates required fields", async () => {
+    it("allows saving drafts without required fields, rejects on publish", async () => {
       await jsonRequest(handler, "POST", `/api/models/${modelId}/fields`, {
         label: "Slug", apiKey: "slug", fieldType: "slug", validators: { required: true },
       });
+      // Draft models allow saving without required fields
       const res = await jsonRequest(handler, "POST", "/api/records", { modelApiKey: "post", data: { title: "No slug" } });
+      expect(res.status).toBe(201);
+      const record = await res.json();
+      // But publishing should fail
+      const pubRes = await jsonRequest(handler, "POST", `/api/records/${record.id}/publish?modelApiKey=post`);
+      expect(pubRes.status).toBe(400);
+    });
+
+    it("validates required fields on create for non-draft models", async () => {
+      const ndRes = await jsonRequest(handler, "POST", "/api/models", { name: "Page", apiKey: "page", hasDraft: false });
+      const ndModel = await ndRes.json();
+      await jsonRequest(handler, "POST", `/api/models/${ndModel.id}/fields`, {
+        label: "Title", apiKey: "title", fieldType: "string", validators: { required: true },
+      });
+      const res = await jsonRequest(handler, "POST", "/api/records", { modelApiKey: "page", data: {} });
       expect(res.status).toBe(400);
     });
 
