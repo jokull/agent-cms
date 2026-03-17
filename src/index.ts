@@ -1,4 +1,5 @@
 import { D1Client } from "@effect/sql-d1";
+import { Layer } from "effect";
 import { createWebHandler } from "./http/router.js";
 import type { AiBinding, VectorizeBinding } from "./search/vectorize.js";
 import type { CmsHooks } from "./hooks.js";
@@ -104,7 +105,7 @@ export function createCMSHandler(config: CmsHandlerConfig) {
 
 function createCMSHandlerUncached(config: CmsHandlerConfig) {
   const { bindings, hooks } = config;
-  const sqlLayer = D1Client.layer({ db: bindings.db });
+  const sqlLayer = D1Client.layer({ db: bindings.db }).pipe(Layer.orDie);
   const handler = createWebHandler(sqlLayer, {
     assetBaseUrl: bindings.assetBaseUrl,
     isProduction: bindings.environment === "production",

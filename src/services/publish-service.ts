@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
 import { NotFoundError, ValidationError } from "../errors.js";
 import { selectById } from "../schema-engine/sql-records.js";
-import type { ModelRow, ContentRow, FieldRow } from "../db/row-types.js";
+import type { ModelRow, FieldRow } from "../db/row-types.js";
 import { parseFieldValidators } from "../db/row-types.js";
 import { computeIsValid, findUniqueConstraintViolations } from "../db/validators.js";
 import { materializeRecordStructuredTextFields } from "./structured-text-service.js";

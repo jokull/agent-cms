@@ -1,7 +1,7 @@
 import { Effect, Schema } from "effect";
 import { SqlClient } from "@effect/sql";
 import { ulid } from "ulidx";
-import { NotFoundError, ValidationError, DuplicateError } from "../errors.js";
+import { ValidationError, DuplicateError } from "../errors.js";
 import type { LocaleRow } from "../db/row-types.js";
 import { removeLocale as removeLocaleWithCleanup } from "./schema-lifecycle.js";
 import { CreateLocaleInput } from "./input-schemas.js";

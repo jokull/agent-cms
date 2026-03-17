@@ -492,10 +492,14 @@ export function materializeStructuredTextValue(params: {
       }
     }
     if (!dast || typeof dast !== "object") return null;
+    if (!("document" in dast) || typeof dast.document !== "object" || dast.document === null || !("children" in dast.document)) {
+      return null;
+    }
+    const doc = dast as { document: { children: readonly unknown[] } };
 
-    const blockIds = extractAllBlockIds(dast);
+    const blockIds = extractAllBlockIds(doc);
     if (blockIds.length === 0) {
-      return { value: dast as DastDocumentInput, blocks: {} } satisfies StructuredTextEnvelope;
+      return { value: doc as DastDocumentInput, blocks: {} } satisfies StructuredTextEnvelope;
     }
 
     const blockModels = yield* fetchBlockModelsCached(materializeContext, sql);

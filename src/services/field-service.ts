@@ -1,7 +1,7 @@
 import { Effect, Schema } from "effect";
 import { SqlClient } from "@effect/sql";
 import { ulid } from "ulidx";
-import { FIELD_TYPES, isFieldType, type FieldType } from "../types.js";
+import { FIELD_TYPES, isFieldType } from "../types.js";
 import { NotFoundError, ValidationError, DuplicateError, ReferenceConflictError } from "../errors.js";
 import { migrateContentTable } from "../schema-engine/sql-ddl.js";
 import type { ModelRow, FieldRow } from "../db/row-types.js";

@@ -53,8 +53,8 @@ function logEvent(level: "info" | "error", message: string, fields: Record<strin
 }
 
 /** Helper: run a CMS Effect and return an HTTP response */
-function handle<A>(
-  effect: Effect.Effect<A, unknown, SqlClient.SqlClient>,
+function handle<A, R>(
+  effect: Effect.Effect<A, unknown, R>,
   status: number = 200
 ) {
   return effect.pipe(

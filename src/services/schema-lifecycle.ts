@@ -4,7 +4,7 @@
  */
 import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
-import { NotFoundError, ValidationError, ReferenceConflictError } from "../errors.js";
+import { NotFoundError, ValidationError } from "../errors.js";
 import type { ModelRow, FieldRow } from "../db/row-types.js";
 import { dropTableSql } from "../schema-engine/sql-ddl.js";
 

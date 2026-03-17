@@ -11,7 +11,7 @@ import {
   deleteRecord as sqlDeleteRecord,
 } from "../schema-engine/sql-records.js";
 import { writeStructuredText, deleteBlocksForField, getStructuredTextStorageKey } from "./structured-text-service.js";
-import type { ModelRow, FieldRow, ParsedFieldRow, ContentRow } from "../db/row-types.js";
+import type { ModelRow, FieldRow, ParsedFieldRow } from "../db/row-types.js";
 import { parseFieldValidators, isContentRow } from "../db/row-types.js";
 import { getSlugSource, getBlockWhitelist, getBlocksOnly, isRequired, findUniqueConstraintViolations, isUnique } from "../db/validators.js";
 import * as SearchService from "../search/search-service.js";
@@ -449,7 +449,7 @@ export function patchRecord(id: string, rawBody: unknown) {
           yield* deleteBlocksForField({
             rootRecordId: id,
             fieldApiKey: field.api_key,
-            includeLocalizedVariants: field.localized,
+            includeLocalizedVariants: field.localized === 1,
           });
         } else {
           if (field.localized) {
