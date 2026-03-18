@@ -1,5 +1,6 @@
 export type { CmsEditConfig, CmsFieldContext, EditorType } from "./types.js";
 export { CmsClient } from "./client.js";
+export type { Asset, AssetListResponse } from "./client.js";
 export {
   dastToEditableMarkdown,
   editableMarkdownToDast,
@@ -13,5 +14,5 @@ export type {
   BlockNodeMeta,
   LinkMeta,
 } from "./markdown.js";
-export { createOverlay, openMarkdownEditor, openImagePicker } from "./overlay.js";
-export type { MarkdownEditorOptions, ImagePickerOptions } from "./overlay.js";
+export { createOverlay, openMarkdownEditor, openImagePicker, openAssetPicker } from "./overlay.js";
+export type { MarkdownEditorOptions, ImagePickerOptions, AssetPickerOptions } from "./overlay.js";

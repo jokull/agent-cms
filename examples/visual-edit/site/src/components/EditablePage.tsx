@@ -1,4 +1,4 @@
-import { CmsEditProvider, CmsRecord, CmsField, CmsImage, CmsText } from "@agent-cms/visual-edit-react";
+import { CmsEditProvider, CmsRecord, CmsField, CmsImage, CmsText, CmsAgent } from "@agent-cms/visual-edit-react";
 import type { RecordStatus } from "@agent-cms/visual-edit-react";
 import type { PageData, BodyBlock, ImageBlockRecord } from "../graphql/queries";
 
@@ -38,7 +38,7 @@ export default function EditablePage({ page, locale, editMode, cmsEndpoint, writ
       </CmsField>
 
       {page.heroImage && (
-        <CmsImage assetId={page.heroImage.id} onReplaced={reload}>
+        <CmsImage assetId={page.heroImage.id} fieldApiKey="hero_image" onReplaced={reload}>
           <img
             src={assetUrl(page.heroImage.url)}
             alt={page.heroImage.alt ?? ""}
@@ -74,6 +74,7 @@ export default function EditablePage({ page, locale, editMode, cmsEndpoint, writ
   return (
     <CmsEditProvider endpoint={cmsEndpoint} writeKey={writeKey}>
       {content}
+      <CmsAgent />
     </CmsEditProvider>
   );
 }

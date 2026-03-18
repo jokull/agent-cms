@@ -8,6 +8,7 @@ function getHandler(env: Env) {
       bindings: {
         db: env.DB,
         assets: env.ASSETS,
+        ai: env.AI,
         writeKey: env.CMS_WRITE_KEY || "dev",
         assetBaseUrl: env.ASSET_BASE_URL,
       },
@@ -25,6 +26,7 @@ export default {
 interface Env {
   DB: D1Database;
   ASSETS?: R2Bucket;
+  AI?: { run(model: string, input: unknown): Promise<unknown> };
   CMS_WRITE_KEY?: string;
   ASSET_BASE_URL?: string;
 }

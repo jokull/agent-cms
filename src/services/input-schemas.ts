@@ -86,6 +86,19 @@ export const CreateAssetInput = Schema.Struct({
 });
 export type CreateAssetInput = typeof CreateAssetInput.Type;
 
+export const SearchAssetsInput = Schema.Struct({
+  query: Schema.optional(Schema.String),
+  limit: Schema.optionalWith(Schema.Number, { default: () => 24 }),
+  offset: Schema.optionalWith(Schema.Number, { default: () => 0 }),
+});
+export type SearchAssetsInput = typeof SearchAssetsInput.Type;
+
+export const UpdateAssetMetadataInput = Schema.Struct({
+  alt: Schema.optional(Schema.String),
+  title: Schema.optional(Schema.String),
+});
+export type UpdateAssetMetadataInput = typeof UpdateAssetMetadataInput.Type;
+
 export const ReorderInput = Schema.Struct({
   modelApiKey: Schema.NonEmptyString,
   recordIds: Schema.Array(Schema.String),

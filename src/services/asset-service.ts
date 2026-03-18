@@ -94,6 +94,55 @@ export function replaceAsset(id: string, body: CreateAssetInput) {
   });
 }
 
+export function searchAssets(opts: { query?: string; limit: number; offset: number }) {
+  return Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const { query, limit, offset } = opts;
+
+    if (query) {
+      const pattern = `%${query}%`;
+      const assets = yield* sql.unsafe<AssetRow>(
+        `SELECT * FROM assets WHERE filename LIKE ? OR alt LIKE ? OR title LIKE ?
+         ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+        [pattern, pattern, pattern, limit, offset]
+      );
+      const countRows = yield* sql.unsafe<{ total: number }>(
+        `SELECT COUNT(*) as total FROM assets WHERE filename LIKE ? OR alt LIKE ? OR title LIKE ?`,
+        [pattern, pattern, pattern]
+      );
+      return { assets: Array.from(assets), total: countRows[0]?.total ?? 0 };
+    }
+
+    const assets = yield* sql.unsafe<AssetRow>(
+      "SELECT * FROM assets ORDER BY created_at DESC LIMIT ? OFFSET ?",
+      [limit, offset]
+    );
+    const countRows = yield* sql.unsafe<{ total: number }>(
+      "SELECT COUNT(*) as total FROM assets"
+    );
+    return { assets: Array.from(assets), total: countRows[0]?.total ?? 0 };
+  });
+}
+
+export function updateAssetMetadata(id: string, body: { alt?: string; title?: string }) {
+  return Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+
+    const rows = yield* sql.unsafe<AssetRow>("SELECT * FROM assets WHERE id = ?", [id]);
+    if (rows.length === 0) return yield* new NotFoundError({ entity: "Asset", id });
+
+    const alt = body.alt !== undefined ? body.alt : rows[0].alt;
+    const title = body.title !== undefined ? body.title : rows[0].title;
+
+    yield* sql.unsafe(
+      "UPDATE assets SET alt = ?, title = ? WHERE id = ?",
+      [alt, title, id]
+    );
+
+    return { id, alt, title };
+  });
+}
+
 export function deleteAsset(id: string) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;

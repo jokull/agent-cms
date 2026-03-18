@@ -17,5 +17,8 @@
       "binding": "ASSETS",
       "bucket_name": "test-visual-edit-assets"
     }
-  ]
+  ],
+  "ai": {
+    "binding": "AI"
+  }
 }

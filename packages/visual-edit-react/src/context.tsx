@@ -4,6 +4,8 @@ import type { CmsEditConfig } from "@agent-cms/visual-edit";
 
 interface CmsEditContextValue {
   client: CmsClient;
+  endpoint: string;
+  writeKey: string;
   enabled: boolean;
 }
 
@@ -26,7 +28,7 @@ export interface CmsEditProviderProps extends CmsEditConfig {
  */
 export function CmsEditProvider({ endpoint, writeKey, enabled = true, children }: CmsEditProviderProps) {
   const value = useMemo(
-    () => ({ client: new CmsClient({ endpoint, writeKey }), enabled }),
+    () => ({ client: new CmsClient({ endpoint, writeKey }), endpoint, writeKey, enabled }),
     [endpoint, writeKey, enabled],
   );
   return <CmsEditContext value={value}>{children}</CmsEditContext>;

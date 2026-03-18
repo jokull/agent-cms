@@ -8,3 +8,5 @@ export { CmsImage } from "./cms-image.js";
 export type { CmsImageProps } from "./cms-image.js";
 export { CmsField } from "./cms-field.js";
 export type { CmsFieldProps } from "./cms-field.js";
+export { CmsAgent } from "./cms-agent.js";
+export type { CmsAgentProps } from "./cms-agent.js";

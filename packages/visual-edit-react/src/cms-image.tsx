@@ -1,10 +1,13 @@
 import { useState, useCallback } from "react";
-import { openImagePicker } from "@agent-cms/visual-edit";
+import { openAssetPicker } from "@agent-cms/visual-edit";
 import { useCmsEdit } from "./context.js";
+import { useCmsRecord } from "./cms-record.js";
 
 export interface CmsImageProps {
   /** Asset ID in the CMS */
   assetId: string;
+  /** Field API key — needed to swap asset reference on the record */
+  fieldApiKey?: string;
   /** Called after a successful asset replacement — use to re-fetch/revalidate */
   onReplaced?: () => void;
   /** The rendered image (e.g. <img> element) */
@@ -13,20 +16,35 @@ export interface CmsImageProps {
 
 /**
  * Wraps an image element. In edit mode, shows a hover overlay.
- * Clicking opens a file picker to replace the asset.
+ * Clicking opens the asset picker modal to browse, search, upload, or select an asset.
  */
-export function CmsImage({ assetId, onReplaced, children }: CmsImageProps) {
+export function CmsImage({ assetId, fieldApiKey, onReplaced, children }: CmsImageProps) {
   const edit = useCmsEdit();
+  const record = useCmsRecord();
   const [hovering, setHovering] = useState(false);
 
   const handleClick = useCallback(() => {
     if (!edit?.enabled || !edit.client) return;
-    openImagePicker({
+    openAssetPicker({
       client: edit.client,
-      assetId,
-      onReplaced,
+      currentAssetId: assetId,
+      onSelect: async (selected) => {
+        if (selected.id !== assetId && fieldApiKey && record) {
+          // Swap the asset reference on the record
+          await edit.client.patchField(
+            {
+              recordId: record.recordId,
+              modelApiKey: record.modelApiKey,
+              fieldApiKey,
+              locale: record.locale,
+            },
+            selected.id,
+          );
+        }
+        onReplaced?.();
+      },
     });
-  }, [edit, assetId, onReplaced]);
+  }, [edit, assetId, fieldApiKey, record, onReplaced]);
 
   if (!edit?.enabled) {
     return <>{children}</>;
@@ -75,7 +93,7 @@ function ImageOverlayBadge() {
           pointerEvents: "none",
         }}
       >
-        Replace image
+        Change image
       </div>
     </div>
   );

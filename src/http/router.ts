@@ -20,6 +20,7 @@ import {
   CreateRecordInput, PatchRecordInput,
   PatchBlocksInput,
   CreateAssetInput,
+  UpdateAssetMetadataInput,
   CreateLocaleInput,
   BulkCreateRecordsInput,
   ImportSchemaInput,
@@ -334,7 +335,24 @@ const recordsRouter = HttpRouter.empty.pipe(
 // --- Assets ---
 // Upload URL endpoint is handled in fetchHandler (needs r2Credentials from options)
 const assetsRouter = HttpRouter.empty.pipe(
-  HttpRouter.get("/", handle(AssetService.listAssets())),
+  HttpRouter.get(
+    "/",
+    Effect.gen(function* () {
+      const req = yield* HttpServerRequest.HttpServerRequest;
+      const url = new URL(req.url, "http://localhost");
+      const q = url.searchParams.get("q");
+      const limit = url.searchParams.get("limit");
+      const offset = url.searchParams.get("offset");
+      if (q !== null || limit !== null || offset !== null) {
+        return yield* handle(AssetService.searchAssets({
+          query: q ?? undefined,
+          limit: limit ? parseInt(limit, 10) : 24,
+          offset: offset ? parseInt(offset, 10) : 0,
+        }));
+      }
+      return yield* handle(AssetService.listAssets());
+    })
+  ),
 
   HttpRouter.post(
     "/",
@@ -360,6 +378,16 @@ const assetsRouter = HttpRouter.empty.pipe(
       const body = yield* readJsonBody();
       const input = yield* decodeUnknownInput(CreateAssetInput, body);
       return yield* handle(AssetService.replaceAsset(param(params, "id"), input));
+    })
+  ),
+
+  HttpRouter.patch(
+    "/:id",
+    Effect.gen(function* () {
+      const params = yield* HttpRouter.params;
+      const body = yield* readJsonBody();
+      const input = yield* decodeUnknownInput(UpdateAssetMetadataInput, body);
+      return yield* handle(AssetService.updateAssetMetadata(param(params, "id"), input));
     })
   ),
 
@@ -526,6 +554,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
     ) => Promise<{ data: unknown; errors?: ReadonlyArray<{ message: string }> }>;
   } | null = null;
   let mcpHandler: ((req: Request) => Promise<Response>) | null = null;
+  let chatHandler: ((req: Request) => Promise<Response>) | null = null;
   let graphqlModulePromise: Promise<typeof import("../graphql/handler.js")> | null = null;
 
   function invalidateGraphqlSchemaCache() {
@@ -562,8 +591,8 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
     const headers = new Headers(response.headers);
     headers.set("Access-Control-Allow-Origin", origin);
     headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
-    headers.set("Access-Control-Allow-Headers", "Content-Type, X-Include-Drafts, X-Exclude-Invalid, X-Filename, Authorization");
-    headers.set("Access-Control-Max-Age", "86400");
+    headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Include-Drafts, X-Exclude-Invalid, X-Filename, X-Requested-With, Accept, User-Agent");
+    headers.set("Access-Control-Max-Age", "600");
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   }
 
@@ -817,6 +846,24 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
           status: 200,
           headers: { "Content-Type": "application/json" },
         }));
+      }
+
+      // POST /api/chat — AI agent chat endpoint
+      if (url.pathname === "/api/chat" && instrumentedRequest.method === "POST") {
+        if (!options?.ai) {
+          return finish(new Response(JSON.stringify({ error: "AI binding not configured" }), {
+            status: 501,
+            headers: { "Content-Type": "application/json" },
+          }));
+        }
+        if (!chatHandler) {
+          const { createChatHandler } = await import("./chat-handler.js");
+          chatHandler = createChatHandler(fullLayer, {
+            ai: options.ai,
+            r2Bucket: options.r2Bucket,
+          });
+        }
+        return finish(await chatHandler(instrumentedRequest));
       }
 
       // Everything else to the Effect router

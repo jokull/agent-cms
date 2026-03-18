@@ -141,5 +141,28 @@ describe("API key auth", () => {
       }));
       expect(res.status).toBe(200);
     });
+
+    it("chat endpoint rejected without write key", async () => {
+      const res = await handler(new Request("http://localhost/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: [] }),
+      }));
+      expect(res.status).toBe(401);
+    });
+
+    it("chat endpoint allowed through auth layer and returns 501 without AI binding", async () => {
+      const res = await handler(new Request("http://localhost/api/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer write-key-456",
+        },
+        body: JSON.stringify({ messages: [] }),
+      }));
+      expect(res.status).toBe(501);
+      const body = await res.json();
+      expect(body.error).toContain("AI binding not configured");
+    });
   });
 });
