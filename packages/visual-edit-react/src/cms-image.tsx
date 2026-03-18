@@ -37,7 +37,7 @@ export function CmsImage({ assetId, onReplaced, children }: CmsImageProps) {
       onMouseEnter={() => setHovering(true)}
       onMouseLeave={() => setHovering(false)}
       style={{ position: "relative", cursor: "pointer", display: "inline-block" }}
-      onClick={handleClick}
+      onClick={(e) => { e.stopPropagation(); handleClick(); }}
     >
       {children}
       {hovering && <ImageOverlayBadge />}
