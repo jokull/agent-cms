@@ -7,17 +7,17 @@ The importer now lives in this repo as a first-class product surface. It is aime
 Primary entrypoint:
 
 ```bash
-npm run dato:import -- --help
+pnpm run dato:import -- --help
 ```
 
 Current proven commands:
 
 ```bash
-npm run dato:import -- inspect
-npm run dato:import -- bootstrap --adapter trip --cms-url http://127.0.0.1:8791
-npm run dato:import -- import --adapter trip --model article --limit 1 --locale en
-npm run dato:import -- status --out-dir scripts/dato-import/out/trip
-npm run dato:import -- report --out-dir scripts/dato-import/out/trip
+pnpm run dato:import -- inspect
+pnpm run dato:import -- bootstrap --adapter trip --cms-url http://127.0.0.1:8791
+pnpm run dato:import -- import --adapter trip --model article --limit 1 --locale en
+pnpm run dato:import -- status --out-dir scripts/dato-import/out/trip
+pnpm run dato:import -- report --out-dir scripts/dato-import/out/trip
 ```
 
 The runtime and CLI are generic. The built-in `trip` adapter is the first real-world validation wedge while broader automatic schema discovery and mapping are generalized.

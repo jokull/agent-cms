@@ -15,9 +15,9 @@ npx wrangler dev --local --port 8791 --persist-to .wrangler/state-v3
 Then run the importer from the repo root with:
 
 ```bash
-DATOCMS_API_TOKEN=... npm run dato:import -- inspect
-CMS_URL=http://127.0.0.1:8791 DATOCMS_API_TOKEN=... npm run dato:import -- bootstrap --adapter trip
-CMS_URL=http://127.0.0.1:8791 DATOCMS_API_TOKEN=... IMPORT_LOCALE=en npm run dato:import -- import --adapter trip --model article --limit 1
+DATOCMS_API_TOKEN=... pnpm run dato:import -- inspect
+CMS_URL=http://127.0.0.1:8791 DATOCMS_API_TOKEN=... pnpm run dato:import -- bootstrap --adapter trip
+CMS_URL=http://127.0.0.1:8791 DATOCMS_API_TOKEN=... IMPORT_LOCALE=en pnpm run dato:import -- import --adapter trip --model article --limit 1
 ```
 
 The migration scripts upload original asset blobs directly into the local Miniflare R2 bucket, then register asset metadata through the CMS API.

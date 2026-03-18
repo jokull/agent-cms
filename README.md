@@ -13,15 +13,15 @@ The structured text format is [DAST](https://www.datocms.com/docs/structured-tex
 ## Quick start
 
 ```bash
-npm create agent-cms my-cms
+pnpm create agent-cms my-cms
 cd my-cms
 ```
 
 The scaffold creates a Cloudflare Worker, provisions a D1 database and R2 bucket, and installs dependencies. Then bootstrap the CMS explicitly:
 
 ```bash
-npm run dev
-npm run setup -- http://127.0.0.1:8787
+pnpm dev
+pnpm run setup -- http://127.0.0.1:8787
 ```
 
 Connect Claude to the MCP server:
@@ -37,7 +37,7 @@ Connect Claude to the MCP server:
 Deploy to production:
 
 ```bash
-npm run deploy
+pnpm run deploy
 ```
 
 ## Interfaces
@@ -194,15 +194,15 @@ For DatoCMS migrations specifically, see [`docs/migrations/dato-import.md`](./do
 `agent-cms` also includes an experimental first-class Dato importer:
 
 ```bash
-npm run dato:import -- --help
+pnpm run dato:import -- --help
 ```
 
 Current workflow:
 
 ```bash
-npm run dato:import -- inspect
-npm run dato:import -- bootstrap --adapter trip --cms-url http://127.0.0.1:8791
-npm run dato:import -- import --adapter trip --model article --limit 1 --locale en
+pnpm run dato:import -- inspect
+pnpm run dato:import -- bootstrap --adapter trip --cms-url http://127.0.0.1:8791
+pnpm run dato:import -- import --adapter trip --model article --limit 1 --locale en
 ```
 
 The runtime and CLI are generic. The built-in `trip` adapter is the first proven large real-world mapping and remains the validation wedge while broader automatic schema discovery and mapping are generalized.
@@ -300,7 +300,7 @@ Use a module-scoped handler/factory. Do not call `createCMSHandler()` directly i
 - **Application**: [Effect](https://effect.website) — HTTP routing, SQL, validation, error handling, dependency injection
 - **Schema engine**: `@effect/sql` with hand-written DDL for both system tables and runtime-generated content tables
 - **GraphQL**: [graphql-yoga](https://the-guild.dev/graphql/yoga-server) with generated SDL
-- **Testing**: [Vitest](https://vitest.dev) (`npm test`, `npm run test:run`)
+- **Testing**: [Vitest](https://vitest.dev) (`pnpm test`, `pnpm run test:run`)
 
 ## Example
 

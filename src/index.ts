@@ -23,6 +23,14 @@ export interface CmsBindings {
   ai?: AiBinding;
   /** Vectorize index binding (optional — enables semantic search) */
   vectorize?: VectorizeBinding;
+  /** R2 API token access key ID — enables presigned upload URLs */
+  r2AccessKeyId?: string;
+  /** R2 API token secret access key — enables presigned upload URLs */
+  r2SecretAccessKey?: string;
+  /** R2 bucket name — needed for presigned upload URLs */
+  r2BucketName?: string;
+  /** Cloudflare account ID — needed for the R2 S3-compatible endpoint */
+  cfAccountId?: string;
 }
 
 export interface CmsHandlerConfig {
@@ -115,6 +123,14 @@ function createCMSHandlerUncached(config: CmsHandlerConfig) {
     ai: bindings.ai,
     vectorize: bindings.vectorize,
     hooks,
+    r2Credentials: bindings.r2AccessKeyId && bindings.r2SecretAccessKey && bindings.r2BucketName && bindings.cfAccountId
+      ? {
+          accessKeyId: bindings.r2AccessKeyId,
+          secretAccessKey: bindings.r2SecretAccessKey,
+          bucketName: bindings.r2BucketName,
+          accountId: bindings.cfAccountId,
+        }
+      : undefined,
   });
 
   return {

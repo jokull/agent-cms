@@ -1,0 +1,14 @@
+{
+  "name": "test-visual-edit-cms",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "seed": "npx tsx ../seed.ts"
+  },
+  "dependencies": {
+    "agent-cms": "file:../../..",
+    "wrangler": "^4.73.0"
+  }
+}

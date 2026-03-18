@@ -24,6 +24,7 @@ import {
   BulkCreateRecordsInput,
   ImportSchemaInput,
   ReindexSearchInput, ReorderInput, SearchInput,
+  CreateUploadUrlInput,
 } from "../services/input-schemas.js";
 import { UnauthorizedError, ValidationError } from "../errors.js";
 import * as SchemaIO from "../services/schema-io.js";
@@ -331,6 +332,7 @@ const recordsRouter = HttpRouter.empty.pipe(
 );
 
 // --- Assets ---
+// Upload URL endpoint is handled in fetchHandler (needs r2Credentials from options)
 const assetsRouter = HttpRouter.empty.pipe(
   HttpRouter.get("/", handle(AssetService.listAssets())),
 
@@ -472,6 +474,13 @@ export interface WebHandlerOptions {
   vectorize?: VectorizeBinding;
   /** Lifecycle hooks fired on content events */
   hooks?: CmsHooks;
+  /** R2 credentials for generating presigned upload URLs */
+  r2Credentials?: {
+    accessKeyId: string;
+    secretAccessKey: string;
+    bucketName: string;
+    accountId: string;
+  };
 }
 
 export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, options?: WebHandlerOptions) {
@@ -552,8 +561,8 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
     const origin = request.headers.get("Origin") ?? "*";
     const headers = new Headers(response.headers);
     headers.set("Access-Control-Allow-Origin", origin);
-    headers.set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
-    headers.set("Access-Control-Allow-Headers", "Content-Type, X-Include-Drafts, X-Exclude-Invalid, Authorization");
+    headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+    headers.set("Access-Control-Allow-Headers", "Content-Type, X-Include-Drafts, X-Exclude-Invalid, X-Filename, Authorization");
     headers.set("Access-Control-Max-Age", "86400");
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   }
@@ -753,6 +762,60 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
           status: response.status,
           statusText: response.statusText,
           headers,
+        }));
+      }
+
+      // POST /api/assets/upload-url — generate presigned R2 upload URL
+      if (url.pathname === "/api/assets/upload-url" && instrumentedRequest.method === "POST") {
+        if (!options?.r2Credentials) {
+          return finish(new Response(JSON.stringify({ error: "Presigned uploads not configured" }), {
+            status: 501,
+            headers: { "Content-Type": "application/json" },
+          }));
+        }
+        const body = await instrumentedRequest.json();
+        const parsed = Schema.decodeUnknownSync(CreateUploadUrlInput)(body);
+        const { S3Client, PutObjectCommand } = await import("@aws-sdk/client-s3");
+        const { getSignedUrl } = await import("@aws-sdk/s3-request-presigner");
+        const creds = options.r2Credentials;
+        const assetId = crypto.randomUUID();
+        const r2Key = `uploads/${assetId}/${parsed.filename}`;
+        const s3 = new S3Client({
+          region: "auto",
+          endpoint: `https://${creds.accountId}.r2.cloudflarestorage.com`,
+          credentials: { accessKeyId: creds.accessKeyId, secretAccessKey: creds.secretAccessKey },
+        });
+        const command = new PutObjectCommand({
+          Bucket: creds.bucketName,
+          Key: r2Key,
+          ContentType: parsed.mimeType,
+        });
+        const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
+        return finish(new Response(JSON.stringify({ uploadUrl, r2Key, assetId }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }));
+      }
+
+      // PUT /api/assets/:id/file — fallback binary upload via R2 binding
+      if (url.pathname.match(/^\/api\/assets\/[^/]+\/file$/) && instrumentedRequest.method === "PUT") {
+        if (!options?.r2Bucket) {
+          return finish(new Response(JSON.stringify({ error: "R2 bucket not configured" }), {
+            status: 501,
+            headers: { "Content-Type": "application/json" },
+          }));
+        }
+        const assetId = url.pathname.split("/")[3];
+        const contentType = instrumentedRequest.headers.get("Content-Type") ?? "application/octet-stream";
+        const filename = instrumentedRequest.headers.get("X-Filename") ?? "upload";
+        const r2Key = `uploads/${assetId}/${filename}`;
+        const body = await instrumentedRequest.arrayBuffer();
+        await options.r2Bucket.put(r2Key, body, {
+          httpMetadata: { contentType },
+        });
+        return finish(new Response(JSON.stringify({ r2Key, assetId }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
         }));
       }
 

@@ -189,3 +189,9 @@ export const ImportSchemaInput = Schema.Struct({
   models: Schema.Array(SchemaExportModelSchema),
 });
 export type ImportSchemaInput = typeof ImportSchemaInput.Type;
+
+export const CreateUploadUrlInput = Schema.Struct({
+  filename: Schema.NonEmptyString,
+  mimeType: Schema.NonEmptyString,
+});
+export type CreateUploadUrlInput = typeof CreateUploadUrlInput.Type;

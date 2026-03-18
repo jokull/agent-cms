@@ -11,9 +11,9 @@ A complete blog with two Cloudflare Workers:
 
 ```bash
 cd cms
-npm install
-npm run dev
-npm run setup -- http://127.0.0.1:8787
+pnpm install
+pnpm dev
+pnpm run setup -- http://127.0.0.1:8787
 ```
 
 CMS is now running at `http://localhost:8787` with:
@@ -24,7 +24,7 @@ CMS is now running at `http://localhost:8787` with:
 For remote environments, deploy first and then run:
 
 ```bash
-CMS_WRITE_KEY=... npm run setup -- https://<your-cms-url>
+CMS_WRITE_KEY=... pnpm run setup -- https://<your-cms-url>
 ```
 
 ### 2. Create the Schema and Content
@@ -51,9 +51,9 @@ After the agent creates the schema, re-introspect for gql.tada types:
 
 ```bash
 cd site
-npm install
-npm run introspect   # generates ../schema.graphql
-npm run generate     # generates src/graphql/graphql-env.d.ts
+pnpm install
+pnpm run introspect   # generates ../schema.graphql
+pnpm run generate     # generates src/graphql/graphql-env.d.ts
 ```
 
 ### 4. Start the Site
@@ -62,7 +62,7 @@ For local development without service bindings, the site needs the CMS running o
 
 ```bash
 cd site
-npm run dev
+pnpm dev
 ```
 
 ## Architecture

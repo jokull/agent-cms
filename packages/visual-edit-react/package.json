@@ -1,0 +1,49 @@
+{
+  "name": "@agent-cms/visual-edit-react",
+  "version": "0.1.0",
+  "description": "React components for agent-cms visual editing — CmsText, CmsImage, CmsField",
+  "type": "module",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "cms",
+    "visual-editing",
+    "agent-cms",
+    "react"
+  ],
+  "author": "Jokull Solberg <jokull@solberg.is>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jokull/agent-cms.git",
+    "directory": "packages/visual-edit-react"
+  },
+  "dependencies": {
+    "@agent-cms/visual-edit": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tsdown": "^0.21.4",
+    "typescript": "^5.9.3"
+  }
+}

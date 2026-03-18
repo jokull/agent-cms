@@ -1,0 +1,42 @@
+---
+interface Props {
+  title: string;
+}
+const { title } = Astro.props;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body {
+        font-family: system-ui, -apple-system, sans-serif;
+        line-height: 1.6;
+        color: #1a1a1a;
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 2rem;
+      }
+      nav {
+        display: flex;
+        gap: 1rem;
+        margin-bottom: 2rem;
+        padding-bottom: 1rem;
+        border-bottom: 1px solid #e5e7eb;
+      }
+      nav a {
+        color: #3b82f6;
+        text-decoration: none;
+        font-size: 14px;
+      }
+      nav a:hover { text-decoration: underline; }
+      nav a.active { font-weight: 600; }
+    </style>
+  </head>
+  <body>
+    <slot />
+  </body>
+</html>

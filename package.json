@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Agent-first headless CMS for Cloudflare Workers. Schema, content, and assets via MCP. GraphQL delivery.",
   "type": "module",
+  "packageManager": "pnpm@10.12.4",
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
   "exports": {
@@ -26,7 +27,7 @@
     "typecheck": "tsc --noEmit",
     "bench:blog": "node scripts/bench-blog.mjs",
     "dato:import": "node scripts/dato-import/cli.mjs",
-    "prepublishOnly": "npm run build",
+    "prepublishOnly": "pnpm run build",
     "db:migrate": "wrangler d1 migrations apply agent-cms-db --local",
     "prepare": "effect-language-service patch"
   },
@@ -46,10 +47,16 @@
     "type": "git",
     "url": "git+https://github.com/jokull/agent-cms.git"
   },
-  "workspaces": [
-    "packages/*"
-  ],
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild",
+      "workerd"
+    ]
+  },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1011.0",
+    "@aws-sdk/s3-request-presigner": "^3.1011.0",
     "@effect/ai": "^0.34.0",
     "@effect/cli": "^0.74.0",
     "@effect/experimental": "^0.59.0",
@@ -63,8 +70,12 @@
     "effect": "^3.20.0",
     "graphql": "^16.13.1",
     "graphql-yoga": "^5.18.1",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "remark-stringify": "^11.0.0",
     "slugify": "^1.6.8",
-    "ulidx": "^2.4.1"
+    "ulidx": "^2.4.1",
+    "unified": "^11.0.5"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260313.1",
@@ -72,6 +83,7 @@
     "@effect/sql-sqlite-node": "^0.51.0",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@types/better-sqlite3": "^7.6.13",
+    "@types/mdast": "^4.0.4",
     "better-sqlite3": "^12.8.0",
     "miniflare": "^4.20260312.1",
     "oxlint": "^1.56.0",

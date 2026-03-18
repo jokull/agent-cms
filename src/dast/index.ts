@@ -51,3 +51,6 @@ export {
 
 export { validateDast, validateBlocksOnly, extractBlockIds, extractInlineBlockIds, extractAllBlockIds, extractLinkIds, pruneBlockNodes } from "./validate.js";
 export type { ValidationError } from "./validate.js";
+
+export { dastToMarkdown, markdownToDast, dastToEditableMarkdown, editableMarkdownToDast } from "./markdown.js";
+export type { EditableMarkdown, PreservationMap, BlockNodeMeta, LinkMeta } from "./markdown.js";

@@ -60,7 +60,7 @@ Schema changes (add a model, add a field, change a field type) generate DDL diff
 ### Simple deployment
 
 ```bash
-npm run deploy
+pnpm run deploy
 ```
 
 One Cloudflare Worker. One D1 database. Optional R2 bucket for assets. That's the entire infrastructure.

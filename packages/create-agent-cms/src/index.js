@@ -31,9 +31,9 @@ if (flags.help) {
     -h, --help          Show this help
 
   Examples:
-    npm create agent-cms my-blog
-    npm create agent-cms my-blog -y
-    npm create agent-cms --name my-blog --local-only
+    pnpm create agent-cms my-blog
+    pnpm create agent-cms my-blog -y
+    pnpm create agent-cms --name my-blog --local-only
 `);
   process.exit(0);
 }
@@ -240,7 +240,7 @@ console.log(JSON.stringify(body, null, 2));
   // --- Install dependencies ---
 
   console.log("  Installing dependencies...\n");
-  run("npm install", { cwd: dir, stdio: ["pipe", "pipe", "pipe"] });
+  run("pnpm install", { cwd: dir, stdio: ["pipe", "pipe", "pipe"] });
   console.log("  Done.\n");
 
   // --- Create Cloudflare resources ---
@@ -277,10 +277,10 @@ console.log(JSON.stringify(body, null, 2));
 
   console.log(`  Ready!\n`);
   console.log(`  cd ${name}`);
-  console.log(`  npm run dev`);
-  console.log(`  npm run setup -- http://127.0.0.1:8787\n`);
+  console.log(`  pnpm dev`);
+  console.log(`  pnpm run setup -- http://127.0.0.1:8787\n`);
   console.log(`  For deployed workers, run:`);
-  console.log(`  CMS_WRITE_KEY=... npm run setup -- https://<your-worker-url>\n`);
+  console.log(`  CMS_WRITE_KEY=... pnpm run setup -- https://<your-worker-url>\n`);
   console.log(`  Connect an MCP client:\n`);
   console.log(`  {`);
   console.log(`    "mcpServers": {`);
@@ -291,7 +291,7 @@ console.log(JSON.stringify(body, null, 2));
   if (!flags["local-only"]) {
     console.log(`  Deploy to production:\n`);
     console.log(`    npx wrangler secret put CMS_WRITE_KEY`);
-    console.log(`    npm run deploy\n`);
+    console.log(`    pnpm run deploy\n`);
   }
 }
 

@@ -1,0 +1,24 @@
+{
+  "name": "test-visual-edit-site",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build"
+  },
+  "dependencies": {
+    "@agent-cms/visual-edit": "workspace:*",
+    "@agent-cms/visual-edit-react": "workspace:*",
+    "@astrojs/cloudflare": "^13.1.1",
+    "@astrojs/react": "^4.2.1",
+    "astro": "^6.0.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.9.3"
+  }
+}
