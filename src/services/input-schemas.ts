@@ -114,3 +114,78 @@ export const CreateLocaleInput = Schema.Struct({
   fallbackLocaleId: Schema.optional(Schema.String),
 });
 export type CreateLocaleInput = typeof CreateLocaleInput.Type;
+
+export const UpdateModelInput = Schema.Struct({
+  name: Schema.optional(Schema.NonEmptyString),
+  apiKey: Schema.optional(Schema.NonEmptyString),
+  singleton: Schema.optional(Schema.Boolean),
+  sortable: Schema.optional(Schema.Boolean),
+  hasDraft: Schema.optional(Schema.Boolean),
+  allLocalesRequired: Schema.optional(Schema.Boolean),
+});
+export type UpdateModelInput = typeof UpdateModelInput.Type;
+
+export const UpdateFieldInput = Schema.Struct({
+  label: Schema.optional(Schema.NonEmptyString),
+  apiKey: Schema.optional(Schema.NonEmptyString),
+  fieldType: Schema.optional(Schema.NonEmptyString),
+  position: Schema.optional(Schema.Number),
+  localized: Schema.optional(Schema.Boolean),
+  validators: Schema.optional(
+    Schema.Record({ key: Schema.String, value: Schema.Unknown })
+  ),
+  hint: Schema.optional(Schema.String),
+  appearance: Schema.optional(Schema.Unknown),
+});
+export type UpdateFieldInput = typeof UpdateFieldInput.Type;
+
+export const BulkCreateRecordsInput = Schema.Struct({
+  modelApiKey: Schema.NonEmptyString,
+  records: Schema.Array(
+    Schema.Record({ key: Schema.String, value: Schema.Unknown })
+  ),
+});
+export type BulkCreateRecordsInput = typeof BulkCreateRecordsInput.Type;
+
+const SchemaExportFieldSchema = Schema.Struct({
+  label: Schema.String,
+  apiKey: Schema.String,
+  fieldType: Schema.String,
+  position: Schema.Number,
+  localized: Schema.Boolean,
+  validators: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+  hint: Schema.NullOr(Schema.String),
+});
+
+const SchemaExportModelSchema = Schema.Struct({
+  name: Schema.String,
+  apiKey: Schema.String,
+  isBlock: Schema.Boolean,
+  singleton: Schema.Boolean,
+  sortable: Schema.Boolean,
+  tree: Schema.Boolean,
+  hasDraft: Schema.Boolean,
+  fields: Schema.Array(SchemaExportFieldSchema),
+});
+
+const SchemaExportLocaleSchema = Schema.Struct({
+  code: Schema.String,
+  position: Schema.Number,
+  fallbackLocale: Schema.NullOr(Schema.String),
+});
+
+export const PatchBlocksInput = Schema.Struct({
+  recordId: Schema.NonEmptyString,
+  modelApiKey: Schema.NonEmptyString,
+  fieldApiKey: Schema.NonEmptyString,
+  value: Schema.optional(Schema.Unknown),
+  blocks: Schema.Record({ key: Schema.String, value: Schema.NullOr(Schema.Unknown) }),
+});
+export type PatchBlocksInput = typeof PatchBlocksInput.Type;
+
+export const ImportSchemaInput = Schema.Struct({
+  version: Schema.Literal(1),
+  locales: Schema.optionalWith(Schema.Array(SchemaExportLocaleSchema), { default: () => [] }),
+  models: Schema.Array(SchemaExportModelSchema),
+});
+export type ImportSchemaInput = typeof ImportSchemaInput.Type;

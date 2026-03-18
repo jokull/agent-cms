@@ -1,17 +1,13 @@
-import { Effect, Schema } from "effect";
+import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
 import { ulid } from "ulidx";
 import { NotFoundError, ValidationError } from "../errors.js";
 import type { AssetRow } from "../db/row-types.js";
-import { CreateAssetInput } from "./input-schemas.js";
+import type { CreateAssetInput } from "./input-schemas.js";
 
-export function createAsset(rawBody: unknown) {
+export function createAsset(body: CreateAssetInput) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-
-    const body = yield* Schema.decodeUnknown(CreateAssetInput)(rawBody).pipe(
-      Effect.mapError((e) => new ValidationError({ message: `Invalid input: ${e.message}` }))
-    );
 
     const now = new Date().toISOString();
     const id = body.id ?? ulid();
@@ -62,16 +58,12 @@ export function getAsset(id: string) {
  * Updates metadata (filename, mimeType, size, dimensions, r2Key) but the asset ID
  * and all content references remain stable. DatoCMS can't do this (imgix regenerates URLs).
  */
-export function replaceAsset(id: string, rawBody: unknown) {
+export function replaceAsset(id: string, body: CreateAssetInput) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
 
     const rows = yield* sql.unsafe<AssetRow>("SELECT * FROM assets WHERE id = ?", [id]);
     if (rows.length === 0) return yield* new NotFoundError({ entity: "Asset", id });
-
-    const body = yield* Schema.decodeUnknown(CreateAssetInput)(rawBody).pipe(
-      Effect.mapError((e) => new ValidationError({ message: `Invalid input: ${e.message}` }))
-    );
 
     const r2Key = body.r2Key ?? `uploads/${id}/${body.filename}`;
 

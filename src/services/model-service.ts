@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect";
+import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
 import { ulid } from "ulidx";
 import {
@@ -11,7 +11,7 @@ import { migrateContentTable, dropTableSql } from "../schema-engine/sql-ddl.js";
 import * as SearchService from "../search/search-service.js";
 import type { ModelRow, FieldRow } from "../db/row-types.js";
 import { parseFieldValidators } from "../db/row-types.js";
-import { CreateModelInput } from "./input-schemas.js";
+import type { CreateModelInput, UpdateModelInput } from "./input-schemas.js";
 
 export function listModels() {
   return Effect.gen(function* () {
@@ -56,13 +56,9 @@ export function getModelByApiKey(apiKey: string) {
   });
 }
 
-export function createModel(rawBody: unknown) {
+export function createModel(body: CreateModelInput) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-
-    const body = yield* Schema.decodeUnknown(CreateModelInput)(rawBody).pipe(
-      Effect.mapError((e) => new ValidationError({ message: `Invalid input: ${e.message}` }))
-    );
 
     if (!/^[a-z][a-z0-9_]*$/.test(body.apiKey))
       return yield* new ValidationError({
@@ -117,7 +113,7 @@ export function createModel(rawBody: unknown) {
   });
 }
 
-export function updateModel(id: string, body: Record<string, unknown>) {
+export function updateModel(id: string, body: UpdateModelInput) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const existing = yield* sql.unsafe<ModelRow>("SELECT * FROM models WHERE id = ?", [id]);
@@ -135,7 +131,7 @@ export function updateModel(id: string, body: Record<string, unknown>) {
     if (body.allLocalesRequired !== undefined) { sets.push("all_locales_required = ?"); values.push(body.allLocalesRequired ? 1 : 0); }
 
     // Handle api_key rename → rename the dynamic table
-    if (typeof body.apiKey === "string" && body.apiKey !== model.api_key) {
+    if (body.apiKey !== undefined && body.apiKey !== model.api_key) {
       const newApiKey = body.apiKey;
       if (!/^[a-z][a-z0-9_]*$/.test(newApiKey))
         return yield* new ValidationError({ message: "apiKey must start with a lowercase letter and contain only lowercase letters, numbers, and underscores" });

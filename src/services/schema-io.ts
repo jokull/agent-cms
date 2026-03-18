@@ -11,6 +11,7 @@ import type { ModelRow, FieldRow, LocaleRow } from "../db/row-types.js";
 import * as ModelService from "./model-service.js";
 import * as FieldService from "./field-service.js";
 import * as LocaleService from "./locale-service.js";
+import type { ImportSchemaInput } from "./input-schemas.js";
 
 // ---------------------------------------------------------------------------
 // Export format (portable, no IDs)
@@ -114,30 +115,14 @@ export function exportSchema() {
 // Import
 // ---------------------------------------------------------------------------
 
-export function importSchema(schema: unknown) {
+export function importSchema(s: ImportSchemaInput) {
   return Effect.gen(function* () {
-    // Validate top-level shape
-    if (
-      typeof schema !== "object" || schema === null ||
-      !("version" in schema) || !("models" in schema)
-    ) {
-      return yield* new ValidationError({
-        message: "Invalid schema: expected { version, models, locales? }",
-      });
-    }
-    const s = schema as SchemaExport;
-    if (s.version !== 1) {
-      return yield* new ValidationError({
-        message: `Unsupported schema version: ${s.version}`,
-      });
-    }
-
     const stats = { locales: 0, models: 0, fields: 0 };
 
     // --- 1. Create locales (in position order, resolve fallbacks) ---
     const localeCodeToId = new Map<string, string>();
 
-    if (s.locales && Array.isArray(s.locales)) {
+    if (s.locales.length > 0) {
       // First pass: create locales without fallbacks
       const sortedLocales = [...s.locales].sort((a, b) => a.position - b.position);
       for (const locale of sortedLocales) {
@@ -177,6 +162,7 @@ export function importSchema(schema: unknown) {
         sortable: model.sortable,
         tree: model.tree,
         hasDraft: model.hasDraft,
+        allLocalesRequired: false,
       });
       modelApiKeyToId.set(model.apiKey, result.id);
       stats.models++;

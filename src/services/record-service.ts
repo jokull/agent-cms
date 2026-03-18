@@ -15,7 +15,7 @@ import type { ModelRow, FieldRow, ParsedFieldRow } from "../db/row-types.js";
 import { parseFieldValidators, isContentRow } from "../db/row-types.js";
 import { getSlugSource, getBlockWhitelist, getBlocksOnly, isRequired, findUniqueConstraintViolations, isUnique } from "../db/validators.js";
 import * as SearchService from "../search/search-service.js";
-import { CreateRecordInput, PatchRecordInput } from "./input-schemas.js";
+import type { CreateRecordInput, PatchRecordInput, BulkCreateRecordsInput, PatchBlocksInput } from "./input-schemas.js";
 import { getFieldTypeDef } from "../field-types.js";
 import { isFieldType } from "../types.js";
 import { StructuredTextWriteInput } from "../dast/schema.js";
@@ -147,11 +147,8 @@ function scopeStructuredTextIds<T>(value: T, scope: string): T {
   return clone as T;
 }
 
-export function createRecord(rawBody: unknown) {
+export function createRecord(body: CreateRecordInput) {
   return Effect.gen(function* () {
-    const body = yield* Schema.decodeUnknown(CreateRecordInput)(rawBody).pipe(
-      Effect.mapError((e) => new ValidationError({ message: `Invalid input: ${e.message}` }))
-    );
 
     const model = yield* getModelByApiKey(body.modelApiKey);
     if (!model) return yield* new NotFoundError({ entity: "Model", id: body.modelApiKey });
@@ -395,11 +392,8 @@ export function getRecord(modelApiKey: string, id: string) {
   });
 }
 
-export function patchRecord(id: string, rawBody: unknown) {
+export function patchRecord(id: string, body: PatchRecordInput) {
   return Effect.gen(function* () {
-    const body = yield* Schema.decodeUnknown(PatchRecordInput)(rawBody).pipe(
-      Effect.mapError((e) => new ValidationError({ message: `Invalid input: ${e.message}` }))
-    );
     const model = yield* getModelByApiKey(body.modelApiKey);
     if (!model) return yield* new NotFoundError({ entity: "Model", id: body.modelApiKey });
 
@@ -672,16 +666,9 @@ export function removeRecord(modelApiKey: string, id: string) {
  * All records must belong to the same model. Runs in a logical batch
  * (individual inserts, but avoids per-record overhead of schema lookups).
  */
-export function bulkCreateRecords(rawBody: unknown) {
+export function bulkCreateRecords({ modelApiKey, records }: BulkCreateRecordsInput) {
   return Effect.gen(function* () {
-    if (typeof rawBody !== "object" || rawBody === null || !("modelApiKey" in rawBody) || !("records" in rawBody)) {
-      return yield* new ValidationError({ message: "Expected { modelApiKey: string, records: Array<Record<string, unknown>> }" });
-    }
-    const { modelApiKey, records } = rawBody as { modelApiKey: string; records: unknown[] };
-
-    if (!modelApiKey || typeof modelApiKey !== "string")
-      return yield* new ValidationError({ message: "modelApiKey is required" });
-    if (!Array.isArray(records) || records.length === 0)
+    if (records.length === 0)
       return yield* new ValidationError({ message: "records must be a non-empty array" });
     if (records.length > 1000)
       return yield* new ValidationError({ message: "Maximum 1000 records per bulk operation" });
@@ -874,17 +861,8 @@ export function bulkCreateRecords(rawBody: unknown) {
  * Optionally accepts a new DAST `value`. If omitted, keeps existing DAST
  * (with deleted blocks auto-pruned).
  */
-export function patchBlocksForField(rawBody: unknown) {
+export function patchBlocksForField(body: PatchBlocksInput) {
   return Effect.gen(function* () {
-    const body = yield* Schema.decodeUnknown(Schema.Struct({
-      recordId: Schema.NonEmptyString,
-      modelApiKey: Schema.NonEmptyString,
-      fieldApiKey: Schema.NonEmptyString,
-      value: Schema.optional(Schema.Unknown),
-      blocks: Schema.Record({ key: Schema.String, value: Schema.NullOr(Schema.Unknown) }),
-    }))(rawBody).pipe(
-      Effect.mapError((e) => new ValidationError({ message: `Invalid input: ${e.message}` }))
-    );
 
     const model = yield* getModelByApiKey(body.modelApiKey);
     if (!model) return yield* new NotFoundError({ entity: "Model", id: body.modelApiKey });

@@ -14,7 +14,17 @@ import * as PublishService from "../services/publish-service.js";
 import * as AssetService from "../services/asset-service.js";
 import * as LocaleService from "../services/locale-service.js";
 import { isCmsError, errorToResponse } from "../errors.js";
-import { ReindexSearchInput, ReorderInput, SearchInput } from "../services/input-schemas.js";
+import {
+  CreateModelInput, UpdateModelInput,
+  CreateFieldInput, UpdateFieldInput,
+  CreateRecordInput, PatchRecordInput,
+  PatchBlocksInput,
+  CreateAssetInput,
+  CreateLocaleInput,
+  BulkCreateRecordsInput,
+  ImportSchemaInput,
+  ReindexSearchInput, ReorderInput, SearchInput,
+} from "../services/input-schemas.js";
 import { UnauthorizedError, ValidationError } from "../errors.js";
 import * as SchemaIO from "../services/schema-io.js";
 import * as VersionService from "../services/version-service.js";
@@ -117,9 +127,9 @@ const modelsRouter = HttpRouter.empty.pipe(
   HttpRouter.post(
     "/",
     Effect.gen(function* () {
-      const req = yield* HttpServerRequest.HttpServerRequest;
-      const body = yield* req.json;
-      return yield* handle(ModelService.createModel(body), 201);
+      const body = yield* readJsonBody();
+      const input = yield* decodeUnknownInput(CreateModelInput, body);
+      return yield* handle(ModelService.createModel(input), 201);
     })
   ),
 
@@ -135,9 +145,9 @@ const modelsRouter = HttpRouter.empty.pipe(
     "/:id",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
-      const req = yield* HttpServerRequest.HttpServerRequest;
-      const body = yield* req.json;
-      return yield* handle(ModelService.updateModel(param(params, "id"), typeof body === "object" && body !== null ? Object.fromEntries(Object.entries(body)) : {}));
+      const body = yield* readJsonBody();
+      const input = yield* decodeUnknownInput(UpdateModelInput, body);
+      return yield* handle(ModelService.updateModel(param(params, "id"), input));
     })
   ),
 
@@ -164,9 +174,9 @@ const fieldsRouter = HttpRouter.empty.pipe(
     "/models/:modelId/fields",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
-      const req = yield* HttpServerRequest.HttpServerRequest;
-      const body = yield* req.json;
-      return yield* handle(FieldService.createField(param(params, "modelId"), body), 201);
+      const body = yield* readJsonBody();
+      const input = yield* decodeUnknownInput(CreateFieldInput, body);
+      return yield* handle(FieldService.createField(param(params, "modelId"), input), 201);
     })
   ),
 
@@ -174,9 +184,9 @@ const fieldsRouter = HttpRouter.empty.pipe(
     "/models/:modelId/fields/:fieldId",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
-      const req = yield* HttpServerRequest.HttpServerRequest;
-      const body = yield* req.json;
-      return yield* handle(FieldService.updateField(param(params, "fieldId"), typeof body === "object" && body !== null ? Object.fromEntries(Object.entries(body)) : {}));
+      const body = yield* readJsonBody();
+      const input = yield* decodeUnknownInput(UpdateFieldInput, body);
+      return yield* handle(FieldService.updateField(param(params, "fieldId"), input));
     })
   ),
 
@@ -194,18 +204,18 @@ const recordsRouter = HttpRouter.empty.pipe(
   HttpRouter.post(
     "/records/bulk",
     Effect.gen(function* () {
-      const req = yield* HttpServerRequest.HttpServerRequest;
-      const body = yield* req.json;
-      return yield* handle(RecordService.bulkCreateRecords(body), 201);
+      const body = yield* readJsonBody();
+      const input = yield* decodeUnknownInput(BulkCreateRecordsInput, body);
+      return yield* handle(RecordService.bulkCreateRecords(input), 201);
     })
   ),
 
   HttpRouter.post(
     "/records",
     Effect.gen(function* () {
-      const req = yield* HttpServerRequest.HttpServerRequest;
-      const body = yield* req.json;
-      return yield* handle(RecordService.createRecord(body), 201);
+      const body = yield* readJsonBody();
+      const input = yield* decodeUnknownInput(CreateRecordInput, body);
+      return yield* handle(RecordService.createRecord(input), 201);
     })
   ),
 
@@ -257,9 +267,9 @@ const recordsRouter = HttpRouter.empty.pipe(
     "/records/:id",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
-      const req = yield* HttpServerRequest.HttpServerRequest;
-      const body = yield* req.json;
-      return yield* handle(RecordService.patchRecord(param(params, "id"), body));
+      const body = yield* readJsonBody();
+      const input = yield* decodeUnknownInput(PatchRecordInput, body);
+      return yield* handle(RecordService.patchRecord(param(params, "id"), input));
     })
   ),
 
@@ -268,12 +278,12 @@ const recordsRouter = HttpRouter.empty.pipe(
     "/records/:id/blocks",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
-      const req = yield* HttpServerRequest.HttpServerRequest;
-      const body = yield* req.json;
-      const payload = typeof body === "object" && body !== null
+      const body = yield* readJsonBody();
+      const merged = typeof body === "object" && body !== null
         ? { ...body, recordId: param(params, "id") }
-        : body;
-      return yield* handle(RecordService.patchBlocksForField(payload));
+        : { recordId: param(params, "id") };
+      const input = yield* decodeUnknownInput(PatchBlocksInput, merged);
+      return yield* handle(RecordService.patchBlocksForField(input));
     })
   ),
 
@@ -327,9 +337,9 @@ const assetsRouter = HttpRouter.empty.pipe(
   HttpRouter.post(
     "/",
     Effect.gen(function* () {
-      const req = yield* HttpServerRequest.HttpServerRequest;
-      const body = yield* req.json;
-      return yield* handle(AssetService.createAsset(body), 201);
+      const body = yield* readJsonBody();
+      const input = yield* decodeUnknownInput(CreateAssetInput, body);
+      return yield* handle(AssetService.createAsset(input), 201);
     })
   ),
 
@@ -345,9 +355,9 @@ const assetsRouter = HttpRouter.empty.pipe(
     "/:id",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
-      const req = yield* HttpServerRequest.HttpServerRequest;
-      const body = yield* req.json;
-      return yield* handle(AssetService.replaceAsset(param(params, "id"), body));
+      const body = yield* readJsonBody();
+      const input = yield* decodeUnknownInput(CreateAssetInput, body);
+      return yield* handle(AssetService.replaceAsset(param(params, "id"), input));
     })
   ),
 
@@ -366,9 +376,9 @@ const localesRouter = HttpRouter.empty.pipe(
   HttpRouter.post(
     "/",
     Effect.gen(function* () {
-      const req = yield* HttpServerRequest.HttpServerRequest;
-      const body = yield* req.json;
-      return yield* handle(LocaleService.createLocale(body), 201);
+      const body = yield* readJsonBody();
+      const input = yield* decodeUnknownInput(CreateLocaleInput, body);
+      return yield* handle(LocaleService.createLocale(input), 201);
     })
   ),
   HttpRouter.del(
@@ -387,9 +397,9 @@ const schemaRouter = HttpRouter.empty.pipe(
   HttpRouter.post(
     "/",
     Effect.gen(function* () {
-      const req = yield* HttpServerRequest.HttpServerRequest;
-      const body = yield* req.json;
-      return yield* handle(SchemaIO.importSchema(body), 201);
+      const body = yield* readJsonBody();
+      const input = yield* decodeUnknownInput(ImportSchemaInput, body);
+      return yield* handle(SchemaIO.importSchema(input), 201);
     })
   )
 );

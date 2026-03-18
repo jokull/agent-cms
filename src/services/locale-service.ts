@@ -1,10 +1,10 @@
-import { Effect, Schema } from "effect";
+import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
 import { ulid } from "ulidx";
-import { ValidationError, DuplicateError } from "../errors.js";
+import { DuplicateError } from "../errors.js";
 import type { LocaleRow } from "../db/row-types.js";
 import { removeLocale as removeLocaleWithCleanup } from "./schema-lifecycle.js";
-import { CreateLocaleInput } from "./input-schemas.js";
+import type { CreateLocaleInput } from "./input-schemas.js";
 
 export function listLocales() {
   return Effect.gen(function* () {
@@ -13,13 +13,9 @@ export function listLocales() {
   });
 }
 
-export function createLocale(rawBody: unknown) {
+export function createLocale(body: CreateLocaleInput) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-
-    const body = yield* Schema.decodeUnknown(CreateLocaleInput)(rawBody).pipe(
-      Effect.mapError((e) => new ValidationError({ message: `Invalid input: ${e.message}` }))
-    );
 
     const existing = yield* sql.unsafe<{ id: string }>("SELECT id FROM locales WHERE code = ?", [body.code]);
     if (existing.length > 0)

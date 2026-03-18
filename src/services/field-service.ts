@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect";
+import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
 import { ulid } from "ulidx";
 import { FIELD_TYPES, isFieldType } from "../types.js";
@@ -6,7 +6,7 @@ import { NotFoundError, ValidationError, DuplicateError, ReferenceConflictError 
 import { migrateContentTable } from "../schema-engine/sql-ddl.js";
 import type { ModelRow, FieldRow } from "../db/row-types.js";
 import { parseFieldValidators } from "../db/row-types.js";
-import { CreateFieldInput } from "./input-schemas.js";
+import type { CreateFieldInput, UpdateFieldInput } from "./input-schemas.js";
 import { deleteBlockSubtrees } from "./structured-text-service.js";
 import { isUnique, supportsUniqueValidation } from "../db/validators.js";
 
@@ -59,15 +59,11 @@ export function listFields(modelId: string) {
   });
 }
 
-export function createField(modelId: string, rawBody: unknown) {
+export function createField(modelId: string, body: CreateFieldInput) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const models = yield* sql.unsafe<{ id: string }>("SELECT id FROM models WHERE id = ?", [modelId]);
     if (models.length === 0) return yield* new NotFoundError({ entity: "Model", id: modelId });
-
-    const body = yield* Schema.decodeUnknown(CreateFieldInput)(rawBody).pipe(
-      Effect.mapError((e) => new ValidationError({ message: `Invalid input: ${e.message}` }))
-    );
 
     if (!/^[a-z][a-z0-9_]*$/.test(body.apiKey))
       return yield* new ValidationError({ message: "apiKey must start with a lowercase letter and contain only lowercase letters, numbers, and underscores" });
@@ -157,17 +153,15 @@ export function createField(modelId: string, rawBody: unknown) {
   });
 }
 
-export function updateField(fieldId: string, body: Record<string, unknown>) {
+export function updateField(fieldId: string, body: UpdateFieldInput) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const fields = yield* sql.unsafe<FieldRow>("SELECT * FROM fields WHERE id = ?", [fieldId]);
     if (fields.length === 0) return yield* new NotFoundError({ entity: "Field", id: fieldId });
 
     const field = fields[0];
-    const nextFieldType = typeof body.fieldType === "string" ? body.fieldType : field.field_type;
-    const nextValidators = typeof body.validators === "object" && body.validators !== null
-      ? body.validators as Record<string, unknown>
-      : parseFieldValidators(field).validators;
+    const nextFieldType = body.fieldType ?? field.field_type;
+    const nextValidators = body.validators ?? parseFieldValidators(field).validators;
     if (isUnique(nextValidators) && !supportsUniqueValidation(nextFieldType)) {
       return yield* new ValidationError({
         message: `unique validator is not supported for field type '${nextFieldType}'`,
@@ -209,7 +203,7 @@ export function updateField(fieldId: string, body: Record<string, unknown>) {
     if (body.appearance !== undefined) { sets.push("appearance = ?"); values.push(JSON.stringify(body.appearance)); }
 
     // Handle api_key rename → rename the column + update block references
-    if (typeof body.apiKey === "string" && body.apiKey !== field.api_key) {
+    if (body.apiKey !== undefined && body.apiKey !== field.api_key) {
       const newApiKey = body.apiKey;
       if (!/^[a-z][a-z0-9_]*$/.test(newApiKey))
         return yield* new ValidationError({ message: "apiKey must start with a lowercase letter and contain only lowercase letters, numbers, and underscores" });
