@@ -1,5 +1,5 @@
 import { Effect, ParseResult, Schema } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient, SqlError } from "@effect/sql";
 import { validateBlocksOnly, extractAllBlockIds } from "../dast/index.js";
 import { ValidationError } from "../errors.js";
 import { DastDocumentInput, DastDocumentSchema, StructuredTextWriteInput } from "../dast/schema.js";
@@ -27,7 +27,7 @@ interface ContainerRef {
 }
 
 interface CompiledStructuredText {
-  dast: DastDocumentInput;
+  dast: { readonly schema: "dast"; readonly document: { readonly type: "root"; readonly children: ReadonlyArray<unknown> } };
   rowsByTable: Map<string, DynamicRow[]>;
 }
 
@@ -169,7 +169,7 @@ function compileStructuredText(
     allowedBlockTypes: string[];
     blocksOnly: boolean;
   }
-): Effect.Effect<CompiledStructuredText, unknown, never> {
+): Effect.Effect<CompiledStructuredText, ValidationError | SqlError.SqlError> {
   return Effect.gen(function* () {
     const { sql, seenBlockIds } = ctx;
     const { fieldApiKey, input, allowedBlockTypes, blocksOnly } = params;
@@ -358,7 +358,7 @@ export function writeStructuredText(params: {
   blocks?: Record<string, unknown>;
   allowedBlockTypes?: string[];
   blocksOnly?: boolean;
-}): Effect.Effect<DastDocumentInput, unknown, SqlClient.SqlClient> {
+}) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const input = yield* decodeStructuredTextInput(params.fieldApiKey, {

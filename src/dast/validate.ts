@@ -6,12 +6,12 @@ export interface ValidationError {
   message: string;
 }
 
-function formatIssuePath(path: ReadonlyArray<string | number | symbol>) {
-  return path.reduce((acc, segment) => {
+function formatIssuePath(path: ReadonlyArray<PropertyKey>): string {
+  return path.reduce<string>((acc, segment) => {
     if (typeof segment === "number") return `${acc}[${segment}]`;
     if (typeof segment === "symbol") return acc;
-    if (acc.length === 0) return segment;
-    return `${acc}.${segment}`;
+    if (acc.length === 0) return String(segment);
+    return `${acc}.${String(segment)}`;
   }, "");
 }
 
@@ -20,7 +20,7 @@ function formatIssuePath(path: ReadonlyArray<string | number | symbol>) {
  * Returns an array of errors (empty = valid).
  */
 export function validateDast(doc: unknown): ValidationError[] {
-  const result = Schema.decodeUnknownEither(DastDocumentSchema, { errors: "all" })(doc);
+  const result = Schema.decodeUnknownEither(DastDocumentSchema)(doc);
 
   if (result._tag === "Right") return [];
 

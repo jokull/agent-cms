@@ -188,13 +188,6 @@ function cmsTool<Name extends string, Parameters extends Schema.Struct.Fields | 
   description: string,
   parameters?: Parameters,
 ) {
-  let tool = AiTool.make(name, {
-    description,
-    parameters: parameters ?? {},
-    success: Schema.Unknown,
-    failure: Schema.Unknown,
-    dependencies: CommonDependencies,
-  });
   const isReadonly = name.startsWith("list_")
     || name.startsWith("describe_")
     || name.startsWith("query_")
@@ -203,11 +196,17 @@ function cmsTool<Name extends string, Parameters extends Schema.Struct.Fields | 
     || name === "build_structured_text"
     || name === "search_content"
     || name === "export_schema";
-  tool = tool.annotate(AiTool.Readonly, isReadonly);
-  tool = tool.annotate(AiTool.Idempotent, isReadonly || name.startsWith("update_") || name.startsWith("replace_"));
-  tool = tool.annotate(AiTool.Destructive, name.startsWith("delete_") || name.startsWith("remove_"));
-  tool = tool.annotate(AiTool.OpenWorld, name === "search_content");
-  return tool;
+  return AiTool.make(name, {
+    description,
+    parameters: parameters ?? {},
+    success: Schema.Unknown,
+    failure: Schema.Unknown,
+    dependencies: [...CommonDependencies],
+  })
+    .annotate(AiTool.Readonly, isReadonly)
+    .annotate(AiTool.Idempotent, isReadonly || name.startsWith("update_") || name.startsWith("replace_"))
+    .annotate(AiTool.Destructive, name.startsWith("delete_") || name.startsWith("remove_"))
+    .annotate(AiTool.OpenWorld, name === "search_content");
 }
 
 function toStructuredContent(value: unknown) {

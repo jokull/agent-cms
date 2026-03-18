@@ -715,8 +715,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
           const { createMcpHttpHandler } = await import("../mcp/http-transport.js");
           mcpHandler = createMcpHttpHandler(fullLayer);
         }
-        const response = await mcpHandler(instrumentedRequest);
-        return finish(response);
+        return finish(await mcpHandler(instrumentedRequest));
       }
 
       // Route /graphql to Yoga

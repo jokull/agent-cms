@@ -74,19 +74,38 @@ export const HeadingNodeSchema = Schema.Struct({
   children: Schema.Array(InlineNodeSchema),
 });
 
-export const ListItemNodeSchema: Schema.Schema<ListItemNode, ListItemNodeEncoded> = Schema.Struct({
-  type: Schema.Literal("listItem"),
-  children: Schema.Array(Schema.Union(
-    ParagraphNodeSchema,
-    Schema.suspend((): Schema.Schema<ListNode, ListNodeEncoded> => ListNodeSchema),
-  )),
-});
+// Forward-declare interfaces for the recursive list schemas
+interface ListItemNodeType {
+  readonly type: "listItem";
+  readonly children: ReadonlyArray<
+    | typeof ParagraphNodeSchema.Type
+    | ListNodeType
+  >;
+}
 
-export const ListNodeSchema = Schema.Struct({
-  type: Schema.Literal("list"),
-  style: Schema.Literal("bulleted", "numbered"),
-  children: Schema.Array(ListItemNodeSchema),
-});
+interface ListNodeType {
+  readonly type: "list";
+  readonly style: "bulleted" | "numbered";
+  readonly children: ReadonlyArray<ListItemNodeType>;
+}
+
+export const ListNodeSchema: Schema.Schema<ListNodeType> = Schema.suspend(() =>
+  Schema.Struct({
+    type: Schema.Literal("list"),
+    style: Schema.Literal("bulleted", "numbered"),
+    children: Schema.Array(ListItemNodeSchema),
+  })
+);
+
+export const ListItemNodeSchema: Schema.Schema<ListItemNodeType> = Schema.suspend(() =>
+  Schema.Struct({
+    type: Schema.Literal("listItem"),
+    children: Schema.Array(Schema.Union(
+      ParagraphNodeSchema,
+      ListNodeSchema,
+    )),
+  })
+);
 
 export const BlockquoteNodeSchema = Schema.Struct({
   type: Schema.Literal("blockquote"),
@@ -163,9 +182,3 @@ export const StructuredTextWriteInput = Schema.Struct({
 });
 
 export type StructuredTextWriteInput = typeof StructuredTextWriteInput.Type;
-
-// --- Type helpers for recursive schemas ---
-type ListNode = typeof ListNodeSchema.Type;
-type ListNodeEncoded = typeof ListNodeSchema.Encoded;
-type ListItemNode = typeof ListItemNodeSchema.Type;
-type ListItemNodeEncoded = typeof ListItemNodeSchema.Encoded;
