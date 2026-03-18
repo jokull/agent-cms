@@ -1,11 +1,14 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { Effect } from "effect";
+import { SqlClient } from "@effect/sql";
 import { createTestApp, jsonRequest, gqlQuery } from "./app-helpers.js";
 
 describe("P2.4: Responsive image + _site query", () => {
   let handler: (req: Request) => Promise<Response>;
+  let sqlLayer: ReturnType<typeof createTestApp>["sqlLayer"];
 
   beforeEach(async () => {
-    ({ handler } = createTestApp());
+    ({ handler, sqlLayer } = createTestApp());
 
     // Set up locales
     await jsonRequest(handler, "POST", "/api/locales", { code: "en", position: 0 });
@@ -86,6 +89,49 @@ describe("P2.4: Responsive image + _site query", () => {
       const { handler: freshHandler } = createTestApp();
       const result = await gqlQuery(freshHandler, `{ _site { locales } }`);
       expect(result.data._site.locales).toEqual([]);
+    });
+
+    it("reads globalSeo from the site_settings table", async () => {
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          yield* sql.unsafe("INSERT OR IGNORE INTO site_settings (id) VALUES ('default')");
+          yield* sql.unsafe(
+            `UPDATE site_settings
+             SET site_name = ?, title_suffix = ?, fallback_seo_title = ?, fallback_seo_description = ?, updated_at = datetime('now')
+             WHERE id = 'default'`,
+            [
+              JSON.stringify({ en: "Agent CMS" }),
+              JSON.stringify({ en: "Blog" }),
+              JSON.stringify({ en: "Fallback title" }),
+              JSON.stringify({ en: "Fallback description" }),
+            ]
+          );
+        }).pipe(Effect.provide(sqlLayer))
+      );
+
+      const result = await gqlQuery(handler, `{
+        _site {
+          globalSeo(locale: en) {
+            siteName
+            titleSuffix
+            fallbackSeo {
+              title
+              description
+            }
+          }
+        }
+      }`);
+
+      expect(result.errors).toBeUndefined();
+      expect(result.data._site.globalSeo).toEqual({
+        siteName: "Agent CMS",
+        titleSuffix: "Blog",
+        fallbackSeo: {
+          title: "Fallback title",
+          description: "Fallback description",
+        },
+      });
     });
   });
 });

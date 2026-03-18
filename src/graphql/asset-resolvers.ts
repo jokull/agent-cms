@@ -177,10 +177,10 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
         const s = yield* SqlClient.SqlClient;
         const tableRows = yield* s.unsafe<{ name: string }>(
           "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
-          ["content_site_settings"]
+          ["site_settings"]
         );
         if (tableRows.length === 0) return null;
-        const rows = yield* s.unsafe<Record<string, unknown>>('SELECT * FROM "content_site_settings" LIMIT 1');
+        const rows = yield* s.unsafe<Record<string, unknown>>('SELECT * FROM "site_settings" LIMIT 1');
         return rows.length > 0 ? rows[0] : null;
       })
     );
@@ -191,23 +191,30 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
       : Array.isArray(context.fallbackLocales)
         ? (context.fallbackLocales as string[])
         : [];
-    const fallbackSeo = pickLocalizedSiteValue(settings?.fallback_seo, locale, fallbackLocales) as Record<string, unknown> | null;
+    const fallbackSeo = settings
+      ? {
+          title: pickLocalizedSiteValue(settings.fallback_seo_title, locale, fallbackLocales) as string | null,
+          description: pickLocalizedSiteValue(settings.fallback_seo_description, locale, fallbackLocales) as string | null,
+          twitterCard: pickLocalizedSiteValue(settings.fallback_seo_twitter_card, locale, fallbackLocales) as string | null,
+          image: pickLocalizedSiteValue(settings.fallback_seo_image_id, locale, fallbackLocales) as string | null,
+        }
+      : null;
+    const hasFallbackSeo = fallbackSeo !== null
+      && (fallbackSeo.title !== null
+        || fallbackSeo.description !== null
+        || fallbackSeo.twitterCard !== null
+        || fallbackSeo.image !== null);
 
     return {
       locales: locales.map((l) => l.code),
       noIndex: settings?.no_index === 1 || settings?.no_index === true || false,
-      faviconMetaTags: settings?.favicon ? await buildFaviconMetaTags(runSql, settings.favicon as string) : [],
+      faviconMetaTags: settings?.favicon_id ? await buildFaviconMetaTags(runSql, settings.favicon_id as string) : [],
       globalSeo: settings ? {
         siteName: pickLocalizedSiteValue(settings.site_name, locale, fallbackLocales) as string | null,
         titleSuffix: pickLocalizedSiteValue(settings.title_suffix, locale, fallbackLocales) as string | null,
         facebookPageUrl: pickLocalizedSiteValue(settings.facebook_page_url, locale, fallbackLocales) as string | null,
         twitterAccount: pickLocalizedSiteValue(settings.twitter_account, locale, fallbackLocales) as string | null,
-        fallbackSeo: fallbackSeo ? {
-          title: fallbackSeo.title ?? null,
-          description: fallbackSeo.description ?? null,
-          twitterCard: fallbackSeo.twitterCard ?? null,
-          image: fallbackSeo.image ?? null,
-        } : null,
+        fallbackSeo: hasFallbackSeo ? fallbackSeo : null,
       } : null,
     };
   };
