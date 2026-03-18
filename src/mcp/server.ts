@@ -8,7 +8,6 @@ import * as AiTool from "@effect/ai/Tool";
 import * as Toolkit from "@effect/ai/Toolkit";
 import { Context, Effect, Layer, Option, Schema } from "effect";
 import { SqlClient } from "@effect/sql";
-import { ValidationError } from "../errors.js";
 import * as ModelService from "../services/model-service.js";
 import * as FieldService from "../services/field-service.js";
 import * as RecordService from "../services/record-service.js";
@@ -19,21 +18,22 @@ import * as SchemaLifecycle from "../services/schema-lifecycle.js";
 import * as SchemaIO from "../services/schema-io.js";
 import * as SearchService from "../search/search-service.js";
 import * as SiteSettingsService from "../services/site-settings-service.js";
-import * as InputSchemas from "../services/input-schemas.js";
-import { ReorderInput } from "../services/input-schemas.js";
+import {
+  CreateAssetInput as AssetInput,
+  CreateFieldInput,
+  CreateModelInput,
+  CreateRecordInput,
+  ImportSchemaInput,
+  ReindexSearchInput,
+  ReorderInput,
+  SearchInput as SearchContentInput,
+} from "../services/input-schemas.js";
 import type { ModelRow, FieldRow, LocaleRow } from "../db/row-types.js";
 import { VectorizeContext } from "../search/vectorize-context.js";
 import { HooksContext } from "../hooks.js";
 
 const JsonRecord = Schema.Record({ key: Schema.String, value: Schema.Unknown });
-
-/** Decode unknown input with Effect Schema, mapping ParseError to ValidationError */
-function decodeInput<A, I, R>(schema: Schema.Schema<A, I, R>, input: unknown) {
-  return Schema.decodeUnknown(schema)(input).pipe(
-    Effect.mapError((e) => new ValidationError({ message: `Invalid input: ${e.message}` }))
-  );
-}
-const CommonDependencies = [SqlClient.SqlClient, VectorizeContext, HooksContext] as const;
+const CommonDependencies = [SqlClient.SqlClient, VectorizeContext, HooksContext];
 
 const BuildStructuredTextInput = Schema.Struct({
   paragraphs: Schema.optional(Schema.Array(Schema.String)),
@@ -125,41 +125,9 @@ const RemoveBlockFromWhitelistInput = Schema.Struct({
   blockApiKey: Schema.String,
 });
 
-const UploadAssetInput = Schema.Struct({
-  filename: Schema.String,
-  mimeType: Schema.String,
-  r2Key: Schema.String,
-  size: Schema.optional(Schema.Number),
-  width: Schema.optional(Schema.Number),
-  height: Schema.optional(Schema.Number),
-  alt: Schema.optional(Schema.String),
-  title: Schema.optional(Schema.String),
-});
-
 const ReplaceAssetInput = Schema.Struct({
   assetId: Schema.String,
-  filename: Schema.String,
-  mimeType: Schema.String,
-  r2Key: Schema.String,
-  size: Schema.optional(Schema.Number),
-  width: Schema.optional(Schema.Number),
-  height: Schema.optional(Schema.Number),
-});
-
-const ImportSchemaInput = Schema.Struct({
-  schema: JsonRecord,
-});
-
-const SearchContentInput = Schema.Struct({
-  query: Schema.String,
-  modelApiKey: Schema.optional(Schema.String),
-  first: Schema.optional(Schema.Number),
-  skip: Schema.optional(Schema.Number),
-  mode: Schema.optional(Schema.Literal("keyword", "semantic", "hybrid")),
-});
-
-const ReindexSearchInput = Schema.Struct({
-  modelApiKey: Schema.optional(Schema.String),
+  ...AssetInput.fields,
 });
 
 const UpdateSiteSettingsInput = Schema.Struct({
@@ -188,6 +156,13 @@ function cmsTool<Name extends string, Parameters extends Schema.Struct.Fields | 
   description: string,
   parameters?: Parameters,
 ) {
+  let tool = AiTool.make(name, {
+    description,
+    parameters: parameters ?? {},
+    success: Schema.Unknown,
+    failure: Schema.Unknown,
+    dependencies: CommonDependencies,
+  });
   const isReadonly = name.startsWith("list_")
     || name.startsWith("describe_")
     || name.startsWith("query_")
@@ -196,24 +171,35 @@ function cmsTool<Name extends string, Parameters extends Schema.Struct.Fields | 
     || name === "build_structured_text"
     || name === "search_content"
     || name === "export_schema";
-  return AiTool.make(name, {
-    description,
-    parameters: parameters ?? {},
-    success: Schema.Unknown,
-    failure: Schema.Unknown,
-    dependencies: [...CommonDependencies],
-  })
-    .annotate(AiTool.Readonly, isReadonly)
-    .annotate(AiTool.Idempotent, isReadonly || name.startsWith("update_") || name.startsWith("replace_"))
-    .annotate(AiTool.Destructive, name.startsWith("delete_") || name.startsWith("remove_"))
-    .annotate(AiTool.OpenWorld, name === "search_content");
+  tool = tool.annotate(AiTool.Readonly, isReadonly);
+  tool = tool.annotate(AiTool.Idempotent, isReadonly || name.startsWith("update_") || name.startsWith("replace_"));
+  tool = tool.annotate(AiTool.Destructive, name.startsWith("delete_") || name.startsWith("remove_"));
+  tool = tool.annotate(AiTool.OpenWorld, name === "search_content");
+  return tool;
 }
 
 function toStructuredContent(value: unknown) {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value : undefined;
 }
 
+function parseValidators(value: unknown): Record<string, unknown> {
+  if (value == null || value === "") return {};
+  if (typeof value === "string") return JSON.parse(value) as Record<string, unknown>;
+  if (typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  return {};
+}
+
+function withDecoded<A, I, R, B, E, R2>(
+  schema: Schema.Schema<A, I, R>,
+  handler: (params: A) => Effect.Effect<B, E, R2>,
+) {
+  return (params: unknown) => Schema.decodeUnknown(schema)(params).pipe(Effect.flatMap(handler));
+}
+
 function toMcpInputSchema(tool: AiTool.Any) {
+  // Effect AI's helper is typed against the concrete Tool model, while AiTool.Any is wider.
+  // Runtime behavior is correct here because every entry in CmsToolkit is created via AiTool.make.
+  // @ts-expect-error external type mismatch between Any and getJsonSchema helper
   const inputSchema = AiTool.getJsonSchema(tool);
   return inputSchema !== null
     && typeof inputSchema === "object"
@@ -225,7 +211,7 @@ function toMcpInputSchema(tool: AiTool.Any) {
 
 const ListModelsTool = cmsTool("list_models", "List all content models and block types with their fields");
 const DescribeModelTool = cmsTool("describe_model", "Get detailed info about a model", ApiKeyInput.fields);
-const CreateModelTool = cmsTool("create_model", "Create a content model or block type. Use isBlock:true for block types (embeddable in StructuredText). Use singleton:true for models with exactly one record (e.g. site settings). After creating a model, add fields with create_field.", InputSchemas.CreateModelInput.fields);
+const CreateModelTool = cmsTool("create_model", "Create a content model or block type. Use isBlock:true for block types (embeddable in StructuredText). Use singleton:true for models with exactly one record (e.g. site settings). After creating a model, add fields with create_field.", CreateModelInput.fields);
 const UpdateModelTool = cmsTool("update_model", "Update model properties (name, apiKey, singleton, sortable, hasDraft, allLocalesRequired)", UpdateModelInput.fields);
 const CreateFieldTool = cmsTool("create_field", `Add a field to a model. Auto-migrates the database table (adds column).
 
@@ -236,7 +222,7 @@ Key validators by field type:
 - structured_text: {"structured_text_blocks": ["block_api_key"]} — allowed block types
 - any field: {"required": true} — field is required (provide default_value for existing records)`, {
   modelId: Schema.String,
-  ...InputSchemas.CreateFieldInput.fields,
+  ...CreateFieldInput.fields,
 });
 const UpdateFieldTool = cmsTool("update_field", "Update field properties (label, apiKey, validators, hint)", UpdateFieldInput.fields);
 const DeleteModelTool = cmsTool("delete_model", "Delete a model (fails if referenced)", ModelIdInput.fields);
@@ -252,7 +238,7 @@ Field value formats:
 - seo: {"title":"...","description":"...","image":"<asset_id>","twitterCard":"summary_large_image"}
 - structured_text: {"value":{"schema":"dast","document":{...}},"blocks":{"<id>":{"_type":"block_api_key",...}}}
 - color: {"red":255,"green":0,"blue":0,"alpha":255}
-- lat_lon: {"latitude":64.13,"longitude":-21.89}`, InputSchemas.CreateRecordInput.fields);
+- lat_lon: {"latitude":64.13,"longitude":-21.89}`, CreateRecordInput.fields);
 const UpdateRecordTool = cmsTool("update_record", "Update record fields", UpdateRecordInput.fields);
 const PatchBlocksTool = cmsTool("patch_blocks", `Partially update blocks in a structured text field without resending the entire content tree.
 
@@ -287,7 +273,7 @@ const UploadAssetTool = cmsTool("upload_asset", `Register an asset after uploadi
 Upload flow:
 1. Upload the original file to R2
 2. Call this tool with the r2Key, filename, mimeType, and image dimensions
-3. The asset metadata is registered and can be referenced in media fields by its ID`, UploadAssetInput.fields);
+3. The asset metadata is registered and can be referenced in media fields by its ID`, AssetInput.fields);
 const ListAssetsTool = cmsTool("list_assets", "List all assets with their IDs, filenames, and R2 keys");
 const ReplaceAssetTool = cmsTool("replace_asset", `Replace an asset's file metadata while keeping the same ID and URL. All content references remain stable.
 
@@ -426,7 +412,7 @@ function createSchemaResource() {
             label: f.label,
             type: f.field_type,
             localized: !!f.localized,
-            validators: JSON.parse(f.validators || "{}"),
+            validators: parseValidators(f.validators),
           })),
         })),
       }, null, 2);
@@ -485,10 +471,15 @@ Steps:
   });
 }
 
-export function createMcpLayer(sqlLayer: Layer.Layer<SqlClient.SqlClient | VectorizeContext | HooksContext>) {
-  const defaultVectorizeLayer = Layer.succeed(VectorizeContext, Option.none());
-  const defaultHooksLayer = Layer.succeed(HooksContext, Option.none());
-  const fullLayer = Layer.merge(Layer.merge(defaultVectorizeLayer, defaultHooksLayer), sqlLayer);
+export function createMcpLayer(
+  sqlLayer: Layer.Layer<SqlClient.SqlClient | VectorizeContext | HooksContext>,
+){
+  const defaultVectorizeLayer: Layer.Layer<VectorizeContext> = Layer.succeed(VectorizeContext, Option.none());
+  const defaultHooksLayer: Layer.Layer<HooksContext> = Layer.succeed(HooksContext, Option.none());
+  const fullLayer: Layer.Layer<SqlClient.SqlClient | VectorizeContext | HooksContext> = Layer.merge(
+    Layer.merge(defaultVectorizeLayer, defaultHooksLayer),
+    sqlLayer,
+  );
   const serverLayer = McpServer.layerHttpRouter({
     name: "agent-cms",
     version: "0.1.0",
@@ -516,7 +507,7 @@ export function createMcpLayer(sqlLayer: Layer.Layer<SqlClient.SqlClient | Vecto
           fields: fieldsByModel.get(m.id) ?? [],
         }));
       }),
-    describe_model: ({ apiKey }) =>
+    describe_model: withDecoded(ApiKeyInput, ({ apiKey }) =>
       Effect.gen(function* () {
         const model = yield* ModelService.getModelByApiKey(apiKey);
         return {
@@ -532,18 +523,21 @@ export function createMcpLayer(sqlLayer: Layer.Layer<SqlClient.SqlClient | Vecto
             label: f.label,
             type: f.field_type,
             localized: !!f.localized,
-            validators: JSON.parse(f.validators || "{}"),
+            validators: parseValidators(f.validators),
             hint: f.hint,
           })),
         };
-      }),
-    create_model: (args) => decodeInput(InputSchemas.CreateModelInput, args).pipe(Effect.flatMap(ModelService.createModel)),
-    update_model: ({ modelId, ...rest }) => decodeInput(InputSchemas.UpdateModelInput, rest).pipe(Effect.flatMap((input) => ModelService.updateModel(modelId, input))),
-    create_field: ({ modelId, ...rest }) => decodeInput(InputSchemas.CreateFieldInput, rest).pipe(Effect.flatMap((input) => FieldService.createField(modelId, input))),
-    update_field: ({ fieldId, ...rest }) => decodeInput(InputSchemas.UpdateFieldInput, rest).pipe(Effect.flatMap((input) => FieldService.updateField(fieldId, input))),
-    delete_model: ({ modelId }) => ModelService.deleteModel(modelId),
-    delete_field: ({ fieldId }) => FieldService.deleteField(fieldId),
-    schema_info: ({ filterByName, filterByType, includeFieldDetails }) =>
+      })),
+    create_model: withDecoded(CreateModelInput, ModelService.createModel),
+    update_model: withDecoded(UpdateModelInput, ({ modelId, ...rest }) => ModelService.updateModel(modelId, rest)),
+    create_field: withDecoded(
+      Schema.Struct({ modelId: Schema.String, ...CreateFieldInput.fields }),
+      ({ modelId, ...rest }) => FieldService.createField(modelId, rest),
+    ),
+    update_field: withDecoded(UpdateFieldInput, ({ fieldId, ...rest }) => FieldService.updateField(fieldId, rest)),
+    delete_model: withDecoded(ModelIdInput, ({ modelId }) => ModelService.deleteModel(modelId)),
+    delete_field: withDecoded(FieldIdInput, ({ fieldId }) => FieldService.deleteField(fieldId)),
+    schema_info: withDecoded(SchemaInfoInput, ({ filterByName, filterByType, includeFieldDetails }) =>
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         let modelQuery = "SELECT * FROM models";
@@ -589,7 +583,7 @@ export function createMcpLayer(sqlLayer: Layer.Layer<SqlClient.SqlClient | Vecto
                       apiKey: f.api_key,
                       type: f.field_type,
                       localized: !!f.localized,
-                      validators: JSON.parse(f.validators || "{}"),
+                      validators: parseValidators(f.validators),
                       hint: f.hint,
                     })),
                   }
@@ -600,23 +594,23 @@ export function createMcpLayer(sqlLayer: Layer.Layer<SqlClient.SqlClient | Vecto
             };
           }),
         };
-      }),
-    create_record: (args) => decodeInput(InputSchemas.CreateRecordInput, args).pipe(Effect.flatMap(RecordService.createRecord)),
-    update_record: ({ recordId, modelApiKey, data }) => RecordService.patchRecord(recordId, { modelApiKey, data }),
-    patch_blocks: (args) => decodeInput(InputSchemas.PatchBlocksInput, args).pipe(Effect.flatMap(RecordService.patchBlocksForField)),
-    delete_record: ({ recordId, modelApiKey }) => RecordService.removeRecord(modelApiKey, recordId),
-    query_records: ({ modelApiKey }) => RecordService.listRecords(modelApiKey),
-    bulk_create_records: ({ modelApiKey, records }) => RecordService.bulkCreateRecords({ modelApiKey, records }),
-    publish_record: ({ recordId, modelApiKey }) => PublishService.publishRecord(modelApiKey, recordId),
-    unpublish_record: ({ recordId, modelApiKey }) => PublishService.unpublishRecord(modelApiKey, recordId),
-    list_record_versions: ({ modelApiKey, recordId }) => VersionService.listVersions(modelApiKey, recordId),
-    get_record_version: ({ versionId }) => VersionService.getVersion(versionId),
-    restore_record_version: ({ modelApiKey, recordId, versionId }) => VersionService.restoreVersion(modelApiKey, recordId, versionId),
-    reorder_records: ({ modelApiKey, recordIds }) => RecordService.reorderRecords(modelApiKey, recordIds),
-    remove_block_type: ({ blockApiKey }) => SchemaLifecycle.removeBlockType(blockApiKey),
-    remove_block_from_whitelist: ({ fieldId, blockApiKey }) => SchemaLifecycle.removeBlockFromWhitelist({ fieldId, blockApiKey }),
-    remove_locale: ({ localeId }) => SchemaLifecycle.removeLocale(localeId),
-    build_structured_text: ({ paragraphs, blocks }) =>
+      })),
+    create_record: withDecoded(CreateRecordInput, RecordService.createRecord),
+    update_record: withDecoded(UpdateRecordInput, ({ recordId, modelApiKey, data }) => RecordService.patchRecord(recordId, { modelApiKey, data })),
+    patch_blocks: withDecoded(PatchBlocksInput, RecordService.patchBlocksForField),
+    delete_record: withDecoded(DeleteRecordInput, ({ recordId, modelApiKey }) => RecordService.removeRecord(modelApiKey, recordId)),
+    query_records: withDecoded(QueryRecordsInput, ({ modelApiKey }) => RecordService.listRecords(modelApiKey)),
+    bulk_create_records: withDecoded(BulkCreateRecordsInput, ({ modelApiKey, records }) => RecordService.bulkCreateRecords({ modelApiKey, records })),
+    publish_record: withDecoded(PublishRecordInput, ({ recordId, modelApiKey }) => PublishService.publishRecord(modelApiKey, recordId)),
+    unpublish_record: withDecoded(PublishRecordInput, ({ recordId, modelApiKey }) => PublishService.unpublishRecord(modelApiKey, recordId)),
+    list_record_versions: withDecoded(PublishRecordInput, ({ modelApiKey, recordId }) => VersionService.listVersions(modelApiKey, recordId)),
+    get_record_version: withDecoded(VersionIdInput, ({ versionId }) => VersionService.getVersion(versionId)),
+    restore_record_version: withDecoded(RestoreVersionInput, ({ modelApiKey, recordId, versionId }) => VersionService.restoreVersion(modelApiKey, recordId, versionId)),
+    reorder_records: withDecoded(ReorderInput, ({ modelApiKey, recordIds }) => RecordService.reorderRecords(modelApiKey, recordIds)),
+    remove_block_type: withDecoded(RemoveBlockTypeInput, ({ blockApiKey }) => SchemaLifecycle.removeBlockType(blockApiKey)),
+    remove_block_from_whitelist: withDecoded(RemoveBlockFromWhitelistInput, ({ fieldId, blockApiKey }) => SchemaLifecycle.removeBlockFromWhitelist({ fieldId, blockApiKey })),
+    remove_locale: withDecoded(LocaleIdInput, ({ localeId }) => SchemaLifecycle.removeLocale(localeId)),
+    build_structured_text: withDecoded(BuildStructuredTextInput, ({ paragraphs, blocks }) =>
       Effect.promise(async () => {
         const { ulid } = await import("ulidx");
         const safeParagraphs = paragraphs ?? [];
@@ -648,16 +642,16 @@ export function createMcpLayer(sqlLayer: Layer.Layer<SqlClient.SqlClient | Vecto
           value: { schema: "dast", document: { type: "root", children } },
           blocks: blockMap,
         };
-      }),
-    upload_asset: (args) => decodeInput(InputSchemas.CreateAssetInput, args).pipe(Effect.flatMap(AssetService.createAsset)),
+      })),
+    upload_asset: withDecoded(AssetInput, AssetService.createAsset),
     list_assets: () => AssetService.listAssets(),
-    replace_asset: ({ assetId, ...rest }) => decodeInput(InputSchemas.CreateAssetInput, rest).pipe(Effect.flatMap((input) => AssetService.replaceAsset(assetId, input))),
+    replace_asset: withDecoded(ReplaceAssetInput, ({ assetId, ...rest }) => AssetService.replaceAsset(assetId, rest)),
     export_schema: () => SchemaIO.exportSchema(),
-    import_schema: ({ schema }) => decodeInput(InputSchemas.ImportSchemaInput, schema).pipe(Effect.flatMap(SchemaIO.importSchema)),
-    search_content: (args) => SearchService.search(args),
-    reindex_search: ({ modelApiKey }) => SearchService.reindexAll(modelApiKey),
+    import_schema: withDecoded(ImportSchemaInput, SchemaIO.importSchema),
+    search_content: withDecoded(SearchContentInput, SearchService.search),
+    reindex_search: withDecoded(ReindexSearchInput, ({ modelApiKey }) => SearchService.reindexAll(modelApiKey)),
     get_site_settings: () => SiteSettingsService.getSiteSettings(),
-    update_site_settings: (args) => SiteSettingsService.updateSiteSettings(args),
+    update_site_settings: withDecoded(UpdateSiteSettingsInput, SiteSettingsService.updateSiteSettings),
   });
 
   const toolkitRegistration = Layer.effectDiscard(Effect.gen(function* () {
@@ -704,12 +698,13 @@ export function createMcpLayer(sqlLayer: Layer.Layer<SqlClient.SqlClient | Vecto
     }
   })).pipe(Layer.provide(toolkitHandlers));
 
-  return Layer.mergeAll(
-    serverLayer,
-    toolkitRegistration.pipe(Layer.provide(serverLayer)),
+  const registeredContent = Layer.mergeAll(
+    toolkitRegistration,
     createGuideResource(),
     createSchemaResource(),
     createSetupContentModelPrompt(),
     createGenerateGraphqlQueriesPrompt(),
-  ).pipe(Layer.provide(fullLayer));
+  ).pipe(Layer.provide(serverLayer));
+
+  return Layer.merge(serverLayer, registeredContent).pipe(Layer.provide(fullLayer));
 }

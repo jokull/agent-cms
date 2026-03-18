@@ -11,10 +11,12 @@ import { HooksContext } from "../hooks.js";
 export function createMcpHttpHandler(
   sqlLayer: Layer.Layer<SqlClient.SqlClient | VectorizeContext | HooksContext>,
 ) {
-  // @ts-expect-error — Effect AI McpServer layer context doesn't fully align with HttpLayerRouter expectations
-  const { handler } = HttpLayerRouter.toWebHandler(createMcpLayer(sqlLayer), {
+  // Effect AI's MCP layer composes correctly at runtime, but current Layer inference
+  // widens the remaining router requirement to `unknown` at this boundary.
+  // Keep the cast here instead of weakening the typed MCP handlers and tool payloads.
+  const mcpLayer = createMcpLayer(sqlLayer) as Layer.Layer<unknown, never, HttpLayerRouter.HttpRouter>;
+  const { handler } = HttpLayerRouter.toWebHandler(mcpLayer, {
     disableLogger: true,
   });
-  // Second arg is ExecutionContext — not used by the MCP handler, safe to stub
-  return (req: Request): Promise<Response> => handler(req, { waitUntil: () => {}, passThroughOnException: () => {} });
+  return handler;
 }
