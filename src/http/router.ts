@@ -430,9 +430,7 @@ const searchRouter = HttpRouter.empty.pipe(
 const setupRouter = HttpRouter.empty.pipe(
   HttpRouter.post(
     "/setup",
-    Effect.gen(function* () {
-      return yield* handle(ensureSchema().pipe(Effect.as({ ok: true })));
-    })
+    handle(ensureSchema().pipe(Effect.as({ ok: true })))
   )
 );
 

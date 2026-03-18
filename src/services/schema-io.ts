@@ -12,6 +12,7 @@ import * as ModelService from "./model-service.js";
 import * as FieldService from "./field-service.js";
 import * as LocaleService from "./locale-service.js";
 import type { ImportSchemaInput } from "./input-schemas.js";
+import { decodeJsonRecordStringOr } from "../json.js";
 
 // ---------------------------------------------------------------------------
 // Export format (portable, no IDs)
@@ -102,7 +103,7 @@ export function exportSchema() {
         fieldType: f.field_type,
         position: f.position,
         localized: !!f.localized,
-        validators: JSON.parse(f.validators || "{}"),
+        validators: decodeJsonRecordStringOr(f.validators || "{}", {}),
         hint: f.hint,
       })),
     }));
@@ -172,8 +173,7 @@ export function importSchema(s: ImportSchemaInput) {
     for (const model of s.models) {
       const modelId = modelApiKeyToId.get(model.apiKey);
       if (modelId === undefined) {
-        return yield* Effect.fail(new ValidationError({ message: `Model "${model.apiKey}" was not created — cannot attach fields` }));
-        continue;
+        return yield* new ValidationError({ message: `Model "${model.apiKey}" was not created — cannot attach fields` });
       }
       for (const field of model.fields) {
         yield* FieldService.createField(modelId, {

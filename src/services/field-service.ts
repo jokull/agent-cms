@@ -9,16 +9,17 @@ import { parseFieldValidators } from "../db/row-types.js";
 import type { CreateFieldInput, UpdateFieldInput } from "./input-schemas.js";
 import { deleteBlockSubtrees } from "./structured-text-service.js";
 import { isUnique, supportsUniqueValidation } from "../db/validators.js";
+import { decodeJsonRecordStringOr, encodeJson } from "../json.js";
 
 function serializeDefaultValueForFieldMetadata(value: unknown): string | null {
   if (value === undefined) return null;
   if (typeof value === "string") return value;
-  return JSON.stringify(value);
+  return encodeJson(value);
 }
 
 function serializeDefaultValueForRecordColumn(value: unknown): unknown {
   if (value === undefined) return null;
-  if (typeof value === "object" && value !== null) return JSON.stringify(value);
+  if (typeof value === "object" && value !== null) return encodeJson(value);
   if (typeof value === "boolean") return value ? 1 : 0;
   return value;
 }
@@ -111,7 +112,7 @@ export function createField(modelId: string, body: CreateFieldInput) {
 
     const now = new Date().toISOString();
     const id = ulid();
-    const validators = JSON.stringify(body.validators ?? {});
+    const validators = encodeJson(body.validators ?? {});
 
     yield* sql.unsafe(
       `INSERT INTO fields (id, model_id, label, api_key, field_type, position, localized, validators, default_value, appearance, hint, fieldset_id, created_at, updated_at)
@@ -120,7 +121,7 @@ export function createField(modelId: string, body: CreateFieldInput) {
         id, modelId, body.label, body.apiKey, body.fieldType,
         position, body.localized ? 1 : 0, validators,
         serializeDefaultValueForFieldMetadata(body.defaultValue),
-        body.appearance ? JSON.stringify(body.appearance) : null,
+        body.appearance ? encodeJson(body.appearance) : null,
         body.hint ?? null, body.fieldsetId ?? null,
         now, now,
       ]
@@ -198,9 +199,9 @@ export function updateField(fieldId: string, body: UpdateFieldInput) {
     if (body.label !== undefined) { sets.push("label = ?"); values.push(body.label); }
     if (body.position !== undefined) { sets.push("position = ?"); values.push(body.position); }
     if (body.localized !== undefined) { sets.push("localized = ?"); values.push(body.localized ? 1 : 0); }
-    if (body.validators !== undefined) { sets.push("validators = ?"); values.push(JSON.stringify(body.validators)); }
+    if (body.validators !== undefined) { sets.push("validators = ?"); values.push(encodeJson(body.validators)); }
     if (body.hint !== undefined) { sets.push("hint = ?"); values.push(body.hint); }
-    if (body.appearance !== undefined) { sets.push("appearance = ?"); values.push(JSON.stringify(body.appearance)); }
+    if (body.appearance !== undefined) { sets.push("appearance = ?"); values.push(encodeJson(body.appearance)); }
 
     // Handle api_key rename → rename the column + update block references
     if (body.apiKey !== undefined && body.apiKey !== field.api_key) {
@@ -279,7 +280,7 @@ export function deleteField(fieldId: string) {
       [modelId, fieldId]
     );
     for (const slugField of siblingFields) {
-      const validators = JSON.parse(slugField.validators || "{}");
+      const validators = decodeJsonRecordStringOr(slugField.validators || "{}", {});
       if (validators.slug_source === field.api_key) {
         return yield* new ReferenceConflictError({
           message: `Cannot delete field '${field.api_key}': slug field '${slugField.api_key}' depends on it via slug_source`,
@@ -302,12 +303,13 @@ export function deleteField(fieldId: string) {
       );
       for (const record of publishedRecords) {
         let snapshot: Record<string, unknown>;
-        try { snapshot = JSON.parse(record._published_snapshot); } catch { continue; }
+        snapshot = decodeJsonRecordStringOr(record._published_snapshot, {});
+        if (Object.keys(snapshot).length === 0) continue;
         if (field.api_key in snapshot) {
           delete snapshot[field.api_key];
           yield* sql.unsafe(
             `UPDATE "${tableName}" SET _published_snapshot = ? WHERE id = ?`,
-            [JSON.stringify(snapshot), record.id]
+            [encodeJson(snapshot), record.id]
           );
         }
       }

@@ -4,6 +4,7 @@ import { ulid } from "ulidx";
 import { NotFoundError, ValidationError } from "../errors.js";
 import type { AssetRow } from "../db/row-types.js";
 import type { CreateAssetInput } from "./input-schemas.js";
+import { encodeJson } from "../json.js";
 
 export function createAsset(body: CreateAssetInput) {
   return Effect.gen(function* () {
@@ -26,9 +27,9 @@ export function createAsset(body: CreateAssetInput) {
         body.alt ?? null, body.title ?? null,
         body.r2Key ?? `uploads/${id}/${body.filename}`,
         body.blurhash ?? null,
-        body.colors ? JSON.stringify(body.colors) : null,
-        body.focalPoint ? JSON.stringify(body.focalPoint) : null,
-        JSON.stringify(body.tags),
+        body.colors ? encodeJson(body.colors) : null,
+        body.focalPoint ? encodeJson(body.focalPoint) : null,
+        encodeJson(body.tags),
         now,
       ]
     );
@@ -77,9 +78,9 @@ export function replaceAsset(id: string, body: CreateAssetInput) {
         body.alt ?? rows[0].alt, body.title ?? rows[0].title,
         r2Key,
         body.blurhash ?? null,
-        body.colors ? JSON.stringify(body.colors) : null,
-        body.focalPoint ? JSON.stringify(body.focalPoint) : null,
-        JSON.stringify(body.tags),
+        body.colors ? encodeJson(body.colors) : null,
+        body.focalPoint ? encodeJson(body.focalPoint) : null,
+        encodeJson(body.tags),
         id,
       ]
     );

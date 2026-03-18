@@ -2,7 +2,7 @@
  * Lifecycle hooks for content events.
  * Passed to createCMSHandler, fired in the service layer.
  */
-import { Context, Effect, Option } from "effect";
+import { Context, Data, Effect, Option } from "effect";
 
 export interface CmsHooks {
   readonly onRecordCreate?: (event: { modelApiKey: string; recordId: string }) => void | Promise<void>;
@@ -16,6 +16,10 @@ export class HooksContext extends Context.Tag("HooksContext")<
   HooksContext,
   Option.Option<CmsHooks>
 >() {}
+
+class HookExecutionError extends Data.TaggedError("HookExecutionError")<{
+  cause: unknown;
+}> {}
 
 /**
  * Fire a lifecycle hook if configured. Non-blocking — errors are logged, not propagated.
@@ -31,7 +35,7 @@ export function fireHook(
     if (!fn) return;
     yield* Effect.tryPromise({
       try: () => Promise.resolve(fn(event)),
-      catch: (error) => error,
+      catch: (cause) => new HookExecutionError({ cause }),
     }).pipe(Effect.ignore);
   });
 }

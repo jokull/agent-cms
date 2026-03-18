@@ -22,6 +22,7 @@ import { StructuredTextWriteInput } from "../dast/schema.js";
 import { pruneBlockNodes } from "../dast/index.js";
 import { fireHook } from "../hooks.js";
 import * as VersionService from "./version-service.js";
+import { decodeJsonIfString, encodeJson } from "../json.js";
 
 function validateRequestedId(id: string | undefined) {
   if (id === undefined) return null;
@@ -88,14 +89,7 @@ function decodeLocalizedFieldMap(field: ParsedFieldRow, rawValue: unknown) {
 
 function parseExistingLocaleMap(rawValue: unknown): Record<string, unknown> {
   if (rawValue === null || rawValue === undefined) return {};
-  let parsed = rawValue;
-  if (typeof parsed === "string") {
-    try {
-      parsed = JSON.parse(parsed);
-    } catch {
-      return {};
-    }
-  }
+  const parsed = decodeJsonIfString(rawValue);
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
   return sanitizeLocaleMap(parsed as Record<string, unknown>);
 }
@@ -110,14 +104,18 @@ function isLocaleKey(key: string): boolean {
   return /^[a-z]{2,3}(?:[_-][A-Za-z0-9]{2,8})*$/.test(key);
 }
 
+function isJsonRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function scopeStructuredTextIds<T>(value: T, scope: string): T {
   if (!value || typeof value !== "object") return value;
 
-  const clone = JSON.parse(JSON.stringify(value)) as {
-    value: { document?: unknown };
-    blocks?: Record<string, unknown>;
-  };
-  const originalIds = Object.keys(clone.blocks ?? {});
+  const clone = structuredClone(value);
+  if (!isJsonRecord(clone)) return clone;
+  const mutableClone: Record<string, unknown> = clone;
+  const blocks = isJsonRecord(mutableClone.blocks) ? mutableClone.blocks : undefined;
+  const originalIds = Object.keys(blocks ?? {});
   if (originalIds.length === 0) return clone as T;
 
   const idMap = new Map(originalIds.map((id) => [id, `${scope}:${id}`]));
@@ -136,9 +134,11 @@ function scopeStructuredTextIds<T>(value: T, scope: string): T {
     return next;
   };
 
-  clone.value = rewriteNode(clone.value) as typeof clone.value;
-  clone.blocks = Object.fromEntries(
-    Object.entries(clone.blocks ?? {}).map(([blockId, blockValue]) => [
+  if ("value" in mutableClone) {
+    mutableClone.value = rewriteNode(mutableClone.value);
+  }
+  mutableClone.blocks = Object.fromEntries(
+    Object.entries(blocks ?? {}).map(([blockId, blockValue]) => [
       idMap.get(blockId) ?? blockId,
       blockValue,
     ])
@@ -358,7 +358,7 @@ export function createRecord(body: CreateRecordInput) {
       }
       yield* sql.unsafe(
         `UPDATE "${tableName}" SET _published_snapshot = ? WHERE id = ?`,
-        [JSON.stringify(snap), id]
+        [encodeJson(snap), id]
       );
     }
 
@@ -416,7 +416,7 @@ export function patchRecord(id: string, body: PatchRecordInput) {
         if (existing._published_snapshot) {
           const prevSnapshot = typeof existing._published_snapshot === "string"
             ? existing._published_snapshot
-            : JSON.stringify(existing._published_snapshot);
+            : encodeJson(existing._published_snapshot);
           yield* VersionService.createVersion(body.modelApiKey, id, prevSnapshot);
         }
       }
@@ -620,7 +620,7 @@ export function patchRecord(id: string, body: PatchRecordInput) {
         }
         yield* sql.unsafe(
           `UPDATE "${tableName}" SET _published_snapshot = ?, _published_at = ?, _status = 'published' WHERE id = ?`,
-          [JSON.stringify(snap), new Date().toISOString(), id]
+          [encodeJson(snap), new Date().toISOString(), id]
         );
       }
     }
@@ -981,7 +981,7 @@ export function patchBlocksForField(body: PatchBlocksInput) {
     const now = new Date().toISOString();
     yield* sql.unsafe(
       `UPDATE "${tableName}" SET "${field.api_key}" = ?, _updated_at = ? WHERE id = ?`,
-      [JSON.stringify(dast), now, body.recordId]
+      [encodeJson(dast), now, body.recordId]
     );
 
     // Status transition: published → updated on content edit (draft models only)
@@ -1002,7 +1002,7 @@ export function patchBlocksForField(body: PatchBlocksInput) {
         }
         yield* sql.unsafe(
           `UPDATE "${tableName}" SET _published_snapshot = ?, _published_at = ?, _status = 'published' WHERE id = ?`,
-          [JSON.stringify(snap), now, body.recordId]
+          [encodeJson(snap), now, body.recordId]
         );
       }
     }

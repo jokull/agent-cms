@@ -7,6 +7,7 @@ import type { ModelRow, FieldRow, VersionRow } from "../db/row-types.js";
 import { parseFieldValidators } from "../db/row-types.js";
 import { materializeRecordStructuredTextFields } from "./structured-text-service.js";
 import { fireHook } from "../hooks.js";
+import { decodeJsonString, encodeJson } from "../json.js";
 
 /**
  * Create a version snapshot for a record.
@@ -45,7 +46,7 @@ export function listVersions(modelApiKey: string, recordId: string) {
     );
     return rows.map((r) => ({
       ...r,
-      snapshot: JSON.parse(r.snapshot),
+      snapshot: decodeJsonString(r.snapshot),
     }));
   });
 }
@@ -62,7 +63,7 @@ export function getVersion(versionId: string) {
     );
     if (rows.length === 0) return yield* new NotFoundError({ entity: "Version", id: versionId });
     const row = rows[0];
-    return { ...row, snapshot: JSON.parse(row.snapshot) };
+    return { ...row, snapshot: decodeJsonString(row.snapshot) };
   });
 }
 
@@ -101,7 +102,7 @@ export function restoreVersion(modelApiKey: string, recordId: string, versionId:
     for (const [key, value] of Object.entries(current)) {
       if (!key.startsWith("_") && key !== "id") currentSnap[key] = value;
     }
-    yield* createVersion(modelApiKey, recordId, JSON.stringify(currentSnap));
+    yield* createVersion(modelApiKey, recordId, encodeJson(currentSnap));
 
     // Get model fields to know which fields still exist
     const fieldRows = yield* sql.unsafe<FieldRow>(
@@ -111,7 +112,7 @@ export function restoreVersion(modelApiKey: string, recordId: string, versionId:
     const existingFieldKeys = new Set(fieldRows.map((f) => f.api_key));
 
     // Parse version snapshot and filter to fields that still exist
-    const versionSnapshot: Record<string, unknown> = JSON.parse(version.snapshot);
+    const versionSnapshot = decodeJsonString(version.snapshot) as Record<string, unknown>;
     const updates: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(versionSnapshot)) {
       if (existingFieldKeys.has(key)) {
@@ -146,7 +147,7 @@ export function restoreVersion(modelApiKey: string, recordId: string, versionId:
         if (!key.startsWith("_") && key !== "id") snap[key] = value;
       }
 
-      updates._published_snapshot = JSON.stringify(snap);
+      updates._published_snapshot = encodeJson(snap);
       updates._published_at = now;
       updates._status = "published";
     }
@@ -157,7 +158,7 @@ export function restoreVersion(modelApiKey: string, recordId: string, versionId:
     const values = setCols.map((c) => {
       const v = updates[c];
       if (v === undefined || v === null) return null;
-      if (typeof v === "object") return JSON.stringify(v);
+      if (typeof v === "object") return encodeJson(v);
       return v;
     });
     values.push(recordId);

@@ -8,6 +8,15 @@ import type { AssetRow } from "../db/row-types.js";
 import { compileFilterToSql, compileOrderBy } from "./filter-compiler.js";
 import { UPLOAD_TYPE_DEFS } from "./sdl-constants.js";
 import type { SchemaBuilderContext, DynamicRow, AssetObject } from "./gql-types.js";
+import { decodeJsonIfString, decodeJsonStringOr } from "../json.js";
+
+function parseCustomData(value: string | null): Record<string, string> | null {
+  if (!value) return null;
+  const parsed = decodeJsonStringOr(value, null);
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+  const entries = Object.entries(parsed).filter(([, entryValue]) => typeof entryValue === "string");
+  return Object.fromEntries(entries);
+}
 
 /**
  * Legacy DatoCMS/imgix compatibility shim.
@@ -94,14 +103,7 @@ type RunSqlFn = SchemaBuilderContext["runSql"];
 
 function pickLocalizedSiteValue(rawValue: unknown, locale?: string | null, fallbackLocales: string[] = []) {
   if (rawValue == null) return null;
-  let localeMap = rawValue;
-  if (typeof localeMap === "string") {
-    try {
-      localeMap = JSON.parse(localeMap);
-    } catch {
-      return rawValue;
-    }
-  }
+  const localeMap = decodeJsonIfString(rawValue);
   if (typeof localeMap !== "object" || localeMap === null || Array.isArray(localeMap)) {
     return rawValue;
   }
@@ -227,7 +229,7 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
           id: a.id, filename: a.filename, mimeType: a.mime_type,
           size: a.size, width: a.width, height: a.height,
           alt: a.alt, title: a.title, blurhash: a.blurhash ?? null,
-          customData: a.custom_data ? JSON.parse(a.custom_data) : null,
+          customData: parseCustomData(a.custom_data),
           url: assetUrl(a.id, a.filename),
         }));
       })
@@ -345,7 +347,7 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
           return {
             id: a.id, filename: a.filename, mimeType: a.mime_type,
             size: a.size, width: a.width, height: a.height,
-            alt: a.alt, title: a.title, customData: a.custom_data ? JSON.parse(a.custom_data) : null,
+            alt: a.alt, title: a.title, customData: parseCustomData(a.custom_data),
             url: assetUrl(a.id, a.filename),
           };
         })

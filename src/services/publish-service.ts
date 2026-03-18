@@ -8,6 +8,7 @@ import { computeIsValid, findUniqueConstraintViolations } from "../db/validators
 import { materializeRecordStructuredTextFields } from "./structured-text-service.js";
 import { fireHook } from "../hooks.js";
 import * as VersionService from "./version-service.js";
+import { encodeJson } from "../json.js";
 
 export function publishRecord(modelApiKey: string, recordId: string) {
   return Effect.gen(function* () {
@@ -64,7 +65,7 @@ export function publishRecord(modelApiKey: string, recordId: string) {
     if (record._published_snapshot) {
       const prevSnapshot = typeof record._published_snapshot === "string"
         ? record._published_snapshot
-        : JSON.stringify(record._published_snapshot);
+        : encodeJson(record._published_snapshot);
       yield* VersionService.createVersion(modelApiKey, recordId, prevSnapshot);
     }
 
@@ -79,7 +80,7 @@ export function publishRecord(modelApiKey: string, recordId: string) {
     const now = new Date().toISOString();
     yield* sql.unsafe(
       `UPDATE "${tableName}" SET _status = 'published', _published_at = ?, _first_published_at = COALESCE(_first_published_at, ?), _published_snapshot = ?, _updated_at = ? WHERE id = ?`,
-      [now, now, JSON.stringify(snapshot), now, recordId]
+      [now, now, encodeJson(snapshot), now, recordId]
     );
 
     yield* fireHook("onPublish", { modelApiKey, recordId });

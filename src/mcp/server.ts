@@ -31,6 +31,7 @@ import {
 import type { ModelRow, FieldRow, LocaleRow } from "../db/row-types.js";
 import { VectorizeContext } from "../search/vectorize-context.js";
 import { HooksContext } from "../hooks.js";
+import { decodeJsonRecordStringOr, encodeJson } from "../json.js";
 
 const JsonRecord = Schema.Record({ key: Schema.String, value: Schema.Unknown });
 const CommonDependencies = [SqlClient.SqlClient, VectorizeContext, HooksContext];
@@ -130,6 +131,10 @@ const ReplaceAssetInput = Schema.Struct({
   ...AssetInput.fields,
 });
 
+const ImportSchemaToolInput = Schema.Struct({
+  schema: ImportSchemaInput,
+});
+
 const UpdateSiteSettingsInput = Schema.Struct({
   siteName: Schema.optional(Schema.String),
   titleSuffix: Schema.optional(Schema.String),
@@ -184,7 +189,7 @@ function toStructuredContent(value: unknown) {
 
 function parseValidators(value: unknown): Record<string, unknown> {
   if (value == null || value === "") return {};
-  if (typeof value === "string") return JSON.parse(value) as Record<string, unknown>;
+  if (typeof value === "string") return decodeJsonRecordStringOr(value, {});
   if (typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
   return {};
 }
@@ -285,7 +290,7 @@ const ExportSchemaTool = cmsTool("export_schema", "Export the full CMS schema (m
 const ImportSchemaTool = cmsTool("import_schema", `Import a CMS schema from JSON. Creates all locales, models, and fields in dependency order. Use on a fresh/empty CMS.
 
 The schema format matches export_schema output:
-{ "version": 1, "locales": [...], "models": [{ "name", "apiKey", "fields": [...] }] }`, ImportSchemaInput.fields);
+{ "version": 1, "locales": [...], "models": [{ "name", "apiKey", "fields": [...] }] }`, ImportSchemaToolInput.fields);
 const SearchContentTool = cmsTool("search_content", `Search content records. Supports keyword search (FTS5), semantic search (Vectorize), or hybrid (both combined with rank fusion).
 
 Keyword mode: phrases ("exact match"), prefix (word*), boolean (AND/OR).
@@ -398,7 +403,7 @@ function createSchemaResource() {
         list.push(f);
         fieldsByModel.set(f.model_id, list);
       }
-      return JSON.stringify({
+      return encodeJson({
         locales: locales.map((l) => ({ code: l.code, position: l.position, fallbackLocaleId: l.fallback_locale_id })),
         models: models.map((m) => ({
           id: m.id,
@@ -415,7 +420,7 @@ function createSchemaResource() {
             validators: parseValidators(f.validators),
           })),
         })),
-      }, null, 2);
+      });
     }),
   });
 }
@@ -647,7 +652,7 @@ export function createMcpLayer(
     list_assets: () => AssetService.listAssets(),
     replace_asset: withDecoded(ReplaceAssetInput, ({ assetId, ...rest }) => AssetService.replaceAsset(assetId, rest)),
     export_schema: () => SchemaIO.exportSchema(),
-    import_schema: withDecoded(ImportSchemaInput, SchemaIO.importSchema),
+    import_schema: withDecoded(ImportSchemaToolInput, ({ schema }) => SchemaIO.importSchema(schema)),
     search_content: withDecoded(SearchContentInput, SearchService.search),
     reindex_search: withDecoded(ReindexSearchInput, ({ modelApiKey }) => SearchService.reindexAll(modelApiKey)),
     get_site_settings: () => SiteSettingsService.getSiteSettings(),
@@ -683,13 +688,13 @@ export function createMcpLayer(
                 new McpSchema.CallToolResult({
                   isError: true,
                   structuredContent: toStructuredContent(error),
-                  content: [{ type: "text", text: JSON.stringify(error) }],
+                  content: [{ type: "text", text: encodeJson(error) }],
                 }),
               onSuccess: (result) =>
                 new McpSchema.CallToolResult({
                   isError: false,
                   structuredContent: toStructuredContent(result.encodedResult),
-                  content: [{ type: "text", text: JSON.stringify(result.encodedResult) }],
+                  content: [{ type: "text", text: encodeJson(result.encodedResult) }],
                 }),
             }),
           );

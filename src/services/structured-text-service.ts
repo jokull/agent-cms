@@ -8,6 +8,7 @@ import { parseFieldValidators } from "../db/row-types.js";
 import { getBlockWhitelist, getBlocksOnly } from "../db/validators.js";
 import { getFieldTypeDef } from "../field-types.js";
 import { isFieldType } from "../types.js";
+import { decodeJsonIfString, decodeJsonStringOr, encodeJson } from "../json.js";
 
 type DynamicRow = Record<string, unknown>;
 
@@ -62,17 +63,13 @@ function mergeRowMaps(target: Map<string, DynamicRow[]>, source: Map<string, Dyn
 function serializeValue(value: unknown): unknown {
   if (value === undefined || value === null) return null;
   if (typeof value === "boolean") return value ? 1 : 0;
-  if (typeof value === "object") return JSON.stringify(value);
+  if (typeof value === "object") return encodeJson(value);
   return value;
 }
 
 function deserializeValue(value: unknown): unknown {
   if (typeof value === "string" && (value.startsWith("{") || value.startsWith("["))) {
-    try {
-      return JSON.parse(value);
-    } catch {
-      return value;
-    }
+    return decodeJsonStringOr(value, value);
   }
   return value;
 }
@@ -480,14 +477,7 @@ export function materializeStructuredTextValue(params: {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const materializeContext = params.materializeContext ?? { blockModelSchemas: new Map<string, BlockModelSchema>() };
-    let dast = params.rawValue;
-    if (typeof dast === "string") {
-      try {
-        dast = JSON.parse(dast);
-      } catch {
-        return null;
-      }
-    }
+    const dast = decodeJsonIfString(params.rawValue);
     if (!dast || typeof dast !== "object") return null;
     if (!("document" in dast) || typeof dast.document !== "object" || dast.document === null || !("children" in dast.document)) {
       return null;
@@ -541,14 +531,7 @@ export function materializeRecordStructuredTextFields(params: {
       if (rawValue === null || rawValue === undefined) continue;
       const materializeContext = { blockModelSchemas: new Map<string, BlockModelSchema>() };
       if (field.localized) {
-        let localeMap = rawValue;
-        if (typeof localeMap === "string") {
-          try {
-            localeMap = JSON.parse(localeMap);
-          } catch {
-            continue;
-          }
-        }
+        const localeMap = decodeJsonIfString(rawValue);
         if (typeof localeMap !== "object" || localeMap === null || Array.isArray(localeMap)) {
           continue;
         }

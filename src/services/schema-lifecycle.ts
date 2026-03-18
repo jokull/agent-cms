@@ -7,6 +7,7 @@ import { SqlClient } from "@effect/sql";
 import { NotFoundError, ValidationError } from "../errors.js";
 import type { ModelRow, FieldRow } from "../db/row-types.js";
 import { dropTableSql } from "../schema-engine/sql-ddl.js";
+import { decodeJsonIfString, decodeJsonRecordStringOr, encodeJson } from "../json.js";
 
 /**
  * P4.4: Remove a block type — scans all StructuredText fields,
@@ -30,7 +31,7 @@ export function removeBlockType(blockApiKey: string) {
     );
 
     const affectedFields = stFields.filter((f) => {
-      const validators = JSON.parse(f.validators || "{}");
+      const validators = decodeJsonRecordStringOr(f.validators || "{}", {});
       const allowedBlocks = validators.structured_text_blocks;
       return Array.isArray(allowedBlocks) && allowedBlocks.includes(blockApiKey);
     });
@@ -57,16 +58,13 @@ export function removeBlockType(blockApiKey: string) {
 
         if (blockIdSet.size > 0) {
           // Clean draft DAST
-          let dastRaw: unknown = record[field.api_key];
-          if (typeof dastRaw === "string") {
-            try { dastRaw = JSON.parse(dastRaw); } catch { dastRaw = null; }
-          }
+          const dastRaw = decodeJsonIfString(record[field.api_key]);
           const dast = dastRaw as DastLike | null;
           if (dast?.document?.children) {
             const cleaned = removeBlockNodesFromDast(dast, blockIdSet);
             yield* sql.unsafe(
               `UPDATE "${tableName}" SET "${field.api_key}" = ? WHERE id = ?`,
-              [JSON.stringify(cleaned), record.id]
+              [encodeJson(cleaned), record.id]
             );
           }
 
@@ -76,12 +74,14 @@ export function removeBlockType(blockApiKey: string) {
       }
 
       // Remove from whitelist
-      const validators = JSON.parse(field.validators || "{}");
-      validators.structured_text_blocks = (validators.structured_text_blocks ?? [])
-        .filter((b: string) => b !== blockApiKey);
+      const validators = decodeJsonRecordStringOr(field.validators || "{}", {});
+      const whitelist = Array.isArray(validators.structured_text_blocks)
+        ? validators.structured_text_blocks.filter((b): b is string => typeof b === "string")
+        : [];
+      validators.structured_text_blocks = whitelist.filter((b) => b !== blockApiKey);
       yield* sql.unsafe(
         "UPDATE fields SET validators = ? WHERE id = ?",
-        [JSON.stringify(validators), field.id]
+        [encodeJson(validators), field.id]
       );
     }
 
@@ -120,8 +120,10 @@ export function removeBlockFromWhitelist(params: {
     if (field.field_type !== "structured_text")
       return yield* new ValidationError({ message: "Field is not a structured_text field" });
 
-    const validators = JSON.parse(field.validators || "{}");
-    const whitelist: string[] = validators.structured_text_blocks ?? [];
+    const validators = decodeJsonRecordStringOr(field.validators || "{}", {});
+    const whitelist = Array.isArray(validators.structured_text_blocks)
+      ? validators.structured_text_blocks.filter((b): b is string => typeof b === "string")
+      : [];
     if (!whitelist.includes(blockApiKey))
       return yield* new ValidationError({ message: `Block type '${blockApiKey}' is not in this field's whitelist` });
 
@@ -145,14 +147,13 @@ export function removeBlockFromWhitelist(params: {
         `SELECT id, "${field.api_key}", _published_snapshot FROM "${tableName}" WHERE "${field.api_key}" IS NOT NULL OR _published_snapshot IS NOT NULL`
       );
       for (const record of records) {
-        let dastRaw: unknown = record[field.api_key];
-        if (typeof dastRaw === "string") { try { dastRaw = JSON.parse(dastRaw); } catch { dastRaw = null; } }
+        const dastRaw = decodeJsonIfString(record[field.api_key]);
         const dast = dastRaw as DastLike | null;
         if (dast?.document?.children) {
           const cleaned = removeBlockNodesFromDast(dast, blockIdSet);
           yield* sql.unsafe(
             `UPDATE "${tableName}" SET "${field.api_key}" = ? WHERE id = ?`,
-            [JSON.stringify(cleaned), record.id]
+            [encodeJson(cleaned), record.id]
           );
           cleanedRecords++;
         }
@@ -170,7 +171,7 @@ export function removeBlockFromWhitelist(params: {
 
     // Update whitelist
     validators.structured_text_blocks = whitelist.filter((b: string) => b !== blockApiKey);
-    yield* sql.unsafe("UPDATE fields SET validators = ? WHERE id = ?", [JSON.stringify(validators), fieldId]);
+    yield* sql.unsafe("UPDATE fields SET validators = ? WHERE id = ?", [encodeJson(validators), fieldId]);
 
     return { removed: blockApiKey, cleanedRecords, blocksDeleted: blockIdSet.size };
   });
@@ -211,8 +212,7 @@ export function removeLocale(localeId: string) {
       );
 
       for (const record of records) {
-        let parsed: unknown = record[field.api_key];
-        if (typeof parsed === "string") { try { parsed = JSON.parse(parsed); } catch { continue; } }
+        const parsed = decodeJsonIfString(record[field.api_key]);
         if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) continue;
 
         const localeMap = parsed as Record<string, unknown>;
@@ -220,7 +220,7 @@ export function removeLocale(localeId: string) {
           delete localeMap[localeCode];
           yield* sql.unsafe(
             `UPDATE "${tableName}" SET "${field.api_key}" = ? WHERE id = ?`,
-            [JSON.stringify(localeMap), record.id]
+            [encodeJson(localeMap), record.id]
           );
           updatedRecords++;
         }
@@ -248,17 +248,14 @@ function cleanPublishedSnapshot(
     );
     if (!rows[0]?._published_snapshot) return;
 
-    let snapshot: Record<string, unknown>;
-    try { snapshot = JSON.parse(rows[0]._published_snapshot); } catch { return; }
+    const snapshot = decodeJsonRecordStringOr(rows[0]._published_snapshot, {});
+    if (Object.keys(snapshot).length === 0) return;
 
-    let dast: unknown = snapshot[fieldApiKey];
-    if (typeof dast === "string") {
-      try { dast = JSON.parse(dast); } catch { return; }
-    }
+    const dast = decodeJsonIfString(snapshot[fieldApiKey]);
     snapshot[fieldApiKey] = removeBlockNodesFromStructuredTextValue(dast, blockIds);
     yield* sql.unsafe(
       `UPDATE "${tableName}" SET _published_snapshot = ? WHERE id = ?`,
-      [JSON.stringify(snapshot), recordId]
+      [encodeJson(snapshot), recordId]
     );
   });
 }

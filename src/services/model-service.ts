@@ -12,6 +12,7 @@ import * as SearchService from "../search/search-service.js";
 import type { ModelRow, FieldRow } from "../db/row-types.js";
 import { parseFieldValidators } from "../db/row-types.js";
 import type { CreateModelInput, UpdateModelInput } from "./input-schemas.js";
+import { decodeJsonRecordStringOr, encodeJson } from "../json.js";
 
 export function listModels() {
   return Effect.gen(function* () {
@@ -158,7 +159,7 @@ export function updateModel(id: string, body: UpdateModelInput) {
       // But we need to update validators in other models that reference this model by api_key
       const allFields = yield* sql.unsafe<FieldRow>("SELECT * FROM fields WHERE field_type IN ('link', 'links', 'structured_text')");
       for (const f of allFields) {
-        const validators = JSON.parse(f.validators || "{}");
+        const validators = decodeJsonRecordStringOr(f.validators || "{}", {});
         let changed = false;
         // Update link/links validators
         for (const key of ["item_item_type", "items_item_type"]) {
@@ -179,7 +180,7 @@ export function updateModel(id: string, body: UpdateModelInput) {
           }
         }
         if (changed) {
-          yield* sql.unsafe("UPDATE fields SET validators = ? WHERE id = ?", [JSON.stringify(validators), f.id]);
+          yield* sql.unsafe("UPDATE fields SET validators = ? WHERE id = ?", [encodeJson(validators), f.id]);
         }
       }
 
@@ -215,7 +216,7 @@ export function deleteModel(id: string) {
       const referencingFields = allFields.filter((f) => {
         if (f.field_type !== "link" && f.field_type !== "links") return false;
         if (f.model_id === id) return false;
-        const validators = JSON.parse(f.validators || "{}");
+        const validators = decodeJsonRecordStringOr(f.validators || "{}", {});
         const allowedTypes = validators?.items_item_type ?? validators?.item_item_type;
         return Array.isArray(allowedTypes) && allowedTypes.includes(model.api_key);
       });
@@ -238,7 +239,7 @@ export function deleteModel(id: string) {
       // Block models: check structured_text field whitelists
       const referencingFields = allFields.filter((f) => {
         if (f.field_type !== "structured_text") return false;
-        const validators = JSON.parse(f.validators || "{}");
+        const validators = decodeJsonRecordStringOr(f.validators || "{}", {});
         const whitelist = validators?.block_whitelist;
         return Array.isArray(whitelist) && whitelist.includes(model.api_key);
       });
