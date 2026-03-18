@@ -74,10 +74,11 @@ interface ChatPanelProps {
   writeKey: string;
   recordId?: string;
   modelApiKey?: string;
+  locale?: string;
   onClose: () => void;
 }
 
-function ChatPanel({ apiRoute, writeKey, recordId, modelApiKey, onClose }: ChatPanelProps) {
+function ChatPanel({ apiRoute, writeKey, recordId, modelApiKey, locale, onClose }: ChatPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [inputValue, setInputValue] = useState("");
 
@@ -86,9 +87,9 @@ function ChatPanel({ apiRoute, writeKey, recordId, modelApiKey, onClose }: ChatP
       new DefaultChatTransport({
         api: apiRoute,
         headers: { Authorization: `Bearer ${writeKey}` },
-        body: { recordId, modelApiKey },
+        body: { recordId, modelApiKey, locale },
       }),
-    [apiRoute, writeKey, recordId, modelApiKey],
+    [apiRoute, writeKey, recordId, modelApiKey, locale],
   );
 
   const { messages, sendMessage, status } = useChat({ transport });

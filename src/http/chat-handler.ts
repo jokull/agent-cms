@@ -14,9 +14,24 @@ import * as StructuredTextService from "../services/structured-text-service.js";
 import * as SearchService from "../search/search-service.js";
 import type { VectorizeContext } from "../search/vectorize-context.js";
 import type { HooksContext } from "../hooks.js";
+import type { DastDocument } from "../dast/types.js";
 import { ulid } from "ulidx";
 
 type FullLayer = Layer.Layer<SqlClient.SqlClient | VectorizeContext | HooksContext>;
+
+/** Dynamic content record — fields are user-defined so values are unknown */
+type ContentRecord = Record<string, unknown>;
+
+interface ChatRequestBody {
+  messages: UIMessage[];
+  recordId?: string;
+  modelApiKey?: string;
+  locale?: string;
+}
+
+function run<A>(effect: Effect.Effect<A, unknown, SqlClient.SqlClient | VectorizeContext | HooksContext>, layer: FullLayer): Promise<A> {
+  return Effect.runPromise(effect.pipe(Effect.provide(layer)));
+}
 
 /**
  * Strip the field:locale: scope prefix from a block ID if present.
@@ -28,21 +43,102 @@ function unscopeBlockId(id: string, fieldApiKey: string, locale: string): string
   return id.startsWith(prefix) ? id.slice(prefix.length) : id;
 }
 
-function run<A>(effect: Effect.Effect<A, unknown, SqlClient.SqlClient | VectorizeContext | HooksContext>, layer: FullLayer): Promise<A> {
-  return Effect.runPromise(effect.pipe(Effect.provide(layer)));
-}
-
-function getDisplayTitle(record: Record<string, unknown>, fallback: string): string {
-  const title = record.title ?? record.name ?? record.heading;
-  if (typeof title === "string" && title.length > 0) return title;
-  if (title && typeof title === "object") {
-    const localized = title as Record<string, unknown>;
-    const english: unknown = localized.en;
-    if (typeof english === "string" && english.length > 0) return english;
-    const first = Object.values(localized).find((value): value is string => typeof value === "string" && value.length > 0);
+/** Extract a display title from a content record, preferring the given locale */
+function getDisplayTitle(record: ContentRecord, fallback: string, preferredLocale?: string): string {
+  const raw = record.title ?? record.name ?? record.heading;
+  if (typeof raw === "string" && raw.length > 0) return raw;
+  if (raw && typeof raw === "object") {
+    const localized = raw as Record<string, unknown>;
+    if (preferredLocale) {
+      const preferred = localized[preferredLocale];
+      if (typeof preferred === "string" && preferred.length > 0) return preferred;
+    }
+    const first = Object.values(localized).find((v): v is string => typeof v === "string" && v.length > 0);
     if (first) return first;
   }
   return fallback;
+}
+
+/** Safely read a nested localized value from a dynamic record */
+function getLocalizedField(record: ContentRecord, fieldApiKey: string, locale: string): unknown {
+  const field = record[fieldApiKey];
+  if (field && typeof field === "object" && !Array.isArray(field)) {
+    return (field as Record<string, unknown>)[locale];
+  }
+  return undefined;
+}
+
+/** Check if a value looks like a stored DAST document */
+function isDastValue(value: unknown): value is { schema: string; document: { type: string; children: unknown[] } } {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    "document" in value &&
+    typeof (value as Record<string, unknown>).document === "object"
+  );
+}
+
+/** Materialize blocks from DB for a structured text field */
+function materializeBlocks(
+  modelApiKey: string,
+  recordId: string,
+  fieldApiKey: string,
+  locale: string,
+  rawValue: unknown,
+  layer: FullLayer,
+) {
+  const storageKey = StructuredTextService.getStructuredTextStorageKey(fieldApiKey, locale);
+  return run(
+    StructuredTextService.materializeStructuredTextValue({
+      parentContainerModelApiKey: modelApiKey,
+      parentBlockId: null,
+      parentFieldApiKey: fieldApiKey,
+      rootRecordId: recordId,
+      rootFieldApiKey: storageKey,
+      rawValue,
+    }),
+    layer,
+  );
+}
+
+/** Build a lookup map from materialized blocks, keyed by both scoped and unscoped IDs */
+function buildBlockLookup(
+  blocks: Record<string, unknown>,
+  fieldApiKey: string,
+  locale: string,
+): Map<string, unknown> {
+  const lookup = new Map<string, unknown>();
+  for (const [id, data] of Object.entries(blocks)) {
+    lookup.set(id, data);
+    lookup.set(unscopeBlockId(id, fieldApiKey, locale), data);
+  }
+  return lookup;
+}
+
+/** Unscope block refs in a DAST document and resolve block data from a lookup */
+function resolveBlocks(
+  dast: DastDocument,
+  blockLookup: Map<string, unknown>,
+  fieldApiKey: string,
+  locale: string,
+  newBlock?: { id: string; data: Record<string, unknown> },
+): Record<string, unknown> {
+  const blocks: Record<string, unknown> = {};
+  for (const child of dast.document.children) {
+    if (child.type === "block") {
+      const originalId = child.item;
+      const unscopedId = unscopeBlockId(originalId, fieldApiKey, locale);
+      // Mutate the DAST node to use unscoped ID (patchRecord re-scopes)
+      (child as { item: string }).item = unscopedId;
+      if (newBlock && unscopedId === newBlock.id) {
+        blocks[newBlock.id] = newBlock.data;
+      } else {
+        const blockData = blockLookup.get(originalId) ?? blockLookup.get(unscopedId);
+        if (blockData) blocks[unscopedId] = blockData;
+      }
+    }
+  }
+  return blocks;
 }
 
 const SYSTEM_PROMPT = `You are a CMS content editor. Use your tools to make changes — don't ask for permission.
@@ -62,7 +158,7 @@ export function createChatHandler(
   const workersai = createWorkersAI({ binding: options.ai } as Parameters<typeof createWorkersAI>[0]);
   const model = workersai(options.model ?? "@cf/meta/llama-4-scout-17b-16e-instruct");
 
-  function createTools(currentRecordId?: string) {
+  function createTools(currentRecordId?: string, currentLocale?: string) {
     return {
     schema_info: tool({
       description: "Get the full CMS schema including all models, fields, and locales.",
@@ -78,7 +174,7 @@ export function createChatHandler(
       inputSchema: z.object({
         api_key: z.string().describe("The model's api_key"),
       }),
-      execute: async ({ api_key }: { api_key: string }) => {
+      execute: async ({ api_key }) => {
         console.info("[chat] tool:describe_model", { api_key });
         const modelRow = await run(ModelService.getModelByApiKey(api_key), fullLayer);
         const fields = await run(FieldService.listFields(modelRow.id), fullLayer);
@@ -91,7 +187,7 @@ export function createChatHandler(
       inputSchema: z.object({
         model_api_key: z.string().describe("The model's api_key"),
       }),
-      execute: async ({ model_api_key }: { model_api_key: string }) => {
+      execute: async ({ model_api_key }) => {
         console.info("[chat] tool:query_records", { model_api_key });
         return run(RecordService.listRecords(model_api_key), fullLayer);
       },
@@ -103,7 +199,7 @@ export function createChatHandler(
         model_api_key: z.string().describe("The model's api_key"),
         record_id: z.string().describe("The record ID"),
       }),
-      execute: async ({ model_api_key, record_id }: { model_api_key: string; record_id: string }) => {
+      execute: async ({ model_api_key, record_id }) => {
         console.info("[chat] tool:get_record", { model_api_key, record_id });
         return run(RecordService.getRecord(model_api_key, record_id), fullLayer);
       },
@@ -115,7 +211,7 @@ export function createChatHandler(
         model_api_key: z.string().describe("The model's api_key"),
         data: z.record(z.string(), z.unknown()).describe("Field values keyed by field api_key"),
       }),
-      execute: async ({ model_api_key, data }: { model_api_key: string; data: Record<string, unknown> }) => {
+      execute: async ({ model_api_key, data }) => {
         console.info("[chat] tool:create_record", { model_api_key, data });
         return run(RecordService.createRecord({ modelApiKey: model_api_key, data }), fullLayer);
       },
@@ -128,7 +224,7 @@ export function createChatHandler(
         model_api_key: z.string().describe("The model's api_key"),
         data: z.record(z.string(), z.unknown()).describe("Field values to update"),
       }),
-      execute: async ({ record_id, model_api_key, data }: { record_id: string; model_api_key: string; data: Record<string, unknown> }) => {
+      execute: async ({ record_id, model_api_key, data }) => {
         console.info("[chat] tool:update_record", { record_id, model_api_key, data: JSON.stringify(data).slice(0, 500) });
         const result = await run(RecordService.patchRecord(record_id, { modelApiKey: model_api_key, data }), fullLayer);
         console.info("[chat] tool:update_record result", result ? "success" : "null");
@@ -142,7 +238,7 @@ export function createChatHandler(
         model_api_key: z.string().describe("The model's api_key"),
         record_id: z.string().describe("The record ID"),
       }),
-      execute: async ({ model_api_key, record_id }: { model_api_key: string; record_id: string }) => {
+      execute: async ({ model_api_key, record_id }) => {
         console.info("[chat] tool:publish_record", { model_api_key, record_id });
         return run(PublishService.publishRecord(model_api_key, record_id), fullLayer);
       },
@@ -153,28 +249,26 @@ export function createChatHandler(
       inputSchema: z.object({
         query: z.string().optional().describe("Search term"),
       }),
-      execute: async ({ query }: { query?: string }) => {
+      execute: async ({ query }) => {
         console.info("[chat] tool:list_assets", { query });
         return run(AssetService.searchAssets({ query, limit: 24, offset: 0 }), fullLayer);
       },
     }),
 
     search_content: tool({
-      description: "Search CMS content across all models. Returns record IDs, model keys, and snippets. Use this to find records for internal linking.",
+      description: "Search CMS content across all models. Returns record IDs, model keys, and snippets.",
       inputSchema: z.object({
         query: z.string().describe("Search query"),
         model_api_key: z.string().optional().describe("Restrict to a specific model"),
       }),
-      execute: async ({ query, model_api_key }: { query: string; model_api_key?: string }) => {
+      execute: async ({ query, model_api_key }) => {
         console.info("[chat] tool:search_content", { query, model_api_key });
         const results = await run(SearchService.search({ query, modelApiKey: model_api_key, first: 10 }), fullLayer);
-        // Enrich with record titles for the model to use
         const enriched = await Promise.all(
           results.results.map(async (r) => {
             try {
               const record = await run(RecordService.getRecord(r.modelApiKey, r.recordId), fullLayer);
-              const displayTitle = getDisplayTitle(record, r.recordId);
-              return { ...r, title: displayTitle };
+              return { ...r, title: getDisplayTitle(record, r.recordId, currentLocale) };
             } catch {
               return { ...r, title: r.recordId };
             }
@@ -191,7 +285,7 @@ After calling this, use the returned [text](itemLink:RECORD_ID) syntax in your n
       inputSchema: z.object({
         queries: z.array(z.string()).describe("Search queries to find related content"),
       }),
-      execute: async ({ queries }: { queries: string[] }) => {
+      execute: async ({ queries }) => {
         console.info("[chat] tool:find_linkable_content", { queries });
         const seen = new Set<string>();
         const records: Array<{ recordId: string; modelApiKey: string; title: string; linkSyntax: string }> = [];
@@ -202,13 +296,8 @@ After calling this, use the returned [text](itemLink:RECORD_ID) syntax in your n
             seen.add(r.recordId);
             try {
               const record = await run(RecordService.getRecord(r.modelApiKey, r.recordId), fullLayer);
-              const displayTitle = getDisplayTitle(record, r.recordId);
-              records.push({
-                recordId: r.recordId,
-                modelApiKey: r.modelApiKey,
-                title: displayTitle,
-                linkSyntax: `[${displayTitle}](itemLink:${r.recordId})`,
-              });
+              const title = getDisplayTitle(record, r.recordId, currentLocale);
+              records.push({ recordId: r.recordId, modelApiKey: r.modelApiKey, title, linkSyntax: `[${title}](itemLink:${r.recordId})` });
             } catch {
               records.push({ recordId: r.recordId, modelApiKey: r.modelApiKey, title: r.recordId, linkSyntax: `[${r.recordId}](itemLink:${r.recordId})` });
             }
@@ -220,83 +309,36 @@ After calling this, use the returned [text](itemLink:RECORD_ID) syntax in your n
     }),
 
     update_structured_text: tool({
-      description: `Update a structured_text field using markdown. Supports full formatting: headings, bold, italic, lists, blockquotes, code blocks, links, etc.
-
-To reference existing blocks (e.g. image blocks), include sentinel comments in the markdown:
-  <!-- cms:block:BLOCK_ID -->
-
-Example markdown:
-  # My Title
-
-  A paragraph with **bold** and *italic* text.
-
-  <!-- cms:block:body:en:img-block-1 -->
-
-  Another paragraph after the image block.
-
-To add a NEW block, first use create_block to create it, then reference its ID here.`,
+      description: `Update a structured_text field using markdown. Supports headings, bold, italic, lists, blockquotes, code blocks, links. Use <!-- cms:block:BLOCK_ID --> on its own line to position existing blocks.`,
       inputSchema: z.object({
         record_id: z.string().describe("The record ID"),
         model_api_key: z.string().describe("The model's api_key"),
         field_api_key: z.string().describe("The structured_text field api_key"),
         locale: z.string().describe("Locale code, e.g. 'en'"),
-        markdown: z.string().describe("Markdown content. Use <!-- cms:block:ID --> to position blocks."),
+        markdown: z.string().describe("Markdown content"),
       }),
-      execute: async ({ record_id, model_api_key, field_api_key, locale, markdown }: {
-        record_id: string; model_api_key: string; field_api_key: string; locale: string; markdown: string;
-      }) => {
+      execute: async ({ record_id, model_api_key, field_api_key, locale, markdown }) => {
         console.info("[chat] tool:update_structured_text", record_id, field_api_key, locale);
         console.info("[chat] markdown input:\n" + markdown.slice(0, 800));
         const { markdownToDast } = await import("../dast/markdown.js");
         const dastDocument = markdownToDast(markdown);
-        // Collect block IDs referenced in the markdown
-        const blockIds: string[] = [];
-        for (const child of dastDocument.document.children) {
-          if (child.type === "block") blockIds.push(child.item);
-        }
-        // Materialize existing blocks from DB so we can preserve referenced ones
-        const record = await run(RecordService.getRecord(model_api_key, record_id), fullLayer);
-        const currentField = record[field_api_key] as Record<string, unknown> | undefined;
-        const rawValue = currentField?.[locale];
-        const storageKey = StructuredTextService.getStructuredTextStorageKey(field_api_key, locale);
-        const materialized = rawValue ? await run(
-          StructuredTextService.materializeStructuredTextValue({
-            parentContainerModelApiKey: model_api_key,
-            parentBlockId: null,
-            parentFieldApiKey: field_api_key,
-            rootRecordId: record_id,
-            rootFieldApiKey: storageKey,
-            rawValue,
-          }),
-          fullLayer,
-        ) : null;
-        // Build block lookup from materialized blocks (keyed by both scoped and unscoped)
-        const blockLookup = new Map<string, unknown>();
-        for (const [id, data] of Object.entries(materialized?.blocks ?? {})) {
-          blockLookup.set(id, data);
-          blockLookup.set(unscopeBlockId(id, field_api_key, locale), data);
-        }
-        // Unscope all DAST block refs and resolve block data
-        const blocks: Record<string, unknown> = {};
-        for (const child of dastDocument.document.children) {
-          if (child.type === "block") {
-            const originalId = child.item;
-            const unscopedId = unscopeBlockId(originalId, field_api_key, locale);
-            (child as { item: string }).item = unscopedId;
-            const blockData = blockLookup.get(originalId) ?? blockLookup.get(unscopedId);
-            if (blockData) blocks[unscopedId] = blockData;
-          }
-        }
-        const stValue = { value: dastDocument, blocks };
-        const data = { [field_api_key]: { [locale]: stValue } };
+        const rawValue = getLocalizedField(
+          await run(RecordService.getRecord(model_api_key, record_id), fullLayer),
+          field_api_key,
+          locale,
+        );
+        const materialized = rawValue ? await materializeBlocks(model_api_key, record_id, field_api_key, locale, rawValue, fullLayer) : null;
+        const blockLookup = buildBlockLookup(materialized?.blocks ?? {}, field_api_key, locale);
+        const blocks = resolveBlocks(dastDocument, blockLookup, field_api_key, locale);
+        const data = { [field_api_key]: { [locale]: { value: dastDocument, blocks } } };
         const result = await run(RecordService.patchRecord(record_id, { modelApiKey: model_api_key, data }), fullLayer);
-        console.info("[chat] tool:update_structured_text result", result ? "success" : "null", { blockIds });
+        console.info("[chat] tool:update_structured_text result", result ? "success" : "null");
         return result;
       },
     }),
 
     add_block_to_structured_text: tool({
-      description: `Add a new block (e.g. image_block) to a structured_text field. Provide the full markdown content with <!-- cms:block:NEW --> where you want the new block inserted. The tool creates the block and wires everything.
+      description: `Add a new block (e.g. image_block) to a structured_text field. Write markdown with <!-- cms:block:NEW --> where you want the block. The tool creates the block and wires everything.
 
 For image blocks, first call list_assets to get the asset ID.`,
       inputSchema: z.object({
@@ -304,58 +346,30 @@ For image blocks, first call list_assets to get the asset ID.`,
         model_api_key: z.string().describe("The model's api_key"),
         field_api_key: z.string().describe("The structured_text field api_key"),
         locale: z.string().describe("Locale code, e.g. 'en'"),
-        markdown: z.string().describe("Full markdown content. Use <!-- cms:block:NEW --> where you want the new block."),
+        markdown: z.string().describe("Markdown with <!-- cms:block:NEW --> placeholder"),
         block_type: z.string().describe("Block model api_key, e.g. 'image_block'"),
-        block_data: z.record(z.string(), z.unknown()).describe("Block field values, e.g. { image: 'ASSET_ID', caption: 'Photo' }"),
+        block_data: z.record(z.string(), z.unknown()).describe("Block field values"),
       }),
-      execute: async ({ record_id, model_api_key, field_api_key, locale, markdown, block_type, block_data }: {
-        record_id: string; model_api_key: string; field_api_key: string; locale: string; markdown: string; block_type: string; block_data: Record<string, unknown>;
-      }) => {
+      execute: async ({ record_id, model_api_key, field_api_key, locale, markdown, block_type, block_data }) => {
         console.info("[chat] tool:add_block_to_structured_text", { record_id, field_api_key, locale, block_type });
         const { ulid: generateId } = await import("ulidx");
         const { markdownToDast } = await import("../dast/markdown.js");
         const blockId = generateId();
-        // Replace the NEW placeholder with the actual block ID
         const resolvedMarkdown = markdown.replace(/<!--\s*cms:block:NEW\s*-->/g, `<!-- cms:block:${blockId} -->`);
         console.info("[chat] resolved markdown:\n" + resolvedMarkdown.slice(0, 800));
         const dastDocument = markdownToDast(resolvedMarkdown);
-        // Materialize existing blocks from DB to preserve them
-        const record = await run(RecordService.getRecord(model_api_key, record_id), fullLayer);
-        const currentField = record[field_api_key] as Record<string, unknown> | undefined;
-        const rawValue = currentField?.[locale];
-        const storageKey = StructuredTextService.getStructuredTextStorageKey(field_api_key, locale);
-        const materialized = rawValue ? await run(
-          StructuredTextService.materializeStructuredTextValue({
-            parentContainerModelApiKey: model_api_key,
-            parentBlockId: null,
-            parentFieldApiKey: field_api_key,
-            rootRecordId: record_id,
-            rootFieldApiKey: storageKey,
-            rawValue,
-          }),
-          fullLayer,
-        ) : null;
-        // Build block lookup from materialized blocks (keyed by both scoped and unscoped)
-        const blockLookup = new Map<string, unknown>();
-        for (const [id, data] of Object.entries(materialized?.blocks ?? {})) {
-          blockLookup.set(id, data);
-          blockLookup.set(unscopeBlockId(id, field_api_key, locale), data);
-        }
-        // Build blocks map: existing (unscoped) + new. Unscope all DAST refs.
-        const blocks: Record<string, unknown> = {};
-        for (const child of dastDocument.document.children) {
-          if (child.type === "block") {
-            const unscopedId = unscopeBlockId(child.item, field_api_key, locale);
-            (child as { item: string }).item = unscopedId;
-            if (unscopedId === blockId) {
-              blocks[blockId] = { _type: block_type, ...block_data };
-            } else if (blockLookup.has(child.item) || blockLookup.has(unscopedId)) {
-              blocks[unscopedId] = blockLookup.get(unscopedId) ?? blockLookup.get(child.item);
-            }
-          }
-        }
-        const stValue = { value: dastDocument, blocks };
-        const data = { [field_api_key]: { [locale]: stValue } };
+        const rawValue = getLocalizedField(
+          await run(RecordService.getRecord(model_api_key, record_id), fullLayer),
+          field_api_key,
+          locale,
+        );
+        const materialized = rawValue ? await materializeBlocks(model_api_key, record_id, field_api_key, locale, rawValue, fullLayer) : null;
+        const blockLookup = buildBlockLookup(materialized?.blocks ?? {}, field_api_key, locale);
+        const blocks = resolveBlocks(dastDocument, blockLookup, field_api_key, locale, {
+          id: blockId,
+          data: { _type: block_type, ...block_data },
+        });
+        const data = { [field_api_key]: { [locale]: { value: dastDocument, blocks } } };
         const result = await run(RecordService.patchRecord(record_id, { modelApiKey: model_api_key, data }), fullLayer);
         console.info("[chat] tool:add_block result", { blockId, blockCount: Object.keys(blocks).length });
         return result;
@@ -369,7 +383,7 @@ For image blocks, first call list_assets to get the asset ID.`,
         filename: z.string().optional().describe("Override filename"),
         alt: z.string().optional().describe("Alt text"),
       }),
-      execute: async ({ url, filename, alt }: { url: string; filename?: string; alt?: string }) => {
+      execute: async ({ url, filename, alt }) => {
         console.info("[chat] tool:upload_image_from_url", { url, filename });
         if (!options.r2Bucket) {
           return { error: "R2 bucket not configured" };
@@ -393,18 +407,18 @@ For image blocks, first call list_assets to get the asset ID.`,
   }
 
   return async (request: Request): Promise<Response> => {
-    const body: { messages: UIMessage[]; recordId?: string; modelApiKey?: string } = await request.json();
-    const tools = createTools(body.recordId);
+    const body: ChatRequestBody = await request.json();
+    const tools = createTools(body.recordId, body.locale);
     const lastTextPart = body.messages.at(-1)?.parts.find((part) => part.type === "text");
 
     console.info("[chat] request", {
       messageCount: body.messages.length,
       recordId: body.recordId,
       modelApiKey: body.modelApiKey,
+      locale: body.locale,
       lastMessageLength: lastTextPart?.text.length ?? 0,
     });
 
-    // Build system prompt, optionally pre-warmed with record context
     let systemPrompt = SYSTEM_PROMPT;
     if (body.recordId && body.modelApiKey) {
       try {
@@ -416,23 +430,21 @@ For image blocks, first call list_assets to get the asset ID.`,
           fullLayer,
         );
 
-        // Record health
         const status = typeof record._status === "string" ? record._status : "unknown";
         const publishedAt = typeof record._published_at === "string" ? record._published_at : null;
         const hasDraft = status === "draft" || status === "updated";
 
-        // Field completeness + structured text markdown preview
         const { dastToMarkdown } = await import("../dast/markdown.js");
-        const fieldSummaries: unknown[] = [];
+        const fieldSummaries: Array<Record<string, unknown>> = [];
         const markdownPreviews: string[] = [];
 
-        for (const f of fields as Array<{ api_key: string; field_type: string; localized: number; label: string; validators: Record<string, unknown> }>) {
+        for (const f of fields) {
           const val = record[f.api_key];
           const required = Boolean(f.validators.required);
           const summary: Record<string, unknown> = { api_key: f.api_key, label: f.label, type: f.field_type, localized: !!f.localized, required };
 
           if (f.localized) {
-            const localizedVal = val as Record<string, unknown> | undefined;
+            const localizedVal = val && typeof val === "object" && !Array.isArray(val) ? val as Record<string, unknown> : undefined;
             const filledLocales = localizedVal ? locales.filter((l) => {
               const v = localizedVal[l];
               return v !== null && v !== undefined && v !== "";
@@ -440,30 +452,17 @@ For image blocks, first call list_assets to get the asset ID.`,
             summary.filled = filledLocales;
             summary.missing = locales.filter((l) => !filledLocales.includes(l));
 
-            // For structured_text, show markdown source + block info per locale
             if (f.field_type === "structured_text" && localizedVal) {
               for (const locale of filledLocales) {
-                const stVal = localizedVal[locale] as { schema?: string; document?: unknown } | undefined;
-                if (stVal?.document) {
+                const stVal = localizedVal[locale];
+                if (isDastValue(stVal)) {
                   try {
-                    const md = dastToMarkdown({ schema: "dast", document: stVal.document as { type: "root"; children: [] } });
+                    const md = dastToMarkdown(stVal as DastDocument);
                     markdownPreviews.push(`Current ${f.api_key} [${locale}] markdown source (use this format when rewriting):\n\`\`\`markdown\n${md}\`\`\``);
                   } catch { /* skip */ }
                 }
-                // Materialize blocks to show what's available
-                const storageKey = StructuredTextService.getStructuredTextStorageKey(f.api_key, locale);
                 try {
-                  const materialized = await run(
-                    StructuredTextService.materializeStructuredTextValue({
-                      parentContainerModelApiKey: body.modelApiKey,
-                      parentBlockId: null,
-                      parentFieldApiKey: f.api_key,
-                      rootRecordId: body.recordId,
-                      rootFieldApiKey: storageKey,
-                      rawValue: localizedVal[locale],
-                    }),
-                    fullLayer,
-                  );
+                  const materialized = await materializeBlocks(body.modelApiKey, body.recordId, f.api_key, locale, stVal, fullLayer);
                   if (materialized?.blocks && Object.keys(materialized.blocks).length > 0) {
                     markdownPreviews.push(`Blocks in ${f.api_key} [${locale}]:\n${Object.entries(materialized.blocks).map(([id, b]) => `  ${id}: ${JSON.stringify(b)}`).join("\n")}`);
                   }
@@ -481,6 +480,7 @@ For image blocks, first call list_assets to get the asset ID.`,
 ACTIVE RECORD — use these exact values with update_record:
   record_id: "${body.recordId}"
   model_api_key: "${body.modelApiKey}"
+  current_locale: ${body.locale ?? locales[0] ?? "en"}
   status: ${status}${hasDraft ? " (unpublished changes)" : ""}
   published: ${publishedAt ?? "never"}
   locales: [${locales.join(", ")}]
