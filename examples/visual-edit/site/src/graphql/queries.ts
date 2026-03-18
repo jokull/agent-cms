@@ -13,6 +13,20 @@ export const PAGE_QUERY = `
       }
       body {
         value
+        blocks {
+          __typename
+          ... on ImageBlockRecord {
+            id
+            image {
+              id
+              url
+              width
+              height
+              alt
+            }
+            caption
+          }
+        }
       }
     }
   }
@@ -32,8 +46,24 @@ export interface PageData {
     } | null;
     body: {
       value: DastDocument;
+      blocks: BodyBlock[];
     } | null;
   } | null;
+}
+
+export type BodyBlock = ImageBlockRecord;
+
+export interface ImageBlockRecord {
+  __typename: "ImageBlockRecord";
+  id: string;
+  image: {
+    id: string;
+    url: string;
+    width: number;
+    height: number;
+    alt: string | null;
+  };
+  caption: string | null;
 }
 
 interface DastDocument {
@@ -50,7 +80,8 @@ type DastNode =
   | { type: "list"; style: "bulleted" | "numbered"; children: DastListItem[] }
   | { type: "blockquote"; children: { type: "paragraph"; children: DastInline[] }[] }
   | { type: "code"; code: string; language?: string }
-  | { type: "thematicBreak" };
+  | { type: "thematicBreak" }
+  | { type: "block"; item: string };
 
 type DastListItem = { type: "listItem"; children: DastNode[] };
 

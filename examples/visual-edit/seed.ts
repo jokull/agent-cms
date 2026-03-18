@@ -37,7 +37,27 @@ async function main() {
   const enLocale = await api("POST", "/api/locales", { code: "en", position: 0 }) as { id: string };
   await api("POST", "/api/locales", { code: "is", position: 1, fallbackLocaleId: enLocale.id });
 
-  // Create page model (singleton)
+  // --- Block model: image_block ---
+  const imageBlock = await api("POST", "/api/models", {
+    name: "Image Block",
+    apiKey: "image_block",
+    isBlock: true,
+  }) as { id: string };
+
+  await api("POST", `/api/models/${imageBlock.id}/fields`, {
+    label: "Image",
+    apiKey: "image",
+    fieldType: "media",
+    validators: { required: {} },
+  });
+
+  await api("POST", `/api/models/${imageBlock.id}/fields`, {
+    label: "Caption",
+    apiKey: "caption",
+    fieldType: "string",
+  });
+
+  // --- Page model (singleton) ---
   const model = await api("POST", "/api/models", {
     name: "Page",
     apiKey: "page",
@@ -45,7 +65,6 @@ async function main() {
     hasDraft: true,
   }) as { id: string };
 
-  // Create fields
   await api("POST", `/api/models/${model.id}/fields`, {
     label: "Title",
     apiKey: "title",
@@ -65,10 +84,13 @@ async function main() {
     apiKey: "body",
     fieldType: "structured_text",
     localized: true,
+    validators: {
+      structured_text_blocks: ["image_block"],
+    },
   });
 
-  // Create a placeholder asset
-  const asset = await api("POST", "/api/assets", {
+  // --- Assets ---
+  const heroAsset = await api("POST", "/api/assets", {
     id: "hero-placeholder",
     filename: "hero.jpg",
     mimeType: "image/jpeg",
@@ -78,7 +100,19 @@ async function main() {
     alt: "Hero placeholder",
   }) as { id: string };
 
-  // Create the singleton page record with bilingual content
+  const blockImageAsset = await api("POST", "/api/assets", {
+    id: "block-image-1",
+    filename: "feature-screenshot.jpg",
+    mimeType: "image/jpeg",
+    size: 0,
+    width: 800,
+    height: 600,
+    alt: "Visual editing in action",
+  }) as { id: string };
+
+  // --- Page record with bilingual content ---
+  const blockId = "img-block-1";
+
   const record = await api("POST", "/api/records", {
     modelApiKey: "page",
     data: {
@@ -86,7 +120,7 @@ async function main() {
         en: "Welcome to Agent CMS",
         is: "Velkomin í Agent CMS",
       },
-      hero_image: asset.id,
+      hero_image: heroAsset.id,
       body: {
         en: {
           value: {
@@ -152,6 +186,16 @@ async function main() {
                     },
                   ],
                 },
+                // Image block embedded in the structured text
+                { type: "block", item: blockId },
+                {
+                  type: "paragraph",
+                  children: [
+                    { type: "span", value: "The image above is an " },
+                    { type: "span", value: "image block", marks: ["strong"] },
+                    { type: "span", value: " inside structured text — hover it to swap the image." },
+                  ],
+                },
                 {
                   type: "paragraph",
                   children: [
@@ -163,7 +207,13 @@ async function main() {
               ],
             },
           },
-          blocks: {},
+          blocks: {
+            [blockId]: {
+              _type: "image_block",
+              image: blockImageAsset.id,
+              caption: "Visual editing in action",
+            },
+          },
         },
         is: {
           value: {
