@@ -44,7 +44,7 @@ function describeUnknown(error: unknown): string {
   }
 }
 
-function getRequestIdFromHeaders(headers: Headers | globalThis.Headers): string {
+function getRequestIdFromHeaders(headers: Headers): string {
   return headers.get("x-request-id") ?? headers.get("cf-ray") ?? crypto.randomUUID();
 }
 

@@ -82,11 +82,12 @@ function scheduleFlush(params: {
   if (params.loader.scheduled) return;
   params.loader.scheduled = true;
 
-  queueMicrotask(async () => {
-    const pending = [...params.loader.pending.entries()];
-    params.loader.pending.clear();
-    params.loader.scheduled = false;
-    if (pending.length === 0) return;
+  queueMicrotask(() => {
+    void (async () => {
+      const pending = [...params.loader.pending.entries()];
+      params.loader.pending.clear();
+      params.loader.scheduled = false;
+      if (pending.length === 0) return;
 
     try {
       const results = await params.runSql(
@@ -108,11 +109,12 @@ function scheduleFlush(params: {
         entry.deferred.resolve(results.get(requestKey) ?? null);
       }
     } catch (error) {
-      for (const [requestKey, entry] of pending) {
-        params.loader.cache.delete(requestKey);
-        entry.deferred.reject(error);
+        for (const [requestKey, entry] of pending) {
+          params.loader.cache.delete(requestKey);
+          entry.deferred.reject(error);
+        }
       }
-    }
+    })();
   });
 }
 

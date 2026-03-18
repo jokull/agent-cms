@@ -18,6 +18,15 @@ function parseCustomData(value: string | null): Record<string, string> | null {
   return Object.fromEntries(entries);
 }
 
+function coerceStringListValue(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((entry): entry is string => typeof entry === "string");
+  }
+  if (typeof value === "string") return [value];
+  if (typeof value === "number" || typeof value === "boolean") return [String(value)];
+  return [];
+}
+
 /**
  * Legacy DatoCMS/imgix compatibility shim.
  * This only translates the small subset of imgix-style params used by the
@@ -35,10 +44,8 @@ function normalizeImgixParams(raw: Record<string, unknown>): Record<string, unkn
 
   // Format: imgix auto=format → CF format=auto
   const autoValues = Array.isArray(raw.auto)
-    ? raw.auto.map(String)
-    : raw.auto == null
-      ? []
-      : [String(raw.auto)];
+    ? raw.auto.filter((entry): entry is string => typeof entry === "string")
+    : coerceStringListValue(raw.auto);
   if (
     autoValues.includes("format") ||
     autoValues.join(",") === "compress,format" ||

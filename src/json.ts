@@ -13,14 +13,16 @@ export function decodeJsonString(input: string): unknown {
   return Schema.decodeUnknownSync(UnknownJson)(input);
 }
 
-export function tryDecodeJsonString(input: string): unknown | undefined {
+export function tryDecodeJsonString(input: string) {
   const result = Schema.decodeUnknownEither(UnknownJson)(input);
-  return Either.isRight(result) ? result.right : undefined;
+  return Either.isRight(result)
+    ? { ok: true as const, value: result.right }
+    : { ok: false as const };
 }
 
-export function decodeJsonStringOr<A>(input: string, fallback: A): unknown | A {
+export function decodeJsonStringOr<A>(input: string, fallback: A): unknown {
   const parsed = tryDecodeJsonString(input);
-  return parsed === undefined ? fallback : parsed;
+  return parsed.ok ? parsed.value : fallback;
 }
 
 export function decodeJsonRecordStringOr(

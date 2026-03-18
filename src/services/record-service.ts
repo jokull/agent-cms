@@ -108,6 +108,12 @@ function isJsonRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function toSlugSourceString(value: unknown): string | null {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return null;
+}
+
 function scopeStructuredTextIds<T>(value: T, scope: string): T {
   if (!value || typeof value !== "object") return value;
 
@@ -277,10 +283,12 @@ export function createRecord(body: CreateRecordInput) {
 
       if (field.field_type === "slug") {
         const sourceFieldKey = getSlugSource(field.validators);
-        if (!data[field.api_key] && sourceFieldKey && data[sourceFieldKey]) {
-          data[field.api_key] = generateSlug(String(data[sourceFieldKey]));
-        } else if (data[field.api_key]) {
-          data[field.api_key] = generateSlug(String(data[field.api_key]));
+        const sourceValue = sourceFieldKey ? toSlugSourceString(data[sourceFieldKey]) : null;
+        const currentValue = toSlugSourceString(data[field.api_key]);
+        if (!data[field.api_key] && sourceValue) {
+          data[field.api_key] = generateSlug(sourceValue);
+        } else if (currentValue) {
+          data[field.api_key] = generateSlug(currentValue);
         }
         // Enforce uniqueness
         if (data[field.api_key]) {
@@ -521,10 +529,12 @@ export function patchRecord(id: string, body: PatchRecordInput) {
       // Slug field: normalize and enforce uniqueness (excluding current record)
       if (field.field_type === "slug" && data[field.api_key] !== undefined && data[field.api_key] !== null) {
         const sourceFieldKey = getSlugSource(field.validators);
-        if (sourceFieldKey && data[sourceFieldKey] && !data[field.api_key]) {
-          data[field.api_key] = generateSlug(String(data[sourceFieldKey]));
-        } else {
-          data[field.api_key] = generateSlug(String(data[field.api_key]));
+        const sourceValue = sourceFieldKey ? toSlugSourceString(data[sourceFieldKey]) : null;
+        const currentValue = toSlugSourceString(data[field.api_key]);
+        if (sourceValue && !currentValue) {
+          data[field.api_key] = generateSlug(sourceValue);
+        } else if (currentValue) {
+          data[field.api_key] = generateSlug(currentValue);
         }
         // Enforce uniqueness (exclude current record)
         let slug = String(data[field.api_key]);
@@ -799,10 +809,12 @@ export function bulkCreateRecords({ modelApiKey, records }: BulkCreateRecordsInp
 
         if (field.field_type === "slug") {
           const sourceFieldKey = getSlugSource(field.validators);
-          if (!data[field.api_key] && sourceFieldKey && data[sourceFieldKey]) {
-            data[field.api_key] = generateSlug(String(data[sourceFieldKey]));
-          } else if (data[field.api_key]) {
-            data[field.api_key] = generateSlug(String(data[field.api_key]));
+          const sourceValue = sourceFieldKey ? toSlugSourceString(data[sourceFieldKey]) : null;
+          const currentValue = toSlugSourceString(data[field.api_key]);
+          if (!data[field.api_key] && sourceValue) {
+            data[field.api_key] = generateSlug(sourceValue);
+          } else if (currentValue) {
+            data[field.api_key] = generateSlug(currentValue);
           }
           // Uniqueness enforcement
           if (data[field.api_key]) {

@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
+import { decodeJsonRecordStringOr } from "../json.js";
 
 /**
  * Typed access to field validator properties.
@@ -165,14 +166,7 @@ export function findUniqueConstraintViolations(options: {
 
 function parseLocaleMap(value: unknown): Record<string, unknown> {
   if (value === null || value === undefined) return {};
-  let parsed = value;
-  if (typeof parsed === "string") {
-    try {
-      parsed = JSON.parse(parsed);
-    } catch {
-      return {};
-    }
-  }
+  const parsed = typeof value === "string" ? decodeJsonRecordStringOr(value, {}) : value;
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
   return parsed as Record<string, unknown>;
 }

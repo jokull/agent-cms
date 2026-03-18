@@ -23,6 +23,19 @@ interface SqlCondition {
   params: unknown[];
 }
 
+function isFilterInput(value: unknown): value is FilterInput {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isPrimitiveArray(value: unknown): value is Array<string | number | boolean | null> {
+  return Array.isArray(value)
+    && value.every((item) =>
+      typeof item === "string"
+      || typeof item === "number"
+      || typeof item === "boolean"
+      || item === null);
+}
+
 function isSqlCondition(v: SqlCondition | null): v is SqlCondition {
   return v !== null;
 }
@@ -91,6 +104,7 @@ function buildSqlConditions(
     // --- Logical operators ---
     if (key === "AND" && Array.isArray(value)) {
       const parts = value
+        .filter(isFilterInput)
         .map((f) => buildSqlConditions(f, opts))
         .map((sc) => {
           if (sc.length === 0) return null;
@@ -108,6 +122,7 @@ function buildSqlConditions(
 
     if (key === "OR" && Array.isArray(value)) {
       const parts = value
+        .filter(isFilterInput)
         .map((f) => buildSqlConditions(f, opts))
         .map((sc) => {
           if (sc.length === 0) return null;
@@ -188,13 +203,13 @@ function compileOperator(
 
     // --- Set membership (scalar column) ---
     case "in":
-      if (Array.isArray(expected) && expected.length > 0) {
+      if (isPrimitiveArray(expected) && expected.length > 0) {
         const ph = expected.map(() => "?").join(", ");
         return { sql: `${col} IN (${ph})`, params: expected };
       }
       return null;
     case "notIn":
-      if (Array.isArray(expected) && expected.length > 0) {
+      if (isPrimitiveArray(expected) && expected.length > 0) {
         if (isJsonArray) {
           // For JSON array columns: none of the specified values appear in the array
           const ph = expected.map(() => "?").join(", ");
@@ -210,7 +225,7 @@ function compileOperator(
 
     // --- JSON array operators (links/gallery columns stored as JSON arrays) ---
     case "allIn":
-      if (Array.isArray(expected) && expected.length > 0) {
+      if (isPrimitiveArray(expected) && expected.length > 0) {
         const ph = expected.map(() => "?").join(", ");
         return {
           sql: `(SELECT COUNT(DISTINCT value) FROM json_each(${col}) WHERE value IN (${ph})) = ?`,
@@ -219,7 +234,7 @@ function compileOperator(
       }
       return null;
     case "anyIn":
-      if (Array.isArray(expected) && expected.length > 0) {
+      if (isPrimitiveArray(expected) && expected.length > 0) {
         const ph = expected.map(() => "?").join(", ");
         return {
           sql: `EXISTS (SELECT 1 FROM json_each(${col}) WHERE value IN (${ph}))`,

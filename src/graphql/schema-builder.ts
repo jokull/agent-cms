@@ -17,14 +17,22 @@ import { buildQueryResolvers } from "./query-resolvers.js";
 import { buildReverseRefs, buildReverseRefResolvers } from "./reverse-ref-resolvers.js";
 import { buildAssetResolvers } from "./asset-resolvers.js";
 import { recordSqlMetrics } from "./sql-metrics.js";
+import { encodeJson } from "../json.js";
+
+function serializeGraphqlScalar(value: unknown): string | null {
+  if (value == null) return null;
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return encodeJson(value);
+}
 
 const GraphQLItemId = new GraphQLScalarType({
   name: "ItemId",
   serialize(value) {
-    return value == null ? null : String(value);
+    return serializeGraphqlScalar(value);
   },
   parseValue(value) {
-    return value == null ? null : String(value);
+    return serializeGraphqlScalar(value);
   },
   parseLiteral(ast) {
     if (ast.kind === Kind.STRING || ast.kind === Kind.INT) {
@@ -37,10 +45,10 @@ const GraphQLItemId = new GraphQLScalarType({
 const GraphQLSiteLocale = new GraphQLScalarType({
   name: "SiteLocale",
   serialize(value) {
-    return value == null ? null : String(value);
+    return serializeGraphqlScalar(value);
   },
   parseValue(value) {
-    return value == null ? null : String(value);
+    return serializeGraphqlScalar(value);
   },
   parseLiteral(ast) {
     if (ast.kind === Kind.STRING || ast.kind === Kind.ENUM) {

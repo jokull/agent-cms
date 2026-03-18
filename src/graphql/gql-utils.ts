@@ -5,6 +5,7 @@ import { FIELD_TYPE_REGISTRY, type FieldTypeDefinition } from "../field-types.js
 import { isFieldType } from "../types.js";
 import { getLinkTargets, getLinksTargets } from "../db/validators.js";
 import type { DynamicRow } from "./gql-types.js";
+import { decodeJsonIfString, decodeJsonStringOr } from "../json.js";
 
 /** Convert snake_case api_key to PascalCase GraphQL type name */
 export function toTypeName(apiKey: string): string {
@@ -131,16 +132,7 @@ export function applyOrdering(records: DynamicRow[], orderBy: string[] | undefin
  */
 export function decodeSnapshot(record: DynamicRow, includeDrafts: boolean): DynamicRow {
   if (includeDrafts || !record._published_snapshot) return record;
-  let snapshot: unknown;
-  if (typeof record._published_snapshot === "string") {
-    try {
-      snapshot = JSON.parse(record._published_snapshot);
-    } catch {
-      return record;
-    }
-  } else {
-    snapshot = record._published_snapshot;
-  }
+  const snapshot = decodeJsonIfString(record._published_snapshot);
   if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return record;
   return { ...record, ...(snapshot as DynamicRow) };
 }
@@ -148,10 +140,7 @@ export function decodeSnapshot(record: DynamicRow, includeDrafts: boolean): Dyna
 /** Resolve a video field value into a VideoField object */
 export function resolveVideoField(raw: unknown): Record<string, unknown> | null {
   if (!raw) return null;
-  let val = raw;
-  if (typeof val === "string") {
-    try { val = JSON.parse(val); } catch { /* bare URL string */ }
-  }
+  const val = decodeJsonIfString(raw);
   if (typeof val === "string") {
     return { url: val, title: null, provider: null, providerUid: null, thumbnailUrl: null, width: null, height: null };
   }
@@ -175,7 +164,7 @@ export function deserializeRecord(record: DynamicRow): DynamicRow {
   const result: DynamicRow = {};
   for (const [key, value] of Object.entries(record)) {
     if (typeof value === "string" && (value.startsWith("{") || value.startsWith("["))) {
-      try { result[key] = JSON.parse(value); } catch { result[key] = value; }
+      result[key] = decodeJsonStringOr(value, value);
     } else {
       result[key] = value;
     }

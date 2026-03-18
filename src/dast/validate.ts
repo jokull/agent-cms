@@ -54,7 +54,7 @@ export function validateBlocksOnly(doc: unknown): ValidationError[] {
     if (!child || child.type !== "block") {
       errors.push({
         path: `document.children[${i}]`,
-        message: `Only block nodes are allowed at root level in a blocks-only field. Found "${child?.type ?? "unknown"}" node.`,
+        message: `Only block nodes are allowed at root level in a blocks-only field. Found "${typeof child?.type === "string" ? child.type : "unknown"}" node.`,
       });
     }
   }

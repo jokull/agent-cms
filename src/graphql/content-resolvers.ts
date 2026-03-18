@@ -11,18 +11,20 @@ import { resolveStructuredTextValue } from "./structured-text-resolver.js";
 import { loadLinkedRecords } from "./linked-record-loader.js";
 import { loadStructuredTextEnvelope } from "./structured-text-loader.js";
 import { getBlockWhitelist } from "../db/validators.js";
+import { decodeJsonIfString, decodeJsonStringOr } from "../json.js";
+
+function parseCustomData(value: string | null): Record<string, string> | null {
+  if (!value) return null;
+  const parsed = decodeJsonStringOr(value, null);
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+  const entries = Object.entries(parsed).filter(([, entryValue]) => typeof entryValue === "string");
+  return Object.fromEntries(entries);
+}
 
 function pickLocalizedEntry(rawValue: unknown, context: GqlContext, defaultLocale?: string | null) {
   if (rawValue === null || rawValue === undefined) return { locale: null, value: null };
 
-  let localeMap = rawValue;
-  if (typeof localeMap === "string") {
-    try {
-      localeMap = JSON.parse(localeMap);
-    } catch {
-      return { locale: null, value: rawValue };
-    }
-  }
+  const localeMap = decodeJsonIfString(rawValue);
   if (typeof localeMap !== "object" || localeMap === null || Array.isArray(localeMap)) {
     return { locale: null, value: rawValue };
   }
@@ -160,7 +162,7 @@ export function buildContentModelResolvers(
         let seo = seoField.localized
           ? pickLocalizedValue(parent[seoField.api_key], context, defaultLocale)
           : parent[seoField.api_key];
-        if (typeof seo === "string") { try { seo = JSON.parse(seo); } catch { seo = null; } }
+        if (typeof seo === "string") seo = decodeJsonStringOr(seo, null);
         if (seo && typeof seo === "object") {
           const seoObj = seo as DynamicRow;
           title = (seoObj.title as string) ?? null;
@@ -268,7 +270,7 @@ export function buildContentModelResolvers(
           let localeMap = parent[dbKey];
           if (!localeMap) continue;
           if (typeof localeMap === "string") {
-            try { localeMap = JSON.parse(localeMap); } catch { continue; }
+            localeMap = decodeJsonIfString(localeMap);
           }
           if (typeof localeMap === "object" && localeMap !== null) {
             for (const [locale, value] of Object.entries(localeMap as Record<string, unknown>)) {
@@ -291,7 +293,7 @@ export function buildContentModelResolvers(
         let localeMap = parent[f.api_key];
         if (!localeMap) return [];
         if (typeof localeMap === "string") {
-          try { localeMap = JSON.parse(localeMap); } catch { return []; }
+          localeMap = decodeJsonIfString(localeMap);
         }
         if (typeof localeMap !== "object" || localeMap === null) return [];
         return Object.entries(localeMap as Record<string, unknown>)
@@ -330,7 +332,7 @@ export function buildContentModelResolvers(
           id: a.id, filename: a.filename, mimeType: a.mime_type,
           size: a.size, width: a.width, height: a.height,
           alt: a.alt, title: a.title, blurhash: a.blurhash ?? null,
-          customData: a.custom_data ? JSON.parse(a.custom_data) : null,
+          customData: parseCustomData(a.custom_data),
           url: assetUrl(a.id, a.filename),
         });
       }
@@ -363,7 +365,7 @@ export function buildContentModelResolvers(
           typeResolvers[gqlName] = async (parent: DynamicRow, _args: unknown, context: GqlContext) => {
             let linkedIds = parent[f.api_key];
             if (typeof linkedIds === "string") {
-              try { linkedIds = JSON.parse(linkedIds); } catch { return []; }
+              linkedIds = decodeJsonIfString(linkedIds);
             }
             if (!Array.isArray(linkedIds)) return [];
             const resolved = await loadLinkedRecords({
@@ -392,7 +394,7 @@ export function buildContentModelResolvers(
       if (f.field_type === "media_gallery") {
         typeResolvers[gqlName] = async (parent: DynamicRow) => {
           let ids = parent[f.api_key];
-          if (typeof ids === "string") { try { ids = JSON.parse(ids); } catch { return []; } }
+          ids = decodeJsonIfString(ids);
           if (!Array.isArray(ids)) return [];
           const assetMap = await batchFetchAssets(ids as string[]);
           // Return in original order
@@ -407,7 +409,7 @@ export function buildContentModelResolvers(
             : parent[f.api_key];
           if (!seo) return null;
           if (typeof seo === "string") {
-            try { seo = JSON.parse(seo); } catch { return null; }
+            seo = decodeJsonStringOr(seo, null);
           }
           // Return the object as-is; image is resolved by the SeoField type resolver
           return seo;
@@ -419,7 +421,7 @@ export function buildContentModelResolvers(
           let color = parent[f.api_key];
           if (!color) return null;
           if (typeof color === "string") {
-            try { color = JSON.parse(color); } catch { return null; }
+            color = decodeJsonStringOr(color, null);
           }
           return color;
         };
@@ -434,7 +436,7 @@ export function buildContentModelResolvers(
           let ll = parent[f.api_key];
           if (!ll) return null;
           if (typeof ll === "string") {
-            try { ll = JSON.parse(ll); } catch { return null; }
+            ll = decodeJsonStringOr(ll, null);
           }
           return ll;
         };

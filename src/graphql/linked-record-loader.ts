@@ -55,11 +55,12 @@ function scheduleFlush(params: {
   if (params.loader.scheduled) return;
   params.loader.scheduled = true;
 
-  queueMicrotask(async () => {
-    const pending = new Map(params.loader.pending);
-    params.loader.pending.clear();
-    params.loader.scheduled = false;
-    if (pending.size === 0) return;
+  queueMicrotask(() => {
+    void (async () => {
+      const pending = new Map(params.loader.pending);
+      params.loader.pending.clear();
+      params.loader.scheduled = false;
+      if (pending.size === 0) return;
 
     const ids = [...pending.keys()];
     try {
@@ -74,11 +75,12 @@ function scheduleFlush(params: {
         deferred.resolve(fetched.get(id) ?? null);
       }
     } catch (error) {
-      for (const [id, deferred] of pending) {
-        params.loader.cache.delete(id);
-        deferred.reject(error);
+        for (const [id, deferred] of pending) {
+          params.loader.cache.delete(id);
+          deferred.reject(error);
+        }
       }
-    }
+    })();
   });
 }
 

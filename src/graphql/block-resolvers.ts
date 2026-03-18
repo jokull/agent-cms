@@ -10,17 +10,11 @@ import type { SchemaBuilderContext, DynamicRow, GqlContext } from "./gql-types.j
 import { toTypeName, toCamelCase, fieldToSDL, getRegistryDef, resolveVideoField } from "./gql-utils.js";
 import { resolveStructuredTextValue } from "./structured-text-resolver.js";
 import { loadLinkedRecords } from "./linked-record-loader.js";
+import { decodeJsonIfString, decodeJsonStringOr } from "../json.js";
 
 function pickLocalizedEntry(rawValue: unknown, context: GqlContext) {
   if (rawValue === null || rawValue === undefined) return { locale: null, value: null };
-  let localeMap = rawValue;
-  if (typeof localeMap === "string") {
-    try {
-      localeMap = JSON.parse(localeMap);
-    } catch {
-      return { locale: null, value: rawValue };
-    }
-  }
+  const localeMap = decodeJsonIfString(rawValue);
   if (typeof localeMap !== "object" || localeMap === null || Array.isArray(localeMap)) {
     return { locale: null, value: rawValue };
   }
@@ -86,7 +80,7 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
             id: a.id, filename: a.filename, mimeType: a.mime_type,
             size: a.size, width: a.width, height: a.height,
             alt: a.alt, title: a.title, blurhash: a.blurhash ?? null,
-            customData: a.custom_data ? JSON.parse(a.custom_data) : null,
+            customData: a.custom_data ? decodeJsonStringOr(a.custom_data, null) : null,
             url: assetUrl(a.id, a.filename),
           };
         };
@@ -137,9 +131,7 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
         if (targets && targets.length > 0) {
           bmResolvers[gqlName] = async (parent: DynamicRow, _args: unknown, context: GqlContext) => {
             let linkedIds = parent[f.api_key];
-            if (typeof linkedIds === "string") {
-              try { linkedIds = JSON.parse(linkedIds); } catch { return []; }
-            }
+            linkedIds = decodeJsonIfString(linkedIds);
             if (!Array.isArray(linkedIds)) return [];
             const resolved = await loadLinkedRecords({
               runSql,
@@ -161,7 +153,7 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
           // Parse JSON-stored fields
           const def = getRegistryDef(f.field_type);
           if (def?.graphqlType === "JSON" && typeof rawVal === "string") {
-            try { return JSON.parse(rawVal); } catch { return rawVal; }
+            return decodeJsonStringOr(rawVal, rawVal);
           }
           return rawVal;
         };

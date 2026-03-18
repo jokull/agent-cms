@@ -26,6 +26,12 @@ export class VectorizeError extends Data.TaggedError("VectorizeError")<{
   readonly message: string;
 }> {}
 
+function describeUnknown(error: unknown): string {
+  if (error instanceof Error) return `${error.name}: ${error.message}`;
+  if (typeof error === "string") return error;
+  return JSON.stringify(error);
+}
+
 const EMBED_MODEL = "@cf/baai/bge-small-en-v1.5";
 
 /**
@@ -35,7 +41,7 @@ export function embedTexts(ai: AiBinding, texts: string[]) {
   if (texts.length === 0) return Effect.succeed([] as number[][]);
   return Effect.tryPromise({
     try: () => ai.run(EMBED_MODEL, { text: texts }),
-    catch: (error) => new VectorizeError({ message: `Embedding failed: ${error}` }),
+    catch: (error) => new VectorizeError({ message: `Embedding failed: ${describeUnknown(error)}` }),
   }).pipe(Effect.map((result) => (result as { data: number[][] }).data));
 }
 
@@ -60,7 +66,7 @@ export function vectorizeIndex(
         values: embeddings[0],
         metadata: { recordId, modelApiKey },
       }]),
-      catch: (error) => new VectorizeError({ message: `Upsert failed: ${error}` }),
+      catch: (error) => new VectorizeError({ message: `Upsert failed: ${describeUnknown(error)}` }),
     });
   });
 }
@@ -75,7 +81,7 @@ export function vectorizeDeindex(
 ) {
   return Effect.tryPromise({
     try: () => vectorize.deleteByIds([`${modelApiKey}:${recordId}`]),
-    catch: (error) => new VectorizeError({ message: `Deindex failed: ${error}` }),
+    catch: (error) => new VectorizeError({ message: `Deindex failed: ${describeUnknown(error)}` }),
   });
 }
 
@@ -98,7 +104,7 @@ export function vectorizeSearch(
     const embeddings = yield* embedTexts(ai, [query]);
     const raw = yield* Effect.tryPromise({
       try: () => vectorize.query(embeddings[0], { topK, returnMetadata: "all" }),
-      catch: (error) => new VectorizeError({ message: `Search failed: ${error}` }),
+      catch: (error) => new VectorizeError({ message: `Search failed: ${describeUnknown(error)}` }),
     });
     const results = raw as { matches: Array<{ id: string; score: number; metadata?: Record<string, string> }> };
     return results.matches.map((m) => ({
