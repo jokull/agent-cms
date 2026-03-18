@@ -191,6 +191,22 @@ agent-cms does not accept binary uploads through the Worker. This is intentional
 
 For DatoCMS migrations specifically, see [`docs/migrations/dato-import.md`](./docs/migrations/dato-import.md).
 
+`agent-cms` also includes an experimental first-class Dato importer:
+
+```bash
+npm run dato:import -- --help
+```
+
+Current workflow:
+
+```bash
+npm run dato:import -- inspect
+npm run dato:import -- bootstrap --adapter trip --cms-url http://127.0.0.1:8791
+npm run dato:import -- import --adapter trip --model article --limit 1 --locale en
+```
+
+The runtime and CLI are generic. The built-in `trip` adapter is the first proven large real-world mapping and remains the validation wedge while broader automatic schema discovery and mapping are generalized.
+
 Example `wrangler.jsonc` with all bindings:
 
 ```jsonc

@@ -1,0 +1,854 @@
+{
+  "site": {
+    "id": "101439",
+    "name": "Trip To Japan",
+    "locales": [
+      "en",
+      "ko",
+      "ja",
+      "zh-CN",
+      "es"
+    ],
+    "theme": {
+      "logo": "60832597",
+      "type": "custom",
+      "dark_color": {
+        "red": 1,
+        "blue": 50,
+        "alpha": 255,
+        "green": 0
+      },
+      "light_color": {
+        "red": 248,
+        "blue": 250,
+        "alpha": 255,
+        "green": 243
+      },
+      "accent_color": {
+        "red": 122,
+        "blue": 141,
+        "alpha": 255,
+        "green": 12
+      },
+      "primary_color": {
+        "red": 96,
+        "blue": 121,
+        "alpha": 255,
+        "green": 96
+      },
+      "hue": null
+    }
+  },
+  "itemTypes": [
+    {
+      "id": "1516397",
+      "apiKey": "article",
+      "name": "Article",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "1516399",
+      "apiKey": "contributor",
+      "name": "Contributor",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "1533807",
+      "apiKey": "image",
+      "name": "Image",
+      "singleton": false,
+      "modularBlock": true,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "1559856",
+      "apiKey": "tour",
+      "name": "Tour",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "1566722",
+      "apiKey": "operator",
+      "name": "Operator",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "1566723",
+      "apiKey": "location",
+      "name": "Location",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "1566774",
+      "apiKey": "about",
+      "name": "About",
+      "singleton": true,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "1736583",
+      "apiKey": "language",
+      "name": "Language",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "1742275",
+      "apiKey": "tour_type",
+      "name": "Tour Type",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": true,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "1788965",
+      "apiKey": "tour_feature",
+      "name": "Tour Feature",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "1814636",
+      "apiKey": "home_page",
+      "name": "Home Page",
+      "singleton": true,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "1974285",
+      "apiKey": "articles_page",
+      "name": "Articles Page",
+      "singleton": true,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "2007733",
+      "apiKey": "legal_document",
+      "name": "Legal Document",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "2012135",
+      "apiKey": "travel_guide",
+      "name": "Travel Guide",
+      "singleton": true,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "2333043",
+      "apiKey": "tripadvisor_review",
+      "name": "Tripadvisor Review",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "2384789",
+      "apiKey": "itinerary_location",
+      "name": "Itinerary  Location",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "2395191",
+      "apiKey": "trip",
+      "name": "Trip",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "2395195",
+      "apiKey": "trip_destination",
+      "name": "Trip Destination",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "2395203",
+      "apiKey": "trip_day",
+      "name": "Trip Day",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "2596715",
+      "apiKey": "tour_card",
+      "name": "Tour Card",
+      "singleton": false,
+      "modularBlock": true,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "2706848",
+      "apiKey": "tour_pickup_location",
+      "name": "Tour Pickup Location",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "ADHIG65pQhae0F7HbgQgeA",
+      "apiKey": "tour_type_search",
+      "name": "Tour Type Search",
+      "singleton": false,
+      "modularBlock": true,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "AoVr4Pd9T42chMgFGD3q_g",
+      "apiKey": "tokyo_cheapo_landing_page",
+      "name": "Tokyo Cheapo Landing Page",
+      "singleton": true,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "A2F8wpktQt6twJB7EBnjbA",
+      "apiKey": "hotel_signup",
+      "name": "Hotel Signup",
+      "singleton": true,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "BYvEHh2LTV6bufPR_ffMNQ",
+      "apiKey": "testimonial",
+      "name": "🗣️ Testimonial",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "B1aVjnkmSaqX3xX3O6r1JA",
+      "apiKey": "block",
+      "name": "Title and Paragraph",
+      "singleton": false,
+      "modularBlock": true,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "EmMeKIfQTlaLUaVWP6InXw",
+      "apiKey": "tour_category_page",
+      "name": "Tour Category Page",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "FAhASdgYQLGuzscgxspNNQ",
+      "apiKey": "guide",
+      "name": "Guide",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "FJ4-AICvSjuO2G2u4FyCGw",
+      "apiKey": "google_place_card",
+      "name": "🗃️ Google Place Card",
+      "singleton": false,
+      "modularBlock": true,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "GFSIgnRXQJOno_g_sXFnoA",
+      "apiKey": "route_destination",
+      "name": "Route Destination",
+      "singleton": false,
+      "modularBlock": true,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "HJqXAOt-Qi2Hk7CNtHu4Qw",
+      "apiKey": "text",
+      "name": "Text",
+      "singleton": false,
+      "modularBlock": true,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "HZOQ46b2Q_S5zcv-3kCiQQ",
+      "apiKey": "osaka_expo_article",
+      "name": "Osaka Expo Article",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "H0Zm5I-DQZmWUjPFsh9MNg",
+      "apiKey": "supplier",
+      "name": "🏭 Supplier",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "IUhME9g9SSOkPv6JHj6eBw",
+      "apiKey": "hotel_room",
+      "name": "Hotel Room",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "IVno-rhYTOalxA_VyWFCvg",
+      "apiKey": "seo_meta_block",
+      "name": "SEO Meta",
+      "singleton": false,
+      "modularBlock": true,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "JXftQ9HjQ_6MxDFpGWnPiA",
+      "apiKey": "yamato_learn_more",
+      "name": "Yamato Learn More",
+      "singleton": true,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "J-ByIku5Re2NnkYrmNUl0w",
+      "apiKey": "collapsible",
+      "name": "Collapsible",
+      "singleton": false,
+      "modularBlock": true,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "KK0dM3DcR-q3tmNtp4xdfQ",
+      "apiKey": "trip_accommodation_information",
+      "name": "Trip Accommodation Information",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "KdGcV4EmQ5aftGXfBrAeTg",
+      "apiKey": "editors_pick",
+      "name": "Editors Pick",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": true,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "KgZe8YMVSGekxt2z3ckO3A",
+      "apiKey": "trip_consulting_email",
+      "name": "Trip Consulting Email",
+      "singleton": true,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "KkdHHDT6QeasUlzugrMG4A",
+      "apiKey": "q_a",
+      "name": "Q&A",
+      "singleton": false,
+      "modularBlock": true,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "K0DaOJGrQy27MI3qG98NUw",
+      "apiKey": "table",
+      "name": "Table",
+      "singleton": false,
+      "modularBlock": true,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "K6nKmNTfRnuuydkXegJqwQ",
+      "apiKey": "tour_signup",
+      "name": "Tour Signup",
+      "singleton": true,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "LAxG3s58SeSmqYvcMP8-pg",
+      "apiKey": "japan_travel_packages_page",
+      "name": "Japan Travel Packages",
+      "singleton": true,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "MyN0PHRBRyW6DZqPrvS_zg",
+      "apiKey": "osaka_expo",
+      "name": "🏯 Osaka Expo",
+      "singleton": true,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "QRGy4xYPS6y-89PRE9N1sQ",
+      "apiKey": "structured_text",
+      "name": "Structured Text",
+      "singleton": false,
+      "modularBlock": true,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "Qz-BklNoS0uVM6jfudZ-6w",
+      "apiKey": "trip_transfer_article",
+      "name": "Trip Transfer Article",
+      "singleton": true,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "RJovOBMyQlWxToPZbse5iQ",
+      "apiKey": "vacancy",
+      "name": "Vacancy",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "RNjXTFkZSS28RgDZ9RWLfA",
+      "apiKey": "creator_testimonial",
+      "name": "Creator Testimonial",
+      "singleton": false,
+      "modularBlock": true,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "RQMyy9oqQwmWmOkUoE8pxA",
+      "apiKey": "tour_collection",
+      "name": "Tour Collection",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "SCgf4aDRTzG8kEyjONHXUw",
+      "apiKey": "neighborhood",
+      "name": "Neighborhood",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "SSC53AMiToC8_kiYWv4YSQ",
+      "apiKey": "route",
+      "name": "Route",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "SXq1-tpgQ-yfg7mt8VfJ6w",
+      "apiKey": "travel_style_tag",
+      "name": "Travel Style Tag",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "Sg9wRGaHQoekBt9GG6x9XA",
+      "apiKey": "japan_region",
+      "name": "Japan Region",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": true,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "SjwYmlDuSXeyL2fRlH_gHg",
+      "apiKey": "yamoto_landing",
+      "name": "Yamoto Landing",
+      "singleton": true,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "TdtMdWKJR9OZro2vIIU-jA",
+      "apiKey": "trip_tag",
+      "name": "Trip Tag",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "TgOWVAKQSeqnDsQv4LBNLw",
+      "apiKey": "faq_item",
+      "name": "FAQ Item",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": true,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "TzvdAxnkTw6FgHL4R53f-g",
+      "apiKey": "multi_day_package",
+      "name": "Multi Day Package",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "UfkcmzR_RRyEQSj1kp1faA",
+      "apiKey": "group_signup",
+      "name": "Group Signup",
+      "singleton": true,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "UqOF9BT2Sw-jd1PEm0FN1w",
+      "apiKey": "trip_review",
+      "name": "Trip Review",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "U3Kk6itiSLyut5PDMpXAfg",
+      "apiKey": "trips_page",
+      "name": "🚊 Trips Page",
+      "singleton": true,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "U9bPEsqrSkGCLaYMlgRPLA",
+      "apiKey": "review",
+      "name": "Review",
+      "singleton": false,
+      "modularBlock": true,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "WTQAD5RjQJumhPBlsfNHvA",
+      "apiKey": "video",
+      "name": "Video",
+      "singleton": false,
+      "modularBlock": true,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "WgnYfbvMS1mKxfd9s1zsbQ",
+      "apiKey": "locations_index_page",
+      "name": "Locations Index Page",
+      "singleton": true,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "Xed0WtvXQ5qH2puqdCunEg",
+      "apiKey": "group_type_page",
+      "name": "Group Type Page",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "YZxf4kNXSiCTwPsoTbK4tg",
+      "apiKey": "sample_itinerary",
+      "name": "Sample Itinerary",
+      "singleton": false,
+      "modularBlock": true,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "Y2E6dnLZQMGS6tO1nnm0OA",
+      "apiKey": "tour_plan",
+      "name": "Tour Plan",
+      "singleton": false,
+      "modularBlock": true,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "ZAZUF2tkQ2-Z0bFhAp61PQ",
+      "apiKey": "free_trip_planning",
+      "name": "Free Trip Planning",
+      "singleton": true,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "ZGIln-BPR7Cg4P1VlxBWQw",
+      "apiKey": "place",
+      "name": "Place",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "aNkQBnqXQimZirdtYGEZLQ",
+      "apiKey": "place_card",
+      "name": "Place Card",
+      "singleton": false,
+      "modularBlock": true,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "aYjNp-K-SLWIwEHTEagSKw",
+      "apiKey": "itinerary_page",
+      "name": "Itinerary Page",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "av20X0WDSruj6fQlkyU95Q",
+      "apiKey": "careers_page",
+      "name": "🧑🏼‍🏭 Careers Page",
+      "singleton": true,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "bFRGIVVMSLSKOuthmkv7MA",
+      "apiKey": "trip_template_reference",
+      "name": "Trip Template Reference",
+      "singleton": false,
+      "modularBlock": true,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "bgaqdXh3ReGCoeu4xVXqQQ",
+      "apiKey": "meeting_pickup_place",
+      "name": "Meeting/Pickup Place",
+      "singleton": false,
+      "modularBlock": true,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "bziwh2cZQlKB7QPrsG_eNQ",
+      "apiKey": "extra",
+      "name": "Extra",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "cqlIo_vBR5Sid0-j8_iRLA",
+      "apiKey": "group_type_content",
+      "name": "Group Type Content",
+      "singleton": false,
+      "modularBlock": true,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "dG72jQydRWGIupOGqxdX7g",
+      "apiKey": "destination",
+      "name": "Destination",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "eBImLjkDRLSjQvEjh8yOIg",
+      "apiKey": "hotel",
+      "name": "Hotel",
+      "singleton": false,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "ecgb9DYCREGothgM3-Wlfg",
+      "apiKey": "creator_signup",
+      "name": "Creator Signup",
+      "singleton": true,
+      "modularBlock": false,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "eoc9pDBXTmitkJfRB2ZqLA",
+      "apiKey": "route_scene",
+      "name": "Route Scene",
+      "singleton": false,
+      "modularBlock": true,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    },
+    {
+      "id": "f3Z3UNjpSrmx9JG-IxD7-w",
+      "apiKey": "group_type_page_block",
+      "name": "Group Type Page Block",
+      "singleton": false,
+      "modularBlock": true,
+      "sortable": false,
+      "tree": false,
+      "orderingDirection": null
+    }
+  ]
+}

@@ -2,7 +2,25 @@
 
 Canonical notes for importing content from DatoCMS into agent-cms.
 
-This is not a generic ETL guide. It is the project-specific import model for preserving Dato content with acceptable fidelity while keeping the import path operationally sane.
+The importer now lives in this repo as a first-class product surface. It is aimed at Dato users who want to hydrate an `agent-cms` instance with high enough fidelity that existing frontend queries can continue to work with minimal rewrites.
+
+Primary entrypoint:
+
+```bash
+npm run dato:import -- --help
+```
+
+Current proven commands:
+
+```bash
+npm run dato:import -- inspect
+npm run dato:import -- bootstrap --adapter trip --cms-url http://127.0.0.1:8791
+npm run dato:import -- import --adapter trip --model article --limit 1 --locale en
+npm run dato:import -- status --out-dir scripts/dato-import/out/trip
+npm run dato:import -- report --out-dir scripts/dato-import/out/trip
+```
+
+The runtime and CLI are generic. The built-in `trip` adapter is the first real-world validation wedge while broader automatic schema discovery and mapping are generalized.
 
 ## Goals
 
@@ -93,7 +111,7 @@ Current guidance:
 
 Import by dependency order, leaves first, then inward toward the trunk.
 
-For the current `trip` wedge, that means:
+For the current built-in `trip` adapter, that means:
 
 1. `contributor`
 2. `location`
@@ -230,10 +248,6 @@ For this project, the right shape is a low-priority source ID field or column, n
 
 SEO is important for fidelity and should not remain a long-term regression.
 
-Current state:
-
-- localized SEO is still an accepted regression in the migration harness for the current wedge
-
 Target state:
 
 - preserve locale-specific SEO values from Dato
@@ -257,6 +271,21 @@ Import should account for:
 agent-cms already has site settings and `_site` GraphQL support, so site import should map into that path rather than inventing a separate migration-only model.
 
 ## Observability
+
+Import runs should emit enough state to answer:
+
+- what root slice was requested
+- what dependency closure was touched
+- which assets were copied, reused, or failed
+- whether publish was skipped or completed
+- what accepted regressions remain
+
+The CLI output directory is currently:
+
+- generic runtime output: `scripts/dato-import/out`
+- built-in Trip adapter output: `scripts/dato-import/out/trip`
+
+See [`scripts/dato-import/PROMPT.md`](/Users/jokull/Code/agent-cms/scripts/dato-import/PROMPT.md) for the current agent workflow.
 
 The import loop needs first-class observability because migration failures are often data-shape failures, not simple transport failures.
 
