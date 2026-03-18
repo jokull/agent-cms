@@ -20,8 +20,8 @@ function pickLocalizedEntry(rawValue: unknown, context: GqlContext) {
   }
 
   const locMap = localeMap as Record<string, unknown>;
-  const locale = context?.locale ?? null;
-  const fallbacks = context?.fallbackLocales ?? [];
+  const locale = context.locale ?? null;
+  const fallbacks = context.fallbackLocales ?? [];
   if (locale && locMap[locale] !== undefined && locMap[locale] !== null && locMap[locale] !== "") {
     return { locale, value: locMap[locale] };
   }
@@ -95,7 +95,7 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
               targetApiKeys: targets,
               ids: [linkedId as string],
               typeNames,
-              includeDrafts: context?.includeDrafts ?? false,
+              includeDrafts: context.includeDrafts ?? false,
               context,
             });
             return resolved.get(linkedId as string) ?? null;
@@ -122,8 +122,8 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
             blockModels,
             allowedBlockApiKeys: getBlockWhitelist(f.validators),
             typeNames,
-            includeDrafts: context?.includeDrafts ?? false,
-            linkedRecordCache: context?.linkedRecordCache,
+            includeDrafts: context.includeDrafts ?? false,
+            linkedRecordCache: context.linkedRecordCache,
           });
         };
       } else if (f.field_type === "links") {
@@ -138,7 +138,7 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
               targetApiKeys: targets,
               ids: linkedIds as string[],
               typeNames,
-              includeDrafts: context?.includeDrafts ?? false,
+              includeDrafts: context.includeDrafts ?? false,
               context,
             });
             return (linkedIds as string[]).map((id) => resolved.get(id) ?? null).filter(Boolean);

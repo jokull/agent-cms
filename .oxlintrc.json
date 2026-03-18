@@ -15,6 +15,17 @@
     "typescript/restrict-template-expressions": "error",
     "typescript/no-redundant-type-constituents": "error",
     "typescript/no-duplicate-type-constituents": "error",
+    "typescript/no-unnecessary-condition": "error",
+    "typescript/no-unnecessary-type-assertion": "error",
+    "typescript/no-unnecessary-type-arguments": "error",
+    "typescript/no-unnecessary-type-constraint": "error",
+    "typescript/no-unnecessary-type-conversion": "error",
+    "typescript/no-unnecessary-type-parameters": "error",
+    "typescript/no-unnecessary-qualifier": "error",
+    "typescript/no-unnecessary-boolean-literal-compare": "error",
+    "typescript/no-unnecessary-template-expression": "error",
+    "typescript/no-unnecessary-parameter-property-assignment": "error",
+    "unicorn/no-unnecessary-await": "error",
     "typescript/unbound-method": "off",
     "unicorn/no-useless-fallback-in-spread": "off"
   }

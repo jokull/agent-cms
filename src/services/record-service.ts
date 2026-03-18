@@ -171,7 +171,7 @@ export function createRecord(body: CreateRecordInput) {
     }
 
     const modelFields = yield* getModelFields(model.id);
-    const data: Record<string, unknown> = { ...(body.data ?? {}) };
+    const data: Record<string, unknown> = { ...body.data };
 
     // Validate required fields only for non-draft models (has_draft=false auto-publishes)
     // Draft models defer required validation to publish time
@@ -295,7 +295,7 @@ export function createRecord(body: CreateRecordInput) {
           let slug = String(data[field.api_key]);
           const baseSlug = slug;
           let suffix = 1;
-          while (true) {
+          for (;;) {
             const existing = yield* sql.unsafe<{ id: string }>(
               `SELECT id FROM "${tableName}" WHERE "${field.api_key}" = ?`,
               [slug]
@@ -410,7 +410,7 @@ export function patchRecord(id: string, body: PatchRecordInput) {
     if (!existing) return yield* new NotFoundError({ entity: "Record", id });
 
     const modelFields = yield* getModelFields(model.id);
-    const data: Record<string, unknown> = { ...(body.data ?? {}) };
+    const data: Record<string, unknown> = { ...body.data };
     const updates: Record<string, unknown> = { _updated_at: new Date().toISOString() };
 
     const hasExplicitDataUpdates = Object.keys(data).length > 0;
@@ -540,7 +540,7 @@ export function patchRecord(id: string, body: PatchRecordInput) {
         let slug = String(data[field.api_key]);
         const baseSlug = slug;
         let suffix = 1;
-        while (true) {
+        for (;;) {
           const existing = yield* sql.unsafe<{ id: string }>(
             `SELECT id FROM "${tableName}" WHERE "${field.api_key}" = ? AND id != ?`,
             [slug, id]
@@ -708,8 +708,7 @@ export function bulkCreateRecords({ modelApiKey, records }: BulkCreateRecordsInp
 
     for (let idx = 0; idx < records.length; idx++) {
       const rawRecord = records[idx];
-      if (typeof rawRecord !== "object" || rawRecord === null) continue;
-      const data: Record<string, unknown> = { ...(rawRecord as Record<string, unknown>) };
+      const data: Record<string, unknown> = { ...rawRecord };
 
       // Validate required fields only for non-draft models
       if (!model.has_draft) {
@@ -821,7 +820,7 @@ export function bulkCreateRecords({ modelApiKey, records }: BulkCreateRecordsInp
             let slug = String(data[field.api_key]);
             const baseSlug = slug;
             let suffix = 1;
-            while (true) {
+            for (;;) {
               const existing = yield* sql.unsafe<{ id: string }>(
                 `SELECT id FROM "${tableName}" WHERE "${field.api_key}" = ?`, [slug]
               );
@@ -928,7 +927,7 @@ export function patchBlocksForField(body: PatchBlocksInput) {
         delete mergedBlocks[blockId];
       } else if (typeof patchValue === "string") {
         // Keep unchanged — verify it exists
-        if (!existingBlocks[blockId]) {
+        if (!Object.hasOwn(existingBlocks, blockId)) {
           return yield* new ValidationError({
             message: `Block '${blockId}' referenced in patch does not exist`,
             field: body.fieldApiKey,
@@ -937,13 +936,13 @@ export function patchBlocksForField(body: PatchBlocksInput) {
       } else if (typeof patchValue === "object" && !Array.isArray(patchValue)) {
         // Partial merge
         const patchObj = patchValue as Record<string, unknown>;
-        const existingBlock = existingBlocks[blockId];
-        if (!existingBlock) {
+        if (!Object.hasOwn(existingBlocks, blockId)) {
           return yield* new ValidationError({
             message: `Block '${blockId}' referenced in patch does not exist`,
             field: body.fieldApiKey,
           });
         }
+        const existingBlock = existingBlocks[blockId];
         // Merge: existing block data + patch (patch wins)
         mergedBlocks[blockId] = {
           ...(existingBlock as Record<string, unknown>),

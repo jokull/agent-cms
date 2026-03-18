@@ -60,10 +60,8 @@ export function updateSiteSettings(args: SiteSettingsInput) {
 
     for (const [key, value] of Object.entries(args)) {
       const col = fieldMap[key as keyof SiteSettingsInput];
-      if (col && value !== undefined) {
-        sets.push(`"${col}" = ?`);
-        params.push(typeof value === "boolean" ? (value ? 1 : 0) : value);
-      }
+      sets.push(`"${col}" = ?`);
+      params.push(typeof value === "boolean" ? (value ? 1 : 0) : value);
     }
 
     if (sets.length === 0) {

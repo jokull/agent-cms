@@ -273,7 +273,7 @@ export function search(params: {
       results: ftsResults,
       meta: {
         count: ftsResults.length,
-        mode: (hasVector ? mode : "keyword") as SearchMode,
+        mode: (hasVector ? mode : "keyword"),
       },
     };
   });

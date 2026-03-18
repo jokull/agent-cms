@@ -99,7 +99,7 @@ export function buildReverseRefResolvers(
       // Ensure resolver map exists for target type
       if (!resolvers[targetTypeName]) resolvers[targetTypeName] = {};
 
-      (resolvers[targetTypeName] as Record<string, unknown>)[fieldName] = async (parent: DynamicRow, args: DynamicRow, context: GqlContext) => {
+      (resolvers[targetTypeName])[fieldName] = async (parent: DynamicRow, args: DynamicRow, context: GqlContext) => {
         // Propagate locale/fallbackLocales from args to context for nested resolvers
         if (typeof args.locale === "string") context.locale = args.locale;
         if (Array.isArray(args.fallbackLocales)) context.fallbackLocales = args.fallbackLocales;
@@ -127,13 +127,15 @@ export function buildReverseRefResolvers(
             let params = [...refParams];
 
             // Draft filtering
-            const includeDrafts = context?.includeDrafts ?? false;
+            const includeDrafts = context.includeDrafts ?? false;
             if (!includeDrafts) {
               query += ` AND "_status" IN ('published', 'updated')`;
             }
 
             // Apply user filter
-            const filterLocale = (typeof args.locale === "string" ? args.locale : undefined) ?? context?.locale ?? defaultLocale ?? undefined;
+            const filterLocale = typeof args.locale === "string"
+              ? args.locale
+              : (context.locale ?? defaultLocale ?? undefined);
             const filterOpts: FilterCompilerOpts = {
               fieldIsLocalized: (fName) => sourceLocalizedCamelKeys.has(fName),
               fieldNameMap: Object.fromEntries(sourceCamelToSnake),
@@ -153,7 +155,7 @@ export function buildReverseRefResolvers(
               query += ` ORDER BY ${orderBy}`;
             }
 
-            const limit = Math.min((args.first as number) ?? 20, 500);
+            const limit = Math.min(typeof args.first === "number" ? args.first : 20, 500);
             query += ` LIMIT ?`;
             params.push(limit);
 

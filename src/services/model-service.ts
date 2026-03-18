@@ -217,7 +217,7 @@ export function deleteModel(id: string) {
         if (f.field_type !== "link" && f.field_type !== "links") return false;
         if (f.model_id === id) return false;
         const validators = decodeJsonRecordStringOr(f.validators || "{}", {});
-        const allowedTypes = validators?.items_item_type ?? validators?.item_item_type;
+        const allowedTypes = validators.items_item_type ?? validators.item_item_type;
         return Array.isArray(allowedTypes) && allowedTypes.includes(model.api_key);
       });
 
@@ -240,7 +240,7 @@ export function deleteModel(id: string) {
       const referencingFields = allFields.filter((f) => {
         if (f.field_type !== "structured_text") return false;
         const validators = decodeJsonRecordStringOr(f.validators || "{}", {});
-        const whitelist = validators?.block_whitelist;
+        const whitelist = validators.block_whitelist;
         return Array.isArray(whitelist) && whitelist.includes(model.api_key);
       });
 

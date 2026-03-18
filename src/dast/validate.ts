@@ -10,8 +10,8 @@ function formatIssuePath(path: ReadonlyArray<PropertyKey>): string {
   return path.reduce<string>((acc, segment) => {
     if (typeof segment === "number") return `${acc}[${segment}]`;
     if (typeof segment === "symbol") return acc;
-    if (acc.length === 0) return String(segment);
-    return `${acc}.${String(segment)}`;
+    if (acc.length === 0) return segment;
+    return `${acc}.${segment}`;
   }, "");
 }
 

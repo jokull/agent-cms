@@ -85,7 +85,7 @@ export function createField(modelId: string, body: CreateFieldInput) {
     const position = body.position ?? allFields.length;
 
     // Validate required field + defaultValue BEFORE any mutations
-    const parsedValidators = body.validators ?? {};
+    const parsedValidators = body.validators;
     if (isUnique(parsedValidators) && !supportsUniqueValidation(body.fieldType)) {
       return yield* new ValidationError({
         message: `unique validator is not supported for field type '${body.fieldType}'`,
@@ -112,7 +112,7 @@ export function createField(modelId: string, body: CreateFieldInput) {
 
     const now = new Date().toISOString();
     const id = ulid();
-    const validators = encodeJson(body.validators ?? {});
+    const validators = encodeJson(body.validators);
 
     yield* sql.unsafe(
       `INSERT INTO fields (id, model_id, label, api_key, field_type, position, localized, validators, default_value, appearance, hint, fieldset_id, created_at, updated_at)
@@ -146,7 +146,7 @@ export function createField(modelId: string, body: CreateFieldInput) {
 
     return {
       id, modelId, label: body.label, apiKey: body.apiKey, fieldType: body.fieldType,
-      position, localized: body.localized ?? false, validators: body.validators ?? {},
+      position, localized: body.localized, validators: body.validators,
       defaultValue: body.defaultValue ?? null, appearance: body.appearance ?? null,
       hint: body.hint ?? null, fieldsetId: body.fieldsetId ?? null,
       createdAt: now, updatedAt: now,

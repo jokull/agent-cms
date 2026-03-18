@@ -173,7 +173,7 @@ function compileStructuredText(
 
     const dast = yield* validateDastForField(fieldApiKey, input.value, blocksOnly);
     const referencedBlockIds = extractAllBlockIds(dast);
-    const providedBlockIds = Object.keys(input.blocks ?? {});
+    const providedBlockIds = Object.keys(input.blocks);
 
     for (const blockId of referencedBlockIds) {
       if (!input.blocks[blockId]) {
@@ -445,7 +445,7 @@ function materializeBlockPayload(
     for (const field of blockModel.fields) {
       const rawValue = deserializeValue(row[field.api_key]);
       if (rawValue === undefined) continue;
-      if (field.field_type === "structured_text" && rawValue !== null && rawValue !== undefined) {
+      if (field.field_type === "structured_text" && rawValue !== null) {
         payload[field.api_key] = yield* materializeStructuredTextValue({
           materializeContext: ctx,
           allowedBlockApiKeys: getBlockWhitelist(field.validators) ?? [],

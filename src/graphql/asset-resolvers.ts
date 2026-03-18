@@ -170,7 +170,7 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
 
   // _site query - DatoCMS-compatible site info with globalSeo and faviconMetaTags
   queryFieldDefs.push("_site: SiteInfo!");
-  (resolvers.Query as Record<string, unknown>)._site = async (_parent: unknown, args: DynamicRow, context: DynamicRow) => {
+  (resolvers.Query)._site = async (_parent: unknown, args: DynamicRow, context: DynamicRow) => {
     // Load site settings from DB (returns defaults if table/row doesn't exist)
     const settings = await runSql(
       Effect.gen(function* () {
@@ -185,10 +185,10 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
       })
     );
 
-    const locale = typeof args?.locale === "string" ? args.locale : (context?.locale as string | undefined) ?? null;
-    const fallbackLocales = Array.isArray(args?.fallbackLocales)
+    const locale = typeof args.locale === "string" ? args.locale : (context.locale as string | undefined) ?? null;
+    const fallbackLocales = Array.isArray(args.fallbackLocales)
       ? (args.fallbackLocales as string[])
-      : Array.isArray(context?.fallbackLocales)
+      : Array.isArray(context.fallbackLocales)
         ? (context.fallbackLocales as string[])
         : [];
     const fallbackSeo = pickLocalizedSiteValue(settings?.fallback_seo, locale, fallbackLocales) as Record<string, unknown> | null;
@@ -218,7 +218,7 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
   queryFieldDefs.push("allUploads(filter: UploadFilter, orderBy: [UploadOrderBy!], first: Int, skip: Int): [Asset!]!");
   queryFieldDefs.push("_allUploadsMeta(filter: UploadFilter): UploadMeta!");
 
-  (resolvers.Query as Record<string, unknown>).allUploads = async (_: unknown, args: DynamicRow) => {
+  (resolvers.Query).allUploads = async (_: unknown, args: DynamicRow) => {
     return await runSql(
       Effect.gen(function* () {
         const s = yield* SqlClient.SqlClient;
@@ -228,7 +228,7 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
         if (compiled) { query += ` WHERE ${compiled.where}`; params = compiled.params; }
         const orderBy = compileOrderBy(args.orderBy as string[] | undefined, { fieldNameMap: uploadFieldMap });
         if (orderBy) query += ` ORDER BY ${orderBy}`;
-        const limit = Math.min((args.first as number) ?? 20, 500);
+        const limit = Math.min((args.first as number | undefined) ?? 20, 500);
         query += ` LIMIT ?`; params.push(limit);
         if (args.skip) { query += ` OFFSET ?`; params.push(args.skip); }
         const rows = yield* s.unsafe<AssetRow>(query, params);
@@ -243,7 +243,7 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
     );
   };
 
-  (resolvers.Query as Record<string, unknown>)._allUploadsMeta = async (_: unknown, args: DynamicRow) => {
+  (resolvers.Query)._allUploadsMeta = async (_: unknown, args: DynamicRow) => {
     return {
       count: await runSql(
         Effect.gen(function* () {
@@ -264,8 +264,8 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
     responsiveImage: (asset: AssetObject, args: DynamicRow) => {
       if (!asset.width || !asset.height) return null;
       // Accept transforms (native), cfImagesParams (alias), or imgixParams (legacy migration shim)
-      const rawParams = (args?.transforms ?? args?.cfImagesParams ?? args?.imgixParams ?? {}) as Record<string, unknown>;
-      const params = args?.imgixParams ? normalizeImgixParams(rawParams) : rawParams;
+      const rawParams = (args.transforms ?? args.cfImagesParams ?? args.imgixParams ?? {}) as Record<string, unknown>;
+      const params = args.imgixParams ? normalizeImgixParams(rawParams) : rawParams;
 
       // Requested dimensions (fall back to original)
       const requestedW = (params.width ?? params.w ?? asset.width) as number;
@@ -343,7 +343,7 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
   // SeoField.image resolver: look up asset by ID
   resolvers.SeoField = {
     image: async (seo: DynamicRow) => {
-      const assetId = seo?.image;
+      const assetId = seo.image;
       if (!assetId) return null;
       return await runSql(
         Effect.gen(function* () {

@@ -56,8 +56,8 @@ function cacheKey(config: CmsHandlerConfig): string {
     getObjectId(hooks as unknown as object | undefined),
     bindings.environment ?? "",
     bindings.assetBaseUrl ?? "",
-    bindings.readKey ?? "",
-    bindings.writeKey ?? "",
+    bindings.readKey || "",
+    bindings.writeKey || "",
   ].join("|");
 }
 

@@ -20,7 +20,7 @@ export function tryDecodeJsonString(input: string) {
     : { ok: false as const };
 }
 
-export function decodeJsonStringOr<A>(input: string, fallback: A): unknown {
+export function decodeJsonStringOr(input: string, fallback: unknown): unknown {
   const parsed = tryDecodeJsonString(input);
   return parsed.ok ? parsed.value : fallback;
 }

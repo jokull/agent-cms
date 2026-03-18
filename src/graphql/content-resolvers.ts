@@ -30,8 +30,8 @@ function pickLocalizedEntry(rawValue: unknown, context: GqlContext, defaultLocal
   }
 
   const locMap = localeMap as Record<string, unknown>;
-  const locale = context?.locale ?? defaultLocale;
-  const fallbacks = context?.fallbackLocales ?? [];
+  const locale = context.locale ?? defaultLocale;
+  const fallbacks = context.fallbackLocales ?? [];
 
   if (locale && locMap[locale] !== undefined && locMap[locale] !== null && locMap[locale] !== "") {
     return { locale, value: locMap[locale] };
@@ -165,9 +165,9 @@ export function buildContentModelResolvers(
         if (typeof seo === "string") seo = decodeJsonStringOr(seo, null);
         if (seo && typeof seo === "object") {
           const seoObj = seo as DynamicRow;
-          title = (seoObj.title as string) ?? null;
-          description = (seoObj.description as string) ?? null;
-          twitterCard = (seoObj.twitterCard as string) ?? null;
+          title = typeof seoObj.title === "string" ? seoObj.title : null;
+          description = typeof seoObj.description === "string" ? seoObj.description : null;
+          twitterCard = typeof seoObj.twitterCard === "string" ? seoObj.twitterCard : null;
           if (seoObj.image) {
             // Resolve image URL from asset ID
             const asset = await runSql(
@@ -231,10 +231,10 @@ export function buildContentModelResolvers(
       return tags;
     };
     if (model.sortable || model.tree) {
-      typeResolvers._position = (p: DynamicRow) => (p._position as number) ?? 0;
+      typeResolvers._position = (p: DynamicRow) => typeof p._position === "number" ? p._position : 0;
     }
     if (model.tree) {
-      typeResolvers._parentId = (p: DynamicRow) => (p._parent_id as string) ?? null;
+      typeResolvers._parentId = (p: DynamicRow) => typeof p._parent_id === "string" ? p._parent_id : null;
       typeResolvers._parent = async (parent: DynamicRow) => {
         const parentId = parent._parent_id;
         if (!parentId) return null;
@@ -353,7 +353,7 @@ export function buildContentModelResolvers(
               targetApiKeys: targets,
               ids: [linkedId as string],
               typeNames,
-              includeDrafts: context?.includeDrafts ?? false,
+              includeDrafts: context.includeDrafts ?? false,
               context,
             }).then((resolved) => resolved.get(linkedId as string) ?? null);
           };
@@ -373,7 +373,7 @@ export function buildContentModelResolvers(
               targetApiKeys: targets,
               ids: linkedIds as string[],
               typeNames,
-              includeDrafts: context?.includeDrafts ?? false,
+              includeDrafts: context.includeDrafts ?? false,
               context,
             });
             // Return in original order, preserving insertion order
@@ -449,8 +449,8 @@ export function buildContentModelResolvers(
             : { locale: null, value: parent[f.api_key] };
           let dast = localized.value;
           if (!dast) return null;
-          const includeDrafts = context?.includeDrafts ?? false;
-          const isEnvelope = typeof dast === "object" && dast !== null && !Array.isArray(dast)
+          const includeDrafts = context.includeDrafts ?? false;
+          const isEnvelope = typeof dast === "object" && !Array.isArray(dast)
             && "value" in (dast as Record<string, unknown>)
             && "blocks" in (dast as Record<string, unknown>);
           const resolvedLocale = f.localized ? localized.locale : null;
@@ -483,7 +483,7 @@ export function buildContentModelResolvers(
             allowedBlockApiKeys: getBlockWhitelist(f.validators),
             typeNames,
             includeDrafts,
-            linkedRecordCache: context?.linkedRecordCache,
+            linkedRecordCache: context.linkedRecordCache,
           });
         };
       }

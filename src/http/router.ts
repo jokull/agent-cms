@@ -477,7 +477,7 @@ export interface WebHandlerOptions {
 export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, options?: WebHandlerOptions) {
   const vectorizeLayer = Layer.succeed(
     VectorizeContext,
-    options?.ai && options?.vectorize
+    options?.ai && options.vectorize
       ? Option.some({ ai: options.ai, vectorize: options.vectorize })
       : Option.none()
   );
@@ -586,7 +586,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
 
     if (level === "read" && options?.readKey) {
       // Write key also grants read access
-      if (token !== options.readKey && token !== options?.writeKey) {
+      if (token !== options.readKey && token !== options.writeKey) {
         return new UnauthorizedError({
           message: "Unauthorized. Provide a valid API key via Authorization: Bearer <key>",
         });

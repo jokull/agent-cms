@@ -167,7 +167,6 @@ export function findUniqueConstraintViolations(options: {
 function parseLocaleMap(value: unknown): Record<string, unknown> {
   if (value === null || value === undefined) return {};
   const parsed = typeof value === "string" ? decodeJsonRecordStringOr(value, {}) : value;
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
   return parsed as Record<string, unknown>;
 }
 

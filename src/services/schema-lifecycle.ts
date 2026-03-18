@@ -276,7 +276,7 @@ interface DastNode {
 
 /** Remove block/inlineBlock nodes whose item IDs are in the given set */
 function removeBlockNodesFromDast(dast: DastLike, blockIds: Set<string>): DastLike {
-  if (!dast?.document?.children) return dast;
+  if (!dast.document?.children) return dast;
 
   return {
     ...dast,
@@ -292,11 +292,11 @@ function removeBlockNodesFromStructuredTextValue(value: unknown, blockIds: Set<s
   const obj = value as DastLike;
 
   if (obj.value && typeof obj.value === "object" && obj.blocks && typeof obj.blocks === "object") {
-    const cleanedBlocks = { ...(obj.blocks as Record<string, unknown>) };
+    const cleanedBlocks = { ...(obj.blocks) };
     for (const blockId of blockIds) delete cleanedBlocks[blockId];
     return {
       ...obj,
-      value: removeBlockNodesFromDast(obj.value as DastLike, blockIds),
+      value: removeBlockNodesFromDast(obj.value, blockIds),
       blocks: cleanedBlocks,
     };
   }

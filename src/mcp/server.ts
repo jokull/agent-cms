@@ -156,10 +156,10 @@ const GenerateGraphqlQueriesPromptInput = Schema.Struct({
   modelApiKey: Schema.String,
 });
 
-function cmsTool<Name extends string, Parameters extends Schema.Struct.Fields | undefined = undefined>(
+function cmsTool<Name extends string>(
   name: Name,
   description: string,
-  parameters?: Parameters,
+  parameters?: Schema.Struct.Fields,
 ) {
   let tool = AiTool.make(name, {
     description,
@@ -187,6 +187,10 @@ function toStructuredContent(value: unknown) {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value : undefined;
 }
 
+function isToolPayload(value: unknown): value is Record<PropertyKey, unknown> {
+  return value !== null && typeof value === "object";
+}
+
 function parseValidators(value: unknown): Record<string, unknown> {
   if (value == null || value === "") return {};
   if (typeof value === "string") return decodeJsonRecordStringOr(value, {});
@@ -206,8 +210,7 @@ function toMcpInputSchema(tool: AiTool.Any) {
   // Runtime behavior is correct here because every entry in CmsToolkit is created via AiTool.make.
   // @ts-expect-error external type mismatch between Any and getJsonSchema helper
   const inputSchema = AiTool.getJsonSchema(tool);
-  return inputSchema !== null
-    && typeof inputSchema === "object"
+  return typeof inputSchema === "object"
     && "type" in inputSchema
     && inputSchema.type === "object"
     ? inputSchema
@@ -681,7 +684,8 @@ export function createMcpLayer(
       yield* registry.addTool({
         tool: mcpTool,
         handle(payload) {
-          return built.handle(tool.name, payload).pipe(
+          const params = isToolPayload(payload) ? payload : {};
+          return built.handle(tool.name, params).pipe(
             Effect.provide(context),
             Effect.match({
               onFailure: (error) =>

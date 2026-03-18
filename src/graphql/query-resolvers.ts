@@ -158,19 +158,21 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
       );
     }
 
-    (resolvers.Query as Record<string, unknown>)[listName] = async (_: unknown, args: DynamicRow, context: GqlContext) => {
-      const includeDrafts = context?.includeDrafts ?? false;
+    (resolvers.Query)[listName] = async (_: unknown, args: DynamicRow, context: GqlContext) => {
+      const includeDrafts = context.includeDrafts ?? false;
       const excludeInvalid = typeof args.excludeInvalid === "boolean"
         ? args.excludeInvalid
-        : (context?.excludeInvalid ?? false);
-      const locale = (args.locale as string) ?? context?.locale ?? defaultLocale;
+        : (context.excludeInvalid ?? false);
+      const locale = typeof args.locale === "string"
+        ? args.locale
+        : (context.locale ?? defaultLocale ?? undefined);
       // Store locale for nested field resolvers (per-query, not shared across root fields)
       if (args.locale) context.locale = args.locale as string;
       if (args.fallbackLocales) context.fallbackLocales = args.fallbackLocales as string[];
       let results = await queryWithFilter(
         args as { filter?: DynamicRow; orderBy?: string[]; first?: number; skip?: number },
         includeDrafts,
-        locale ?? undefined
+        locale
       );
       if (excludeInvalid) {
         const validity = await Promise.all(results.map(async (record) => {
@@ -189,9 +191,11 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
       return results;
     };
 
-    (resolvers.Query as Record<string, unknown>)[singleName] = async (_: unknown, args: DynamicRow, context: GqlContext) => {
-      const includeDrafts = context?.includeDrafts ?? false;
-      const locale = (args.locale as string) ?? context?.locale ?? defaultLocale;
+    (resolvers.Query)[singleName] = async (_: unknown, args: DynamicRow, context: GqlContext) => {
+      const includeDrafts = context.includeDrafts ?? false;
+      const locale = typeof args.locale === "string"
+        ? args.locale
+        : (context.locale ?? defaultLocale ?? undefined);
       if (args.locale) context.locale = args.locale as string;
       if (args.fallbackLocales) context.fallbackLocales = args.fallbackLocales as string[];
       if (args.id) {
@@ -213,23 +217,23 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
         const records = await queryWithFilter(
           { filter: args.filter as DynamicRow, first: 1 },
           includeDrafts,
-          locale ?? undefined
+          locale
         );
         return records[0] ?? null;
       }
       // Singleton models: return the single record without arguments
       if (model.singleton) {
-        const records = await queryWithFilter({ first: 1 }, includeDrafts, locale ?? undefined);
+        const records = await queryWithFilter({ first: 1 }, includeDrafts, locale);
         return records[0] ?? null;
       }
       return null;
     };
 
-    (resolvers.Query as Record<string, unknown>)[metaName] = async (_: unknown, args: DynamicRow, context: GqlContext) => {
-      const includeDrafts = context?.includeDrafts ?? false;
+    (resolvers.Query)[metaName] = async (_: unknown, args: DynamicRow, context: GqlContext) => {
+      const includeDrafts = context.includeDrafts ?? false;
       const excludeInvalid = typeof args.excludeInvalid === "boolean"
         ? args.excludeInvalid
-        : (context?.excludeInvalid ?? false);
+        : (context.excludeInvalid ?? false);
       if (excludeInvalid) {
         // Need to fetch all records and filter in JS for accurate count
         const allRecords = await queryWithFilter(

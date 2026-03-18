@@ -72,7 +72,7 @@ export function compileFilterToSql(
 }
 
 // Map GraphQL camelCase system fields to snake_case DB columns
-const META_COLUMN_MAP: Record<string, string> = {
+const META_COLUMN_MAP: Partial<Record<string, string>> = {
   _createdAt: "_created_at",
   _updatedAt: "_updated_at",
   _publishedAt: "_published_at",
@@ -87,7 +87,7 @@ function resolveDbKey(key: string, opts?: FilterCompilerOpts): string {
 }
 
 function resolveCol(key: string, dbKey: string, opts?: FilterCompilerOpts): string {
-  return opts?.fieldIsLocalized?.(key) && opts?.locale
+  return opts?.fieldIsLocalized?.(key) && opts.locale
     ? `json_extract("${dbKey}", '$.${opts.locale}')`
     : `"${dbKey}"`;
 }
@@ -401,7 +401,7 @@ export function compileOrderBy(
       const dbField = META_COLUMN_MAP[field] ?? opts?.fieldNameMap?.[field] ?? field;
 
       const col =
-        opts?.fieldIsLocalized?.(field) && opts?.locale
+        opts?.fieldIsLocalized?.(field) && opts.locale
           ? `json_extract("${dbField}", '$.${opts.locale}')`
           : `"${dbField}"`;
 

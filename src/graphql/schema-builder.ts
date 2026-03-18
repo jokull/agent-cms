@@ -163,7 +163,7 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
     // Fallback for empty schema
     if (queryFieldDefs.length === 0) {
       queryFieldDefs.push("_empty: String");
-      (resolvers.Query as Record<string, unknown>)._empty = () => null;
+      (resolvers.Query)._empty = () => null;
     }
 
     return createSchema({

@@ -1,6 +1,6 @@
 import { createYoga, type YogaSchemaDefinition } from "graphql-yoga";
 import { Effect, Layer } from "effect";
-import { GraphQLError, type GraphQLSchema, parse, execute as gqlExecute, validate } from "graphql";
+import { type GraphQLSchema, parse, execute as gqlExecute, validate } from "graphql";
 import { SqlClient } from "@effect/sql";
 import { buildGraphQLSchema } from "./schema-builder.js";
 import { enforceQueryLimits } from "./query-limits.js";
@@ -21,6 +21,19 @@ interface SchemaTiming {
   cacheHit: boolean;
   buildMs: number;
   waitMs: number;
+}
+
+interface GraphqlRequestBody {
+  operationName?: string | null;
+  query?: string | null;
+}
+
+function isGraphqlRequestBody(value: unknown): value is GraphqlRequestBody {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  const operationNameValid = record.operationName === undefined || record.operationName === null || typeof record.operationName === "string";
+  const queryValid = record.query === undefined || record.query === null || typeof record.query === "string";
+  return operationNameValid && queryValid;
 }
 
 function inferOperationName(query: string | null | undefined): string | null {
@@ -89,7 +102,7 @@ export function createGraphQLHandler(
         if (typeof params.query !== "string") return;
         const errors = enforceQueryLimits(params.query, queryLimits);
         if (errors.length > 0) {
-          setResult({ errors: errors as GraphQLError[] });
+          setResult({ errors: errors });
         }
       },
     }],
@@ -112,8 +125,10 @@ export function createGraphQLHandler(
 
       if (traceEnabled) {
         try {
-          const body = await request.clone().json() as { operationName?: string; query?: string };
-          operationName = body.operationName ?? inferOperationName(body.query);
+          const body = await request.clone().json();
+          if (isGraphqlRequestBody(body)) {
+            operationName = body.operationName ?? inferOperationName(body.query);
+          }
         } catch {
           operationName = null;
         }

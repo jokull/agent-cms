@@ -65,7 +65,6 @@ export function getRegistryDef(fieldType: string): FieldTypeDefinition | null {
 
 /** In-memory filter for records (fallback/legacy path) */
 export function applyFilters(records: DynamicRow[], filter: DynamicRow): DynamicRow[] {
-  if (!filter) return records;
   if (filter.AND) {
     const andFilters = filter.AND as DynamicRow[];
     for (const sub of andFilters) records = applyFilters(records, sub);
