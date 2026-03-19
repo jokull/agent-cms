@@ -145,6 +145,63 @@ describe("Sortable and tree models", () => {
       expect(childResult.data.allCategories[0]._parent.name).toBe("Electronics");
     });
 
+    it("supports model-level default ordering", async () => {
+      // Create a non-sortable model with default ordering
+      const modelRes = await jsonRequest(handler, "POST", "/api/models", {
+        name: "Article", apiKey: "article", ordering: "title_ASC",
+      });
+      const model = await modelRes.json();
+      await jsonRequest(handler, "POST", `/api/models/${model.id}/fields`, {
+        label: "Title", apiKey: "title", fieldType: "string",
+      });
+
+      await jsonRequest(handler, "POST", "/api/records", { modelApiKey: "article", data: { title: "Zebra" } });
+      await jsonRequest(handler, "POST", "/api/records", { modelApiKey: "article", data: { title: "Apple" } });
+      await jsonRequest(handler, "POST", "/api/records", { modelApiKey: "article", data: { title: "Mango" } });
+
+      // Without orderBy — should use model's default ordering (title_ASC)
+      const result = await gqlQuery(handler, `{
+        allArticles { title }
+      }`, { includeDrafts: true });
+
+      expect(result.errors).toBeUndefined();
+      expect(result.data.allArticles.map((r: { title: string }) => r.title)).toEqual(["Apple", "Mango", "Zebra"]);
+
+      // Explicit orderBy should override the default
+      const desc = await gqlQuery(handler, `{
+        allArticles(orderBy: [title_DESC]) { title }
+      }`, { includeDrafts: true });
+
+      expect(desc.data.allArticles.map((r: { title: string }) => r.title)).toEqual(["Zebra", "Mango", "Apple"]);
+    });
+
+    it("supports updating model ordering", async () => {
+      // Create model without ordering
+      const modelRes = await jsonRequest(handler, "POST", "/api/models", {
+        name: "Post", apiKey: "post",
+      });
+      const model = await modelRes.json();
+      await jsonRequest(handler, "POST", `/api/models/${model.id}/fields`, {
+        label: "Title", apiKey: "title", fieldType: "string",
+      });
+
+      // Set ordering via update
+      const updateRes = await jsonRequest(handler, "PATCH", `/api/models/${model.id}`, {
+        ordering: "_createdAt_DESC",
+      });
+      expect(updateRes.status).toBe(200);
+      const updated = await updateRes.json();
+      expect(updated.ordering).toBe("_createdAt_DESC");
+
+      // Clear ordering
+      const clearRes = await jsonRequest(handler, "PATCH", `/api/models/${model.id}`, {
+        ordering: null,
+      });
+      expect(clearRes.status).toBe(200);
+      const cleared = await clearRes.json();
+      expect(cleared.ordering).toBeNull();
+    });
+
     it("rejects reorder on non-sortable model", async () => {
       // Create a non-sortable model
       const modelRes = await jsonRequest(handler, "POST", "/api/models", {

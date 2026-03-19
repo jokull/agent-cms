@@ -242,7 +242,7 @@ function pickToolkitHandlers<T extends Record<string, unknown>>(
 const ListModelsTool = cmsTool("list_models", "List all content models and block types with their fields");
 const DescribeModelTool = cmsTool("describe_model", "Get detailed info about a model", ApiKeyInput.fields);
 const CreateModelTool = cmsTool("create_model", "Create a content model or block type. Use isBlock:true for block types (embeddable in StructuredText). Use singleton:true for models with exactly one record (e.g. site settings). After creating a model, add fields with create_field.", CreateModelInput.fields);
-const UpdateModelTool = cmsTool("update_model", "Update model properties (name, apiKey, singleton, sortable, hasDraft, allLocalesRequired)", UpdateModelInput.fields);
+const UpdateModelTool = cmsTool("update_model", "Update model properties (name, apiKey, singleton, sortable, hasDraft, allLocalesRequired, ordering). Set ordering to a default sort like 'title_ASC', '_createdAt_DESC', '_position_ASC', or null to clear.", UpdateModelInput.fields);
 const CreateFieldTool = cmsTool("create_field", `Add a field to a model. Auto-migrates the database table (adds column).
 
 Key validators by field type:

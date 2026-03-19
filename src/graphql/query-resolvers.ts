@@ -104,7 +104,9 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
             query += ` WHERE ${conditions.join(" AND ")}`;
           }
 
-          const orderBy = compileOrderBy(args.orderBy, filterOpts);
+          // Use explicit orderBy if provided, otherwise fall back to model's default ordering
+          const effectiveOrderBy = args.orderBy ?? (model.ordering ? [model.ordering] : undefined);
+          const orderBy = compileOrderBy(effectiveOrderBy, filterOpts);
           if (orderBy) {
             query += ` ORDER BY ${orderBy}`;
           }

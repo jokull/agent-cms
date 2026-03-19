@@ -145,6 +145,7 @@ export const UpdateModelInput = Schema.Struct({
   sortable: Schema.optional(Schema.Boolean),
   hasDraft: Schema.optional(Schema.Boolean),
   allLocalesRequired: Schema.optional(Schema.Boolean),
+  ordering: Schema.optional(Schema.NullOr(Schema.String)),
 });
 export type UpdateModelInput = typeof UpdateModelInput.Type;
 
@@ -188,6 +189,7 @@ const SchemaExportModelSchema = Schema.Struct({
   sortable: Schema.Boolean,
   tree: Schema.Boolean,
   hasDraft: Schema.Boolean,
+  ordering: Schema.optionalWith(Schema.NullOr(Schema.String), { default: () => null }),
   fields: Schema.Array(SchemaExportFieldSchema),
 });
 

@@ -130,6 +130,7 @@ export function updateModel(id: string, body: UpdateModelInput) {
     if (body.sortable !== undefined) { sets.push("sortable = ?"); values.push(body.sortable ? 1 : 0); }
     if (body.hasDraft !== undefined) { sets.push("has_draft = ?"); values.push(body.hasDraft ? 1 : 0); }
     if (body.allLocalesRequired !== undefined) { sets.push("all_locales_required = ?"); values.push(body.allLocalesRequired ? 1 : 0); }
+    if (body.ordering !== undefined) { sets.push("ordering = ?"); values.push(body.ordering); }
 
     // Handle api_key rename → rename the dynamic table
     if (body.apiKey !== undefined && body.apiKey !== model.api_key) {

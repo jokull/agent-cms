@@ -36,6 +36,7 @@ export interface SchemaExportModel {
   sortable: boolean;
   tree: boolean;
   hasDraft: boolean;
+  ordering: string | null;
   fields: SchemaExportField[];
 }
 
@@ -97,6 +98,7 @@ export function exportSchema() {
       sortable: !!m.sortable,
       tree: !!m.tree,
       hasDraft: !!m.has_draft,
+      ordering: m.ordering,
       fields: (fieldsByModelId.get(m.id) ?? []).map((f) => ({
         label: f.label,
         apiKey: f.api_key,
@@ -164,6 +166,7 @@ export function importSchema(s: ImportSchemaInput) {
         tree: model.tree,
         hasDraft: model.hasDraft,
         allLocalesRequired: false,
+        ordering: model.ordering ?? undefined,
       });
       modelApiKeyToId.set(model.apiKey, result.id);
       stats.models++;
