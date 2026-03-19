@@ -121,6 +121,18 @@ const MIGRATIONS: readonly Migration[] = [
       `ALTER TABLE "models" ADD COLUMN "all_locales_required" integer DEFAULT 0 NOT NULL`,
     ],
   },
+  {
+    version: 5,
+    statements: [
+      `CREATE TABLE IF NOT EXISTS "editor_tokens" (
+        "id" TEXT PRIMARY KEY,
+        "name" TEXT NOT NULL,
+        "created_at" TEXT NOT NULL DEFAULT (datetime('now')),
+        "last_used_at" TEXT,
+        "expires_at" TEXT
+      )`,
+    ],
+  },
 ];
 
 /**

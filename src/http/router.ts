@@ -26,10 +26,12 @@ import {
   ImportSchemaInput,
   ReindexSearchInput, ReorderInput, SearchInput,
   CreateUploadUrlInput,
+  CreateEditorTokenInput,
 } from "../services/input-schemas.js";
 import { UnauthorizedError, ValidationError } from "../errors.js";
 import * as SchemaIO from "../services/schema-io.js";
 import * as VersionService from "../services/version-service.js";
+import * as TokenService from "../services/token-service.js";
 import * as SearchService from "../search/search-service.js";
 import type { AiBinding, VectorizeBinding } from "../search/vectorize.js";
 import { VectorizeContext } from "../search/vectorize-context.js";
@@ -456,6 +458,28 @@ const searchRouter = HttpRouter.empty.pipe(
   )
 );
 
+// --- Tokens ---
+const tokensRouter = HttpRouter.empty.pipe(
+  HttpRouter.get("/", handle(TokenService.listEditorTokens())),
+
+  HttpRouter.post(
+    "/",
+    Effect.gen(function* () {
+      const body = yield* readJsonBody();
+      const input = yield* decodeUnknownInput(CreateEditorTokenInput, body);
+      return yield* handle(TokenService.createEditorToken(input), 201);
+    })
+  ),
+
+  HttpRouter.del(
+    "/:id",
+    Effect.gen(function* () {
+      const params = yield* HttpRouter.params;
+      return yield* handle(TokenService.revokeEditorToken(param(params, "id")));
+    })
+  )
+);
+
 // --- Setup / bootstrap ---
 const setupRouter = HttpRouter.empty.pipe(
   HttpRouter.post(
@@ -479,6 +503,7 @@ export const appRouter = HttpRouter.empty.pipe(
   HttpRouter.concat(localesRouter.pipe(HttpRouter.prefixAll("/api/locales"))),
   HttpRouter.concat(schemaRouter.pipe(HttpRouter.prefixAll("/api/schema"))),
   HttpRouter.concat(searchRouter.pipe(HttpRouter.prefixAll("/api/search"))),
+  HttpRouter.concat(tokensRouter.pipe(HttpRouter.prefixAll("/api/tokens"))),
   HttpRouter.concat(setupRouter.pipe(HttpRouter.prefixAll("/api"))),
 );
 
@@ -608,23 +633,42 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
   /**
    * Check if a request is authorized for write access.
    * If no writeKey is configured, all requests are allowed (local dev).
+   * When adminOnly is true, only writeKey is accepted (not editor tokens).
    */
-  function checkWriteAuth(request: Request): UnauthorizedError | null {
+  async function checkWriteAuth(request: Request, adminOnly = false): Promise<UnauthorizedError | null> {
     if (!options?.writeKey) return null;
     const token = getBearerToken(request);
-    if (token !== options.writeKey) {
+    if (token === options.writeKey) return null;
+
+    if (adminOnly) {
       return new UnauthorizedError({
-        message: "Unauthorized. Provide a valid write API key via Authorization: Bearer <key>",
+        message: "Unauthorized. This endpoint requires admin (writeKey) access.",
       });
     }
-    return null;
+
+    if (token && token.startsWith("etk_")) {
+      try {
+        await Effect.runPromise(
+          TokenService.validateEditorToken(token).pipe(Effect.provide(fullLayer))
+        );
+        return null;
+      } catch {
+        return new UnauthorizedError({
+          message: "Unauthorized. Invalid or expired editor token.",
+        });
+      }
+    }
+
+    return new UnauthorizedError({
+      message: "Unauthorized. Provide a valid write API key or editor token via Authorization: Bearer <key>",
+    });
   }
 
   const fetchHandler = async (request: Request): Promise<Response> => {
     const requestId = getRequestIdFromHeaders(request.headers);
     const headers = new Headers(request.headers);
     headers.set("x-request-id", requestId);
-    const instrumentedRequest = new Request(request, { headers });
+    let instrumentedRequest = new Request(request, { headers });
     const startedAt = Date.now();
 
     const finish = (response: Response) => {
@@ -693,13 +737,35 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
         }));
       }
 
-      // /graphql — no auth required (both GET GraphiQL and POST queries are open)
+      // /graphql — no auth required, but detect credential type for draft visibility
       if (url.pathname === "/graphql") {
+        const token = getBearerToken(instrumentedRequest);
+        let credentialType: "admin" | "editor" | null = null;
+        if (!options?.writeKey) {
+          // No writeKey configured (local dev) — treat as admin (respects X-Include-Drafts)
+          credentialType = "admin";
+        } else if (token === options.writeKey) {
+          credentialType = "admin";
+        } else if (token && token.startsWith("etk_")) {
+          try {
+            await Effect.runPromise(
+              TokenService.validateEditorToken(token).pipe(Effect.provide(fullLayer))
+            );
+            credentialType = "editor";
+          } catch {
+            // Invalid/expired token — treat as unauthenticated (published only)
+          }
+        }
+        if (credentialType) {
+          const h = new Headers(instrumentedRequest.headers);
+          h.set("X-Credential-Type", credentialType);
+          instrumentedRequest = new Request(instrumentedRequest, { headers: h });
+        }
         // Fall through to graphql handler below
       }
-      // /mcp — write auth
+      // /mcp — admin only
       else if (url.pathname === "/mcp") {
-        const denied = checkWriteAuth(instrumentedRequest);
+        const denied = await checkWriteAuth(instrumentedRequest, true);
         if (denied) {
           const mapped = errorToResponse(denied);
           return finish(new Response(JSON.stringify(mapped.body), {
@@ -708,9 +774,11 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
           }));
         }
       }
-      // /api/* — write auth
+      // /api/* — write auth (schema mutations and token management require admin)
       else if (url.pathname.startsWith("/api/")) {
-        const denied = checkWriteAuth(instrumentedRequest);
+        const adminOnly = isSchemaMutationRequest(url, instrumentedRequest.method)
+          || url.pathname.startsWith("/api/tokens");
+        const denied = await checkWriteAuth(instrumentedRequest, adminOnly);
         if (denied) {
           const mapped = errorToResponse(denied);
           return finish(new Response(JSON.stringify(mapped.body), {

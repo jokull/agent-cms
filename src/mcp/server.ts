@@ -18,6 +18,7 @@ import * as SchemaLifecycle from "../services/schema-lifecycle.js";
 import * as SchemaIO from "../services/schema-io.js";
 import * as SearchService from "../search/search-service.js";
 import * as SiteSettingsService from "../services/site-settings-service.js";
+import * as TokenService from "../services/token-service.js";
 import {
   CreateAssetInput as AssetInput,
   CreateFieldInput,
@@ -147,6 +148,13 @@ const UpdateSiteSettingsInput = Schema.Struct({
   fallbackSeoImageId: Schema.optional(Schema.String),
   fallbackSeoTwitterCard: Schema.optional(Schema.String),
 });
+
+const CreateEditorTokenMcpInput = Schema.Struct({
+  name: Schema.String,
+  expiresIn: Schema.optional(Schema.Number),
+});
+
+const TokenIdInput = Schema.Struct({ tokenId: Schema.String });
 
 const SetupContentModelPromptInput = Schema.Struct({
   description: Schema.String,
@@ -302,6 +310,9 @@ Hybrid mode (default when Vectorize available): combines both for best results.`
 const ReindexSearchTool = cmsTool("reindex_search", "Rebuild FTS5 + Vectorize search indexes. Use after deploying search to a CMS with existing content, or to recover from index drift. Scoped to a single model or all content models.", ReindexSearchInput.fields);
 const GetSiteSettingsTool = cmsTool("get_site_settings", "Get global site settings (site name, title suffix, global SEO, favicon, social accounts)");
 const UpdateSiteSettingsTool = cmsTool("update_site_settings", `Update global site settings. These power the _site GraphQL query (globalSeo, faviconMetaTags).`, UpdateSiteSettingsInput.fields);
+const CreateEditorTokenTool = cmsTool("create_editor_token", "Create an editor token for restricted write access (no schema mutations). Optional expiresIn in seconds.", CreateEditorTokenMcpInput.fields);
+const ListEditorTokensTool = cmsTool("list_editor_tokens", "List all non-expired editor tokens");
+const RevokeEditorTokenTool = cmsTool("revoke_editor_token", "Revoke an editor token by its ID", TokenIdInput.fields);
 
 const CmsToolkit = Toolkit.make(
   ListModelsTool,
@@ -338,6 +349,9 @@ const CmsToolkit = Toolkit.make(
   ReindexSearchTool,
   GetSiteSettingsTool,
   UpdateSiteSettingsTool,
+  CreateEditorTokenTool,
+  ListEditorTokensTool,
+  RevokeEditorTokenTool,
 );
 
 function createGuideResource() {
@@ -660,6 +674,9 @@ export function createMcpLayer(
     reindex_search: withDecoded(ReindexSearchInput, ({ modelApiKey }) => SearchService.reindexAll(modelApiKey)),
     get_site_settings: () => SiteSettingsService.getSiteSettings(),
     update_site_settings: withDecoded(UpdateSiteSettingsInput, SiteSettingsService.updateSiteSettings),
+    create_editor_token: withDecoded(CreateEditorTokenMcpInput, TokenService.createEditorToken),
+    list_editor_tokens: () => TokenService.listEditorTokens(),
+    revoke_editor_token: withDecoded(TokenIdInput, ({ tokenId }) => TokenService.revokeEditorToken(tokenId)),
   });
 
   const toolkitRegistration = Layer.effectDiscard(Effect.gen(function* () {

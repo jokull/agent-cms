@@ -86,6 +86,14 @@ export interface VersionRow {
   readonly created_at: string;
 }
 
+export interface EditorTokenRow {
+  readonly id: string;
+  readonly name: string;
+  readonly created_at: string;
+  readonly last_used_at: string | null;
+  readonly expires_at: string | null;
+}
+
 /** A dynamic block table row */
 export interface BlockRow {
   readonly id: string;

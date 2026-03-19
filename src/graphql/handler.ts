@@ -6,6 +6,8 @@ import { buildGraphQLSchema } from "./schema-builder.js";
 import { enforceQueryLimits } from "./query-limits.js";
 import { getSqlMetrics, withSqlMetrics } from "./sql-metrics.js";
 
+export type CredentialType = "admin" | "editor" | null;
+
 export interface GraphQLContext {
   includeDrafts: boolean;
   excludeInvalid: boolean;
@@ -107,7 +109,12 @@ export function createGraphQLHandler(
       },
     }],
     context: ({ request }: { request: Request }) => {
-      const includeDrafts = request.headers.get("X-Include-Drafts") === "true";
+      const credentialType = request.headers.get("X-Credential-Type") as CredentialType;
+      const headerDrafts = request.headers.get("X-Include-Drafts") === "true";
+      // Editor tokens always see drafts; admin respects header; no credential = published only
+      const includeDrafts = credentialType === "editor" ? true
+        : credentialType === "admin" ? headerDrafts
+        : false;
       const excludeInvalid = request.headers.get("X-Exclude-Invalid") === "true";
       return { includeDrafts, excludeInvalid } satisfies GraphQLContext;
     },
