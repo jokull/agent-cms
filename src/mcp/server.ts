@@ -12,6 +12,7 @@ import * as ModelService from "../services/model-service.js";
 import * as FieldService from "../services/field-service.js";
 import * as RecordService from "../services/record-service.js";
 import * as PublishService from "../services/publish-service.js";
+import * as ScheduleService from "../services/schedule-service.js";
 import * as AssetService from "../services/asset-service.js";
 import { AssetImportContext } from "../services/asset-service.js";
 import * as VersionService from "../services/version-service.js";
@@ -113,6 +114,12 @@ const BulkCreateRecordsInput = Schema.Struct({
 const PublishRecordInput = Schema.Struct({
   recordId: Schema.String,
   modelApiKey: Schema.String,
+});
+
+const ScheduleToolInput = Schema.Struct({
+  recordId: Schema.String,
+  modelApiKey: Schema.String,
+  at: Schema.NullOr(Schema.String),
 });
 
 const RestoreVersionInput = Schema.Struct({
@@ -295,6 +302,9 @@ const BulkCreateRecordsTool = cmsTool("bulk_create_records", `Create multiple re
 All records must belong to the same model. Slugs are auto-generated. Returns array of created record IDs.`, BulkCreateRecordsInput.fields);
 const PublishRecordTool = cmsTool("publish_record", "Publish a record", PublishRecordInput.fields);
 const UnpublishRecordTool = cmsTool("unpublish_record", "Unpublish a record", PublishRecordInput.fields);
+const SchedulePublishTool = cmsTool("schedule_publish", "Schedule a record to publish at a future ISO datetime. Set at:null to clear.", ScheduleToolInput.fields);
+const ScheduleUnpublishTool = cmsTool("schedule_unpublish", "Schedule a record to unpublish at a future ISO datetime. Set at:null to clear.", ScheduleToolInput.fields);
+const ClearScheduleTool = cmsTool("clear_schedule", "Clear both publish and unpublish schedules for a record", PublishRecordInput.fields);
 const ListRecordVersionsTool = cmsTool("list_record_versions", "List all version snapshots for a record, newest first. Versions are created on each publish or auto-republish.", PublishRecordInput.fields);
 const GetRecordVersionTool = cmsTool("get_record_version", "Get a specific version snapshot by version ID", VersionIdInput.fields);
 const RestoreRecordVersionTool = cmsTool("restore_record_version", "Restore a record to a previous version. The current state is versioned first, so restore is always reversible. For has_draft models, the record returns to draft status (needs re-publish). For non-draft models, the record is auto-republished.", RestoreVersionInput.fields);
@@ -359,6 +369,9 @@ const AdminTools = [
   BulkCreateRecordsTool,
   PublishRecordTool,
   UnpublishRecordTool,
+  SchedulePublishTool,
+  ScheduleUnpublishTool,
+  ClearScheduleTool,
   ListRecordVersionsTool,
   GetRecordVersionTool,
   RestoreRecordVersionTool,
@@ -394,6 +407,9 @@ const EditorTools = [
   BulkCreateRecordsTool,
   PublishRecordTool,
   UnpublishRecordTool,
+  SchedulePublishTool,
+  ScheduleUnpublishTool,
+  ClearScheduleTool,
   ListRecordVersionsTool,
   GetRecordVersionTool,
   RestoreRecordVersionTool,
@@ -705,6 +721,9 @@ export function createMcpLayer(
     bulk_create_records: withDecoded(BulkCreateRecordsInput, ({ modelApiKey, records }) => RecordService.bulkCreateRecords({ modelApiKey, records }, options?.actor)),
     publish_record: withDecoded(PublishRecordInput, ({ recordId, modelApiKey }) => PublishService.publishRecord(modelApiKey, recordId, options?.actor)),
     unpublish_record: withDecoded(PublishRecordInput, ({ recordId, modelApiKey }) => PublishService.unpublishRecord(modelApiKey, recordId, options?.actor)),
+    schedule_publish: withDecoded(ScheduleToolInput, ({ recordId, modelApiKey, at }) => ScheduleService.schedulePublish(modelApiKey, recordId, at, options?.actor)),
+    schedule_unpublish: withDecoded(ScheduleToolInput, ({ recordId, modelApiKey, at }) => ScheduleService.scheduleUnpublish(modelApiKey, recordId, at, options?.actor)),
+    clear_schedule: withDecoded(PublishRecordInput, ({ recordId, modelApiKey }) => ScheduleService.clearSchedule(modelApiKey, recordId, options?.actor)),
     list_record_versions: withDecoded(PublishRecordInput, ({ modelApiKey, recordId }) => VersionService.listVersions(modelApiKey, recordId)),
     get_record_version: withDecoded(VersionIdInput, ({ versionId }) => VersionService.getVersion(versionId)),
     restore_record_version: withDecoded(RestoreVersionInput, ({ modelApiKey, recordId, versionId }) => VersionService.restoreVersion(modelApiKey, recordId, versionId, options?.actor)),

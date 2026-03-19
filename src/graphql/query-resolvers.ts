@@ -23,10 +23,13 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
       "id: LinkFilter", "_status: StatusFilter",
       "_createdAt: DateTimeFilter", "_updatedAt: DateTimeFilter",
       "_publishedAt: DateTimeFilter", "_firstPublishedAt: DateTimeFilter",
+      "_publicationScheduledAt: DateTimeFilter", "_unpublishingScheduledAt: DateTimeFilter",
     ];
     const orderByValues = [
       "_createdAt_ASC", "_createdAt_DESC", "_updatedAt_ASC", "_updatedAt_DESC",
       "_publishedAt_ASC", "_publishedAt_DESC", "_firstPublishedAt_ASC", "_firstPublishedAt_DESC",
+      "_publicationScheduledAt_ASC", "_publicationScheduledAt_DESC",
+      "_unpublishingScheduledAt_ASC", "_unpublishingScheduledAt_DESC",
     ];
     if (model.sortable || model.tree) {
       filterFields.push("_position: PositionFilter");

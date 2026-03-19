@@ -21,6 +21,9 @@ export default {
   fetch(request: Request, env: Env): Promise<Response> {
     return getHandler(env).fetch(request);
   },
+  scheduled(_controller: ScheduledController, env: Env) {
+    return getHandler(env).runScheduledTransitions();
+  },
 };
 
 interface Env {

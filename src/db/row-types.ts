@@ -80,6 +80,8 @@ export interface ContentRow {
   readonly _created_by: string | null;
   readonly _updated_by: string | null;
   readonly _published_by: string | null;
+  readonly _scheduled_publish_at: string | null;
+  readonly _scheduled_unpublish_at: string | null;
   readonly [fieldKey: string]: unknown;
 }
 

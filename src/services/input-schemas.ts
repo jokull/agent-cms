@@ -115,6 +115,12 @@ export const ReorderInput = Schema.Struct({
 });
 export type ReorderInput = typeof ReorderInput.Type;
 
+export const ScheduleRecordInput = Schema.Struct({
+  modelApiKey: Schema.NonEmptyString,
+  at: Schema.NullOr(Schema.String),
+});
+export type ScheduleRecordInput = typeof ScheduleRecordInput.Type;
+
 export const SearchInput = Schema.Struct({
   query: Schema.String,
   modelApiKey: Schema.optional(Schema.String),

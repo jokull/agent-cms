@@ -83,7 +83,7 @@ export function publishRecord(modelApiKey: string, recordId: string, actor?: Req
 
     const now = new Date().toISOString();
     yield* sql.unsafe(
-      `UPDATE "${tableName}" SET _status = 'published', _published_at = ?, _first_published_at = COALESCE(_first_published_at, ?), _published_snapshot = ?, _updated_at = ?, _updated_by = ?, _published_by = ? WHERE id = ?`,
+      `UPDATE "${tableName}" SET _status = 'published', _published_at = ?, _first_published_at = COALESCE(_first_published_at, ?), _published_snapshot = ?, _updated_at = ?, _updated_by = ?, _published_by = ?, _scheduled_publish_at = NULL WHERE id = ?`,
       [now, now, encodeJson(snapshot), now, actor?.label ?? null, actor?.label ?? null, recordId]
     );
 
@@ -108,7 +108,7 @@ export function unpublishRecord(modelApiKey: string, recordId: string, actor?: R
 
     const now = new Date().toISOString();
     yield* sql.unsafe(
-      `UPDATE "${tableName}" SET _status = 'draft', _published_snapshot = NULL, _updated_at = ?, _updated_by = ? WHERE id = ?`,
+      `UPDATE "${tableName}" SET _status = 'draft', _published_snapshot = NULL, _updated_at = ?, _updated_by = ?, _scheduled_unpublish_at = NULL WHERE id = ?`,
       [now, actor?.label ?? null, recordId]
     );
 

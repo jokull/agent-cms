@@ -20,6 +20,8 @@ const CONTENT_SYSTEM_COLUMNS = [
   `"_created_by" TEXT`,
   `"_updated_by" TEXT`,
   `"_published_by" TEXT`,
+  `"_scheduled_publish_at" TEXT`,
+  `"_scheduled_unpublish_at" TEXT`,
 ];
 
 /** System columns for block tables */
@@ -245,6 +247,8 @@ export function migrateContentTable(
           "_created_by",
           "_updated_by",
           "_published_by",
+          "_scheduled_publish_at",
+          "_scheduled_unpublish_at",
           "_position",
           "_parent_id",
         ]);

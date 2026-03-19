@@ -149,6 +149,15 @@ Two prompts encode common multi-step workflows:
 
 JSON REST API for programmatic content management. Models, fields, records, assets, locales, publish/unpublish, bulk operations, schema import/export.
 
+Scheduling is available but optional:
+- `POST /api/records/:id/schedule-publish`
+- `POST /api/records/:id/schedule-unpublish`
+- `POST /api/records/:id/clear-schedule`
+
+GraphQL exposes:
+- `_publicationScheduledAt`
+- `_unpublishingScheduledAt`
+
 ### `/api/search` — Search
 
 Fulltext search powered by SQLite FTS5 with BM25 ranking and snippets. Records are automatically indexed on create, update, and delete. Searches across all models or scoped to a single model. Supports FTS5 query syntax including phrase matching.
@@ -159,6 +168,50 @@ curl -X POST https://my-cms.workers.dev/api/search \
 ```
 
 Vector search via Cloudflare Vectorize provides semantic similarity — hybrid rank fusion combines keyword and vector results.
+
+## Optional cron scheduling
+
+Scheduled publish/unpublish does not need extra bindings or services.
+
+If you want automatic execution, add a Worker `scheduled()` handler and a cron trigger:
+
+```ts
+import { createCMSHandler } from "agent-cms";
+
+let cachedHandler: ReturnType<typeof createCMSHandler> | null = null;
+
+function getHandler(env: Env) {
+  if (!cachedHandler) {
+    cachedHandler = createCMSHandler({
+      bindings: {
+        db: env.DB,
+        assets: env.ASSETS,
+        writeKey: env.CMS_WRITE_KEY,
+      },
+    });
+  }
+  return cachedHandler;
+}
+
+export default {
+  fetch(request: Request, env: Env) {
+    return getHandler(env).fetch(request);
+  },
+  scheduled(_controller: ScheduledController, env: Env) {
+    return getHandler(env).runScheduledTransitions();
+  },
+};
+```
+
+```json
+{
+  "triggers": {
+    "crons": ["* * * * *"]
+  }
+}
+```
+
+Without a cron trigger, schedules can still be created and queried, but they will not execute automatically.
 
 ## Field types
 

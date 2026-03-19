@@ -79,6 +79,8 @@ const META_COLUMN_MAP: Partial<Record<string, string>> = {
   _updatedAt: "_updated_at",
   _publishedAt: "_published_at",
   _firstPublishedAt: "_first_published_at",
+  _publicationScheduledAt: "_scheduled_publish_at",
+  _unpublishingScheduledAt: "_scheduled_unpublish_at",
   _status: "_status",
   _parent: "_parent_id",
   _position: "_position",

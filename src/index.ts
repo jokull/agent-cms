@@ -88,6 +88,7 @@ function cacheKey(config: CmsHandlerConfig): string {
  *
  * export default {
  *   fetch: (request, env) => getHandler(env).fetch(request),
+ *   scheduled: (_controller, env) => getHandler(env).runScheduledTransitions(),
  * };
  *
  * let cachedHandler: ReturnType<typeof createCMSHandler> | null = null;
@@ -150,5 +151,8 @@ function createCMSHandlerUncached(config: CmsHandlerConfig) {
      * Skips CORS, auth, and request logging — caller is trusted.
      */
     execute: webHandler.execute,
+
+    /** Run due scheduled publish/unpublish transitions. Safe to call from a cron trigger. */
+    runScheduledTransitions: (now?: Date) => webHandler.runScheduledTransitions(now),
   };
 }

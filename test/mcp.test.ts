@@ -195,6 +195,27 @@ describe("MCP Server", () => {
       expect(getResult(unpubRes)._status).toBe("draft");
     });
 
+    it("schedules publish and clears schedules", async () => {
+      const createRes = await client.callTool({
+        name: "create_record",
+        arguments: { modelApiKey: "post", data: { title: "Scheduled draft" } },
+      });
+      const record = getResult(createRes);
+
+      const scheduleRes = await client.callTool({
+        name: "schedule_publish",
+        arguments: { recordId: record.id, modelApiKey: "post", at: "2026-04-01T09:00:00.000Z" },
+      });
+      expect(getResult(scheduleRes)._scheduled_publish_at).toBe("2026-04-01T09:00:00.000Z");
+
+      const clearRes = await client.callTool({
+        name: "clear_schedule",
+        arguments: { recordId: record.id, modelApiKey: "post" },
+      });
+      expect(getResult(clearRes)._scheduled_publish_at).toBeNull();
+      expect(getResult(clearRes)._scheduled_unpublish_at).toBeNull();
+    });
+
     it("deletes a record", async () => {
       const createRes = await client.callTool({
         name: "create_record",

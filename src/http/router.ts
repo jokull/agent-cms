@@ -13,6 +13,7 @@ import * as RecordService from "../services/record-service.js";
 import * as PublishService from "../services/publish-service.js";
 import * as AssetService from "../services/asset-service.js";
 import * as LocaleService from "../services/locale-service.js";
+import * as ScheduleService from "../services/schedule-service.js";
 import { isCmsError, errorToResponse } from "../errors.js";
 import {
   CreateModelInput, UpdateModelInput,
@@ -23,6 +24,7 @@ import {
   UpdateAssetMetadataInput,
   CreateLocaleInput,
   BulkCreateRecordsInput,
+  ScheduleRecordInput,
   ImportSchemaInput,
   ReindexSearchInput, ReorderInput, SearchInput,
   CreateUploadUrlInput,
@@ -338,6 +340,39 @@ const recordsRouter = HttpRouter.empty.pipe(
     })
   ),
 
+  HttpRouter.post(
+    "/records/:id/schedule-publish",
+    Effect.gen(function* () {
+      const params = yield* HttpRouter.params;
+      const body = yield* readJsonBody();
+      const input = yield* decodeUnknownInput(ScheduleRecordInput, body);
+      const actor = yield* currentActor();
+      return yield* handle(ScheduleService.schedulePublish(input.modelApiKey, param(params, "id"), input.at, actor));
+    })
+  ),
+
+  HttpRouter.post(
+    "/records/:id/schedule-unpublish",
+    Effect.gen(function* () {
+      const params = yield* HttpRouter.params;
+      const body = yield* readJsonBody();
+      const input = yield* decodeUnknownInput(ScheduleRecordInput, body);
+      const actor = yield* currentActor();
+      return yield* handle(ScheduleService.scheduleUnpublish(input.modelApiKey, param(params, "id"), input.at, actor));
+    })
+  ),
+
+  HttpRouter.post(
+    "/records/:id/clear-schedule",
+    Effect.gen(function* () {
+      const params = yield* HttpRouter.params;
+      const body = yield* readJsonBody();
+      const input = yield* decodeUnknownInput(Schema.Struct({ modelApiKey: Schema.NonEmptyString }), body);
+      const actor = yield* currentActor();
+      return yield* handle(ScheduleService.clearSchedule(input.modelApiKey, param(params, "id"), actor));
+    })
+  ),
+
   // Reorder
   HttpRouter.post(
     "/reorder",
@@ -619,6 +654,16 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
       });
     }
     return graphqlInstance;
+  }
+
+  async function runScheduledTransitions(now = new Date()) {
+    const result = await Effect.runPromise(
+      ScheduleService.runScheduledTransitions(now).pipe(Effect.provide(fullLayer))
+    );
+    if (result.published.length > 0 || result.unpublished.length > 0) {
+      invalidateGraphqlSchemaCache();
+    }
+    return result;
   }
 
   function isSchemaMutationRequest(url: URL, method: string): boolean {
@@ -1020,5 +1065,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
       const instance = await getGraphqlInstance();
       return instance.execute(query, variables, context);
     },
+
+    runScheduledTransitions,
   };
 }
