@@ -44,6 +44,13 @@ For editorial agents, use the reduced-scope MCP endpoint instead:
 }
 ```
 
+With Claude Code, the equivalent CLI command is:
+
+```bash
+claude mcp add --transport http my-cms http://127.0.0.1:8787/mcp
+claude mcp add --transport http my-cms-editor http://127.0.0.1:8787/mcp/editor
+```
+
 Deploy to production:
 
 ```bash
@@ -249,6 +256,12 @@ The focused example at [`examples/editor-mcp/`](/Users/jokull/Code/agent-cms/exa
 - direct CMS editor-token endpoint: `https://<cms>/mcp/editor`
 - app-land OAuth/editor gateway: `https://<app>/editor-access/mcp`
 
+For Claude Code, the editor-facing command looks like:
+
+```bash
+claude mcp add --transport http editor-mcp https://<app>/editor-access/mcp
+```
+
 ## Localization
 
 Define locales with fallback chains. Localized fields store a value per locale. The GraphQL API respects the `Accept-Language` header and falls back through the chain when a locale is missing.
@@ -270,13 +283,14 @@ Only `DB` is required. Everything else is optional — each binding unlocks capa
 
 Asset binaries live in your R2 bucket. agent-cms stores asset metadata in D1 and serves registered assets from `/assets/:id/:filename`.
 
-The canonical flow is:
+The canonical flow depends on the client:
 
-1. Upload the original file to R2
-2. Register the asset in agent-cms via `/api/assets`
-3. Reference the asset by ID from content
+1. MCP/editor workflow: call `import_asset_from_url` with a public file URL
+2. Browser visual-edit workflow: upload bytes via `PUT /api/assets/:id/file`, then register/update metadata through the CMS API
+3. Manual/server workflow: upload the original file to R2, then register the asset via `/api/assets`
+4. Reference the asset by ID from content
 
-agent-cms does not accept binary uploads through the Worker. This is intentional: direct-to-R2 upload is the default ingestion model. See [`docs/architecture/assets.md`](./docs/architecture/assets.md) for the full rationale.
+For large-scale imports and backfills, direct-to-R2 remains the default ingestion model. See [`docs/architecture/assets.md`](./docs/architecture/assets.md) for the full rationale.
 
 For DatoCMS migrations specifically, see [`docs/migrations/dato-import.md`](./docs/migrations/dato-import.md).
 
@@ -398,6 +412,8 @@ For the editor-auth flow specifically, see [`examples/editor-mcp/`](./examples/e
 - a separate app-land Worker using Hono
 - a distinct app-land MCP gateway URL for editors
 - a browser route that mints short-lived visual-edit editor tokens
+
+For inline visual editing specifically, see [`examples/visual-edit/`](./examples/visual-edit/). It demonstrates field tweaks and image replacement without a built-in chat surface.
 
 ## License
 
