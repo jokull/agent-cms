@@ -1,6 +1,6 @@
 import { createYoga, type YogaSchemaDefinition } from "graphql-yoga";
-import { Effect, Layer, Logger } from "effect";
-import { type GraphQLSchema, parse, execute as gqlExecute, validate } from "graphql";
+import { Cache, Effect, Layer, Logger } from "effect";
+import { parse, execute as gqlExecute, validate } from "graphql";
 import { SqlClient } from "@effect/sql";
 import { buildGraphQLSchema } from "./schema-builder.js";
 import { enforceQueryLimits } from "./query-limits.js";
@@ -59,15 +59,15 @@ export function createGraphQLHandler(
     maxSelections: 250,
   } as const;
 
-  let schemaPromise: Promise<GraphQLSchema> | null = null;
   let schemaBuildCount = 0;
   let lastSchemaBuildMs = 0;
-
-  function getSchema() {
-    if (!schemaPromise) {
-      const buildStartedAt = performance.now();
-      schemaPromise = Effect.runPromise(
-        buildGraphQLSchema(sqlLayer, {
+  const schemaCache = Effect.runSync(
+    Cache.make({
+      capacity: 1,
+      timeToLive: "24 hours",
+      lookup: () => {
+        const buildStartedAt = performance.now();
+        return buildGraphQLSchema(sqlLayer, {
           assetBaseUrl: options?.assetBaseUrl,
           assetPathPrefix: options?.assetPathPrefix,
           isProduction: options?.isProduction,
@@ -77,23 +77,32 @@ export function createGraphQLHandler(
             assetBaseUrl: options?.assetBaseUrl ?? "",
             isProduction: options?.isProduction ?? false,
           }),
+          Effect.tap(() => Effect.sync(() => {
+            lastSchemaBuildMs = Number((performance.now() - buildStartedAt).toFixed(3));
+            schemaBuildCount += 1;
+          })),
           Effect.provide(runtimeLayer),
-          Effect.orDie,
-        )
-      ).then((schema) => {
-        lastSchemaBuildMs = Number((performance.now() - buildStartedAt).toFixed(3));
-        schemaBuildCount += 1;
-        return schema;
-      }).catch((error) => {
-        schemaPromise = null;
-        throw error;
-      });
-    }
-    return schemaPromise;
+        );
+      },
+    }),
+  );
+
+  function getSchema() {
+    return Effect.runPromise(
+      schemaCache.get("schema").pipe(
+        Effect.provide(runtimeLayer),
+        Effect.orDie,
+      ),
+    );
   }
 
   async function getSchemaTiming(): Promise<SchemaTiming> {
-    const cacheHit = schemaPromise !== null;
+    const cacheHit = await Effect.runPromise(
+      schemaCache.contains("schema").pipe(
+        Effect.provide(runtimeLayer),
+        Effect.orDie,
+      ),
+    );
     const startedAt = performance.now();
     await getSchema();
     return {
@@ -130,7 +139,12 @@ export function createGraphQLHandler(
   });
 
   function invalidateSchema() {
-    schemaPromise = null;
+    return Effect.runPromise(
+      schemaCache.invalidate("schema").pipe(
+        Effect.provide(runtimeLayer),
+        Effect.orDie,
+      ),
+    );
   }
 
   function logGraphqlInfo(message: string, fields: Record<string, unknown>) {
