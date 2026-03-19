@@ -169,6 +169,163 @@ function scopeStructuredTextIds<T>(value: T, scope: string): T {
   return clone as T;
 }
 
+type CreateLikeFieldProcessingParams = {
+  modelApiKey: string;
+  tableName: string;
+  recordId: string;
+  data: Record<string, unknown>;
+  record: Record<string, unknown>;
+  modelFields: readonly ParsedFieldRow[];
+  errorPrefix?: string;
+};
+
+function createFieldErrorMessage(prefix: string | undefined, message: string) {
+  return prefix ? `${prefix}: ${message}` : message;
+}
+
+function processCreateLikeRecordFields({
+  modelApiKey,
+  tableName,
+  recordId,
+  data,
+  record,
+  modelFields,
+  errorPrefix,
+}: CreateLikeFieldProcessingParams) {
+  return Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+
+    for (const field of modelFields) {
+      if (field.field_type === "structured_text" && data[field.api_key] !== undefined && data[field.api_key] !== null) {
+        if (field.localized) {
+          const localeMap = yield* decodeLocalizedStructuredTextMap(field, data[field.api_key]).pipe(
+            Effect.mapError((error) => new ValidationError({
+              message: createFieldErrorMessage(errorPrefix, error.message),
+              field: error.field,
+            }))
+          );
+          const localizedDast: Record<string, unknown> = {};
+          for (const [localeCode, localeValue] of Object.entries(localeMap)) {
+            if (localeValue === null) {
+              localizedDast[localeCode] = null;
+              continue;
+            }
+
+            const stInput = yield* Schema.decodeUnknown(StructuredTextWriteInput)(scopeStructuredTextIds(localeValue, `${field.api_key}:${localeCode}`)).pipe(
+              Effect.mapError((e) => new ValidationError({
+                message: createFieldErrorMessage(errorPrefix, `Invalid StructuredText for field '${field.api_key}' locale '${localeCode}': ${e.message}`),
+                field: field.api_key,
+              }))
+            );
+
+            const allowedBlockTypes = getBlockWhitelist(field.validators);
+            const blocksOnly = getBlocksOnly(field.validators);
+
+            const dast = yield* writeStructuredText({
+              rootModelApiKey: modelApiKey,
+              fieldApiKey: field.api_key,
+              rootFieldStorageKey: getStructuredTextStorageKey(field.api_key, localeCode),
+              rootRecordId: recordId,
+              value: stInput.value,
+              blocks: stInput.blocks,
+              allowedBlockTypes: allowedBlockTypes ?? [],
+              blocksOnly,
+            });
+
+            localizedDast[localeCode] = dast;
+          }
+
+          data[field.api_key] = localizedDast;
+          record[field.api_key] = localizedDast;
+          continue;
+        }
+
+        const stInput = yield* Schema.decodeUnknown(StructuredTextWriteInput)(data[field.api_key]).pipe(
+          Effect.mapError((e) => new ValidationError({
+            message: createFieldErrorMessage(errorPrefix, `Invalid StructuredText for field '${field.api_key}': ${e.message}`),
+            field: field.api_key,
+          }))
+        );
+
+        const allowedBlockTypes = getBlockWhitelist(field.validators);
+        const blocksOnly = getBlocksOnly(field.validators);
+
+        const dast = yield* writeStructuredText({
+          rootModelApiKey: modelApiKey,
+          fieldApiKey: field.api_key,
+          rootRecordId: recordId,
+          value: stInput.value,
+          blocks: stInput.blocks,
+          allowedBlockTypes: allowedBlockTypes ?? [],
+          blocksOnly,
+        });
+
+        data[field.api_key] = dast;
+      }
+
+      if (field.field_type === "slug") {
+        const sourceFieldKey = getSlugSource(field.validators);
+        const sourceValue = sourceFieldKey ? toSlugSourceString(data[sourceFieldKey]) : null;
+        const currentValue = toSlugSourceString(data[field.api_key]);
+        if (!data[field.api_key] && sourceValue) {
+          data[field.api_key] = generateSlug(sourceValue);
+        } else if (currentValue) {
+          data[field.api_key] = generateSlug(currentValue);
+        }
+        if (data[field.api_key]) {
+          let slug = String(data[field.api_key]);
+          const baseSlug = slug;
+          let suffix = 1;
+          for (;;) {
+            const existing = yield* sql.unsafe<{ id: string }>(
+              `SELECT id FROM "${tableName}" WHERE "${field.api_key}" = ?`,
+              [slug]
+            );
+            if (existing.length === 0) break;
+            suffix++;
+            slug = `${baseSlug}-${suffix}`;
+          }
+          data[field.api_key] = slug;
+        }
+      }
+
+      if (isFieldType(field.field_type) && data[field.api_key] !== undefined && data[field.api_key] !== null) {
+        const fieldDef = getFieldTypeDef(field.field_type);
+        if (fieldDef.inputSchema) {
+          if (field.localized) {
+            const localeMap = yield* decodeLocalizedFieldMap(field, data[field.api_key]).pipe(
+              Effect.mapError((error) => new ValidationError({
+                message: createFieldErrorMessage(errorPrefix, error.message),
+                field: error.field,
+              }))
+            );
+            for (const [localeCode, localeValue] of Object.entries(localeMap)) {
+              if (localeValue === null) continue;
+              yield* Schema.decodeUnknown(fieldDef.inputSchema)(localeValue).pipe(
+                Effect.mapError((e) => new ValidationError({
+                  message: createFieldErrorMessage(errorPrefix, `Invalid ${field.field_type} for field '${field.api_key}' locale '${localeCode}': ${e.message}`),
+                  field: field.api_key,
+                }))
+              );
+            }
+          } else {
+            yield* Schema.decodeUnknown(fieldDef.inputSchema)(data[field.api_key]).pipe(
+              Effect.mapError((e) => new ValidationError({
+                message: createFieldErrorMessage(errorPrefix, `Invalid ${field.field_type} for field '${field.api_key}': ${e.message}`),
+                field: field.api_key,
+              }))
+            );
+          }
+        }
+      }
+
+      if (data[field.api_key] !== undefined) {
+        record[field.api_key] = data[field.api_key];
+      }
+    }
+  });
+}
+
 export function createRecord(body: CreateRecordInput, actor?: RequestActor | null) {
   return Effect.gen(function* () {
 
@@ -239,126 +396,14 @@ export function createRecord(body: CreateRecordInput, actor?: RequestActor | nul
       delete data._parent_id;
     }
 
-    // Process fields
-    for (const field of modelFields) {
-      // StructuredText: validate DAST + write blocks
-      if (field.field_type === "structured_text" && data[field.api_key] !== undefined && data[field.api_key] !== null) {
-        if (field.localized) {
-          const localeMap = yield* decodeLocalizedStructuredTextMap(field, data[field.api_key]);
-          const localizedDast: Record<string, unknown> = {};
-          for (const [localeCode, localeValue] of Object.entries(localeMap)) {
-            if (localeValue === null) {
-              localizedDast[localeCode] = null;
-              continue;
-            }
-            const stInput = yield* Schema.decodeUnknown(StructuredTextWriteInput)(scopeStructuredTextIds(localeValue, `${field.api_key}:${localeCode}`)).pipe(
-              Effect.mapError((e) => new ValidationError({
-                message: `Invalid StructuredText for field '${field.api_key}' locale '${localeCode}': ${e.message}`,
-                field: field.api_key,
-              }))
-            );
-
-            const allowedBlockTypes = getBlockWhitelist(field.validators);
-            const blocksOnly = getBlocksOnly(field.validators);
-
-            const dast = yield* writeStructuredText({
-              rootModelApiKey: model.api_key,
-              fieldApiKey: field.api_key,
-              rootFieldStorageKey: getStructuredTextStorageKey(field.api_key, localeCode),
-              rootRecordId: id,
-              value: stInput.value,
-              blocks: stInput.blocks,
-              allowedBlockTypes: allowedBlockTypes ?? [],
-              blocksOnly,
-            });
-
-            localizedDast[localeCode] = dast;
-          }
-          data[field.api_key] = localizedDast;
-          record[field.api_key] = localizedDast;
-          continue;
-        }
-
-        const stInput = yield* Schema.decodeUnknown(StructuredTextWriteInput)(data[field.api_key]).pipe(
-          Effect.mapError((e) => new ValidationError({
-            message: `Invalid StructuredText for field '${field.api_key}': ${e.message}`,
-            field: field.api_key,
-          }))
-        );
-
-        const allowedBlockTypes = getBlockWhitelist(field.validators);
-        const blocksOnly = getBlocksOnly(field.validators);
-
-        const dast = yield* writeStructuredText({
-          rootModelApiKey: model.api_key,
-          fieldApiKey: field.api_key,
-          rootRecordId: id,
-          value: stInput.value,
-          blocks: stInput.blocks,
-          allowedBlockTypes: allowedBlockTypes ?? [],
-          blocksOnly,
-        });
-
-        data[field.api_key] = dast;
-      }
-
-      if (field.field_type === "slug") {
-        const sourceFieldKey = getSlugSource(field.validators);
-        const sourceValue = sourceFieldKey ? toSlugSourceString(data[sourceFieldKey]) : null;
-        const currentValue = toSlugSourceString(data[field.api_key]);
-        if (!data[field.api_key] && sourceValue) {
-          data[field.api_key] = generateSlug(sourceValue);
-        } else if (currentValue) {
-          data[field.api_key] = generateSlug(currentValue);
-        }
-        // Enforce uniqueness
-        if (data[field.api_key]) {
-          let slug = String(data[field.api_key]);
-          const baseSlug = slug;
-          let suffix = 1;
-          for (;;) {
-            const existing = yield* sql.unsafe<{ id: string }>(
-              `SELECT id FROM "${tableName}" WHERE "${field.api_key}" = ?`,
-              [slug]
-            );
-            if (existing.length === 0) break;
-            suffix++;
-            slug = `${baseSlug}-${suffix}`;
-          }
-          data[field.api_key] = slug;
-        }
-      }
-
-      // Validate composite field types using registry schemas
-      if (isFieldType(field.field_type) && data[field.api_key] !== undefined && data[field.api_key] !== null) {
-        const fieldDef = getFieldTypeDef(field.field_type);
-        if (fieldDef.inputSchema) {
-          if (field.localized) {
-            const localeMap = yield* decodeLocalizedFieldMap(field, data[field.api_key]);
-            for (const [localeCode, localeValue] of Object.entries(localeMap)) {
-              if (localeValue === null) continue;
-              yield* Schema.decodeUnknown(fieldDef.inputSchema)(localeValue).pipe(
-                Effect.mapError((e) => new ValidationError({
-                  message: `Invalid ${field.field_type} for field '${field.api_key}' locale '${localeCode}': ${e.message}`,
-                  field: field.api_key,
-                }))
-              );
-            }
-          } else {
-            yield* Schema.decodeUnknown(fieldDef.inputSchema)(data[field.api_key]).pipe(
-              Effect.mapError((e) => new ValidationError({
-                message: `Invalid ${field.field_type} for field '${field.api_key}': ${e.message}`,
-                field: field.api_key,
-              }))
-            );
-          }
-        }
-      }
-
-      if (data[field.api_key] !== undefined) {
-        record[field.api_key] = data[field.api_key];
-      }
-    }
+    yield* processCreateLikeRecordFields({
+      modelApiKey: model.api_key,
+      tableName,
+      recordId: id,
+      data,
+      record,
+      modelFields,
+    });
 
     const createUniqueViolations = yield* findUniqueConstraintViolations({
       tableName,
@@ -771,114 +816,15 @@ export function bulkCreateRecords({ modelApiKey, records }: BulkCreateRecordsInp
         record._position = nextPosition++;
       }
 
-      // Process fields: slug, structured_text, composite validation
-      for (const field of modelFields) {
-        // StructuredText: validate DAST + write blocks
-        if (field.field_type === "structured_text" && data[field.api_key] !== undefined && data[field.api_key] !== null) {
-          if (field.localized) {
-            const localeMap = yield* decodeLocalizedStructuredTextMap(field, data[field.api_key]);
-            const localizedDast: Record<string, unknown> = {};
-            for (const [localeCode, localeValue] of Object.entries(localeMap)) {
-              if (localeValue === null) {
-                localizedDast[localeCode] = null;
-                continue;
-              }
-
-              const stInput = yield* Schema.decodeUnknown(StructuredTextWriteInput)(scopeStructuredTextIds(localeValue, `${field.api_key}:${localeCode}`)).pipe(
-                Effect.mapError((e) => new ValidationError({
-                  message: `Record ${idx}: invalid StructuredText for field '${field.api_key}' locale '${localeCode}': ${e.message}`,
-                  field: field.api_key,
-                }))
-              );
-
-              const allowedBlockTypes = getBlockWhitelist(field.validators);
-              const blocksOnly = getBlocksOnly(field.validators);
-
-              const dast = yield* writeStructuredText({
-                rootModelApiKey: model.api_key,
-                fieldApiKey: field.api_key,
-                rootFieldStorageKey: getStructuredTextStorageKey(field.api_key, localeCode),
-                rootRecordId: id,
-                value: stInput.value,
-                blocks: stInput.blocks,
-                allowedBlockTypes: allowedBlockTypes ?? [],
-                blocksOnly,
-              });
-
-              localizedDast[localeCode] = dast;
-            }
-
-            data[field.api_key] = localizedDast;
-            record[field.api_key] = localizedDast;
-            continue;
-          }
-
-          const stInput = yield* Schema.decodeUnknown(StructuredTextWriteInput)(data[field.api_key]).pipe(
-            Effect.mapError((e) => new ValidationError({
-              message: `Record ${idx}: invalid StructuredText for field '${field.api_key}': ${e.message}`,
-              field: field.api_key,
-            }))
-          );
-
-          const allowedBlockTypes = getBlockWhitelist(field.validators);
-          const blocksOnly = getBlocksOnly(field.validators);
-
-          const dast = yield* writeStructuredText({
-            rootModelApiKey: model.api_key,
-            fieldApiKey: field.api_key,
-            rootRecordId: id,
-            value: stInput.value,
-            blocks: stInput.blocks,
-            allowedBlockTypes: allowedBlockTypes ?? [],
-            blocksOnly,
-          });
-
-          data[field.api_key] = dast;
-        }
-
-        if (field.field_type === "slug") {
-          const sourceFieldKey = getSlugSource(field.validators);
-          const sourceValue = sourceFieldKey ? toSlugSourceString(data[sourceFieldKey]) : null;
-          const currentValue = toSlugSourceString(data[field.api_key]);
-          if (!data[field.api_key] && sourceValue) {
-            data[field.api_key] = generateSlug(sourceValue);
-          } else if (currentValue) {
-            data[field.api_key] = generateSlug(currentValue);
-          }
-          // Uniqueness enforcement
-          if (data[field.api_key]) {
-            let slug = String(data[field.api_key]);
-            const baseSlug = slug;
-            let suffix = 1;
-            for (;;) {
-              const existing = yield* sql.unsafe<{ id: string }>(
-                `SELECT id FROM "${tableName}" WHERE "${field.api_key}" = ?`, [slug]
-              );
-              if (existing.length === 0) break;
-              suffix++;
-              slug = `${baseSlug}-${suffix}`;
-            }
-            data[field.api_key] = slug;
-          }
-        }
-
-        // Validate composite field types using registry schemas
-        if (isFieldType(field.field_type) && data[field.api_key] !== undefined && data[field.api_key] !== null) {
-          const fieldDef = getFieldTypeDef(field.field_type);
-          if (fieldDef.inputSchema) {
-            yield* Schema.decodeUnknown(fieldDef.inputSchema)(data[field.api_key]).pipe(
-              Effect.mapError((e) => new ValidationError({
-                message: `Record ${idx}: invalid ${field.field_type} for field '${field.api_key}': ${e.message}`,
-                field: field.api_key,
-              }))
-            );
-          }
-        }
-
-        if (data[field.api_key] !== undefined) {
-          record[field.api_key] = data[field.api_key];
-        }
-      }
+      yield* processCreateLikeRecordFields({
+        modelApiKey: model.api_key,
+        tableName,
+        recordId: id,
+        data,
+        record,
+        modelFields,
+        errorPrefix: `Record ${idx}`,
+      });
 
       yield* insertRecord(tableName, record);
       yield* SearchService.indexRecord(modelApiKey, id, record, modelFields).pipe(Effect.ignore);
