@@ -51,6 +51,8 @@ export interface FilterCompilerOpts {
   localizedDbColumns?: string[];
   /** Set of camelCase field names that store JSON arrays (links, media_gallery) */
   jsonArrayFields?: Set<string>;
+  /** Set of camelCase field names that store JSON objects with an upload_id-like primary ID */
+  jsonObjectIdFields?: Set<string>;
 }
 
 /**
@@ -154,10 +156,11 @@ function buildSqlConditions(
     const col = resolveCol(key, dbKey, opts);
 
     const isJsonArray = opts?.jsonArrayFields?.has(key) ?? false;
+    const isJsonObjectId = opts?.jsonObjectIdFields?.has(key) ?? false;
 
     for (const [op, expected] of Object.entries(value as Record<string, unknown>)) {
       if (expected === undefined) continue;
-      const cond = compileOperator(op, expected, col, dbKey, isJsonArray);
+      const cond = compileOperator(op, expected, col, dbKey, isJsonArray, isJsonObjectId);
       if (cond) conditions.push(cond);
     }
   }
@@ -175,11 +178,17 @@ function compileOperator(
   expected: unknown,
   col: string,
   dbKey: string,
-  isJsonArray: boolean = false
+  isJsonArray: boolean = false,
+  isJsonObjectId: boolean = false,
 ): SqlCondition | null {
+  const objectIdExpr = `(CASE WHEN json_valid("${dbKey}") AND json_type("${dbKey}") = 'object' THEN json_extract("${dbKey}", '$.upload_id') ELSE ${col} END)`;
+  const arrayObjectIdExpr = `CASE WHEN json_valid(value) AND json_type(value) = 'object' THEN json_extract(value, '$.upload_id') ELSE value END`;
   switch (op) {
     // --- Scalar comparison ---
     case "eq": {
+      if (isJsonObjectId) {
+        return { sql: `${objectIdExpr} = ?`, params: [expected] };
+      }
       if (isJsonArray && Array.isArray(expected)) {
         // Exact JSON array match (for links/gallery): same elements, same order
         const json = JSON.stringify(expected);
@@ -189,6 +198,9 @@ function compileOperator(
       return { sql: `${col} = ?`, params: [val] };
     }
     case "neq": {
+      if (isJsonObjectId) {
+        return { sql: `${objectIdExpr} != ?`, params: [expected] };
+      }
       const val = typeof expected === "boolean" ? (expected ? 1 : 0) : expected;
       return { sql: `${col} != ?`, params: [val] };
     }
@@ -205,11 +217,18 @@ function compileOperator(
     case "in":
       if (isPrimitiveArray(expected) && expected.length > 0) {
         const ph = expected.map(() => "?").join(", ");
+        if (isJsonObjectId) {
+          return { sql: `${objectIdExpr} IN (${ph})`, params: expected };
+        }
         return { sql: `${col} IN (${ph})`, params: expected };
       }
       return null;
     case "notIn":
       if (isPrimitiveArray(expected) && expected.length > 0) {
+        if (isJsonObjectId) {
+          const ph = expected.map(() => "?").join(", ");
+          return { sql: `${objectIdExpr} NOT IN (${ph})`, params: expected };
+        }
         if (isJsonArray) {
           // For JSON array columns: none of the specified values appear in the array
           const ph = expected.map(() => "?").join(", ");
@@ -228,7 +247,7 @@ function compileOperator(
       if (isPrimitiveArray(expected) && expected.length > 0) {
         const ph = expected.map(() => "?").join(", ");
         return {
-          sql: `(SELECT COUNT(DISTINCT value) FROM json_each(${col}) WHERE value IN (${ph})) = ?`,
+          sql: `(SELECT COUNT(DISTINCT ${arrayObjectIdExpr}) FROM json_each(${col}) WHERE ${arrayObjectIdExpr} IN (${ph})) = ?`,
           params: [...expected, expected.length],
         };
       }
@@ -237,7 +256,7 @@ function compileOperator(
       if (isPrimitiveArray(expected) && expected.length > 0) {
         const ph = expected.map(() => "?").join(", ");
         return {
-          sql: `EXISTS (SELECT 1 FROM json_each(${col}) WHERE value IN (${ph}))`,
+          sql: `EXISTS (SELECT 1 FROM json_each(${col}) WHERE ${arrayObjectIdExpr} IN (${ph}))`,
           params: expected,
         };
       }
@@ -280,6 +299,11 @@ function compileOperator(
         ? { sql: `(${col} IS NOT NULL AND ${col} != '')`, params: [] }
         : { sql: `(${col} IS NULL OR ${col} = '')`, params: [] };
     case "exists":
+      if (isJsonObjectId) {
+        return expected
+          ? { sql: `${objectIdExpr} IS NOT NULL`, params: [] }
+          : { sql: `${objectIdExpr} IS NULL`, params: [] };
+      }
       return expected
         ? { sql: `${col} IS NOT NULL`, params: [] }
         : { sql: `${col} IS NULL`, params: [] };

@@ -73,12 +73,17 @@ type Asset {
   title: String
   url: String!
   blurhash: String
+  focalPoint: FocalPoint
   customData: JSON
   _createdAt: String!
   _updatedAt: String!
   _createdBy: String
   _updatedBy: String
   responsiveImage(transforms: ImageTransformParams, cfImagesParams: ImageTransformParams, imgixParams: ImgixParamsShim): ResponsiveImage
+}
+type FocalPoint {
+  x: Float!
+  y: Float!
 }
 type ResponsiveImage {
   src: String!

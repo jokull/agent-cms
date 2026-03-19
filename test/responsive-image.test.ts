@@ -75,6 +75,37 @@ describe("P2.4: Responsive image + _site query", () => {
 
       expect(result.data.allPosts[0].cover.responsiveImage).toBeNull();
     });
+
+    it("uses per-field focal point for responsiveImage gravity", async () => {
+      const assetRes = await jsonRequest(handler, "POST", "/api/assets", {
+        filename: "hero.jpg", mimeType: "image/jpeg", size: 50000, width: 1920, height: 1080, alt: "Hero image",
+      });
+      const asset = await assetRes.json();
+
+      await jsonRequest(handler, "POST", "/api/records", {
+        modelApiKey: "post",
+        data: {
+          title: "Focal Post",
+          cover: {
+            upload_id: asset.id,
+            focal_point: { x: 0.5, y: 0.2 },
+          },
+        },
+      });
+
+      const result = await gqlQuery(handler, `{
+        allPosts {
+          cover {
+            responsiveImage(transforms: { width: 600, height: 400, fit: "cover" }) {
+              src
+            }
+          }
+        }
+      }`);
+
+      expect(result.errors).toBeUndefined();
+      expect(result.data.allPosts[0].cover.responsiveImage.src).toContain("gravity=0.5x0.2");
+    });
   });
 
   describe("_site query", () => {

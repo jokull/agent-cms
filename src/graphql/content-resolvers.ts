@@ -12,14 +12,7 @@ import { loadLinkedRecords } from "./linked-record-loader.js";
 import { loadStructuredTextEnvelope } from "./structured-text-loader.js";
 import { getBlockWhitelist } from "../db/validators.js";
 import { decodeJsonIfString, decodeJsonStringOr } from "../json.js";
-
-function parseCustomData(value: string | null): Record<string, string> | null {
-  if (!value) return null;
-  const parsed = decodeJsonStringOr(value, null);
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
-  const entries = Object.entries(parsed).filter(([, entryValue]) => typeof entryValue === "string");
-  return Object.fromEntries(entries);
-}
+import { mergeAssetWithMediaReference, parseMediaFieldReference, parseMediaGalleryReferences } from "../media-field.js";
 
 function pickLocalizedEntry(rawValue: unknown, context: GqlContext, defaultLocale?: string | null) {
   if (rawValue === null || rawValue === undefined) return { locale: null, value: null };
@@ -200,7 +193,7 @@ export function buildContentModelResolvers(
         description = (typeof raw === "string" ? raw : null);
       }
       if (!imageUrl && firstMediaField && parent[firstMediaField.api_key]) {
-        const assetId = parent[firstMediaField.api_key] as string;
+        const assetId = parseMediaFieldReference(parent[firstMediaField.api_key])?.uploadId;
         const asset = await runSql(
           Effect.gen(function* () {
             const s = yield* SqlClient.SqlClient;
@@ -333,15 +326,7 @@ export function buildContentModelResolvers(
       const map = new Map<string, AssetObject>();
       for (const a of rows) {
         map.set(a.id, {
-          id: a.id, filename: a.filename, mimeType: a.mime_type,
-          size: a.size, width: a.width, height: a.height,
-          alt: a.alt, title: a.title, blurhash: a.blurhash ?? null,
-          customData: parseCustomData(a.custom_data),
-          url: assetUrl(a.id, a.filename),
-          _createdAt: a.created_at,
-          _updatedAt: a.updated_at,
-          _createdBy: a.created_by,
-          _updatedBy: a.updated_by,
+          ...mergeAssetWithMediaReference(a, null, assetUrl),
         });
       }
       return map;
@@ -392,21 +377,38 @@ export function buildContentModelResolvers(
       // Media field resolver: batch-fetch single asset
       if (f.field_type === "media") {
         typeResolvers[gqlName] = async (parent: DynamicRow) => {
-          const assetId = parent[f.api_key];
-          if (!assetId) return null;
-          const map = await batchFetchAssets([assetId as string]);
-          return map.get(assetId as string) ?? null;
+          const reference = parseMediaFieldReference(parent[f.api_key]);
+          if (!reference) return null;
+          const map = await batchFetchAssets([reference.uploadId]);
+          const asset = map.get(reference.uploadId);
+          if (!asset) return null;
+          return {
+            ...asset,
+            alt: reference.alt ?? asset.alt,
+            title: reference.title ?? asset.title,
+            focalPoint: reference.focalPoint ?? asset.focalPoint,
+            customData: reference.customData ?? asset.customData,
+          };
         };
       }
       // Media gallery resolver: batch-fetch all assets in one IN query
       if (f.field_type === "media_gallery") {
         typeResolvers[gqlName] = async (parent: DynamicRow) => {
-          let ids = parent[f.api_key];
-          ids = decodeJsonIfString(ids);
-          if (!Array.isArray(ids)) return [];
-          const assetMap = await batchFetchAssets(ids as string[]);
+          const references = parseMediaGalleryReferences(parent[f.api_key]);
+          if (references.length === 0) return [];
+          const assetMap = await batchFetchAssets(references.map((reference) => reference.uploadId));
           // Return in original order
-          return (ids as string[]).map((id: string) => assetMap.get(id) ?? null).filter(Boolean);
+          return references.map((reference) => {
+            const asset = assetMap.get(reference.uploadId);
+            if (!asset) return null;
+            return {
+              ...asset,
+              alt: reference.alt ?? asset.alt,
+              title: reference.title ?? asset.title,
+              focalPoint: reference.focalPoint ?? asset.focalPoint,
+              customData: reference.customData ?? asset.customData,
+            };
+          }).filter(Boolean);
         };
       }
       // SEO field resolver: return parsed JSON with image asset resolution

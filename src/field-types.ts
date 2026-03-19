@@ -32,6 +32,22 @@ export const SeoSchema = Schema.Struct({
   twitterCard: Schema.optional(Schema.String),
 });
 
+export const MediaFocalPointSchema = Schema.Struct({
+  x: Schema.Number.pipe(Schema.between(0, 1)),
+  y: Schema.Number.pipe(Schema.between(0, 1)),
+});
+
+export const MediaFieldObjectSchema = Schema.Struct({
+  upload_id: Schema.String,
+  alt: Schema.optional(Schema.NullOr(Schema.String)),
+  title: Schema.optional(Schema.NullOr(Schema.String)),
+  focal_point: Schema.optional(Schema.NullOr(MediaFocalPointSchema)),
+  custom_data: Schema.optional(Schema.NullOr(Schema.Record({ key: Schema.String, value: Schema.Unknown }))),
+});
+
+export const MediaFieldSchema = Schema.Union(Schema.String, MediaFieldObjectSchema);
+export const MediaGalleryFieldSchema = Schema.Array(MediaFieldSchema);
+
 /** Static definition for a field type — everything known at compile time */
 export interface FieldTypeDefinition {
   /** SQLite column type */
@@ -154,7 +170,7 @@ export const FIELD_TYPE_REGISTRY: Record<FieldType, FieldTypeDefinition> = {
     filterType: "LinkFilter",
     localizable: false,
     multiLocaleType: "StringMultiLocaleField",
-    inputSchema: null,
+    inputSchema: MediaFieldSchema,
     jsonStored: false,
     hasCustomResolver: true,
   },
@@ -164,7 +180,7 @@ export const FIELD_TYPE_REGISTRY: Record<FieldType, FieldTypeDefinition> = {
     filterType: "LinksFilter",
     localizable: false,
     multiLocaleType: "JsonMultiLocaleField",
-    inputSchema: null,
+    inputSchema: MediaGalleryFieldSchema,
     jsonStored: true,
     hasCustomResolver: true,
   },

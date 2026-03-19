@@ -247,6 +247,11 @@ const CreateFieldTool = cmsTool("create_field", `Add a field to a model. Auto-mi
 
 Key validators by field type:
 - slug: {"slug_source": "title"} — auto-generates from source field
+- string/text/slug: {"enum": ["draft","review","published"]} — restrict allowed values
+- string/text/slug: {"length": {"min": 10, "max": 160}} — character count limits
+- integer/float: {"number_range": {"min": 1, "max": 5}} — numeric bounds
+- string/text/slug: {"format": "email"} or {"format": "url"} or {"format": {"custom_pattern": "^[A-Z]{2}\\\\d{4}$"}} — string format checks
+- date/date_time: {"date_range": {"min": "now"}} — temporal bounds
 - link: {"item_item_type": ["model_api_key"]} — target model
 - links: {"items_item_type": ["model_api_key"]} — target model
 - structured_text: {"structured_text_blocks": ["block_api_key"]} — allowed block types
@@ -261,8 +266,8 @@ const SchemaInfoTool = cmsTool("schema_info", "Get the complete CMS schema in on
 const CreateRecordTool = cmsTool("create_record", `Create a content record. Records start as draft — call publish_record to make them visible in GraphQL.
 
 Field value formats:
-- media: asset ID string (from upload_asset)
-- media_gallery: array of asset ID strings
+- media: asset ID string, or {"upload_id":"<asset_id>","alt":"...","title":"...","focal_point":{"x":0.5,"y":0.2},"custom_data":{...}}
+- media_gallery: array of asset IDs and/or media override objects
 - link: record ID string
 - links: array of record ID strings
 - seo: {"title":"...","description":"...","image":"<asset_id>","twitterCard":"summary_large_image"}
@@ -427,8 +432,8 @@ Naming conventions:
   - Block types get "Record" suffix in GraphQL: code_block -> CodeBlockRecord
 
 Field value formats (composite types):
-  - media: asset ID string (from upload_asset)
-  - media_gallery: array of asset ID strings
+  - media: asset ID string, or {"upload_id":"<asset_id>","alt":"...","title":"...","focal_point":{"x":0.5,"y":0.2},"custom_data":{...}}
+  - media_gallery: array of asset IDs and/or media override objects
   - link: record ID string
   - links: array of record ID strings
   - seo: {"title":"...","description":"...","image":"<asset_id>","twitterCard":"summary_large_image"}

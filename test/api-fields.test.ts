@@ -65,6 +65,16 @@ describe("Fields REST API", () => {
       const body = await res.json();
       expect(body.validators).toEqual({ required: true, length: { min: 1, max: 255 } });
     });
+
+    it("rejects invalid validator shapes", async () => {
+      const res = await jsonRequest(handler, "POST", `/api/models/${modelId}/fields`, {
+        label: "Title", apiKey: "title", fieldType: "string",
+        validators: { number_range: { min: 1 } },
+      });
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toContain("number_range");
+    });
   });
 
   describe("GET /api/models/:modelId/fields", () => {

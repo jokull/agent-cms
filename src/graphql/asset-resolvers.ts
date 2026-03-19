@@ -8,15 +8,8 @@ import type { AssetRow } from "../db/row-types.js";
 import { compileFilterToSql, compileOrderBy } from "./filter-compiler.js";
 import { UPLOAD_TYPE_DEFS } from "./sdl-constants.js";
 import type { SchemaBuilderContext, DynamicRow, AssetObject } from "./gql-types.js";
-import { decodeJsonIfString, decodeJsonStringOr } from "../json.js";
-
-function parseCustomData(value: string | null): Record<string, string> | null {
-  if (!value) return null;
-  const parsed = decodeJsonStringOr(value, null);
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
-  const entries = Object.entries(parsed).filter(([, entryValue]) => typeof entryValue === "string");
-  return Object.fromEntries(entries);
-}
+import { decodeJsonIfString } from "../json.js";
+import { mergeAssetWithMediaReference } from "../media-field.js";
 
 function coerceStringListValue(value: unknown): string[] {
   if (Array.isArray(value)) {
@@ -240,15 +233,7 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
         if (args.skip) { query += ` OFFSET ?`; params.push(args.skip); }
         const rows = yield* s.unsafe<AssetRow>(query, params);
         return rows.map((a): AssetObject => ({
-          id: a.id, filename: a.filename, mimeType: a.mime_type,
-          size: a.size, width: a.width, height: a.height,
-          alt: a.alt, title: a.title, blurhash: a.blurhash ?? null,
-          customData: parseCustomData(a.custom_data),
-          url: assetUrl(a.id, a.filename),
-          _createdAt: a.created_at,
-          _updatedAt: a.updated_at,
-          _createdBy: a.created_by,
-          _updatedBy: a.updated_by,
+          ...mergeAssetWithMediaReference(a, null, assetUrl),
         }));
       })
     );
@@ -284,7 +269,10 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
       const fit = (params.fit ?? "scale-down") as string;
       const quality = (params.quality ?? params.q ?? null) as number | null;
       const format = (params.format ?? params.auto ?? "auto") as string;
-      const gravity = (params.gravity ?? null) as string | null;
+      let gravity = (params.gravity ?? null) as string | null;
+      if (!gravity && asset.focalPoint) {
+        gravity = `${asset.focalPoint.x}x${asset.focalPoint.y}`;
+      }
       const zoom = (params.zoom ?? null) as number | null;
       const background = (params.background ?? null) as string | null;
       const blur = (params.blur ?? null) as number | null;
@@ -362,16 +350,7 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
           const rows = yield* s.unsafe<AssetRow>("SELECT * FROM assets WHERE id = ?", [assetId]);
           if (rows.length === 0) return null;
           const a = rows[0];
-          return {
-            id: a.id, filename: a.filename, mimeType: a.mime_type,
-            size: a.size, width: a.width, height: a.height,
-            alt: a.alt, title: a.title, customData: parseCustomData(a.custom_data),
-            url: assetUrl(a.id, a.filename),
-            _createdAt: a.created_at,
-            _updatedAt: a.updated_at,
-            _createdBy: a.created_by,
-            _updatedBy: a.updated_by,
-          };
+          return mergeAssetWithMediaReference(a, null, assetUrl);
         })
       );
     },

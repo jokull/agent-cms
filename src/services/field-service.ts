@@ -11,6 +11,142 @@ import { deleteBlockSubtrees } from "./structured-text-service.js";
 import { isUnique, supportsUniqueValidation } from "../db/validators.js";
 import { decodeJsonRecordStringOr, encodeJson } from "../json.js";
 
+function validateFieldValidators(
+  fieldType: string,
+  apiKey: string,
+  validators: Record<string, unknown>,
+) {
+  return Effect.gen(function* () {
+    if (isUnique(validators) && !supportsUniqueValidation(fieldType)) {
+      return yield* new ValidationError({
+        message: `unique validator is not supported for field type '${fieldType}'`,
+        field: apiKey,
+      });
+    }
+
+    const enumValues = validators.enum;
+    if (enumValues !== undefined) {
+      if (!["string", "text", "slug"].includes(fieldType)) {
+        return yield* new ValidationError({
+          message: `enum validator is only supported for string, text, and slug fields`,
+          field: apiKey,
+        });
+      }
+      if (!Array.isArray(enumValues) || !enumValues.every((value) => typeof value === "string")) {
+        return yield* new ValidationError({
+          message: `enum validator must be an array of strings`,
+          field: apiKey,
+        });
+      }
+    }
+
+    const length = validators.length;
+    if (length !== undefined) {
+      if (!["string", "text", "slug"].includes(fieldType)) {
+        return yield* new ValidationError({
+          message: `length validator is only supported for string, text, and slug fields`,
+          field: apiKey,
+        });
+      }
+      if (typeof length !== "object" || length === null || Array.isArray(length)) {
+        return yield* new ValidationError({
+          message: `length validator must be an object`,
+          field: apiKey,
+        });
+      }
+      const lengthConfig = length as { min?: unknown; max?: unknown };
+      if (lengthConfig.min !== undefined && (typeof lengthConfig.min !== "number" || lengthConfig.min < 0)) {
+        return yield* new ValidationError({
+          message: `length.min must be a non-negative number`,
+          field: apiKey,
+        });
+      }
+      if (lengthConfig.max !== undefined && (typeof lengthConfig.max !== "number" || lengthConfig.max < 0)) {
+        return yield* new ValidationError({
+          message: `length.max must be a non-negative number`,
+          field: apiKey,
+        });
+      }
+    }
+
+    const numberRange = validators.number_range;
+    if (numberRange !== undefined) {
+      if (!["integer", "float"].includes(fieldType)) {
+        return yield* new ValidationError({
+          message: `number_range validator is only supported for integer and float fields`,
+          field: apiKey,
+        });
+      }
+      if (typeof numberRange !== "object" || numberRange === null || Array.isArray(numberRange)) {
+        return yield* new ValidationError({
+          message: `number_range validator must be an object`,
+          field: apiKey,
+        });
+      }
+      const rangeConfig = numberRange as { min?: unknown; max?: unknown };
+      if (rangeConfig.min !== undefined && typeof rangeConfig.min !== "number") {
+        return yield* new ValidationError({
+          message: `number_range.min must be a number`,
+          field: apiKey,
+        });
+      }
+      if (rangeConfig.max !== undefined && typeof rangeConfig.max !== "number") {
+        return yield* new ValidationError({
+          message: `number_range.max must be a number`,
+          field: apiKey,
+        });
+      }
+    }
+
+    const format = validators.format;
+    if (format !== undefined) {
+      if (!["string", "text", "slug"].includes(fieldType)) {
+        return yield* new ValidationError({
+          message: `format validator is only supported for string, text, and slug fields`,
+          field: apiKey,
+        });
+      }
+      const isPreset = format === "email" || format === "url";
+      const isCustom = typeof format === "object"
+        && format !== null
+        && !Array.isArray(format)
+        && typeof (format as { custom_pattern?: unknown }).custom_pattern === "string";
+      if (!isPreset && !isCustom) {
+        return yield* new ValidationError({
+          message: `format validator must be 'email', 'url', or { custom_pattern: string }`,
+          field: apiKey,
+        });
+      }
+    }
+
+    const dateRange = validators.date_range;
+    if (dateRange !== undefined) {
+      if (!["date", "date_time"].includes(fieldType)) {
+        return yield* new ValidationError({
+          message: `date_range validator is only supported for date and date_time fields`,
+          field: apiKey,
+        });
+      }
+      if (typeof dateRange !== "object" || dateRange === null || Array.isArray(dateRange)) {
+        return yield* new ValidationError({
+          message: `date_range validator must be an object`,
+          field: apiKey,
+        });
+      }
+      const dateRangeConfig = dateRange as { min?: unknown; max?: unknown };
+      for (const key of ["min", "max"] as const) {
+        const boundary = dateRangeConfig[key];
+        if (boundary !== undefined && boundary !== "now" && typeof boundary !== "string") {
+          return yield* new ValidationError({
+            message: `date_range.${key} must be an ISO datetime string or 'now'`,
+            field: apiKey,
+          });
+        }
+      }
+    }
+  });
+}
+
 function serializeDefaultValueForFieldMetadata(value: unknown): string | null {
   if (value === undefined) return null;
   if (typeof value === "string") return value;
@@ -86,12 +222,7 @@ export function createField(modelId: string, body: CreateFieldInput) {
 
     // Validate required field + defaultValue BEFORE any mutations
     const parsedValidators = body.validators;
-    if (isUnique(parsedValidators) && !supportsUniqueValidation(body.fieldType)) {
-      return yield* new ValidationError({
-        message: `unique validator is not supported for field type '${body.fieldType}'`,
-        field: body.apiKey,
-      });
-    }
+    yield* validateFieldValidators(body.fieldType, body.apiKey, parsedValidators);
     if (parsedValidators.required) {
       const modelInfo = yield* sql.unsafe<{ api_key: string; is_block: number }>(
         "SELECT api_key, is_block FROM models WHERE id = ?", [modelId]
@@ -163,12 +294,7 @@ export function updateField(fieldId: string, body: UpdateFieldInput) {
     const field = fields[0];
     const nextFieldType = body.fieldType ?? field.field_type;
     const nextValidators = body.validators ?? parseFieldValidators(field).validators;
-    if (isUnique(nextValidators) && !supportsUniqueValidation(nextFieldType)) {
-      return yield* new ValidationError({
-        message: `unique validator is not supported for field type '${nextFieldType}'`,
-        field: field.api_key,
-      });
-    }
+    yield* validateFieldValidators(nextFieldType, field.api_key, nextValidators);
 
     // Reject field type changes if field has data
     if (body.fieldType !== undefined && body.fieldType !== field.field_type) {

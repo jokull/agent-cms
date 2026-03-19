@@ -65,6 +65,9 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
     // Build locale-awareness and camelCase->snake_case mapping for filter/order compilation
     const fieldNameMap = Object.fromEntries(camelToSnake);
     const fieldIsLocalized = (fieldName: string) => localizedCamelKeys.has(fieldName);
+    const jsonObjectIdFields = new Set(
+      fields.filter((f) => f.field_type === "media").map((f) => toCamelCase(f.api_key))
+    );
 
     async function queryWithFilter(
       args: { filter?: DynamicRow; orderBy?: string[]; first?: number; skip?: number },
@@ -77,6 +80,7 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
         fieldNameMap,
         localizedDbColumns,
         jsonArrayFields,
+        jsonObjectIdFields,
         locale: filterLocale,
       };
 
@@ -144,6 +148,7 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
             fieldNameMap,
             localizedDbColumns,
             jsonArrayFields,
+            jsonObjectIdFields,
           });
           if (compiled) {
             conditions.push(compiled.where);

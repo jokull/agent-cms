@@ -11,6 +11,7 @@ import { toTypeName, toCamelCase, fieldToSDL, getRegistryDef, resolveVideoField 
 import { resolveStructuredTextValue } from "./structured-text-resolver.js";
 import { loadLinkedRecords } from "./linked-record-loader.js";
 import { decodeJsonIfString, decodeJsonStringOr } from "../json.js";
+import { mergeAssetWithMediaReference, parseMediaFieldReference, parseMediaGalleryReferences } from "../media-field.js";
 
 function pickLocalizedEntry(rawValue: unknown, context: GqlContext) {
   if (rawValue === null || rawValue === undefined) return { locale: null, value: null };
@@ -66,27 +67,37 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
 
       if (f.field_type === "media") {
         bmResolvers[gqlName] = async (parent: DynamicRow) => {
-          const assetId = parent[f.api_key];
-          if (!assetId) return null;
+          const reference = parseMediaFieldReference(parent[f.api_key]);
+          if (!reference) return null;
           const rows = await runSql(
             Effect.gen(function* () {
               const s = yield* SqlClient.SqlClient;
-              return yield* s.unsafe<AssetRow>("SELECT * FROM assets WHERE id = ?", [assetId]);
+              return yield* s.unsafe<AssetRow>("SELECT * FROM assets WHERE id = ?", [reference.uploadId]);
             })
           );
           if (rows.length === 0) return null;
           const a = rows[0];
           return {
-            id: a.id, filename: a.filename, mimeType: a.mime_type,
-            size: a.size, width: a.width, height: a.height,
-            alt: a.alt, title: a.title, blurhash: a.blurhash ?? null,
-            customData: a.custom_data ? decodeJsonStringOr(a.custom_data, null) : null,
-            url: assetUrl(a.id, a.filename),
-            _createdAt: a.created_at,
-            _updatedAt: a.updated_at,
-            _createdBy: a.created_by,
-            _updatedBy: a.updated_by,
+            ...mergeAssetWithMediaReference(a, reference, assetUrl),
           };
+        };
+      } else if (f.field_type === "media_gallery") {
+        bmResolvers[gqlName] = async (parent: DynamicRow) => {
+          const references = parseMediaGalleryReferences(parent[f.api_key]);
+          if (references.length === 0) return [];
+          const rows = await runSql(
+            Effect.gen(function* () {
+              const s = yield* SqlClient.SqlClient;
+              const ids = references.map((reference) => reference.uploadId);
+              const placeholders = ids.map(() => "?").join(", ");
+              return yield* s.unsafe<AssetRow>(`SELECT * FROM assets WHERE id IN (${placeholders})`, ids);
+            })
+          );
+          const assetMap = new Map(rows.map((row) => [row.id, row] as const));
+          return references.map((reference) => {
+            const asset = assetMap.get(reference.uploadId);
+            return asset ? mergeAssetWithMediaReference(asset, reference, assetUrl) : null;
+          }).filter(Boolean);
         };
       } else if (f.field_type === "link") {
         const targets = getLinkTargets(f.validators);

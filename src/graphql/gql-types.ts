@@ -60,7 +60,8 @@ export interface AssetObject {
   alt: string | null;
   title: string | null;
   blurhash: string | null;
-  customData: Record<string, string> | null;
+  focalPoint: { x: number; y: number } | null;
+  customData: Record<string, unknown> | null;
   url: string;
   _createdAt: string;
   _updatedAt: string;

@@ -194,4 +194,59 @@ describe("_isValid computed field + publish gate", () => {
     expect(validCount).toBe(1);
     expect(invalidCount).toBe(1);
   });
+
+  it("_isValid and publish gate respect enum validators", async () => {
+    await jsonRequest(handler, "POST", `/api/models/${modelId}/fields`, {
+      label: "Status", apiKey: "status", fieldType: "string", validators: { enum: ["draft", "review"] },
+    });
+
+    const createRes = await jsonRequest(handler, "POST", "/api/records", {
+      modelApiKey: "article", data: { title: "Hello", status: "published" },
+    });
+    const record = await createRes.json();
+
+    const result = await gqlQuery(handler, `{ allArticles { _isValid status } }`);
+    expect(result.data.allArticles[0]._isValid).toBe(false);
+
+    const pubRes = await handler(
+      new Request(`http://localhost/api/records/${record.id}/publish?modelApiKey=article`, { method: "POST" })
+    );
+    expect(pubRes.status).toBe(400);
+    const body = await pubRes.json();
+    expect(body.error).toContain("status");
+  });
+
+  it("_isValid respects length and format validators", async () => {
+    await jsonRequest(handler, "POST", `/api/models/${modelId}/fields`, {
+      label: "Email", apiKey: "email", fieldType: "string", validators: { format: "email" },
+    });
+    await jsonRequest(handler, "POST", `/api/models/${modelId}/fields`, {
+      label: "Excerpt", apiKey: "excerpt", fieldType: "text", validators: { length: { min: 10, max: 20 } },
+    });
+
+    await jsonRequest(handler, "POST", "/api/records", {
+      modelApiKey: "article",
+      data: { title: "Hello", email: "not-an-email", excerpt: "short" },
+    });
+
+    const result = await gqlQuery(handler, `{ allArticles { _isValid email excerpt } }`);
+    expect(result.data.allArticles[0]._isValid).toBe(false);
+  });
+
+  it("_isValid respects number_range and date_range validators", async () => {
+    await jsonRequest(handler, "POST", `/api/models/${modelId}/fields`, {
+      label: "Rating", apiKey: "rating", fieldType: "integer", validators: { number_range: { min: 1, max: 5 } },
+    });
+    await jsonRequest(handler, "POST", `/api/models/${modelId}/fields`, {
+      label: "Publish On", apiKey: "publish_on", fieldType: "date_time", validators: { date_range: { min: "2100-01-01T00:00:00.000Z" } },
+    });
+
+    await jsonRequest(handler, "POST", "/api/records", {
+      modelApiKey: "article",
+      data: { title: "Hello", rating: 7, publish_on: "2026-01-01T00:00:00.000Z" },
+    });
+
+    const result = await gqlQuery(handler, `{ allArticles { _isValid rating publishOn } }`);
+    expect(result.data.allArticles[0]._isValid).toBe(false);
+  });
 });

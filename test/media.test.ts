@@ -88,4 +88,53 @@ describe("Media fields", () => {
     const result = await gqlQuery(handler, `{ allPosts { gallery { id } } }`);
     expect(result.data.allPosts[0].gallery).toEqual([]);
   });
+
+  it("supports per-field media overrides with fallback to asset defaults", async () => {
+    const assetRes = await jsonRequest(handler, "POST", "/api/assets", {
+      filename: "hero.jpg",
+      mimeType: "image/jpeg",
+      size: 50000,
+      width: 1920,
+      height: 1080,
+      alt: "Default hero alt",
+      title: "Default hero title",
+    });
+    const asset = await assetRes.json();
+
+    await jsonRequest(handler, "POST", "/api/records", {
+      modelApiKey: "post",
+      data: {
+        title: "Override Post",
+        cover: {
+          upload_id: asset.id,
+          alt: "Override alt",
+          focal_point: { x: 0.5, y: 0.2 },
+          custom_data: { placement: "hero" },
+        },
+        gallery: [
+          asset.id,
+          {
+            upload_id: asset.id,
+            title: "Gallery override title",
+          },
+        ],
+      },
+    });
+
+    const result = await gqlQuery(handler, `{
+      allPosts {
+        cover { alt title focalPoint { x y } customData }
+        gallery { alt title }
+      }
+    }`);
+
+    expect(result.errors).toBeUndefined();
+    const post = result.data.allPosts[0];
+    expect(post.cover.alt).toBe("Override alt");
+    expect(post.cover.title).toBe("Default hero title");
+    expect(post.cover.focalPoint).toEqual({ x: 0.5, y: 0.2 });
+    expect(post.cover.customData).toEqual({ placement: "hero" });
+    expect(post.gallery[0].title).toBe("Default hero title");
+    expect(post.gallery[1].title).toBe("Gallery override title");
+  });
 });
