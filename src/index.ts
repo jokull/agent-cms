@@ -3,6 +3,7 @@ import { Layer } from "effect";
 import { createWebHandler } from "./http/router.js";
 import type { AiBinding, VectorizeBinding } from "./search/vectorize.js";
 import type { CmsHooks } from "./hooks.js";
+import { decodeCmsBindings, type DecodedCmsBindings } from "./config-schema.js";
 export { createCmsAdminClient } from "./admin-client.js";
 export type {
   CmsAdminClientConfig,
@@ -24,12 +25,12 @@ export type { CmsHooks } from "./hooks.js";
 export interface CmsBindings {
   db: D1Database;
   assets?: R2Bucket;
-  environment?: string;
+  environment?: "production" | "development";
   /** Public URL base for assets (e.g. "https://my-cms.workers.dev") */
   assetBaseUrl?: string;
   /** Write API key — required for REST writes, MCP, publish/unpublish.
    *  Like DatoCMS CMA token. Use any string for local dev (e.g. "dev"). */
-  writeKey: string;
+  writeKey?: string;
   /** Workers AI binding for embedding generation (optional — enables vector search) */
   ai?: AiBinding;
   /** Vectorize index binding (optional — enables semantic search) */
@@ -65,8 +66,7 @@ function getObjectId(value: object | undefined): number {
   return id;
 }
 
-function cacheKey(config: CmsHandlerConfig): string {
-  const { bindings, hooks } = config;
+function cacheKey(bindings: DecodedCmsBindings, hooks: CmsHooks | undefined): string {
   return [
     getObjectId(bindings.db as unknown as object),
     getObjectId(bindings.assets as unknown as object | undefined),
@@ -75,7 +75,10 @@ function cacheKey(config: CmsHandlerConfig): string {
     getObjectId(hooks as unknown as object | undefined),
     bindings.environment ?? "",
     bindings.assetBaseUrl ?? "",
-    bindings.writeKey || "",
+    bindings.writeKey ?? "",
+    bindings.r2Credentials?.accessKeyId ?? "",
+    bindings.r2Credentials?.bucketName ?? "",
+    bindings.r2Credentials?.accountId ?? "",
   ].join("|");
 }
 
@@ -112,17 +115,17 @@ function cacheKey(config: CmsHandlerConfig): string {
  * ```
  */
 export function createCMSHandler(config: CmsHandlerConfig) {
-  const key = cacheKey(config);
+  const decodedBindings = decodeCmsBindings(config.bindings);
+  const key = cacheKey(decodedBindings, config.hooks);
   const cached = handlerCache.get(key);
   if (cached) return cached;
 
-  const handler = createCMSHandlerUncached(config);
+  const handler = createCMSHandlerUncached(decodedBindings, config.hooks);
   handlerCache.set(key, handler);
   return handler;
 }
 
-function createCMSHandlerUncached(config: CmsHandlerConfig) {
-  const { bindings, hooks } = config;
+function createCMSHandlerUncached(bindings: DecodedCmsBindings, hooks?: CmsHooks) {
   const sqlLayer = D1Client.layer({ db: bindings.db }).pipe(Layer.orDie);
   const webHandler = createWebHandler(sqlLayer, {
     assetBaseUrl: bindings.assetBaseUrl,
@@ -132,14 +135,7 @@ function createCMSHandlerUncached(config: CmsHandlerConfig) {
     ai: bindings.ai,
     vectorize: bindings.vectorize,
     hooks,
-    r2Credentials: bindings.r2AccessKeyId && bindings.r2SecretAccessKey && bindings.r2BucketName && bindings.cfAccountId
-      ? {
-          accessKeyId: bindings.r2AccessKeyId,
-          secretAccessKey: bindings.r2SecretAccessKey,
-          bucketName: bindings.r2BucketName,
-          accountId: bindings.cfAccountId,
-        }
-      : undefined,
+    r2Credentials: bindings.r2Credentials,
   });
 
   return {
