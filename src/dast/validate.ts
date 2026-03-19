@@ -1,5 +1,12 @@
 import { ParseResult, Schema } from "effect";
 import { DastDocumentSchema } from "./schema.js";
+import type {
+  BlockLevelNode,
+  DastDocument,
+  InlineNode,
+  ParagraphNode,
+  RootNode,
+} from "./types.js";
 
 export interface ValidationError {
   path: string;
@@ -35,42 +42,35 @@ export function validateDast(doc: unknown): ValidationError[] {
  * Validate that a DAST document only contains block nodes at root level.
  */
 export function validateBlocksOnly(doc: unknown): ValidationError[] {
-  const errors: ValidationError[] = [];
+  const decoded = Schema.decodeUnknownEither(DastDocumentSchema)(doc);
+  if (decoded._tag === "Left") return [];
 
-  if (!isRecord(doc)) {
-    errors.push({ path: "", message: "Document must be an object" });
-    return errors;
-  }
+  return decoded.right.document.children.flatMap((child, index) =>
+    child.type === "block"
+      ? []
+      : [{
+          path: `document.children[${index}]`,
+          message: `Only block nodes are allowed at root level in a blocks-only field. Found "${child.type}" node.`,
+        }],
+  );
+}
 
-  const document = isRecord(doc.document) ? doc.document : undefined;
-  if (!document) return errors;
+type DastLikeDocument = {
+  document: {
+    children: readonly unknown[];
+    type?: string;
+  };
+};
+type DastNode = RootNode | BlockLevelNode | InlineNode;
 
-  const children = getArray(document, "children");
-  if (!children) return errors;
+function visitDastNode(node: DastNode, visit: (node: DastNode) => void): void {
+  visit(node);
 
-  for (let i = 0; i < children.length; i++) {
-    const raw = children[i];
-    const child = isRecord(raw) ? raw : undefined;
-    if (!child || child.type !== "block") {
-      errors.push({
-        path: `document.children[${i}]`,
-        message: `Only block nodes are allowed at root level in a blocks-only field. Found "${typeof child?.type === "string" ? child.type : "unknown"}" node.`,
-      });
+  if ("children" in node) {
+    for (const child of node.children) {
+      visitDastNode(child as DastNode, visit);
     }
   }
-
-  return errors;
-}
-
-// --- Helpers used by extraction/pruning utilities ---
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-
-function getArray(obj: Record<string, unknown>, key: string): unknown[] | undefined {
-  const v = obj[key];
-  return Array.isArray(v) ? v : undefined;
 }
 
 // --- Extraction utilities (operate on validated or raw data) ---
@@ -78,18 +78,26 @@ function getArray(obj: Record<string, unknown>, key: string): unknown[] | undefi
 /**
  * Extract all block-level block IDs (type "block") from a DAST document.
  */
-export function extractBlockIds(doc: { document: { children: readonly unknown[] } }): string[] {
+export function extractBlockIds(doc: DastLikeDocument): string[] {
   const ids: string[] = [];
-  walkNodesForType([...doc.document.children], "block", ids);
+  visitDastNode({ type: "root", children: doc.document.children as readonly BlockLevelNode[] }, (node) => {
+    if (node.type === "block") {
+      ids.push(node.item);
+    }
+  });
   return ids;
 }
 
 /**
  * Extract all inline block IDs (type "inlineBlock") from a DAST document.
  */
-export function extractInlineBlockIds(doc: { document: { children: readonly unknown[] } }): string[] {
+export function extractInlineBlockIds(doc: DastLikeDocument): string[] {
   const ids: string[] = [];
-  walkNodesForType([...doc.document.children], "inlineBlock", ids);
+  visitDastNode({ type: "root", children: doc.document.children as readonly BlockLevelNode[] }, (node) => {
+    if (node.type === "inlineBlock") {
+      ids.push(node.item);
+    }
+  });
   return ids;
 }
 
@@ -97,52 +105,27 @@ export function extractInlineBlockIds(doc: { document: { children: readonly unkn
  * Extract ALL block IDs (both "block" and "inlineBlock") from a DAST document.
  * Used for write orchestration where both types need to be stored.
  */
-export function extractAllBlockIds(doc: { document: { children: readonly unknown[] } }): string[] {
+export function extractAllBlockIds(doc: DastLikeDocument): string[] {
   const ids: string[] = [];
-  walkNodesForTypes([...doc.document.children], ["block", "inlineBlock"], ids);
+  visitDastNode({ type: "root", children: doc.document.children as readonly BlockLevelNode[] }, (node) => {
+    if (node.type === "block" || node.type === "inlineBlock") {
+      ids.push(node.item);
+    }
+  });
   return ids;
-}
-
-function walkNodesForType(nodes: unknown[], targetType: string, ids: string[]) {
-  for (const node of nodes) {
-    if (!isRecord(node)) continue;
-    if (node.type === targetType && typeof node.item === "string") {
-      ids.push(node.item);
-    }
-    const children = getArray(node, "children");
-    if (children) walkNodesForType(children, targetType, ids);
-  }
-}
-
-function walkNodesForTypes(nodes: unknown[], targetTypes: string[], ids: string[]) {
-  for (const node of nodes) {
-    if (!isRecord(node)) continue;
-    if (typeof node.type === "string" && targetTypes.includes(node.type) && typeof node.item === "string") {
-      ids.push(node.item);
-    }
-    const children = getArray(node, "children");
-    if (children) walkNodesForTypes(children, targetTypes, ids);
-  }
 }
 
 /**
  * Extract all record link IDs referenced in a DAST document.
  */
-export function extractLinkIds(doc: { document: { children: readonly unknown[] } }): string[] {
+export function extractLinkIds(doc: DastLikeDocument): string[] {
   const ids: string[] = [];
-  walkLinkNodes([...doc.document.children], ids);
-  return ids;
-}
-
-function walkLinkNodes(nodes: unknown[], ids: string[]) {
-  for (const node of nodes) {
-    if (!isRecord(node)) continue;
-    if ((node.type === "itemLink" || node.type === "inlineItem") && typeof node.item === "string") {
+  visitDastNode({ type: "root", children: doc.document.children as readonly BlockLevelNode[] }, (node) => {
+    if (node.type === "itemLink" || node.type === "inlineItem") {
       ids.push(node.item);
     }
-    const children = getArray(node, "children");
-    if (children) walkLinkNodes(children, ids);
-  }
+  });
+  return ids;
 }
 
 /**
@@ -150,39 +133,91 @@ function walkLinkNodes(nodes: unknown[], ids: string[]) {
  * Returns a deep-cloned document with those nodes pruned from the tree.
  */
 export function pruneBlockNodes(
-  doc: { schema: string; document: { type: string; children: readonly unknown[] } },
+  doc: {
+    schema: string;
+    document: {
+      type: string;
+      children: readonly unknown[];
+    };
+  },
   blockIdsToRemove: ReadonlySet<string>
-): { schema: string; document: { type: string; children: unknown[] } } {
-  function filterChildren(nodes: readonly unknown[]): unknown[] {
-    const result: unknown[] = [];
-    for (const node of nodes) {
-      if (!isRecord(node)) {
-        result.push(node);
-        continue;
-      }
-      if (
-        (node.type === "block" || node.type === "inlineBlock") &&
-        typeof node.item === "string" &&
-        blockIdsToRemove.has(node.item)
-      ) {
-        continue; // prune
-      }
-      const children = getArray(node, "children");
-      if (children) {
-        const filtered = filterChildren(children);
-        result.push({ ...node, children: filtered });
-      } else {
-        result.push(node);
-      }
+): DastDocument {
+  function isSpanOnlyChildren(node: InlineNode): node is Extract<InlineNode, { children: readonly unknown[] }> {
+    return node.type === "link" || node.type === "itemLink";
+  }
+
+  function pruneInlineNode(node: InlineNode): InlineNode | null {
+    if (node.type === "inlineBlock" && blockIdsToRemove.has(node.item)) {
+      return null;
     }
-    return result;
+    if (isSpanOnlyChildren(node)) {
+      return node;
+    }
+    return node;
+  }
+
+  function pruneParagraphNode(node: ParagraphNode): ParagraphNode {
+    return {
+      ...node,
+      children: node.children.map((child) => pruneInlineNode(child)).filter((child): child is InlineNode => child !== null),
+    };
+  }
+
+  function pruneBlockLevelNode(node: BlockLevelNode): BlockLevelNode | null {
+    if (node.type === "block" && blockIdsToRemove.has(node.item)) {
+      return null;
+    }
+
+    switch (node.type) {
+      case "paragraph":
+        return pruneParagraphNode(node);
+      case "heading":
+        return {
+          ...node,
+          children: node.children.map((child) => pruneInlineNode(child)).filter((child): child is InlineNode => child !== null),
+        };
+      case "list":
+        return {
+          ...node,
+          children: node.children.map((child) => ({
+            ...child,
+            children: child.children
+              .map((nested) => pruneBlockLevelNode(nested))
+              .filter((nested): nested is ParagraphNode | Extract<BlockLevelNode, { type: "list" }> => nested !== null && (nested.type === "paragraph" || nested.type === "list")),
+          })),
+        };
+      case "blockquote":
+        return {
+          ...node,
+          children: node.children.map((child) => pruneParagraphNode(child)),
+        };
+      case "table":
+        return {
+          ...node,
+          children: node.children.map((row) => ({
+            ...row,
+            children: row.children.map((cell) => ({
+              ...cell,
+              children: cell.children.map((child) =>
+                "item" in child || "url" in child || "value" in child
+                  ? pruneInlineNode(child as InlineNode)
+                  : pruneBlockLevelNode(child as BlockLevelNode)
+              ).filter((child): child is ParagraphNode | InlineNode => child !== null),
+            })),
+          })) as unknown as typeof node.children,
+        };
+      default:
+        return node;
+    }
   }
 
   return {
-    schema: doc.schema,
+    schema: "dast",
     document: {
-      type: doc.document.type,
-      children: filterChildren(doc.document.children),
+      type: "root",
+      children: doc.document.children
+        .map((child) => pruneBlockLevelNode(child as BlockLevelNode))
+        .filter((child): child is BlockLevelNode => child !== null),
     },
   };
 }
