@@ -1,6 +1,10 @@
+import { pathToFileURL } from "node:url";
+import { Effect } from "effect";
+
 import {
   IMPORT_LOCALE,
   cmsRequest,
+  configureTripRuntime,
   datoGetItem,
   datoGetItems,
   datoGetItemTypeApiKey,
@@ -22,16 +26,23 @@ import {
 } from "./common.mjs";
 import { contentModelDependencyOrder } from "./schema.mjs";
 
-const model = getArg("model", "location");
-const limit = Number(getArg("limit", "5"));
-const skip = Number(getArg("skip", "0"));
+let model = "location";
+let limit = 5;
+let skip = 0;
 
-const findings = [];
-const touchedRecords = new Map();
-const touchedOverrides = new Map();
+let findings = [];
+let touchedRecords = new Map();
+let touchedOverrides = new Map();
 const FATAL_FINDING_TYPES = new Set(["asset_fallback", "skipped_block"]);
-const recordImportPromises = new Map();
-const assetImportPromises = new Map();
+let recordImportPromises = new Map();
+let assetImportPromises = new Map();
+
+function promiseEffect(thunk) {
+  return Effect.tryPromise({
+    try: thunk,
+    catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+  });
+}
 
 function noteFinding(record) {
   findings.push(record);
@@ -158,6 +169,35 @@ async function publishTouchedRecords() {
       }
     }
   }
+}
+
+function publishTouchedRecordsEffect() {
+  if (IMPORT_LOCALE !== "en") {
+    return Effect.sync(() => {
+      noteFinding({
+        type: "deferred_publish",
+        detail: `Skipped auto-publish for locale '${IMPORT_LOCALE}'. Non-default locale imports only merge localized values onto existing records.`,
+      });
+    });
+  }
+
+  return Effect.forEach(
+    contentModelDependencyOrder(),
+    (modelApiKey) =>
+      Effect.forEach(
+        [...(touchedRecords.get(modelApiKey) ?? [])],
+        (id) =>
+          promiseEffect(async () => {
+            await publishRecord(modelApiKey, id);
+            const overrides = touchedOverrides.get(modelApiKey)?.get(id);
+            if (overrides) {
+              await patchRecordOverrides(modelApiKey, id, overrides);
+            }
+          }),
+        { concurrency: 1 },
+      ),
+    { concurrency: 1 },
+  ).pipe(Effect.asVoid);
 }
 
 function assetFields(name) {
@@ -1060,49 +1100,82 @@ async function listSourceRecords(modelApiKey) {
   return recordsFromData(modelApiKey, data);
 }
 
-try {
-  await importSiteSettings();
-  const records = await listSourceRecords(model);
+export async function runImport(options = {}) {
+  return Effect.runPromise(createImportProgram(options));
+}
 
-  for (const record of records) {
-    if (model === "location") await importLocation(record);
-    if (model === "place") await importPlace(record);
-    if (model === "article") await importArticle(record);
-    if (model === "guide") await importGuide(record);
-  }
+export function createImportProgram(options = {}) {
+  configureTripRuntime(options);
+  model = options.model ?? "location";
+  limit = options.limit ?? 5;
+  skip = options.skip ?? 0;
+  findings = [];
+  touchedRecords = new Map();
+  touchedOverrides = new Map();
+  recordImportPromises = new Map();
+  assetImportPromises = new Map();
 
-  await publishTouchedRecords();
+  const importRootRecord = (record) =>
+    promiseEffect(async () => {
+      if (model === "location") await importLocation(record);
+      if (model === "place") await importPlace(record);
+      if (model === "article") await importArticle(record);
+      if (model === "guide") await importGuide(record);
+    });
 
-  const findingsPath = await writeJson(`findings-${model}-${skip}-${limit}.json`, findings);
-  const integrityViolations = fatalFindings();
+  return Effect.gen(function* () {
+    yield* Effect.logInfo(`Starting Dato import for ${model} (${IMPORT_LOCALE})`);
+    yield* promiseEffect(() => importSiteSettings());
+    const records = yield* promiseEffect(() => listSourceRecords(model));
 
-  if (integrityViolations.length > 0) {
-    throw new Error(
-      `Import aborted for ${model}: ${integrityViolations.length} referential integrity violation(s). See ${findingsPath}`
+    yield* Effect.forEach(records, importRootRecord, { concurrency: 1 });
+    yield* publishTouchedRecordsEffect();
+
+    const findingsPath = yield* promiseEffect(() => writeJson(`findings-${model}-${skip}-${limit}.json`, findings));
+    const integrityViolations = fatalFindings();
+
+    if (integrityViolations.length > 0) {
+      yield* Effect.fail(
+        new Error(
+          `Import aborted for ${model}: ${integrityViolations.length} referential integrity violation(s). See ${findingsPath}`,
+        ),
+      );
+    }
+
+    yield* Effect.logInfo(`Imported ${records.length} ${model} record(s) from locale ${IMPORT_LOCALE}`);
+    yield* Effect.logInfo(`Skipped/accepted findings: ${findings.length}`);
+    yield* Effect.logInfo(`Saved ${findingsPath}`);
+
+    const summary = yield* promiseEffect(() =>
+      cmsRequest("POST", "/graphql", {
+        query: `
+          query Verify($first: Int) {
+            ${model === "location" ? "allLocations(first: $first) { id slug }" : ""}
+            ${model === "place" ? "allPlaces(first: $first) { id slug }" : ""}
+            ${model === "article" ? "allArticles(first: $first) { id slug }" : ""}
+            ${model === "guide" ? "allGuides(first: $first) { id slug }" : ""}
+          }
+        `,
+        variables: { first: limit + skip + 5 },
+      }),
     );
-  }
 
-  console.log(`Imported ${records.length} ${model} record(s) from locale ${IMPORT_LOCALE}`);
-  console.log(`Skipped/accepted findings: ${findings.length}`);
-  console.log(`Saved ${findingsPath}`);
+    if (!summary.ok) {
+      yield* Effect.fail(new Error(`Verification query failed (${summary.status}): ${JSON.stringify(summary.body)}`));
+    }
 
-  const summary = await cmsRequest("POST", "/graphql", {
-    query: `
-      query Verify($first: Int) {
-        ${model === "location" ? "allLocations(first: $first) { id slug }" : ""}
-        ${model === "place" ? "allPlaces(first: $first) { id slug }" : ""}
-        ${model === "article" ? "allArticles(first: $first) { id slug }" : ""}
-        ${model === "guide" ? "allGuides(first: $first) { id slug }" : ""}
-      }
-    `,
-    variables: { first: limit + skip + 5 },
+    yield* Effect.logInfo("Verification query succeeded");
+    return {
+      findingsPath,
+      recordsImported: records.length,
+    };
+  }).pipe(Effect.ensuring(promiseEffect(() => disposeLocalR2Context())));
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await runImport({
+    model: getArg("model", "location"),
+    limit: Number(getArg("limit", "5")),
+    skip: Number(getArg("skip", "0")),
   });
-
-  if (!summary.ok) {
-    throw new Error(`Verification query failed (${summary.status}): ${JSON.stringify(summary.body)}`);
-  }
-
-  console.log("Verification query succeeded");
-} finally {
-  await disposeLocalR2Context();
 }

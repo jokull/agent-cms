@@ -5,26 +5,47 @@ import { createDatoClient } from "../../core/datocms.mjs";
 import { createLocalR2Client } from "../../core/local-r2.mjs";
 import { getArg, writeJson as writeJsonToDir } from "../../core/runtime.mjs";
 
-export const CMS_URL = process.env.CMS_URL ?? "http://127.0.0.1:8791";
-export const DATOCMS_API_TOKEN = process.env.DATOCMS_API_TOKEN;
+export let CMS_URL = process.env.CMS_URL ?? "http://127.0.0.1:8791";
+export let DATOCMS_API_TOKEN = process.env.DATOCMS_API_TOKEN;
 export const ACTIVE_LOCALES = ["en", "ko", "ja", "zh_CN", "es"];
-export const IMPORT_LOCALE = process.env.IMPORT_LOCALE ?? "en";
-export const OUT_DIR = resolve(process.cwd(), "scripts/dato-import/out/trip");
-export const TRIP_MIGRATION_CMS_DIR = resolve(process.cwd(), "examples/trip-migration/cms");
-export const R2_PERSIST_DIR = process.env.R2_PERSIST_DIR ?? resolve(TRIP_MIGRATION_CMS_DIR, ".wrangler/state-v3");
-export const WRANGLER_CONFIG = process.env.WRANGLER_CONFIG ?? resolve(TRIP_MIGRATION_CMS_DIR, "wrangler.jsonc");
+export let IMPORT_LOCALE = process.env.IMPORT_LOCALE ?? "en";
+export let OUT_DIR = resolve(process.cwd(), "scripts/dato-import/out/trip");
+export let TRIP_MIGRATION_CMS_DIR = resolve(process.cwd(), "examples/trip-migration/cms");
+export let R2_PERSIST_DIR = process.env.R2_PERSIST_DIR ?? resolve(TRIP_MIGRATION_CMS_DIR, ".wrangler/state-v3");
+export let WRANGLER_CONFIG = process.env.WRANGLER_CONFIG ?? resolve(TRIP_MIGRATION_CMS_DIR, "wrangler.jsonc");
 
-if (!DATOCMS_API_TOKEN) {
-  throw new Error("DATOCMS_API_TOKEN is required");
+let dato;
+let cms;
+let localR2;
+
+export function configureTripRuntime(options = {}) {
+  CMS_URL = options.cmsUrl ?? process.env.CMS_URL ?? "http://127.0.0.1:8791";
+  DATOCMS_API_TOKEN = options.datoToken ?? process.env.DATOCMS_API_TOKEN;
+  IMPORT_LOCALE = options.locale ?? process.env.IMPORT_LOCALE ?? "en";
+  OUT_DIR = options.outDir ?? resolve(process.cwd(), "scripts/dato-import/out/trip");
+  TRIP_MIGRATION_CMS_DIR = options.tripMigrationCmsDir ?? resolve(process.cwd(), "examples/trip-migration/cms");
+  R2_PERSIST_DIR = options.r2PersistDir ?? process.env.R2_PERSIST_DIR ?? resolve(TRIP_MIGRATION_CMS_DIR, ".wrangler/state-v3");
+  WRANGLER_CONFIG = options.wranglerConfig ?? process.env.WRANGLER_CONFIG ?? resolve(TRIP_MIGRATION_CMS_DIR, "wrangler.jsonc");
+
+  if (!DATOCMS_API_TOKEN) {
+    throw new Error("DATOCMS_API_TOKEN is required");
+  }
+
+  dato = createDatoClient({ token: DATOCMS_API_TOKEN });
+  cms = createAgentCmsClient({ cmsUrl: CMS_URL });
+  localR2 = createLocalR2Client({
+    persistDir: R2_PERSIST_DIR,
+    wranglerConfigPath: WRANGLER_CONFIG,
+    bucketBindingName: "ASSETS",
+  });
 }
 
-const dato = createDatoClient({ token: DATOCMS_API_TOKEN });
-const cms = createAgentCmsClient({ cmsUrl: CMS_URL });
-const localR2 = createLocalR2Client({
-  persistDir: R2_PERSIST_DIR,
-  wranglerConfigPath: WRANGLER_CONFIG,
-  bucketBindingName: "ASSETS",
-});
+function requireConfigured(service, value) {
+  if (value == null) {
+    throw new Error(`Trip importer runtime is not configured for ${service}`);
+  }
+  return value;
+}
 
 export function normalizeDatoLocale(code) {
   if (!code) return code;
@@ -42,27 +63,67 @@ export async function writeJson(filename, value) {
 
 export { getArg };
 
-export const datoQuery = dato.query;
-export const datoCmaRequest = dato.cmaRequest;
-export const datoListItemsByType = dato.listItemsByType;
-export const datoGetItem = dato.getItem;
-export const datoGetItems = dato.getItems;
-export const datoGetItemTypes = dato.getItemTypes;
-export const datoGetItemTypeApiKey = dato.getItemTypeApiKey;
-export const datoGetUpload = dato.getUpload;
-export const datoGetUploads = dato.getUploads;
-export const datoGetSite = dato.getSite;
+export function datoQuery(...args) {
+  return requireConfigured("Dato query", dato).query(...args);
+}
+export function datoCmaRequest(...args) {
+  return requireConfigured("Dato CMA", dato).cmaRequest(...args);
+}
+export function datoListItemsByType(...args) {
+  return requireConfigured("Dato listItemsByType", dato).listItemsByType(...args);
+}
+export function datoGetItem(...args) {
+  return requireConfigured("Dato getItem", dato).getItem(...args);
+}
+export function datoGetItems(...args) {
+  return requireConfigured("Dato getItems", dato).getItems(...args);
+}
+export function datoGetItemTypes(...args) {
+  return requireConfigured("Dato getItemTypes", dato).getItemTypes(...args);
+}
+export function datoGetItemTypeApiKey(...args) {
+  return requireConfigured("Dato getItemTypeApiKey", dato).getItemTypeApiKey(...args);
+}
+export function datoGetUpload(...args) {
+  return requireConfigured("Dato getUpload", dato).getUpload(...args);
+}
+export function datoGetUploads(...args) {
+  return requireConfigured("Dato getUploads", dato).getUploads(...args);
+}
+export function datoGetSite(...args) {
+  return requireConfigured("Dato getSite", dato).getSite(...args);
+}
 
-export const cmsRequest = cms.request;
-export const listModels = cms.listModels;
-export const listFields = cms.listFields;
-export const listLocales = cms.listLocales;
-export const ensureLocale = cms.ensureLocale;
-export const ensureModel = cms.ensureModel;
-export const ensureField = cms.ensureField;
-export const upsertRecord = cms.upsertRecord;
-export const publishRecord = cms.publishRecord;
-export const patchRecordOverrides = cms.patchRecordOverrides;
+export function cmsRequest(...args) {
+  return requireConfigured("CMS request", cms).request(...args);
+}
+export function listModels(...args) {
+  return requireConfigured("CMS listModels", cms).listModels(...args);
+}
+export function listFields(...args) {
+  return requireConfigured("CMS listFields", cms).listFields(...args);
+}
+export function listLocales(...args) {
+  return requireConfigured("CMS listLocales", cms).listLocales(...args);
+}
+export function ensureLocale(...args) {
+  return requireConfigured("CMS ensureLocale", cms).ensureLocale(...args);
+}
+export function ensureModel(...args) {
+  return requireConfigured("CMS ensureModel", cms).ensureModel(...args);
+}
+export function ensureField(...args) {
+  return requireConfigured("CMS ensureField", cms).ensureField(...args);
+}
+export function upsertRecord(...args) {
+  return requireConfigured("CMS upsertRecord", cms).upsertRecord(...args);
+}
+export function publishRecord(...args) {
+  return requireConfigured("CMS publishRecord", cms).publishRecord(...args);
+}
+export function patchRecordOverrides(...args) {
+  return requireConfigured("CMS patchRecordOverrides", cms).patchRecordOverrides(...args);
+}
 
 export async function ensureAsset(asset) {
   if (!asset?.id) return;
@@ -130,7 +191,7 @@ export async function ensureAsset(asset) {
 }
 
 export async function disposeLocalR2Context() {
-  await localR2.dispose();
+  await requireConfigured("local R2", localR2).dispose();
 }
 
 export function mapDatoBlockType(typename) {

@@ -1,9 +1,8 @@
-import { spawn } from "node:child_process";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import * as Command from "@effect/cli/Command";
 import * as Options from "@effect/cli/Options";
-import * as NodeContext from "@effect/platform-node/NodeContext";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import { Effect } from "effect";
 
@@ -63,18 +62,18 @@ const bootstrapCommand = Command.make("bootstrap", {
   locale: localeOption,
 }).pipe(
   Command.withDescription("Bootstrap an agent-cms schema for a Dato import adapter."),
-  Command.withHandler(({ adapter, cmsUrl, datoToken, locale }) =>
-    Effect.tryPromise(() => {
-      if (!datoToken) throw new Error("Missing Dato token. Pass --dato-token or set DATOCMS_API_TOKEN.");
-      return (
-      runScript(resolve(process.cwd(), `scripts/dato-import/adapters/${adapter}/bootstrap.mjs`), [], {
-        CMS_URL: cmsUrl,
-        DATOCMS_API_TOKEN: datoToken,
-        IMPORT_LOCALE: locale,
-      })
-      );
-    }),
-  ),
+  Command.withHandler(({ adapter, cmsUrl, datoToken, locale }) => {
+    if (!datoToken) {
+      return Effect.fail(new Error("Missing Dato token. Pass --dato-token or set DATOCMS_API_TOKEN."));
+    }
+    return Effect.tryPromise(() =>
+      importWithEnv(
+        resolve(process.cwd(), `scripts/dato-import/adapters/${adapter}/bootstrap.mjs`),
+      ),
+    ).pipe(
+      Effect.flatMap(({ createBootstrapProgram }) => createBootstrapProgram({ cmsUrl, datoToken, locale })),
+    );
+  }),
 );
 
 const importCommand = Command.make("import", {
@@ -87,22 +86,18 @@ const importCommand = Command.make("import", {
   locale: localeOption,
 }).pipe(
   Command.withDescription("Import a thin Dato root slice and expand it to a referentially intact local closure."),
-  Command.withHandler(({ adapter, cmsUrl, datoToken, model, limit, skip, locale }) =>
-    Effect.tryPromise(() => {
-      if (!datoToken) throw new Error("Missing Dato token. Pass --dato-token or set DATOCMS_API_TOKEN.");
-      return (
-      runScript(
+  Command.withHandler(({ adapter, cmsUrl, datoToken, model, limit, skip, locale }) => {
+    if (!datoToken) {
+      return Effect.fail(new Error("Missing Dato token. Pass --dato-token or set DATOCMS_API_TOKEN."));
+    }
+    return Effect.tryPromise(() =>
+      importWithEnv(
         resolve(process.cwd(), `scripts/dato-import/adapters/${adapter}/import.mjs`),
-        ["--model", model, "--limit", String(limit), "--skip", String(skip)],
-        {
-          CMS_URL: cmsUrl,
-          DATOCMS_API_TOKEN: datoToken,
-          IMPORT_LOCALE: locale,
-        },
-      )
-      );
-    }),
-  ),
+      ),
+    ).pipe(
+      Effect.flatMap(({ createImportProgram }) => createImportProgram({ cmsUrl, datoToken, locale, model, limit, skip })),
+    );
+  }),
 );
 
 const statusCommand = Command.make("status", { outDir: outDirOption }).pipe(
@@ -157,27 +152,10 @@ const run = Command.run(root, {
   footer: "",
 });
 
-NodeRuntime.runMain(run(process.argv).pipe(Effect.provide(NodeContext.layer)));
+NodeRuntime.runMain(run(process.argv));
 
-async function runScript(scriptPath, args, env) {
-  await new Promise((resolvePromise, reject) => {
-    const child = spawn(process.execPath, [scriptPath, ...args], {
-      stdio: "inherit",
-      env: {
-        ...process.env,
-        ...env,
-      },
-    });
-
-    child.on("exit", (code) => {
-      if (code === 0) {
-        resolvePromise(undefined);
-        return;
-      }
-      reject(new Error(`${scriptPath} exited with code ${code ?? "null"}`));
-    });
-    child.on("error", reject);
-  });
+async function importWithEnv(modulePath) {
+  return import(pathToFileURL(modulePath).href);
 }
 
 function buildHelp(args) {
@@ -222,81 +200,38 @@ GLOBAL ENV
   DATOCMS_API_TOKEN    Dato read token
   CMS_URL              agent-cms base URL (default: http://127.0.0.1:8791)
   IMPORT_LOCALE        Locale for adapter-backed import runs (default: en)
-
-EXAMPLES
-
-  npm run dato:import -- inspect
-  npm run dato:import -- bootstrap --adapter trip --cms-url http://127.0.0.1:8791
-  npm run dato:import -- import --adapter trip --model article --limit 1 --locale en
-  npm run dato:import -- status --out-dir scripts/dato-import/out/trip
-  npm run dato:import -- report --out-dir scripts/dato-import/out/trip
 `;
 }
 
 function inspectHelp() {
   return `agent-cms dato-import inspect
 
-Inspect a Dato project via CMA and write a schema summary snapshot.
-
 USAGE
 
   npm run dato:import -- inspect [--dato-token <token>]
-
-OPTIONS
-
-  --dato-token <token>   Dato read token. Falls back to DATOCMS_API_TOKEN.
 `;
 }
 
 function bootstrapHelp() {
   return `agent-cms dato-import bootstrap
 
-Bootstrap an agent-cms schema for a Dato import adapter.
-
 USAGE
 
   npm run dato:import -- bootstrap --adapter trip [--cms-url <url>] [--dato-token <token>] [--locale <code>]
-
-OPTIONS
-
-  --adapter <trip>       Import adapter. 'trip' is the current proven large fixture.
-  --cms-url <url>        agent-cms base URL.
-  --dato-token <token>   Dato read token. Falls back to DATOCMS_API_TOKEN.
-  --locale <code>        Locale context for the adapter bootstrap flow.
 `;
 }
 
 function importHelp() {
   return `agent-cms dato-import import
 
-Import a thin Dato root slice and expand it to a referentially intact local closure.
-
 USAGE
 
   npm run dato:import -- import --adapter trip --model <apiKey> [options]
-
-OPTIONS
-
-  --adapter <trip>       Import adapter. 'trip' is the current proven large fixture.
-  --model <apiKey>       Root content model to import.
-  --limit <n>            Root record count. Dependency closure expands beyond this.
-  --skip <n>             Root offset.
-  --locale <code>        Locale pass to import. Non-default locales merge draft values only.
-  --cms-url <url>        agent-cms base URL.
-  --dato-token <token>   Dato read token. Falls back to DATOCMS_API_TOKEN.
-
-NOTES
-
-  One requested root record can expand into many local writes.
-  The importer preserves source IDs and upserts instead of duplicating local rows.
-  Circular dependencies are memoized and collapse onto the same in-flight import.
 `;
 }
 
 function statusHelp() {
   return `agent-cms dato-import status
-
-Show the latest output path for an import run.
 
 USAGE
 
@@ -306,8 +241,6 @@ USAGE
 
 function reportHelp() {
   return `agent-cms dato-import report
-
-Summarize the latest findings JSON emitted by the importer.
 
 USAGE
 

@@ -1,4 +1,6 @@
-import { sleep } from "./runtime.mjs";
+import { Data, Effect } from "effect";
+
+class DatoRequestError extends Data.TaggedError("DatoRequestError") {}
 
 export function createDatoClient({
   token,
@@ -13,22 +15,42 @@ export function createDatoClient({
   const itemTypeCache = new Map();
   const uploadCache = new Map();
 
-  async function query(query, variables = {}) {
-    const response = await fetch(graphqlUrl, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        accept: "application/json",
-        authorization: `Bearer ${token}`,
-        "x-exclude-invalid": "true",
-      },
-      body: JSON.stringify({ query, variables }),
+  function requestJson(url, init) {
+    return Effect.gen(function* () {
+      const response = yield* Effect.tryPromise({
+        try: () => fetch(url, init),
+        catch: (cause) => new DatoRequestError({ message: `Dato request failed for ${url}`, cause }),
+      });
+      const body = yield* Effect.tryPromise({
+        try: () => response.json(),
+        catch: (cause) => new DatoRequestError({ message: `Dato response JSON decode failed for ${url}`, cause }),
+      });
+      return { response, body };
     });
-    const body = await response.json();
-    if (!response.ok || body.errors) {
-      throw new Error(`Dato query failed: ${JSON.stringify(body.errors ?? body, null, 2)}`);
-    }
-    return body.data;
+  }
+
+  async function query(query, variables = {}) {
+    return Effect.runPromise(Effect.gen(function* () {
+      const { response, body } = yield* requestJson(graphqlUrl, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json",
+          authorization: `Bearer ${token}`,
+          "x-exclude-invalid": "true",
+        },
+        body: JSON.stringify({ query, variables }),
+      });
+      if (!response.ok || body.errors) {
+        yield* Effect.fail(
+          new DatoRequestError({
+            message: `Dato query failed: ${JSON.stringify(body.errors ?? body, null, 2)}`,
+            cause: body.errors ?? body,
+          }),
+        );
+      }
+      return body.data;
+    }));
   }
 
   async function cmaRequest(path, searchParams = undefined) {
@@ -46,33 +68,44 @@ export function createDatoClient({
       }
     }
 
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const response = await fetch(url, {
-        headers: {
-          authorization: `Bearer ${token}`,
-          accept: "application/json",
-          "X-Api-Version": "3",
-        },
+    const runAttempt = (attempt) =>
+      Effect.gen(function* () {
+        const { response, body } = yield* requestJson(url, {
+          headers: {
+            authorization: `Bearer ${token}`,
+            accept: "application/json",
+            "X-Api-Version": "3",
+          },
+        });
+
+        const rateLimitError =
+          response.status === 429 ||
+          (Array.isArray(body?.data) && body.data.some((entry) => entry?.attributes?.code === "RATE_LIMIT_EXCEEDED"));
+
+        if (response.ok && !body.errors) {
+          return body;
+        }
+
+        if (rateLimitError && attempt < 4) {
+          const reset = Number(body?.data?.[0]?.attributes?.details?.reset ?? 1);
+          yield* Effect.sleep(Math.max(reset, 1) * 1000);
+          return yield* runAttempt(attempt + 1);
+        }
+
+        yield* Effect.fail(
+          new DatoRequestError({
+            message: `Dato CMA request failed: ${JSON.stringify(body.errors ?? body, null, 2)}`,
+            cause: body.errors ?? body,
+          }),
+        );
       });
 
-      const body = await response.json();
-      const rateLimitError = response.status === 429
-        || (Array.isArray(body?.data) && body.data.some((entry) => entry?.attributes?.code === "RATE_LIMIT_EXCEEDED"));
-
-      if (response.ok && !body.errors) {
-        return body;
+    return Effect.runPromise(runAttempt(0)).catch((error) => {
+      if (error instanceof DatoRequestError) {
+        throw error;
       }
-
-      if (rateLimitError && attempt < 4) {
-        const reset = Number(body?.data?.[0]?.attributes?.details?.reset ?? 1);
-        await sleep(Math.max(reset, 1) * 1000);
-        continue;
-      }
-
-      throw new Error(`Dato CMA request failed: ${JSON.stringify(body.errors ?? body, null, 2)}`);
-    }
-
-    throw new Error(`Dato CMA request failed after retries for ${url.pathname}`);
+      throw new Error(`Dato CMA request failed after retries for ${url.pathname}`);
+    });
   }
 
   async function listItemsByType(type, { limit = 20, offset = 0 } = {}) {
@@ -136,7 +169,11 @@ export function createDatoClient({
 
   async function getUploads(ids) {
     if (!ids.length) return [];
-    return Promise.all(ids.map((id) => getUpload(id)));
+    return Effect.runPromise(
+      Effect.forEach(ids, (id) => Effect.tryPromise(() => getUpload(id)), {
+        concurrency: 8,
+      }),
+    );
   }
 
   async function getSite() {
