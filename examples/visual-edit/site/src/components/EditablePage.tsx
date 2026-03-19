@@ -1,4 +1,4 @@
-import { CmsEditProvider, CmsRecord, CmsField, CmsImage, CmsText, CmsAgent } from "@agent-cms/visual-edit-react";
+import { CmsEditProvider, CmsRecord, CmsField, CmsImage, CmsText } from "@agent-cms/visual-edit-react";
 import type { RecordStatus } from "@agent-cms/visual-edit-react";
 import type { PageData, BodyBlock, ImageBlockRecord } from "../graphql/queries";
 
@@ -74,7 +74,6 @@ export default function EditablePage({ page, locale, editMode, cmsEndpoint, writ
   return (
     <CmsEditProvider endpoint={cmsEndpoint} writeKey={writeKey}>
       {content}
-      <CmsAgent />
     </CmsEditProvider>
   );
 }

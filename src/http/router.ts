@@ -577,7 +577,6 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
     ) => Promise<{ data: unknown; errors?: ReadonlyArray<{ message: string }> }>;
   } | null = null;
   let mcpHandler: ((req: Request) => Promise<Response>) | null = null;
-  let chatHandler: ((req: Request) => Promise<Response>) | null = null;
   let graphqlModulePromise: Promise<typeof import("../graphql/handler.js")> | null = null;
   let mcpEditorHandler: ((req: Request) => Promise<Response>) | null = null;
 
@@ -929,24 +928,6 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
           status: 200,
           headers: { "Content-Type": "application/json" },
         }));
-      }
-
-      // POST /api/chat — AI agent chat endpoint
-      if (url.pathname === "/api/chat" && instrumentedRequest.method === "POST") {
-        if (!options?.ai) {
-          return finish(new Response(JSON.stringify({ error: "AI binding not configured" }), {
-            status: 501,
-            headers: { "Content-Type": "application/json" },
-          }));
-        }
-        if (!chatHandler) {
-          const { createChatHandler } = await import("./chat-handler.js");
-          chatHandler = createChatHandler(fullLayer, {
-            ai: options.ai,
-            r2Bucket: options.r2Bucket,
-          });
-        }
-        return finish(await chatHandler(instrumentedRequest));
       }
 
       // Everything else to the Effect router
