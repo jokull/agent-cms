@@ -26,7 +26,7 @@ export class CmsClient {
     this.endpoint = config.endpoint.replace(/\/$/, "");
     this.headers = {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${config.writeKey}`,
+      Authorization: `Bearer ${config.token}`,
     };
   }
 

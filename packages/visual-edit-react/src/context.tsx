@@ -5,7 +5,7 @@ import type { CmsEditConfig } from "@agent-cms/visual-edit";
 interface CmsEditContextValue {
   client: CmsClient;
   endpoint: string;
-  writeKey: string;
+  token: string;
   enabled: boolean;
 }
 
@@ -21,15 +21,15 @@ export interface CmsEditProviderProps extends CmsEditConfig {
  * Provides CMS edit configuration to all CmsText/CmsImage components below.
  *
  * ```tsx
- * <CmsEditProvider endpoint="https://cms.example.com" writeKey="..." enabled={isDraft}>
+ * <CmsEditProvider endpoint="https://cms.example.com" token="etk_..." enabled={isDraft}>
  *   <App />
  * </CmsEditProvider>
  * ```
  */
-export function CmsEditProvider({ endpoint, writeKey, enabled = true, children }: CmsEditProviderProps) {
+export function CmsEditProvider({ endpoint, token, enabled = true, children }: CmsEditProviderProps) {
   const value = useMemo(
-    () => ({ client: new CmsClient({ endpoint, writeKey }), endpoint, writeKey, enabled }),
-    [endpoint, writeKey, enabled],
+    () => ({ client: new CmsClient({ endpoint, token }), endpoint, token, enabled }),
+    [endpoint, token, enabled],
   );
   return <CmsEditContext value={value}>{children}</CmsEditContext>;
 }

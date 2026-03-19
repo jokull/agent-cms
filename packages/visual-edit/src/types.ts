@@ -2,8 +2,8 @@
 export interface CmsEditConfig {
   /** Base URL of the agent-cms REST API (e.g. "https://cms.example.com") */
   endpoint: string;
-  /** Write API key for authentication */
-  writeKey: string;
+  /** Editor token or writeKey for authentication */
+  token: string;
 }
 
 /** Identifies a specific field on a specific record */

@@ -58,7 +58,7 @@ export function CmsAgent({ apiRoute }: CmsAgentProps) {
       {open && (
         <ChatPanel
           apiRoute={apiRoute ?? `${edit.endpoint}/api/chat`}
-          writeKey={edit.writeKey}
+          token={edit.token}
           recordId={record?.recordId}
           modelApiKey={record?.modelApiKey}
           locale={record?.locale}
@@ -71,14 +71,14 @@ export function CmsAgent({ apiRoute }: CmsAgentProps) {
 
 interface ChatPanelProps {
   apiRoute: string;
-  writeKey: string;
+  token: string;
   recordId?: string;
   modelApiKey?: string;
   locale?: string;
   onClose: () => void;
 }
 
-function ChatPanel({ apiRoute, writeKey, recordId, modelApiKey, locale, onClose }: ChatPanelProps) {
+function ChatPanel({ apiRoute, token, recordId, modelApiKey, locale, onClose }: ChatPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [inputValue, setInputValue] = useState("");
 
@@ -86,10 +86,10 @@ function ChatPanel({ apiRoute, writeKey, recordId, modelApiKey, locale, onClose 
     () =>
       new DefaultChatTransport({
         api: apiRoute,
-        headers: { Authorization: `Bearer ${writeKey}` },
+        headers: { Authorization: `Bearer ${token}` },
         body: { recordId, modelApiKey, locale },
       }),
-    [apiRoute, writeKey, recordId, modelApiKey, locale],
+    [apiRoute, token, recordId, modelApiKey, locale],
   );
 
   const { messages, sendMessage, status } = useChat({ transport });
