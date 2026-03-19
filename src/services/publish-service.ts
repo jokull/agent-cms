@@ -9,8 +9,9 @@ import { materializeRecordStructuredTextFields } from "./structured-text-service
 import { fireHook } from "../hooks.js";
 import * as VersionService from "./version-service.js";
 import { encodeJson } from "../json.js";
+import type { RequestActor } from "../attribution.js";
 
-export function publishRecord(modelApiKey: string, recordId: string) {
+export function publishRecord(modelApiKey: string, recordId: string, actor?: RequestActor | null) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
 
@@ -66,7 +67,10 @@ export function publishRecord(modelApiKey: string, recordId: string) {
       const prevSnapshot = typeof record._published_snapshot === "string"
         ? record._published_snapshot
         : encodeJson(record._published_snapshot);
-      yield* VersionService.createVersion(modelApiKey, recordId, prevSnapshot);
+      yield* VersionService.createVersion(modelApiKey, recordId, prevSnapshot, {
+        action: "publish",
+        actor,
+      });
     }
 
     // Build snapshot from current field values (exclude system columns)
@@ -79,8 +83,8 @@ export function publishRecord(modelApiKey: string, recordId: string) {
 
     const now = new Date().toISOString();
     yield* sql.unsafe(
-      `UPDATE "${tableName}" SET _status = 'published', _published_at = ?, _first_published_at = COALESCE(_first_published_at, ?), _published_snapshot = ?, _updated_at = ? WHERE id = ?`,
-      [now, now, encodeJson(snapshot), now, recordId]
+      `UPDATE "${tableName}" SET _status = 'published', _published_at = ?, _first_published_at = COALESCE(_first_published_at, ?), _published_snapshot = ?, _updated_at = ?, _updated_by = ?, _published_by = ? WHERE id = ?`,
+      [now, now, encodeJson(snapshot), now, actor?.label ?? null, actor?.label ?? null, recordId]
     );
 
     yield* fireHook("onPublish", { modelApiKey, recordId });
@@ -88,7 +92,7 @@ export function publishRecord(modelApiKey: string, recordId: string) {
   });
 }
 
-export function unpublishRecord(modelApiKey: string, recordId: string) {
+export function unpublishRecord(modelApiKey: string, recordId: string, actor?: RequestActor | null) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
 
@@ -104,8 +108,8 @@ export function unpublishRecord(modelApiKey: string, recordId: string) {
 
     const now = new Date().toISOString();
     yield* sql.unsafe(
-      `UPDATE "${tableName}" SET _status = 'draft', _published_snapshot = NULL, _updated_at = ? WHERE id = ?`,
-      [now, recordId]
+      `UPDATE "${tableName}" SET _status = 'draft', _published_snapshot = NULL, _updated_at = ?, _updated_by = ? WHERE id = ?`,
+      [now, actor?.label ?? null, recordId]
     );
 
     yield* fireHook("onUnpublish", { modelApiKey, recordId });

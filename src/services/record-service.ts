@@ -23,6 +23,7 @@ import { pruneBlockNodes } from "../dast/index.js";
 import { fireHook } from "../hooks.js";
 import * as VersionService from "./version-service.js";
 import { decodeJsonIfString, encodeJson } from "../json.js";
+import type { RequestActor } from "../attribution.js";
 
 function validateRequestedId(id: string | undefined) {
   if (id === undefined) return null;
@@ -40,6 +41,21 @@ function applyRecordOverrides(target: Record<string, unknown>, overrides: {
   if (overrides.updatedAt !== undefined) target._updated_at = overrides.updatedAt;
   if (overrides.publishedAt !== undefined) target._published_at = overrides.publishedAt;
   if (overrides.firstPublishedAt !== undefined) target._first_published_at = overrides.firstPublishedAt;
+}
+
+function applyActorColumns(
+  target: Record<string, unknown>,
+  actor: RequestActor | null | undefined,
+  options?: {
+    created?: boolean;
+    updated?: boolean;
+    published?: boolean;
+  },
+) {
+  if (!actor) return;
+  if (options?.created) target._created_by = actor.label;
+  if (options?.updated) target._updated_by = actor.label;
+  if (options?.published) target._published_by = actor.label;
 }
 
 function getModelByApiKey(apiKey: string) {
@@ -153,7 +169,7 @@ function scopeStructuredTextIds<T>(value: T, scope: string): T {
   return clone as T;
 }
 
-export function createRecord(body: CreateRecordInput) {
+export function createRecord(body: CreateRecordInput, actor?: RequestActor | null) {
   return Effect.gen(function* () {
 
     const model = yield* getModelByApiKey(body.modelApiKey);
@@ -202,6 +218,11 @@ export function createRecord(body: CreateRecordInput) {
       _updated_at: now,
       ...(!model.has_draft ? { _published_at: now, _first_published_at: now } : {}),
     };
+    applyActorColumns(record, actor, {
+      created: true,
+      updated: true,
+      published: !model.has_draft,
+    });
     applyRecordOverrides(record, body.overrides);
 
     // Sortable/tree models: auto-assign _position
@@ -400,7 +421,7 @@ export function getRecord(modelApiKey: string, id: string) {
   });
 }
 
-export function patchRecord(id: string, body: PatchRecordInput) {
+export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestActor | null) {
   return Effect.gen(function* () {
     const model = yield* getModelByApiKey(body.modelApiKey);
     if (!model) return yield* new NotFoundError({ entity: "Model", id: body.modelApiKey });
@@ -412,6 +433,7 @@ export function patchRecord(id: string, body: PatchRecordInput) {
     const modelFields = yield* getModelFields(model.id);
     const data: Record<string, unknown> = { ...body.data };
     const updates: Record<string, unknown> = { _updated_at: new Date().toISOString() };
+    applyActorColumns(updates, actor, { updated: true });
 
     const hasExplicitDataUpdates = Object.keys(data).length > 0;
 
@@ -425,7 +447,10 @@ export function patchRecord(id: string, body: PatchRecordInput) {
           const prevSnapshot = typeof existing._published_snapshot === "string"
             ? existing._published_snapshot
             : encodeJson(existing._published_snapshot);
-          yield* VersionService.createVersion(body.modelApiKey, id, prevSnapshot);
+          yield* VersionService.createVersion(body.modelApiKey, id, prevSnapshot, {
+            action: "auto_republish",
+            actor,
+          });
         }
       }
     }
@@ -629,8 +654,8 @@ export function patchRecord(id: string, body: PatchRecordInput) {
           if (!key.startsWith("_") && key !== "id") snap[key] = value;
         }
         yield* sql.unsafe(
-          `UPDATE "${tableName}" SET _published_snapshot = ?, _published_at = ?, _status = 'published' WHERE id = ?`,
-          [encodeJson(snap), new Date().toISOString(), id]
+          `UPDATE "${tableName}" SET _published_snapshot = ?, _published_at = ?, _published_by = ?, _status = 'published' WHERE id = ?`,
+          [encodeJson(snap), new Date().toISOString(), actor?.label ?? null, id]
         );
       }
     }
@@ -676,7 +701,7 @@ export function removeRecord(modelApiKey: string, id: string) {
  * All records must belong to the same model. Runs in a logical batch
  * (individual inserts, but avoids per-record overhead of schema lookups).
  */
-export function bulkCreateRecords({ modelApiKey, records }: BulkCreateRecordsInput) {
+export function bulkCreateRecords({ modelApiKey, records }: BulkCreateRecordsInput, actor?: RequestActor | null) {
   return Effect.gen(function* () {
     if (records.length === 0)
       return yield* new ValidationError({ message: "records must be a non-empty array" });
@@ -735,6 +760,11 @@ export function bulkCreateRecords({ modelApiKey, records }: BulkCreateRecordsInp
         _updated_at: now,
         ...(!model.has_draft ? { _published_at: now, _first_published_at: now } : {}),
       };
+      applyActorColumns(record, actor, {
+        created: true,
+        updated: true,
+        published: !model.has_draft,
+      });
       applyRecordOverrides(record, undefined);
 
       if (model.sortable || model.tree) {
@@ -872,7 +902,7 @@ export function bulkCreateRecords({ modelApiKey, records }: BulkCreateRecordsInp
  * Optionally accepts a new DAST `value`. If omitted, keeps existing DAST
  * (with deleted blocks auto-pruned).
  */
-export function patchBlocksForField(body: PatchBlocksInput) {
+export function patchBlocksForField(body: PatchBlocksInput, actor?: RequestActor | null) {
   return Effect.gen(function* () {
 
     const model = yield* getModelByApiKey(body.modelApiKey);
@@ -991,8 +1021,8 @@ export function patchBlocksForField(body: PatchBlocksInput) {
     const sql = yield* SqlClient.SqlClient;
     const now = new Date().toISOString();
     yield* sql.unsafe(
-      `UPDATE "${tableName}" SET "${field.api_key}" = ?, _updated_at = ? WHERE id = ?`,
-      [encodeJson(dast), now, body.recordId]
+      `UPDATE "${tableName}" SET "${field.api_key}" = ?, _updated_at = ?, _updated_by = ? WHERE id = ?`,
+      [encodeJson(dast), now, actor?.label ?? null, body.recordId]
     );
 
     // Status transition: published → updated on content edit (draft models only)
@@ -1005,6 +1035,15 @@ export function patchBlocksForField(body: PatchBlocksInput) {
 
     // Auto-re-publish for has_draft=false models
     if (!model.has_draft) {
+      if (existing._published_snapshot) {
+        const prevSnapshot = typeof existing._published_snapshot === "string"
+          ? existing._published_snapshot
+          : encodeJson(existing._published_snapshot);
+        yield* VersionService.createVersion(body.modelApiKey, body.recordId, prevSnapshot, {
+          action: "auto_republish",
+          actor,
+        });
+      }
       const updated = yield* selectById(tableName, body.recordId);
       if (updated) {
         const snap: Record<string, unknown> = {};
@@ -1012,8 +1051,8 @@ export function patchBlocksForField(body: PatchBlocksInput) {
           if (!key.startsWith("_") && key !== "id") snap[key] = value;
         }
         yield* sql.unsafe(
-          `UPDATE "${tableName}" SET _published_snapshot = ?, _published_at = ?, _status = 'published' WHERE id = ?`,
-          [encodeJson(snap), now, body.recordId]
+          `UPDATE "${tableName}" SET _published_snapshot = ?, _published_at = ?, _published_by = ?, _status = 'published' WHERE id = ?`,
+          [encodeJson(snap), now, actor?.label ?? null, body.recordId]
         );
       }
     }
@@ -1029,7 +1068,7 @@ export function patchBlocksForField(body: PatchBlocksInput) {
  * Reorder records for a sortable/tree model.
  * Accepts an ordered array of record IDs — sets _position = index.
  */
-export function reorderRecords(modelApiKey: string, recordIds: readonly string[]) {
+export function reorderRecords(modelApiKey: string, recordIds: readonly string[], actor?: RequestActor | null) {
   return Effect.gen(function* () {
     const model = yield* getModelByApiKey(modelApiKey);
     if (!model) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
@@ -1041,8 +1080,8 @@ export function reorderRecords(modelApiKey: string, recordIds: readonly string[]
 
     for (let i = 0; i < recordIds.length; i++) {
       yield* sql.unsafe(
-        `UPDATE "${tableName}" SET "_position" = ? WHERE id = ?`,
-        [i, recordIds[i]]
+        `UPDATE "${tableName}" SET "_position" = ?, "_updated_at" = ?, "_updated_by" = ? WHERE id = ?`,
+        [i, new Date().toISOString(), actor?.label ?? null, recordIds[i]]
       );
     }
 

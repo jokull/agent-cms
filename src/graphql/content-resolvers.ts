@@ -82,6 +82,7 @@ export function buildContentModelResolvers(
     // Object type
     const fieldDefs = [
       "id: ID!", "_modelApiKey: String!", "_status: ItemStatus", "_isValid: Boolean!", "_createdAt: String", "_updatedAt: String",
+      "_createdBy: String", "_updatedBy: String", "_publishedBy: String",
       "_publishedAt: String", "_firstPublishedAt: String", "_seoMetaTags: [Tag!]!",
     ];
     if (model.sortable || model.tree) {
@@ -126,6 +127,9 @@ export function buildContentModelResolvers(
     typeResolvers._modelApiKey = () => model.api_key;
     typeResolvers._createdAt = (p: DynamicRow) => p._created_at;
     typeResolvers._updatedAt = (p: DynamicRow) => p._updated_at;
+    typeResolvers._createdBy = (p: DynamicRow) => typeof p._created_by === "string" ? p._created_by : null;
+    typeResolvers._updatedBy = (p: DynamicRow) => typeof p._updated_by === "string" ? p._updated_by : null;
+    typeResolvers._publishedBy = (p: DynamicRow) => typeof p._published_by === "string" ? p._published_by : null;
     typeResolvers._publishedAt = (p: DynamicRow) => p._published_at;
     typeResolvers._firstPublishedAt = (p: DynamicRow) => p._first_published_at;
     typeResolvers._isValid = async (parent: DynamicRow) => {

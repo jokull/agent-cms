@@ -74,6 +74,9 @@ export interface ContentRow {
   readonly _published_snapshot: string | null; // JSON string
   readonly _created_at: string;
   readonly _updated_at: string;
+  readonly _created_by: string | null;
+  readonly _updated_by: string | null;
+  readonly _published_by: string | null;
   readonly [fieldKey: string]: unknown;
 }
 
@@ -83,6 +86,10 @@ export interface VersionRow {
   readonly record_id: string;
   readonly version_number: number;
   readonly snapshot: string;
+  readonly action: string;
+  readonly actor_type: string | null;
+  readonly actor_label: string | null;
+  readonly actor_token_id: string | null;
   readonly created_at: string;
 }
 

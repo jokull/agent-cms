@@ -35,6 +35,7 @@ import type { ModelRow, FieldRow, LocaleRow } from "../db/row-types.js";
 import { VectorizeContext } from "../search/vectorize-context.js";
 import { HooksContext } from "../hooks.js";
 import { decodeJsonRecordStringOr, encodeJson } from "../json.js";
+import type { RequestActor } from "../attribution.js";
 
 const JsonRecord = Schema.Record({ key: Schema.String, value: Schema.Unknown });
 const CommonDependencies = [SqlClient.SqlClient, VectorizeContext, HooksContext, AssetImportContext];
@@ -555,6 +556,7 @@ export interface CreateMcpLayerOptions {
   readonly path?: string;
   readonly r2Bucket?: R2Bucket;
   readonly fetch?: typeof globalThis.fetch;
+  readonly actor?: RequestActor | null;
 }
 
 export function createMcpLayer(
@@ -690,18 +692,18 @@ export function createMcpLayer(
           }),
         };
       })),
-    create_record: withDecoded(CreateRecordInput, RecordService.createRecord),
-    update_record: withDecoded(UpdateRecordInput, ({ recordId, modelApiKey, data }) => RecordService.patchRecord(recordId, { modelApiKey, data })),
-    patch_blocks: withDecoded(PatchBlocksInput, RecordService.patchBlocksForField),
+    create_record: withDecoded(CreateRecordInput, (input) => RecordService.createRecord(input, options?.actor)),
+    update_record: withDecoded(UpdateRecordInput, ({ recordId, modelApiKey, data }) => RecordService.patchRecord(recordId, { modelApiKey, data }, options?.actor)),
+    patch_blocks: withDecoded(PatchBlocksInput, (input) => RecordService.patchBlocksForField(input, options?.actor)),
     delete_record: withDecoded(DeleteRecordInput, ({ recordId, modelApiKey }) => RecordService.removeRecord(modelApiKey, recordId)),
     query_records: withDecoded(QueryRecordsInput, ({ modelApiKey }) => RecordService.listRecords(modelApiKey)),
-    bulk_create_records: withDecoded(BulkCreateRecordsInput, ({ modelApiKey, records }) => RecordService.bulkCreateRecords({ modelApiKey, records })),
-    publish_record: withDecoded(PublishRecordInput, ({ recordId, modelApiKey }) => PublishService.publishRecord(modelApiKey, recordId)),
-    unpublish_record: withDecoded(PublishRecordInput, ({ recordId, modelApiKey }) => PublishService.unpublishRecord(modelApiKey, recordId)),
+    bulk_create_records: withDecoded(BulkCreateRecordsInput, ({ modelApiKey, records }) => RecordService.bulkCreateRecords({ modelApiKey, records }, options?.actor)),
+    publish_record: withDecoded(PublishRecordInput, ({ recordId, modelApiKey }) => PublishService.publishRecord(modelApiKey, recordId, options?.actor)),
+    unpublish_record: withDecoded(PublishRecordInput, ({ recordId, modelApiKey }) => PublishService.unpublishRecord(modelApiKey, recordId, options?.actor)),
     list_record_versions: withDecoded(PublishRecordInput, ({ modelApiKey, recordId }) => VersionService.listVersions(modelApiKey, recordId)),
     get_record_version: withDecoded(VersionIdInput, ({ versionId }) => VersionService.getVersion(versionId)),
-    restore_record_version: withDecoded(RestoreVersionInput, ({ modelApiKey, recordId, versionId }) => VersionService.restoreVersion(modelApiKey, recordId, versionId)),
-    reorder_records: withDecoded(ReorderInput, ({ modelApiKey, recordIds }) => RecordService.reorderRecords(modelApiKey, recordIds)),
+    restore_record_version: withDecoded(RestoreVersionInput, ({ modelApiKey, recordId, versionId }) => VersionService.restoreVersion(modelApiKey, recordId, versionId, options?.actor)),
+    reorder_records: withDecoded(ReorderInput, ({ modelApiKey, recordIds }) => RecordService.reorderRecords(modelApiKey, recordIds, options?.actor)),
     remove_block_type: withDecoded(RemoveBlockTypeInput, ({ blockApiKey }) => SchemaLifecycle.removeBlockType(blockApiKey)),
     remove_block_from_whitelist: withDecoded(RemoveBlockFromWhitelistInput, ({ fieldId, blockApiKey }) => SchemaLifecycle.removeBlockFromWhitelist({ fieldId, blockApiKey })),
     remove_locale: withDecoded(LocaleIdInput, ({ localeId }) => SchemaLifecycle.removeLocale(localeId)),

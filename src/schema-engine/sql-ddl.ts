@@ -17,6 +17,9 @@ const CONTENT_SYSTEM_COLUMNS = [
   `"_published_snapshot" TEXT`,
   `"_created_at" TEXT NOT NULL`,
   `"_updated_at" TEXT NOT NULL`,
+  `"_created_by" TEXT`,
+  `"_updated_by" TEXT`,
+  `"_published_by" TEXT`,
 ];
 
 /** System columns for block tables */
@@ -231,7 +234,20 @@ export function migrateContentTable(
 
     const systemColNames = isBlock
       ? new Set(["id", "_root_record_id", "_root_field_api_key", "_parent_container_model_api_key", "_parent_block_id", "_parent_field_api_key", "_depth"])
-      : new Set(["id", "_status", "_published_at", "_first_published_at", "_published_snapshot", "_created_at", "_updated_at", "_position", "_parent_id"]);
+      : new Set([
+          "id",
+          "_status",
+          "_published_at",
+          "_first_published_at",
+          "_published_snapshot",
+          "_created_at",
+          "_updated_at",
+          "_created_by",
+          "_updated_by",
+          "_published_by",
+          "_position",
+          "_parent_id",
+        ]);
 
     const desiredFieldNames = new Set(fields.map((f) => f.apiKey));
 

@@ -8,12 +8,18 @@ import { parseFieldValidators } from "../db/row-types.js";
 import { materializeRecordStructuredTextFields } from "./structured-text-service.js";
 import { fireHook } from "../hooks.js";
 import { decodeJsonString, encodeJson } from "../json.js";
+import type { RequestActor, VersionAttribution } from "../attribution.js";
 
 /**
  * Create a version snapshot for a record.
  * Called internally by publish and auto-republish flows.
  */
-export function createVersion(modelApiKey: string, recordId: string, snapshot: string) {
+export function createVersion(
+  modelApiKey: string,
+  recordId: string,
+  snapshot: string,
+  attribution?: VersionAttribution,
+) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
 
@@ -25,12 +31,34 @@ export function createVersion(modelApiKey: string, recordId: string, snapshot: s
 
     const id = ulid();
     const now = new Date().toISOString();
+    const actor = attribution?.actor;
     yield* sql.unsafe(
-      `INSERT INTO record_versions (id, model_api_key, record_id, version_number, snapshot, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-      [id, modelApiKey, recordId, nextVersion, snapshot, now]
+      `INSERT INTO record_versions (id, model_api_key, record_id, version_number, snapshot, action, actor_type, actor_label, actor_token_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        modelApiKey,
+        recordId,
+        nextVersion,
+        snapshot,
+        attribution?.action ?? "publish",
+        actor?.type ?? null,
+        actor?.label ?? null,
+        actor?.tokenId ?? null,
+        now,
+      ]
     );
 
-    return { id, model_api_key: modelApiKey, record_id: recordId, version_number: nextVersion, created_at: now };
+    return {
+      id,
+      model_api_key: modelApiKey,
+      record_id: recordId,
+      version_number: nextVersion,
+      action: attribution?.action ?? "publish",
+      actor_type: actor?.type ?? null,
+      actor_label: actor?.label ?? null,
+      actor_token_id: actor?.tokenId ?? null,
+      created_at: now,
+    };
   });
 }
 
@@ -72,7 +100,7 @@ export function getVersion(versionId: string) {
  * Versions the current state first (so restore is reversible), then writes
  * the version's field values back to the content table.
  */
-export function restoreVersion(modelApiKey: string, recordId: string, versionId: string) {
+export function restoreVersion(modelApiKey: string, recordId: string, versionId: string, actor?: RequestActor | null) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
 
@@ -102,7 +130,10 @@ export function restoreVersion(modelApiKey: string, recordId: string, versionId:
     for (const [key, value] of Object.entries(current)) {
       if (!key.startsWith("_") && key !== "id") currentSnap[key] = value;
     }
-    yield* createVersion(modelApiKey, recordId, encodeJson(currentSnap));
+    yield* createVersion(modelApiKey, recordId, encodeJson(currentSnap), {
+      action: "restore",
+      actor,
+    });
 
     // Get model fields to know which fields still exist
     const fieldRows = yield* sql.unsafe<FieldRow>(
@@ -122,6 +153,7 @@ export function restoreVersion(modelApiKey: string, recordId: string, versionId:
 
     const now = new Date().toISOString();
     updates._updated_at = now;
+    updates._updated_by = actor?.label ?? null;
 
     if (model.has_draft) {
       // Needs re-publish after restore
@@ -149,6 +181,7 @@ export function restoreVersion(modelApiKey: string, recordId: string, versionId:
 
       updates._published_snapshot = encodeJson(snap);
       updates._published_at = now;
+      updates._published_by = actor?.label ?? null;
       updates._status = "published";
     }
 

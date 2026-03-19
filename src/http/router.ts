@@ -37,6 +37,11 @@ import type { AiBinding, VectorizeBinding } from "../search/vectorize.js";
 import { VectorizeContext } from "../search/vectorize-context.js";
 import { HooksContext, type CmsHooks } from "../hooks.js";
 import { ensureSchema } from "../migrations.js";
+import {
+  actorFromHeaders,
+  actorHeaders,
+  type RequestActor,
+} from "../attribution.js";
 
 function describeUnknown(error: unknown): string {
   if (error instanceof Error) return `${error.name}: ${error.message}`;
@@ -121,6 +126,13 @@ function readJsonBody(message: string = "Invalid JSON body") {
         message: `${message}: ${describeUnknown(e)}`,
       }))
     );
+  });
+}
+
+function currentActor() {
+  return Effect.gen(function* () {
+    const req = yield* HttpServerRequest.HttpServerRequest;
+    return actorFromHeaders(new Headers(req.headers));
   });
 }
 
@@ -210,7 +222,8 @@ const recordsRouter = HttpRouter.empty.pipe(
     Effect.gen(function* () {
       const body = yield* readJsonBody();
       const input = yield* decodeUnknownInput(BulkCreateRecordsInput, body);
-      return yield* handle(RecordService.bulkCreateRecords(input), 201);
+      const actor = yield* currentActor();
+      return yield* handle(RecordService.bulkCreateRecords(input, actor), 201);
     })
   ),
 
@@ -219,7 +232,8 @@ const recordsRouter = HttpRouter.empty.pipe(
     Effect.gen(function* () {
       const body = yield* readJsonBody();
       const input = yield* decodeUnknownInput(CreateRecordInput, body);
-      return yield* handle(RecordService.createRecord(input), 201);
+      const actor = yield* currentActor();
+      return yield* handle(RecordService.createRecord(input, actor), 201);
     })
   ),
 
@@ -254,7 +268,8 @@ const recordsRouter = HttpRouter.empty.pipe(
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
       const modelApiKey = yield* queryParam("modelApiKey");
-      return yield* handle(VersionService.restoreVersion(modelApiKey, param(params, "id"), param(params, "versionId")));
+      const actor = yield* currentActor();
+      return yield* handle(VersionService.restoreVersion(modelApiKey, param(params, "id"), param(params, "versionId"), actor));
     })
   ),
 
@@ -273,7 +288,8 @@ const recordsRouter = HttpRouter.empty.pipe(
       const params = yield* HttpRouter.params;
       const body = yield* readJsonBody();
       const input = yield* decodeUnknownInput(PatchRecordInput, body);
-      return yield* handle(RecordService.patchRecord(param(params, "id"), input));
+      const actor = yield* currentActor();
+      return yield* handle(RecordService.patchRecord(param(params, "id"), input, actor));
     })
   ),
 
@@ -287,7 +303,8 @@ const recordsRouter = HttpRouter.empty.pipe(
         ? { ...body, recordId: param(params, "id") }
         : { recordId: param(params, "id") };
       const input = yield* decodeUnknownInput(PatchBlocksInput, merged);
-      return yield* handle(RecordService.patchBlocksForField(input));
+      const actor = yield* currentActor();
+      return yield* handle(RecordService.patchBlocksForField(input, actor));
     })
   ),
 
@@ -306,7 +323,8 @@ const recordsRouter = HttpRouter.empty.pipe(
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
       const modelApiKey = yield* queryParam("modelApiKey");
-      return yield* handle(PublishService.publishRecord(modelApiKey, param(params, "id")));
+      const actor = yield* currentActor();
+      return yield* handle(PublishService.publishRecord(modelApiKey, param(params, "id"), actor));
     })
   ),
 
@@ -315,7 +333,8 @@ const recordsRouter = HttpRouter.empty.pipe(
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
       const modelApiKey = yield* queryParam("modelApiKey");
-      return yield* handle(PublishService.unpublishRecord(modelApiKey, param(params, "id")));
+      const actor = yield* currentActor();
+      return yield* handle(PublishService.unpublishRecord(modelApiKey, param(params, "id"), actor));
     })
   ),
 
@@ -327,7 +346,8 @@ const recordsRouter = HttpRouter.empty.pipe(
       return yield* handle(
         Effect.gen(function* () {
           const { modelApiKey, recordIds } = yield* decodeUnknownInput(ReorderInput, rawBody);
-          return yield* RecordService.reorderRecords(modelApiKey, recordIds);
+          const actor = yield* currentActor();
+          return yield* RecordService.reorderRecords(modelApiKey, recordIds, actor);
         })
       );
     })
@@ -664,21 +684,32 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
     });
   }
 
-  async function getCredentialType(request: Request): Promise<"admin" | "editor" | null> {
-    if (!options?.writeKey) return "admin";
+  async function getRequestActor(request: Request): Promise<RequestActor | null> {
+    if (!options?.writeKey) return { type: "admin", label: "admin" };
     const token = getBearerToken(request);
-    if (token === options.writeKey) return "admin";
+    if (token === options.writeKey) {
+      return { type: "admin", label: "admin" };
+    }
     if (token && token.startsWith("etk_")) {
       try {
-        await Effect.runPromise(
+        const editorToken = await Effect.runPromise(
           TokenService.validateEditorToken(token).pipe(Effect.provide(fullLayer))
         );
-        return "editor";
+        return {
+          type: "editor",
+          label: editorToken.name,
+          tokenId: editorToken.id,
+        };
       } catch {
         return null;
       }
     }
     return null;
+  }
+
+  async function getCredentialType(request: Request): Promise<"admin" | "editor" | null> {
+    const actor = await getRequestActor(request);
+    return actor?.type ?? null;
   }
 
   const fetchHandler = async (request: Request): Promise<Response> => {
@@ -769,8 +800,8 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
       }
       // /mcp — admin only
       else if (url.pathname === "/mcp") {
-        const credentialType = await getCredentialType(instrumentedRequest);
-        if (credentialType === "editor") {
+        const actor = await getRequestActor(instrumentedRequest);
+        if (actor?.type === "editor") {
           return finish(new Response(JSON.stringify({
             error: "Unauthorized. Editor tokens must use /mcp/editor.",
           }), {
@@ -809,31 +840,51 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
             headers: { "Content-Type": "application/json" },
           }));
         }
+        const actor = await getRequestActor(instrumentedRequest);
+        const h = new Headers(instrumentedRequest.headers);
+        for (const [key, value] of Object.entries(actorHeaders(actor))) {
+          h.set(key, value);
+        }
+        instrumentedRequest = new Request(instrumentedRequest, { headers: h });
       }
 
       // Route /mcp to MCP HTTP transport
       if (url.pathname === "/mcp") {
-        if (!mcpHandler) {
-          const { createMcpHttpHandler } = await import("../mcp/http-transport.js");
-          mcpHandler = createMcpHttpHandler(fullLayer, {
-            mode: "admin",
-            path: "/mcp",
-            r2Bucket: options?.r2Bucket,
-          });
-        }
-        return finish(await mcpHandler(instrumentedRequest));
+        const { createMcpHttpHandler } = await import("../mcp/http-transport.js");
+        const actor = await getRequestActor(instrumentedRequest);
+        const handler = actor?.type === "admin"
+          ? (mcpHandler ??= createMcpHttpHandler(fullLayer, {
+              mode: "admin",
+              path: "/mcp",
+              r2Bucket: options?.r2Bucket,
+              actor,
+            }))
+          : createMcpHttpHandler(fullLayer, {
+              mode: "admin",
+              path: "/mcp",
+              r2Bucket: options?.r2Bucket,
+              actor,
+            });
+        return finish(await handler(instrumentedRequest));
       }
 
       if (url.pathname === "/mcp/editor") {
-        if (!mcpEditorHandler) {
-          const { createMcpHttpHandler } = await import("../mcp/http-transport.js");
-          mcpEditorHandler = createMcpHttpHandler(fullLayer, {
-            mode: "editor",
-            path: "/mcp/editor",
-            r2Bucket: options?.r2Bucket,
-          });
-        }
-        return finish(await mcpEditorHandler(instrumentedRequest));
+        const { createMcpHttpHandler } = await import("../mcp/http-transport.js");
+        const actor = await getRequestActor(instrumentedRequest);
+        const handler = actor?.type === "editor"
+          ? createMcpHttpHandler(fullLayer, {
+              mode: "editor",
+              path: "/mcp/editor",
+              r2Bucket: options?.r2Bucket,
+              actor,
+            })
+          : (mcpEditorHandler ??= createMcpHttpHandler(fullLayer, {
+              mode: "editor",
+              path: "/mcp/editor",
+              r2Bucket: options?.r2Bucket,
+              actor,
+            }));
+        return finish(await handler(instrumentedRequest));
       }
 
       // Route /graphql to Yoga

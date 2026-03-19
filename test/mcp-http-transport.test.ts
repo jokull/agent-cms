@@ -166,4 +166,77 @@ describe("MCP HTTP transport", () => {
 
     await transport.close();
   });
+
+  it("threads editor attribution through MCP record mutations", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "agent-cms-mcp-editor-attribution-"));
+    const dbPath = join(tmpDir, "test.db");
+    const sqlLayer = SqliteClient.layer({ filename: dbPath, disableWAL: true });
+
+    Effect.runSync(runMigrations().pipe(Effect.provide(sqlLayer)));
+
+    const editorToken = await Effect.runPromise(
+      TokenService.createEditorToken({ name: "Editor MCP" }).pipe(Effect.provide(sqlLayer))
+    );
+    const handler = createWebHandler(sqlLayer, { writeKey: "write-key" }).fetch;
+
+    const createdModelResponse = await handler(new Request("http://localhost/api/models", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer write-key",
+      },
+      body: JSON.stringify({ name: "Note", apiKey: "note", hasDraft: false }),
+    }));
+    const model = await createdModelResponse.json() as { id: string };
+
+    await handler(new Request(`http://localhost/api/models/${model.id}/fields`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer write-key",
+      },
+      body: JSON.stringify({ label: "Title", apiKey: "title", fieldType: "string" }),
+    }));
+
+    const transport = new StreamableHTTPClientTransport(new URL("http://localhost/mcp/editor"), {
+      requestInit: { headers: { Authorization: `Bearer ${editorToken.token}` } },
+      fetch: (input, init) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        return handler(new Request(url, init));
+      },
+    });
+    const client = new Client({ name: "test-editor-attribution-client", version: "1.0.0" });
+
+    await client.connect(transport);
+
+    const created = await client.callTool({
+      name: "create_record",
+      arguments: { modelApiKey: "note", data: { title: "Initial MCP title" } },
+    });
+    const record = JSON.parse(created.content[0]?.text ?? "{}") as { id: string };
+
+    await client.callTool({
+      name: "update_record",
+      arguments: { recordId: record.id, modelApiKey: "note", data: { title: "Updated MCP title" } },
+    });
+
+    const versions = await client.callTool({
+      name: "list_record_versions",
+      arguments: { recordId: record.id, modelApiKey: "note" },
+    });
+    const parsedVersions = JSON.parse(versions.content[0]?.text ?? "[]") as Array<Record<string, unknown>>;
+
+    expect(parsedVersions).toHaveLength(1);
+    expect(parsedVersions[0]?.action).toBe("auto_republish");
+    expect(parsedVersions[0]?.actor_type).toBe("editor");
+    expect(parsedVersions[0]?.actor_label).toBe("Editor MCP");
+    expect(parsedVersions[0]?.actor_token_id).toBe(editorToken.id);
+
+    await transport.close();
+  });
 });

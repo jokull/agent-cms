@@ -89,6 +89,10 @@ CREATE TABLE IF NOT EXISTS "record_versions" (
   "record_id" text NOT NULL,
   "version_number" integer NOT NULL,
   "snapshot" text NOT NULL,
+  "action" text NOT NULL DEFAULT 'publish',
+  "actor_type" text,
+  "actor_label" text,
+  "actor_token_id" text,
   "created_at" text NOT NULL
 );
 
