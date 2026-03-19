@@ -1,6 +1,6 @@
 /**
  * Embedded schema migrations — runs automatically on first request.
- * Each migration is idempotent (CREATE TABLE IF NOT EXISTS / ADD COLUMN IF NOT EXISTS).
+ * The project is still pre-deployment, so the full schema lives in a single genesis migration.
  */
 import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
@@ -28,6 +28,7 @@ const MIGRATIONS: readonly Migration[] = [
         "colors" text,
         "focal_point" text,
         "tags" text DEFAULT '[]',
+        "custom_data" text DEFAULT '{}',
         "created_at" text NOT NULL
       )`,
       `CREATE TABLE IF NOT EXISTS "models" (
@@ -39,6 +40,7 @@ const MIGRATIONS: readonly Migration[] = [
         "sortable" integer DEFAULT false NOT NULL,
         "tree" integer DEFAULT false NOT NULL,
         "has_draft" integer DEFAULT true NOT NULL,
+        "all_locales_required" integer DEFAULT 0 NOT NULL,
         "ordering" text,
         "created_at" text NOT NULL,
         "updated_at" text NOT NULL
@@ -75,11 +77,6 @@ const MIGRATIONS: readonly Migration[] = [
         "fallback_locale_id" text,
         CONSTRAINT "fk_locales_fallback_locale_id_locales_id_fk" FOREIGN KEY ("fallback_locale_id") REFERENCES "locales"("id") ON DELETE SET NULL
       )`,
-    ],
-  },
-  {
-    version: 2,
-    statements: [
       `CREATE TABLE IF NOT EXISTS "site_settings" (
         "id" text PRIMARY KEY DEFAULT 'default',
         "site_name" text,
@@ -96,13 +93,6 @@ const MIGRATIONS: readonly Migration[] = [
         CONSTRAINT "fk_site_settings_favicon" FOREIGN KEY ("favicon_id") REFERENCES "assets"("id") ON DELETE SET NULL,
         CONSTRAINT "fk_site_settings_seo_image" FOREIGN KEY ("fallback_seo_image_id") REFERENCES "assets"("id") ON DELETE SET NULL
       )`,
-      // ADD COLUMN is not idempotent in SQLite — check first
-      `ALTER TABLE "assets" ADD COLUMN "custom_data" text DEFAULT '{}'`,
-    ],
-  },
-  {
-    version: 3,
-    statements: [
       `CREATE TABLE IF NOT EXISTS "record_versions" (
         "id" text PRIMARY KEY,
         "model_api_key" text NOT NULL,
@@ -113,24 +103,16 @@ const MIGRATIONS: readonly Migration[] = [
       )`,
       `CREATE INDEX IF NOT EXISTS "idx_record_versions_lookup"
         ON "record_versions" ("model_api_key", "record_id", "version_number" DESC)`,
-    ],
-  },
-  {
-    version: 4,
-    statements: [
-      `ALTER TABLE "models" ADD COLUMN "all_locales_required" integer DEFAULT 0 NOT NULL`,
-    ],
-  },
-  {
-    version: 5,
-    statements: [
       `CREATE TABLE IF NOT EXISTS "editor_tokens" (
         "id" TEXT PRIMARY KEY,
         "name" TEXT NOT NULL,
+        "token_prefix" TEXT NOT NULL,
+        "secret_hash" TEXT NOT NULL,
         "created_at" TEXT NOT NULL DEFAULT (datetime('now')),
         "last_used_at" TEXT,
         "expires_at" TEXT
       )`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS "idx_editor_tokens_secret_hash" ON "editor_tokens" ("secret_hash")`,
     ],
   },
 ];
@@ -159,10 +141,7 @@ export function ensureSchema() {
     for (const migration of MIGRATIONS) {
       if (appliedSet.has(migration.version)) continue;
       for (const stmt of migration.statements) {
-        yield* sql.unsafe(stmt).pipe(
-          // ALTER TABLE ADD COLUMN fails if column already exists — that's OK
-          Effect.catchAll(() => Effect.void)
-        );
+        yield* sql.unsafe(stmt);
       }
       yield* sql.unsafe(
         "INSERT INTO _cms_migrations (version) VALUES (?)",

@@ -756,11 +756,14 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
             // Invalid/expired token — treat as unauthenticated (published only)
           }
         }
+        // Always overwrite — prevents forged X-Credential-Type headers
+        const h = new Headers(instrumentedRequest.headers);
         if (credentialType) {
-          const h = new Headers(instrumentedRequest.headers);
           h.set("X-Credential-Type", credentialType);
-          instrumentedRequest = new Request(instrumentedRequest, { headers: h });
+        } else {
+          h.delete("X-Credential-Type");
         }
+        instrumentedRequest = new Request(instrumentedRequest, { headers: h });
         // Fall through to graphql handler below
       }
       // /mcp — admin only

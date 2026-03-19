@@ -89,9 +89,14 @@ export interface VersionRow {
 export interface EditorTokenRow {
   readonly id: string;
   readonly name: string;
+  readonly token_prefix: string;
   readonly created_at: string;
   readonly last_used_at: string | null;
   readonly expires_at: string | null;
+}
+
+export interface StoredEditorTokenRow extends EditorTokenRow {
+  readonly secret_hash: string | null;
 }
 
 /** A dynamic block table row */

@@ -151,7 +151,7 @@ const UpdateSiteSettingsInput = Schema.Struct({
 
 const CreateEditorTokenMcpInput = Schema.Struct({
   name: Schema.String,
-  expiresIn: Schema.optional(Schema.Number),
+  expiresIn: Schema.optional(Schema.Number.pipe(Schema.int(), Schema.positive())),
 });
 
 const TokenIdInput = Schema.Struct({ tokenId: Schema.String });

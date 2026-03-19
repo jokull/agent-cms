@@ -211,6 +211,6 @@ export type CreateUploadUrlInput = typeof CreateUploadUrlInput.Type;
 
 export const CreateEditorTokenInput = Schema.Struct({
   name: Schema.NonEmptyString,
-  expiresIn: Schema.optional(Schema.Number),
+  expiresIn: Schema.optional(Schema.Number.pipe(Schema.int(), Schema.positive())),
 });
 export type CreateEditorTokenInput = typeof CreateEditorTokenInput.Type;
