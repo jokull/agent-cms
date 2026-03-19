@@ -740,10 +740,10 @@ export function createMcpLayer(
           blocks: blockMap,
         };
       })),
-    upload_asset: withDecoded(AssetInput, AssetService.createAsset),
-    import_asset_from_url: withDecoded(ImportAssetFromUrlInput, AssetService.importAssetFromUrl),
+    upload_asset: withDecoded(AssetInput, (input) => AssetService.createAsset(input, options?.actor)),
+    import_asset_from_url: withDecoded(ImportAssetFromUrlInput, (input) => AssetService.importAssetFromUrl(input, options?.actor)),
     list_assets: () => AssetService.listAssets(),
-    replace_asset: withDecoded(ReplaceAssetInput, ({ assetId, ...rest }) => AssetService.replaceAsset(assetId, rest)),
+    replace_asset: withDecoded(ReplaceAssetInput, ({ assetId, ...rest }) => AssetService.replaceAsset(assetId, rest, options?.actor)),
     export_schema: () => SchemaIO.exportSchema(),
     import_schema: withDecoded(ImportSchemaToolInput, ({ schema }) => SchemaIO.importSchema(schema)),
     search_content: withDecoded(SearchContentInput, SearchService.search),

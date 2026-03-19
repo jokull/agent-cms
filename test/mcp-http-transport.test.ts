@@ -239,4 +239,63 @@ describe("MCP HTTP transport", () => {
 
     await transport.close();
   });
+
+  it("threads editor attribution through MCP asset mutations", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "agent-cms-mcp-editor-asset-attribution-"));
+    const dbPath = join(tmpDir, "test.db");
+    const sqlLayer = SqliteClient.layer({ filename: dbPath, disableWAL: true });
+
+    Effect.runSync(runMigrations().pipe(Effect.provide(sqlLayer)));
+
+    const editorToken = await Effect.runPromise(
+      TokenService.createEditorToken({ name: "Asset MCP Editor" }).pipe(Effect.provide(sqlLayer))
+    );
+    const handler = createWebHandler(sqlLayer, { writeKey: "write-key" }).fetch;
+
+    const transport = new StreamableHTTPClientTransport(new URL("http://localhost/mcp/editor"), {
+      requestInit: { headers: { Authorization: `Bearer ${editorToken.token}` } },
+      fetch: (input, init) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        return handler(new Request(url, init));
+      },
+    });
+    const client = new Client({ name: "test-editor-asset-attribution-client", version: "1.0.0" });
+
+    await client.connect(transport);
+
+    const created = await client.callTool({
+      name: "upload_asset",
+      arguments: {
+        filename: "pigeon.jpg",
+        mimeType: "image/jpeg",
+        size: 42,
+      },
+    });
+    const asset = JSON.parse(created.content[0]?.text ?? "{}") as { id: string };
+
+    await client.callTool({
+      name: "replace_asset",
+      arguments: {
+        assetId: asset.id,
+        filename: "pigeon-updated.jpg",
+        mimeType: "image/jpeg",
+        size: 84,
+      },
+    });
+
+    const assetResponse = await handler(new Request(`http://localhost/api/assets/${asset.id}`, {
+      headers: { Authorization: `Bearer ${editorToken.token}` },
+    }));
+    const stored = await assetResponse.json() as Record<string, unknown>;
+
+    expect(stored.created_by).toBe("Asset MCP Editor");
+    expect(stored.updated_by).toBe("Asset MCP Editor");
+
+    await transport.close();
+  });
 });

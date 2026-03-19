@@ -62,6 +62,10 @@ export interface AssetObject {
   blurhash: string | null;
   customData: Record<string, string> | null;
   url: string;
+  _createdAt: string;
+  _updatedAt: string;
+  _createdBy: string | null;
+  _updatedBy: string | null;
 }
 
 /** Describes an incoming link/links reference from another model */

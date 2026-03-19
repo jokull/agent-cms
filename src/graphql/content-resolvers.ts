@@ -338,6 +338,10 @@ export function buildContentModelResolvers(
           alt: a.alt, title: a.title, blurhash: a.blurhash ?? null,
           customData: parseCustomData(a.custom_data),
           url: assetUrl(a.id, a.filename),
+          _createdAt: a.created_at,
+          _updatedAt: a.updated_at,
+          _createdBy: a.created_by,
+          _updatedBy: a.updated_by,
         });
       }
       return map;

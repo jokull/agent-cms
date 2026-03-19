@@ -381,7 +381,8 @@ const assetsRouter = HttpRouter.empty.pipe(
     Effect.gen(function* () {
       const body = yield* readJsonBody();
       const input = yield* decodeUnknownInput(CreateAssetInput, body);
-      return yield* handle(AssetService.createAsset(input), 201);
+      const actor = yield* currentActor();
+      return yield* handle(AssetService.createAsset(input, actor), 201);
     })
   ),
 
@@ -399,7 +400,8 @@ const assetsRouter = HttpRouter.empty.pipe(
       const params = yield* HttpRouter.params;
       const body = yield* readJsonBody();
       const input = yield* decodeUnknownInput(CreateAssetInput, body);
-      return yield* handle(AssetService.replaceAsset(param(params, "id"), input));
+      const actor = yield* currentActor();
+      return yield* handle(AssetService.replaceAsset(param(params, "id"), input, actor));
     })
   ),
 
@@ -409,7 +411,8 @@ const assetsRouter = HttpRouter.empty.pipe(
       const params = yield* HttpRouter.params;
       const body = yield* readJsonBody();
       const input = yield* decodeUnknownInput(UpdateAssetMetadataInput, body);
-      return yield* handle(AssetService.updateAssetMetadata(param(params, "id"), input));
+      const actor = yield* currentActor();
+      return yield* handle(AssetService.updateAssetMetadata(param(params, "id"), input, actor));
     })
   ),
 

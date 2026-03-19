@@ -63,6 +63,9 @@ export interface AssetRow {
   readonly tags: string; // JSON string
   readonly custom_data: string | null; // JSON string
   readonly created_at: string;
+  readonly updated_at: string;
+  readonly created_by: string | null;
+  readonly updated_by: string | null;
 }
 
 /** A dynamic content table row — system columns are known, field columns are unknown */

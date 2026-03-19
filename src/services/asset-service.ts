@@ -5,6 +5,7 @@ import { NotFoundError, ValidationError } from "../errors.js";
 import type { AssetRow } from "../db/row-types.js";
 import type { CreateAssetInput, ImportAssetFromUrlInput } from "./input-schemas.js";
 import { encodeJson } from "../json.js";
+import type { RequestActor } from "../attribution.js";
 
 export class AssetImportContext extends Context.Tag("AssetImportContext")<
   AssetImportContext,
@@ -22,7 +23,7 @@ function inferFilename(input: { url: string; filename?: string; mimeType?: strin
   return input.mimeType?.startsWith("image/") ? `asset.${input.mimeType.slice(6)}` : "asset.bin";
 }
 
-export function createAsset(body: CreateAssetInput) {
+export function createAsset(body: CreateAssetInput, actor?: RequestActor | null) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
 
@@ -35,8 +36,8 @@ export function createAsset(body: CreateAssetInput) {
     }
 
     yield* sql.unsafe(
-      `INSERT INTO assets (id, filename, mime_type, size, width, height, alt, title, r2_key, blurhash, colors, focal_point, tags, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO assets (id, filename, mime_type, size, width, height, alt, title, r2_key, blurhash, colors, focal_point, tags, created_at, updated_at, created_by, updated_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id, body.filename, body.mimeType,
         body.size, body.width ?? null, body.height ?? null,
@@ -47,10 +48,27 @@ export function createAsset(body: CreateAssetInput) {
         body.focalPoint ? encodeJson(body.focalPoint) : null,
         encodeJson(body.tags),
         now,
+        now,
+        actor?.label ?? null,
+        actor?.label ?? null,
       ]
     );
 
-    return { id, filename: body.filename, mimeType: body.mimeType, size: body.size, width: body.width, height: body.height, alt: body.alt, title: body.title, r2Key: body.r2Key ?? `uploads/${id}/${body.filename}`, createdAt: now };
+    return {
+      id,
+      filename: body.filename,
+      mimeType: body.mimeType,
+      size: body.size,
+      width: body.width,
+      height: body.height,
+      alt: body.alt,
+      title: body.title,
+      r2Key: body.r2Key ?? `uploads/${id}/${body.filename}`,
+      createdAt: now,
+      updatedAt: now,
+      createdBy: actor?.label ?? null,
+      updatedBy: actor?.label ?? null,
+    };
   });
 }
 
@@ -75,7 +93,7 @@ export function getAsset(id: string) {
  * Updates metadata (filename, mimeType, size, dimensions, r2Key) but the asset ID
  * and all content references remain stable. DatoCMS can't do this (imgix regenerates URLs).
  */
-export function replaceAsset(id: string, body: CreateAssetInput) {
+export function replaceAsset(id: string, body: CreateAssetInput, actor?: RequestActor | null) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
 
@@ -84,9 +102,10 @@ export function replaceAsset(id: string, body: CreateAssetInput) {
 
     const r2Key = body.r2Key ?? `uploads/${id}/${body.filename}`;
 
+    const now = new Date().toISOString();
     yield* sql.unsafe(
       `UPDATE assets SET filename = ?, mime_type = ?, size = ?, width = ?, height = ?,
-       alt = ?, title = ?, r2_key = ?, blurhash = ?, colors = ?, focal_point = ?, tags = ?
+       alt = ?, title = ?, r2_key = ?, blurhash = ?, colors = ?, focal_point = ?, tags = ?, updated_at = ?, updated_by = ?
        WHERE id = ?`,
       [
         body.filename, body.mimeType, body.size,
@@ -97,6 +116,8 @@ export function replaceAsset(id: string, body: CreateAssetInput) {
         body.colors ? encodeJson(body.colors) : null,
         body.focalPoint ? encodeJson(body.focalPoint) : null,
         encodeJson(body.tags),
+        now,
+        actor?.label ?? null,
         id,
       ]
     );
@@ -105,7 +126,7 @@ export function replaceAsset(id: string, body: CreateAssetInput) {
       id, filename: body.filename, mimeType: body.mimeType, size: body.size,
       width: body.width, height: body.height,
       alt: body.alt ?? rows[0].alt, title: body.title ?? rows[0].title,
-      r2Key, replaced: true,
+      r2Key, replaced: true, updatedAt: now, updatedBy: actor?.label ?? null,
     };
   });
 }
@@ -140,7 +161,7 @@ export function searchAssets(opts: { query?: string; limit: number; offset: numb
   });
 }
 
-export function updateAssetMetadata(id: string, body: { alt?: string; title?: string }) {
+export function updateAssetMetadata(id: string, body: { alt?: string; title?: string }, actor?: RequestActor | null) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
 
@@ -150,12 +171,13 @@ export function updateAssetMetadata(id: string, body: { alt?: string; title?: st
     const alt = body.alt !== undefined ? body.alt : rows[0].alt;
     const title = body.title !== undefined ? body.title : rows[0].title;
 
+    const now = new Date().toISOString();
     yield* sql.unsafe(
-      "UPDATE assets SET alt = ?, title = ? WHERE id = ?",
-      [alt, title, id]
+      "UPDATE assets SET alt = ?, title = ?, updated_at = ?, updated_by = ? WHERE id = ?",
+      [alt, title, now, actor?.label ?? null, id]
     );
 
-    return { id, alt, title };
+    return { id, alt, title, updatedAt: now, updatedBy: actor?.label ?? null };
   });
 }
 
@@ -169,7 +191,7 @@ export function deleteAsset(id: string) {
   });
 }
 
-export function importAssetFromUrl(input: ImportAssetFromUrlInput) {
+export function importAssetFromUrl(input: ImportAssetFromUrlInput, actor?: RequestActor | null) {
   return Effect.gen(function* () {
     const { r2Bucket, fetch } = yield* AssetImportContext;
     if (!r2Bucket) {
@@ -209,6 +231,6 @@ export function importAssetFromUrl(input: ImportAssetFromUrlInput) {
       title: input.title,
       tags: input.tags,
       r2Key,
-    });
+    }, actor);
   });
 }

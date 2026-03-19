@@ -13,7 +13,10 @@ CREATE TABLE IF NOT EXISTS "assets" (
   "focal_point" text,
   "tags" text DEFAULT '[]',
   "custom_data" text DEFAULT '{}',
-  "created_at" text NOT NULL
+  "created_at" text NOT NULL,
+  "updated_at" text NOT NULL,
+  "created_by" text,
+  "updated_by" text
 );
 
 CREATE TABLE IF NOT EXISTS "models" (

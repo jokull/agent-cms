@@ -82,6 +82,10 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
             alt: a.alt, title: a.title, blurhash: a.blurhash ?? null,
             customData: a.custom_data ? decodeJsonStringOr(a.custom_data, null) : null,
             url: assetUrl(a.id, a.filename),
+            _createdAt: a.created_at,
+            _updatedAt: a.updated_at,
+            _createdBy: a.created_by,
+            _updatedBy: a.updated_by,
           };
         };
       } else if (f.field_type === "link") {

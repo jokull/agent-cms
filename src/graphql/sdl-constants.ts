@@ -74,6 +74,10 @@ type Asset {
   url: String!
   blurhash: String
   customData: JSON
+  _createdAt: String!
+  _updatedAt: String!
+  _createdBy: String
+  _updatedBy: String
   responsiveImage(transforms: ImageTransformParams, cfImagesParams: ImageTransformParams, imgixParams: ImgixParamsShim): ResponsiveImage
 }
 type ResponsiveImage {

@@ -245,6 +245,10 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
           alt: a.alt, title: a.title, blurhash: a.blurhash ?? null,
           customData: parseCustomData(a.custom_data),
           url: assetUrl(a.id, a.filename),
+          _createdAt: a.created_at,
+          _updatedAt: a.updated_at,
+          _createdBy: a.created_by,
+          _updatedBy: a.updated_by,
         }));
       })
     );
@@ -363,6 +367,10 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
             size: a.size, width: a.width, height: a.height,
             alt: a.alt, title: a.title, customData: parseCustomData(a.custom_data),
             url: assetUrl(a.id, a.filename),
+            _createdAt: a.created_at,
+            _updatedAt: a.updated_at,
+            _createdBy: a.created_by,
+            _updatedBy: a.updated_by,
           };
         })
       );

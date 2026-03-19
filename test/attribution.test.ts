@@ -171,3 +171,61 @@ describe("record attribution", () => {
     expect((versions[0]?.snapshot as Record<string, unknown>).title).toBe("Original title");
   });
 });
+
+describe("asset attribution", () => {
+  let handler: (req: Request) => Promise<Response>;
+  let sqlLayer: ReturnType<typeof createAttributionTestApp>["sqlLayer"];
+
+  beforeEach(() => {
+    ({ handler, sqlLayer } = createAttributionTestApp());
+  });
+
+  it("tracks editor token attribution on asset create and metadata update", async () => {
+    const editorToken = await Effect.runPromise(
+      TokenService.createEditorToken({ name: "Asset Editor" }).pipe(Effect.provide(sqlLayer))
+    );
+
+    const created = await jsonRequest(handler, "POST", "/api/assets", {
+      headers: { Authorization: `Bearer ${editorToken.token}` },
+      body: {
+        filename: "pigeon.jpg",
+        mimeType: "image/jpeg",
+        alt: "Pigeon evidence",
+      },
+    }).then((response) => response.json() as Promise<Record<string, unknown>>);
+
+    expect(created.createdBy).toBe("Asset Editor");
+    expect(created.updatedBy).toBe("Asset Editor");
+
+    const patched = await jsonRequest(handler, "PATCH", `/api/assets/${created.id}`, {
+      headers: { Authorization: `Bearer ${editorToken.token}` },
+      body: {
+        title: "Updated pigeon evidence",
+      },
+    }).then((response) => response.json() as Promise<Record<string, unknown>>);
+
+    expect(patched.updatedBy).toBe("Asset Editor");
+
+    const asset = await handler(new Request(`http://localhost/api/assets/${created.id}`, {
+      headers: { Authorization: `Bearer ${editorToken.token}` },
+    })).then((response) => response.json() as Promise<Record<string, unknown>>);
+
+    expect(asset.created_by).toBe("Asset Editor");
+    expect(asset.updated_by).toBe("Asset Editor");
+
+    const gql = await gqlRequest(
+      handler,
+      "{ allUploads { filename _createdBy _updatedBy } }",
+      { Authorization: `Bearer ${editorToken.token}` },
+    );
+
+    expect(gql.errors).toBeUndefined();
+    expect(gql.data?.allUploads).toEqual([
+      {
+        filename: "pigeon.jpg",
+        _createdBy: "Asset Editor",
+        _updatedBy: "Asset Editor",
+      },
+    ]);
+  });
+});
