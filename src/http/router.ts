@@ -5,7 +5,7 @@ import {
   HttpApp,
   HttpServerError,
 } from "@effect/platform";
-import { Cause, Effect, Layer, Schema, Option } from "effect";
+import { Cause, Effect, Layer, Logger, Schema, Option } from "effect";
 import { SqlClient } from "@effect/sql";
 import * as ModelService from "../services/model-service.js";
 import * as FieldService from "../services/field-service.js";
@@ -59,20 +59,6 @@ function getRequestIdFromHeaders(headers: Headers): string {
   return headers.get("x-request-id") ?? headers.get("cf-ray") ?? crypto.randomUUID();
 }
 
-function logEvent(level: "info" | "error", message: string, fields: Record<string, unknown>) {
-  const payload = {
-    level,
-    message,
-    ...fields,
-  };
-  const line = JSON.stringify(payload);
-  if (level === "error") {
-    console.error(line);
-  } else {
-    console.info(line);
-  }
-}
-
 /** Helper: run a CMS Effect and return an HTTP response */
 function handle<A, R>(
   effect: Effect.Effect<A, unknown, R>,
@@ -86,12 +72,16 @@ function handle<A, R>(
         const mapped = errorToResponse(error);
         return HttpServerResponse.json(mapped.body, { status: mapped.status });
       }
-      console.error("Unhandled error:", error);
-      return HttpServerResponse.json({ error: "Internal server error" }, { status: 500 });
+      return Effect.logError("Unhandled REST error").pipe(
+        Effect.annotateLogs({ error: describeUnknown(error) }),
+        Effect.zipRight(HttpServerResponse.json({ error: "Internal server error" }, { status: 500 })),
+      );
     }),
     Effect.catchAllDefect((defect: unknown) => {
-      console.error("Defect:", defect);
-      return HttpServerResponse.json({ error: "Internal server error" }, { status: 500 });
+      return Effect.logError("REST defect").pipe(
+        Effect.annotateLogs({ defect: describeUnknown(defect) }),
+        Effect.zipRight(HttpServerResponse.json({ error: "Internal server error" }, { status: 500 })),
+      );
     })
   );
 }
@@ -603,7 +593,19 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
     HooksContext,
     options?.hooks ? Option.some(options.hooks) : Option.none()
   );
-  const fullLayer = Layer.merge(Layer.merge(sqlLayer, vectorizeLayer), hooksLayer);
+  const fullLayer = Layer.mergeAll(sqlLayer, vectorizeLayer, hooksLayer, Logger.json);
+
+  const runLoggedEffect = (effect: Effect.Effect<unknown, unknown>) => {
+    Effect.runFork(effect.pipe(Effect.provide(fullLayer), Effect.orDie));
+  };
+
+  const logInfo = (message: string, fields: Record<string, unknown>) => {
+    runLoggedEffect(Effect.logInfo(message).pipe(Effect.annotateLogs(fields)));
+  };
+
+  const logError = (message: string, fields: Record<string, unknown>) => {
+    runLoggedEffect(Effect.logError(message).pipe(Effect.annotateLogs(fields)));
+  };
 
   const restApp = Effect.flatten(HttpRouter.toHttpApp(appRouter)).pipe(
     Effect.catchAll((error: unknown) => {
@@ -615,8 +617,10 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
       if (error instanceof HttpServerError.RouteNotFound) {
         return HttpServerResponse.json({ error: "Not found" }, { status: 404 });
       }
-      console.error("REST handler error:", error);
-      return HttpServerResponse.json({ error: "Internal server error" }, { status: 500 });
+      return Effect.logError("REST handler error").pipe(
+        Effect.annotateLogs({ error: describeUnknown(error) }),
+        Effect.zipRight(HttpServerResponse.json({ error: "Internal server error" }, { status: 500 })),
+      );
     }),
     Effect.provide(fullLayer)
   );
@@ -658,7 +662,11 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
 
   async function runScheduledTransitions(now = new Date()) {
     const result = await Effect.runPromise(
-      ScheduleService.runScheduledTransitions(now).pipe(Effect.provide(fullLayer))
+      ScheduleService.runScheduledTransitions(now).pipe(
+        Effect.withSpan("schedule.run_transitions"),
+        Effect.annotateLogs({ now: now.toISOString() }),
+        Effect.provide(fullLayer),
+      )
     );
     if (result.published.length > 0 || result.unpublished.length > 0) {
       invalidateGraphqlSchemaCache();
@@ -778,13 +786,18 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
       });
       const durationMs = Date.now() - startedAt;
       if (wrapped.status >= 500 || instrumentedRequest.url.includes("/api/assets/")) {
-        logEvent(wrapped.status >= 500 ? "error" : "info", "worker request completed", {
+        const logFields = {
           requestId,
           method: instrumentedRequest.method,
           path: new URL(instrumentedRequest.url).pathname,
           status: wrapped.status,
           durationMs,
-        });
+        };
+        if (wrapped.status >= 500) {
+          logError("worker request completed", logFields);
+        } else {
+          logInfo("worker request completed", logFields);
+        }
       }
       return wrapped;
     };
@@ -1036,7 +1049,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
       }
       return finish(response);
     } catch (error) {
-      logEvent("error", "worker request crashed", {
+      logError("worker request crashed", {
         requestId,
         method: instrumentedRequest.method,
         path: new URL(instrumentedRequest.url).pathname,

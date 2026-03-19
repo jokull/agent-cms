@@ -69,7 +69,14 @@ export function createAsset(body: CreateAssetInput, actor?: RequestActor | null)
       createdBy: actor?.label ?? null,
       updatedBy: actor?.label ?? null,
     };
-  });
+  }).pipe(
+    Effect.withSpan("asset.create"),
+    Effect.annotateSpans({
+      assetId: body.id ?? "",
+      filename: body.filename,
+      actorType: actor?.type ?? "anonymous",
+    }),
+  );
 }
 
 export function listAssets() {
@@ -232,5 +239,11 @@ export function importAssetFromUrl(input: ImportAssetFromUrlInput, actor?: Reque
       tags: input.tags,
       r2Key,
     }, actor);
-  });
+  }).pipe(
+    Effect.withSpan("asset.import_from_url"),
+    Effect.annotateSpans({
+      url: input.url,
+      actorType: actor?.type ?? "anonymous",
+    }),
+  );
 }

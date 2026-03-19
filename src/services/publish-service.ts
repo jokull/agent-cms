@@ -89,7 +89,14 @@ export function publishRecord(modelApiKey: string, recordId: string, actor?: Req
 
     yield* fireHook("onPublish", { modelApiKey, recordId });
     return yield* selectById(tableName, recordId);
-  });
+  }).pipe(
+    Effect.withSpan("record.publish"),
+    Effect.annotateSpans({
+      modelApiKey,
+      recordId,
+      actorType: actor?.type ?? "anonymous",
+    }),
+  );
 }
 
 export function unpublishRecord(modelApiKey: string, recordId: string, actor?: RequestActor | null) {
@@ -114,5 +121,12 @@ export function unpublishRecord(modelApiKey: string, recordId: string, actor?: R
 
     yield* fireHook("onUnpublish", { modelApiKey, recordId });
     return yield* selectById(tableName, recordId);
-  });
+  }).pipe(
+    Effect.withSpan("record.unpublish"),
+    Effect.annotateSpans({
+      modelApiKey,
+      recordId,
+      actorType: actor?.type ?? "anonymous",
+    }),
+  );
 }

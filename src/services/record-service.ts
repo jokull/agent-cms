@@ -441,7 +441,13 @@ export function createRecord(body: CreateRecordInput, actor?: RequestActor | nul
     yield* fireHook("onRecordCreate", { modelApiKey: body.modelApiKey, recordId: id });
 
     return { id, ...record };
-  });
+  }).pipe(
+    Effect.withSpan("record.create"),
+    Effect.annotateSpans({
+      modelApiKey: body.modelApiKey,
+      actorType: actor?.type ?? "anonymous",
+    }),
+  );
 }
 
 export function listRecords(modelApiKey: string) {
@@ -708,7 +714,14 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
     yield* SearchService.reindexRecord(body.modelApiKey, id, modelFields).pipe(Effect.ignore);
     yield* fireHook("onRecordUpdate", { modelApiKey: body.modelApiKey, recordId: id });
     return yield* selectById(tableName, id);
-  });
+  }).pipe(
+    Effect.withSpan("record.patch"),
+    Effect.annotateSpans({
+      modelApiKey: body.modelApiKey,
+      recordId: id,
+      actorType: actor?.type ?? "anonymous",
+    }),
+  );
 }
 
 export function removeRecord(modelApiKey: string, id: string) {

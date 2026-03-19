@@ -4,6 +4,13 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-03-19",
   "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 1
+    }
+  },
   "services": [
     {
       "binding": "CMS",

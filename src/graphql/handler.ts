@@ -1,5 +1,5 @@
 import { createYoga, type YogaSchemaDefinition } from "graphql-yoga";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Logger } from "effect";
 import { type GraphQLSchema, parse, execute as gqlExecute, validate } from "graphql";
 import { SqlClient } from "@effect/sql";
 import { buildGraphQLSchema } from "./schema-builder.js";
@@ -53,6 +53,7 @@ export function createGraphQLHandler(
   sqlLayer: Layer.Layer<SqlClient.SqlClient>,
   options?: GraphQLHandlerOptions
 ) {
+  const runtimeLayer = Layer.merge(sqlLayer, Logger.json);
   const queryLimits = {
     maxDepth: 12,
     maxSelections: 250,
@@ -70,7 +71,15 @@ export function createGraphQLHandler(
           assetBaseUrl: options?.assetBaseUrl,
           assetPathPrefix: options?.assetPathPrefix,
           isProduction: options?.isProduction,
-        }).pipe(Effect.provide(sqlLayer), Effect.orDie)
+        }).pipe(
+          Effect.withSpan("graphql.build_schema"),
+          Effect.annotateSpans({
+            assetBaseUrl: options?.assetBaseUrl ?? "",
+            isProduction: options?.isProduction ?? false,
+          }),
+          Effect.provide(runtimeLayer),
+          Effect.orDie,
+        )
       ).then((schema) => {
         lastSchemaBuildMs = Number((performance.now() - buildStartedAt).toFixed(3));
         schemaBuildCount += 1;
@@ -124,6 +133,16 @@ export function createGraphQLHandler(
     schemaPromise = null;
   }
 
+  function logGraphqlInfo(message: string, fields: Record<string, unknown>) {
+    Effect.runFork(
+      Effect.logInfo(message).pipe(
+        Effect.annotateLogs(fields),
+        Effect.provide(runtimeLayer),
+        Effect.orDie,
+      )
+    );
+  }
+
   const handle = async (request: Request): Promise<Response> => {
     return withSqlMetrics(async () => {
       const traceEnabled = request.headers.get("X-Bench-Trace") === "1" || request.headers.get("X-Debug-Sql") === "true";
@@ -171,8 +190,7 @@ export function createGraphQLHandler(
           `cms-sql;dur=${metrics?.totalDurationMs.toFixed(3) ?? "0.000"}`,
         ];
         headers.set("Server-Timing", serverTiming.join(", "));
-        console.info(JSON.stringify({
-          scope: "cms.graphql",
+        logGraphqlInfo("graphql request completed", {
           traceId,
           operationName,
           status: response.status,
@@ -185,7 +203,7 @@ export function createGraphQLHandler(
           sqlStatementCount: metrics?.statementCount ?? 0,
           sqlTotalMs: metrics?.totalDurationMs ?? 0,
           sqlSlowestSamplesMs: metrics?.slowestSamplesMs ?? [],
-        }));
+        });
       } else if (request.headers.get("X-Debug-Sql") !== "true") {
         return response;
       }
