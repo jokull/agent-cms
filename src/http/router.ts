@@ -490,8 +490,6 @@ export const appRouter = HttpRouter.empty.pipe(
 export interface WebHandlerOptions {
   assetBaseUrl?: string;
   isProduction?: boolean;
-  /** Read API key — if set, required for GraphQL reads (like DatoCMS CDA token) */
-  readKey?: string;
   /** Write API key — if set, required for REST writes, MCP, publish/unpublish (like DatoCMS CMA token) */
   writeKey?: string;
   /** R2 bucket for serving asset files */
@@ -608,30 +606,18 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
   }
 
   /**
-   * Check if a request is authorized for the given access level.
-   * If no keys are configured, all requests are allowed (local dev).
+   * Check if a request is authorized for write access.
+   * If no writeKey is configured, all requests are allowed (local dev).
    */
-  function checkAuth(request: Request, level: "read" | "write"): UnauthorizedError | null {
+  function checkWriteAuth(request: Request): UnauthorizedError | null {
+    if (!options?.writeKey) return null;
     const token = getBearerToken(request);
-
-    if (level === "write" && options?.writeKey) {
-      if (token !== options.writeKey) {
-        return new UnauthorizedError({
-          message: "Unauthorized. Provide a valid write API key via Authorization: Bearer <key>",
-        });
-      }
+    if (token !== options.writeKey) {
+      return new UnauthorizedError({
+        message: "Unauthorized. Provide a valid write API key via Authorization: Bearer <key>",
+      });
     }
-
-    if (level === "read" && options?.readKey) {
-      // Write key also grants read access
-      if (token !== options.readKey && token !== options.writeKey) {
-        return new UnauthorizedError({
-          message: "Unauthorized. Provide a valid API key via Authorization: Bearer <key>",
-        });
-      }
-    }
-
-    return null; // authorized
+    return null;
   }
 
   const fetchHandler = async (request: Request): Promise<Response> => {
@@ -707,24 +693,13 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
         }));
       }
 
-      // /graphql GET (GraphiQL playground) — no auth
-      if (url.pathname === "/graphql" && instrumentedRequest.method === "GET") {
-        // Fall through to graphql handler below (landingPage: true serves GraphiQL)
-      }
-      // /graphql POST — read auth
-      else if (url.pathname === "/graphql" && instrumentedRequest.method === "POST") {
-        const denied = checkAuth(instrumentedRequest, "read");
-        if (denied) {
-          const mapped = errorToResponse(denied);
-          return finish(new Response(JSON.stringify(mapped.body), {
-            status: mapped.status,
-            headers: { "Content-Type": "application/json" },
-          }));
-        }
+      // /graphql — no auth required (both GET GraphiQL and POST queries are open)
+      if (url.pathname === "/graphql") {
+        // Fall through to graphql handler below
       }
       // /mcp — write auth
       else if (url.pathname === "/mcp") {
-        const denied = checkAuth(instrumentedRequest, "write");
+        const denied = checkWriteAuth(instrumentedRequest);
         if (denied) {
           const mapped = errorToResponse(denied);
           return finish(new Response(JSON.stringify(mapped.body), {
@@ -735,7 +710,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
       }
       // /api/* — write auth
       else if (url.pathname.startsWith("/api/")) {
-        const denied = checkAuth(instrumentedRequest, "write");
+        const denied = checkWriteAuth(instrumentedRequest);
         if (denied) {
           const mapped = errorToResponse(denied);
           return finish(new Response(JSON.stringify(mapped.body), {

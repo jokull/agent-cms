@@ -161,7 +161,6 @@ function getHandler(env: Env) {
         assets: env.ASSETS,
         environment: env.ENVIRONMENT,
         assetBaseUrl: env.ASSET_BASE_URL,
-        readKey: env.CMS_READ_KEY,
         writeKey: env.CMS_WRITE_KEY,
       },
     });
@@ -180,7 +179,6 @@ interface Env {
   ASSETS?: R2Bucket;
   ENVIRONMENT?: string;
   ASSET_BASE_URL?: string;
-  CMS_READ_KEY?: string;
   CMS_WRITE_KEY?: string;
 }
 `

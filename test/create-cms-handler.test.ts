@@ -12,7 +12,6 @@ describe("createCMSHandler", () => {
         assets,
         environment: "production",
         assetBaseUrl: "https://cms.example.com",
-        readKey: "read",
         writeKey: "write",
       },
     });
@@ -23,7 +22,6 @@ describe("createCMSHandler", () => {
         assets,
         environment: "production",
         assetBaseUrl: "https://cms.example.com",
-        readKey: "read",
         writeKey: "write",
       },
     });

@@ -7,12 +7,12 @@ import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
-function createAuthTestApp(readKey?: string, writeKey?: string) {
+function createAuthTestApp(writeKey?: string) {
   const tmpDir = mkdtempSync(join(tmpdir(), "agent-cms-auth-"));
   const dbPath = join(tmpDir, "test.db");
   const sqlLayer = SqliteClient.layer({ filename: dbPath, disableWAL: true });
   Effect.runSync(runMigrations().pipe(Effect.provide(sqlLayer)));
-  const webHandler = createWebHandler(sqlLayer, { readKey, writeKey });
+  const webHandler = createWebHandler(sqlLayer, { writeKey });
   return webHandler.fetch;
 }
 
@@ -25,11 +25,11 @@ describe("API key auth", () => {
     });
   });
 
-  describe("with keys configured", () => {
+  describe("with writeKey configured", () => {
     let handler: (req: Request) => Promise<Response>;
 
     beforeEach(() => {
-      handler = createAuthTestApp("read-key-123", "write-key-456");
+      handler = createAuthTestApp("write-key-456");
     });
 
     it("health endpoint needs no auth", async () => {
@@ -39,40 +39,13 @@ describe("API key auth", () => {
 
     it("GraphiQL (GET /graphql) needs no auth", async () => {
       const res = await handler(new Request("http://localhost/graphql"));
-      // Yoga returns 200 with HTML for GET requests (GraphiQL)
       expect(res.status).toBe(200);
     });
 
-    it("GraphQL POST rejected without key", async () => {
+    it("GraphQL POST needs no auth", async () => {
       const res = await handler(new Request("http://localhost/graphql", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: "{ _site { locales } }" }),
-      }));
-      expect(res.status).toBe(401);
-      const body = await res.json();
-      expect(body.error).toContain("Unauthorized");
-    });
-
-    it("GraphQL POST allowed with read key", async () => {
-      const res = await handler(new Request("http://localhost/graphql", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer read-key-123",
-        },
-        body: JSON.stringify({ query: "{ _site { locales } }" }),
-      }));
-      expect(res.status).toBe(200);
-    });
-
-    it("GraphQL POST allowed with write key (write grants read)", async () => {
-      const res = await handler(new Request("http://localhost/graphql", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer write-key-456",
-        },
         body: JSON.stringify({ query: "{ _site { locales } }" }),
       }));
       expect(res.status).toBe(200);
@@ -82,18 +55,6 @@ describe("API key auth", () => {
       const res = await handler(new Request("http://localhost/api/models", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "Test", apiKey: "test" }),
-      }));
-      expect(res.status).toBe(401);
-    });
-
-    it("REST write rejected with read key", async () => {
-      const res = await handler(new Request("http://localhost/api/models", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer read-key-123",
-        },
         body: JSON.stringify({ name: "Test", apiKey: "test" }),
       }));
       expect(res.status).toBe(401);

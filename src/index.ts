@@ -13,9 +13,6 @@ export interface CmsBindings {
   environment?: string;
   /** Public URL base for assets (e.g. "https://my-cms.workers.dev") */
   assetBaseUrl?: string;
-  /** Read API key — required for GraphQL reads. Like DatoCMS CDA token.
-   *  Pass from your secret/binding of choice. */
-  readKey?: string;
   /** Write API key — required for REST writes, MCP, publish/unpublish.
    *  Like DatoCMS CMA token. Use any string for local dev (e.g. "dev"). */
   writeKey: string;
@@ -64,7 +61,6 @@ function cacheKey(config: CmsHandlerConfig): string {
     getObjectId(hooks as unknown as object | undefined),
     bindings.environment ?? "",
     bindings.assetBaseUrl ?? "",
-    bindings.readKey || "",
     bindings.writeKey || "",
   ].join("|");
 }
@@ -90,7 +86,6 @@ function cacheKey(config: CmsHandlerConfig): string {
  *         assets: env.ASSETS,
  *         environment: env.ENVIRONMENT,
  *         assetBaseUrl: env.ASSET_BASE_URL,
- *         readKey: env.CMS_READ_KEY,
  *         writeKey: env.CMS_WRITE_KEY,
  *         ai: env.AI,
  *         vectorize: env.VECTORIZE,
@@ -117,7 +112,6 @@ function createCMSHandlerUncached(config: CmsHandlerConfig) {
   const webHandler = createWebHandler(sqlLayer, {
     assetBaseUrl: bindings.assetBaseUrl,
     isProduction: bindings.environment === "production",
-    readKey: bindings.readKey,
     writeKey: bindings.writeKey,
     r2Bucket: bindings.assets,
     ai: bindings.ai,

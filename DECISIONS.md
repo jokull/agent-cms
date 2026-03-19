@@ -79,7 +79,7 @@ Canonical record of all settled decisions for agent-cms. This file is the comple
 
 | # | Decision | Choice | Rationale |
 |---|---|---|---|
-| D36 | Auth | Optional Bearer token (CMS_READ_KEY / CMS_WRITE_KEY) | Read key for GraphQL, write key for REST/MCP. Set via `wrangler secret put`. Unauthenticated access allowed when keys are not configured. |
+| D36 | Auth | Write-only Bearer token (CMS_WRITE_KEY) | GraphQL is open (no auth). Write key required for REST/MCP. Set via `wrangler secret put`. Unauthenticated writes allowed when key is not configured (local dev). |
 | D37 | Environments | None — one D1 = one CMS instance | Staging/preview = separate Worker + D1 deployment. Not our concern. |
 | D38 | Video support | None for v1 | Media fields are image-only. |
 | D39 | Generic file uploads | None for v1 | Media fields reference images in R2. No arbitrary file type support. |

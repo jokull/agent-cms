@@ -173,7 +173,6 @@ Only `DB` is required. Everything else is optional — each binding unlocks capa
 | `ASSETS` | R2 | Asset file storage. Without it, asset metadata is stored but files can't be served via `/assets/`. |
 | `AI` | Workers AI | Embedding generation for semantic search (uses `bge-small-en-v1.5`, 384 dimensions). |
 | `VECTORIZE` | Vectorize | Semantic vector search. Requires `AI`. Without both, search falls back to FTS5 keyword matching. |
-| `CMS_READ_KEY` | Secret | API key required for GraphQL reads. Without it, GraphQL is open. |
 | `CMS_WRITE_KEY` | Secret | API key required for REST writes, MCP, and publish/unpublish. Without it, writes are open. |
 | `ASSET_BASE_URL` | Variable | Public URL prefix for asset URLs and Cloudflare Image Resizing. Must be a custom domain (not `workers.dev`) for image transforms. |
 
@@ -254,7 +253,6 @@ function getHandler(env: Env) {
         assets: env.ASSETS,
         environment: env.ENVIRONMENT,
         assetBaseUrl: env.ASSET_BASE_URL,
-        readKey: env.CMS_READ_KEY,
         writeKey: env.CMS_WRITE_KEY,
       },
       hooks: {
@@ -276,7 +274,6 @@ interface Env {
   ASSETS?: R2Bucket;
   ENVIRONMENT?: string;
   ASSET_BASE_URL?: string;
-  CMS_READ_KEY?: string;
   CMS_WRITE_KEY?: string;
   DEPLOY_HOOK_URL: string;
 }
