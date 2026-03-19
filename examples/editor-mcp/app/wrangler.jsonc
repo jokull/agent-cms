@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "jokull-editor-mcp-example-app",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-03-19",
+  "compatibility_flags": ["nodejs_compat"],
+  "services": [
+    {
+      "binding": "CMS",
+      "service": "jokull-editor-mcp-example-cms"
+    }
+  ],
+  "vars": {
+    "APP_BASE_URL": "https://jokull-editor-mcp-example-app.solberg.workers.dev",
+    "CMS_BASE_URL": "https://jokull-editor-mcp-example-cms.solberg.workers.dev"
+  }
+}

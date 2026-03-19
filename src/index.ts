@@ -3,6 +3,20 @@ import { Layer } from "effect";
 import { createWebHandler } from "./http/router.js";
 import type { AiBinding, VectorizeBinding } from "./search/vectorize.js";
 import type { CmsHooks } from "./hooks.js";
+export { createCmsAdminClient } from "./admin-client.js";
+export type {
+  CmsAdminClientConfig,
+  CreateEditorTokenRequest,
+  CreateEditorTokenResponse,
+  EditorTokenListItem,
+} from "./admin-client.js";
+export { createEditorMcpProxy } from "./editor-mcp-proxy.js";
+export type {
+  EditorMcpPrincipal,
+  EditorMcpProxyConfig,
+  EditorMcpProxy,
+  EditorMcpProxyPaths,
+} from "./editor-mcp-proxy.js";
 
 export type { CmsHooks } from "./hooks.js";
 

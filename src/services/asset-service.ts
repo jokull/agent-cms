@@ -1,10 +1,26 @@
-import { Effect } from "effect";
+import { Context, Effect } from "effect";
 import { SqlClient } from "@effect/sql";
 import { ulid } from "ulidx";
 import { NotFoundError, ValidationError } from "../errors.js";
 import type { AssetRow } from "../db/row-types.js";
-import type { CreateAssetInput } from "./input-schemas.js";
+import type { CreateAssetInput, ImportAssetFromUrlInput } from "./input-schemas.js";
 import { encodeJson } from "../json.js";
+
+export class AssetImportContext extends Context.Tag("AssetImportContext")<
+  AssetImportContext,
+  {
+    readonly r2Bucket: R2Bucket | undefined;
+    readonly fetch: typeof globalThis.fetch;
+  }
+>() {}
+
+function inferFilename(input: { url: string; filename?: string; mimeType?: string }) {
+  if (input.filename && input.filename.length > 0) return input.filename;
+  const pathname = new URL(input.url).pathname;
+  const candidate = pathname.split("/").filter(Boolean).at(-1);
+  if (candidate && candidate.length > 0) return decodeURIComponent(candidate);
+  return input.mimeType?.startsWith("image/") ? `asset.${input.mimeType.slice(6)}` : "asset.bin";
+}
 
 export function createAsset(body: CreateAssetInput) {
   return Effect.gen(function* () {
@@ -150,5 +166,49 @@ export function deleteAsset(id: string) {
     if (rows.length === 0) return yield* new NotFoundError({ entity: "Asset", id });
     yield* sql.unsafe("DELETE FROM assets WHERE id = ?", [id]);
     return { deleted: true };
+  });
+}
+
+export function importAssetFromUrl(input: ImportAssetFromUrlInput) {
+  return Effect.gen(function* () {
+    const { r2Bucket, fetch } = yield* AssetImportContext;
+    if (!r2Bucket) {
+      return yield* new ValidationError({ message: "Asset import requires an R2 bucket binding" });
+    }
+
+    const filename = inferFilename(input);
+    const id = ulid();
+    const response = yield* Effect.tryPromise({
+      try: () => fetch(input.url),
+      catch: () => new ValidationError({ message: `Failed to fetch asset URL: ${input.url}` }),
+    });
+    if (!response.ok) {
+      return yield* new ValidationError({
+        message: `Failed to fetch asset URL: ${input.url} (${response.status})`,
+      });
+    }
+
+    const mimeType = input.mimeType ?? response.headers.get("content-type")?.split(";")[0] ?? "application/octet-stream";
+    const bytes = yield* Effect.tryPromise({
+      try: () => response.arrayBuffer(),
+      catch: () => new ValidationError({ message: `Failed to read asset bytes from: ${input.url}` }),
+    });
+    const r2Key = `uploads/${id}/${filename}`;
+
+    yield* Effect.tryPromise({
+      try: () => r2Bucket.put(r2Key, bytes, { httpMetadata: { contentType: mimeType } }),
+      catch: () => new ValidationError({ message: `Failed to store asset in R2: ${filename}` }),
+    });
+
+    return yield* createAsset({
+      id,
+      filename,
+      mimeType,
+      size: bytes.byteLength,
+      alt: input.alt,
+      title: input.title,
+      tags: input.tags,
+      r2Key,
+    });
   });
 }

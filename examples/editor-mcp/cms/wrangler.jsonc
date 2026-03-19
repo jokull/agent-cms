@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "jokull-editor-mcp-example-cms",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-03-19",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "jokull-editor-mcp-example-cms-db",
+      "database_id": "92ee6d30-097c-4615-962a-98626d5f300e",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ASSETS",
+      "bucket_name": "jokull-editor-mcp-example-assets"
+    }
+  ],
+  "vars": {
+    "ASSET_BASE_URL": "https://jokull-editor-mcp-example-cms.solberg.workers.dev"
+  }
+}

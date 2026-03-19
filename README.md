@@ -220,6 +220,35 @@ Recommended model:
 - connect general-purpose admin agents to `/mcp`
 - connect writing/editing agents to `/mcp/editor`
 
+## App-Land Editor MCP
+
+For editor onboarding, the recommended shape is:
+
+- developers connect directly to the CMS `/mcp` endpoint with `writeKey`
+- browser visual-edit sessions receive a CMS editor token and talk to the CMS `/mcp/editor` endpoint directly
+- editors using MCP clients connect to an app-land MCP gateway on a distinct URL
+- app-land owns user auth and session UX
+- app-land proxies editor MCP traffic to the CMS `/mcp/editor` endpoint
+
+The package now exports two server-side helpers for this:
+
+```ts
+import { createCmsAdminClient, createEditorMcpProxy } from "agent-cms";
+```
+
+Use `createCmsAdminClient(...)` for app-land token minting and `createEditorMcpProxy(...)` to stand up an OAuth-capable editor MCP gateway in your own Worker or Hono app.
+
+This keeps the mental model clean:
+- CMS owns content capabilities
+- app-land owns users and login
+- editors never see the admin `writeKey`
+- the app-land MCP URL should be distinct from the raw CMS editor endpoint so developers and editors do not confuse the two
+
+The focused example at [`examples/editor-mcp/`](/Users/jokull/Code/agent-cms/examples/editor-mcp) demonstrates this split:
+
+- direct CMS editor-token endpoint: `https://<cms>/mcp/editor`
+- app-land OAuth/editor gateway: `https://<app>/editor-access/mcp`
+
 ## Localization
 
 Define locales with fallback chains. Localized fields store a value per locale. The GraphQL API respects the `Accept-Language` header and falls back through the chain when a locale is missing.
@@ -363,6 +392,12 @@ Use a module-scoped handler/factory. Do not call `createCMSHandler()` directly i
 ## Example
 
 See [`examples/blog/`](./examples/blog/) for a complete setup: a CMS Worker paired with an Astro site that queries the GraphQL API, renders structured text with block dispatch, and handles responsive images.
+
+For the editor-auth flow specifically, see [`examples/editor-mcp/`](./examples/editor-mcp/). It contains:
+- a direct CMS Worker
+- a separate app-land Worker using Hono
+- a distinct app-land MCP gateway URL for editors
+- a browser route that mints short-lived visual-edit editor tokens
 
 ## License
 

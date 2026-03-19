@@ -86,6 +86,16 @@ export const CreateAssetInput = Schema.Struct({
 });
 export type CreateAssetInput = typeof CreateAssetInput.Type;
 
+export const ImportAssetFromUrlInput = Schema.Struct({
+  url: Schema.NonEmptyString,
+  filename: Schema.optional(Schema.String),
+  mimeType: Schema.optional(Schema.String),
+  alt: Schema.optional(Schema.String),
+  title: Schema.optional(Schema.String),
+  tags: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
+});
+export type ImportAssetFromUrlInput = typeof ImportAssetFromUrlInput.Type;
+
 export const SearchAssetsInput = Schema.Struct({
   query: Schema.optional(Schema.String),
   limit: Schema.optionalWith(Schema.Number, { default: () => 24 }),

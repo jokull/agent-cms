@@ -816,7 +816,11 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
       if (url.pathname === "/mcp") {
         if (!mcpHandler) {
           const { createMcpHttpHandler } = await import("../mcp/http-transport.js");
-          mcpHandler = createMcpHttpHandler(fullLayer, { mode: "admin", path: "/mcp" });
+          mcpHandler = createMcpHttpHandler(fullLayer, {
+            mode: "admin",
+            path: "/mcp",
+            r2Bucket: options?.r2Bucket,
+          });
         }
         return finish(await mcpHandler(instrumentedRequest));
       }
@@ -824,7 +828,11 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
       if (url.pathname === "/mcp/editor") {
         if (!mcpEditorHandler) {
           const { createMcpHttpHandler } = await import("../mcp/http-transport.js");
-          mcpEditorHandler = createMcpHttpHandler(fullLayer, { mode: "editor", path: "/mcp/editor" });
+          mcpEditorHandler = createMcpHttpHandler(fullLayer, {
+            mode: "editor",
+            path: "/mcp/editor",
+            r2Bucket: options?.r2Bucket,
+          });
         }
         return finish(await mcpEditorHandler(instrumentedRequest));
       }

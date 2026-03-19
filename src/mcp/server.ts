@@ -13,6 +13,7 @@ import * as FieldService from "../services/field-service.js";
 import * as RecordService from "../services/record-service.js";
 import * as PublishService from "../services/publish-service.js";
 import * as AssetService from "../services/asset-service.js";
+import { AssetImportContext } from "../services/asset-service.js";
 import * as VersionService from "../services/version-service.js";
 import * as SchemaLifecycle from "../services/schema-lifecycle.js";
 import * as SchemaIO from "../services/schema-io.js";
@@ -24,6 +25,7 @@ import {
   CreateFieldInput,
   CreateModelInput,
   CreateRecordInput,
+  ImportAssetFromUrlInput,
   ImportSchemaInput,
   ReindexSearchInput,
   ReorderInput,
@@ -35,7 +37,7 @@ import { HooksContext } from "../hooks.js";
 import { decodeJsonRecordStringOr, encodeJson } from "../json.js";
 
 const JsonRecord = Schema.Record({ key: Schema.String, value: Schema.Unknown });
-const CommonDependencies = [SqlClient.SqlClient, VectorizeContext, HooksContext];
+const CommonDependencies = [SqlClient.SqlClient, VectorizeContext, HooksContext, AssetImportContext];
 
 const BuildStructuredTextInput = Schema.Struct({
   paragraphs: Schema.optional(Schema.Array(Schema.String)),
@@ -301,6 +303,14 @@ Upload flow:
 1. Upload the original file to R2
 2. Call this tool with the r2Key, filename, mimeType, and image dimensions
 3. The asset metadata is registered and can be referenced in media fields by its ID`, AssetInput.fields);
+const ImportAssetFromUrlTool = cmsTool("import_asset_from_url", `Download an asset from a public URL, store it in R2, and register it in one step.
+
+Use this when you have an image URL and want an agent-friendly path.
+
+Flow:
+1. Provide the source URL
+2. The CMS fetches the file, stores it in R2, and creates the asset record
+3. Use the returned asset ID in media fields`, ImportAssetFromUrlInput.fields);
 const ListAssetsTool = cmsTool("list_assets", "List all assets with their IDs, filenames, and R2 keys");
 const ReplaceAssetTool = cmsTool("replace_asset", `Replace an asset's file metadata while keeping the same ID and URL. All content references remain stable.
 
@@ -352,6 +362,7 @@ const AdminTools = [
   RemoveLocaleTool,
   BuildStructuredTextTool,
   UploadAssetTool,
+  ImportAssetFromUrlTool,
   ListAssetsTool,
   ReplaceAssetTool,
   ExportSchemaTool,
@@ -383,6 +394,7 @@ const EditorTools = [
   ReorderRecordsTool,
   BuildStructuredTextTool,
   UploadAssetTool,
+  ImportAssetFromUrlTool,
   ListAssetsTool,
   ReplaceAssetTool,
   ExportSchemaTool,
@@ -429,7 +441,12 @@ Draft/publish lifecycle:
   GraphQL serves published content by default; use X-Include-Drafts header for previews.
 
 Asset upload flow:
-  1. Upload file to R2: wrangler r2 object put <bucket>/uploads/<filename> --file=<path>
+  Preferred:
+  1. Call import_asset_from_url with a public file URL
+  2. Use returned asset ID in media/media_gallery fields
+
+  Manual fallback:
+  1. Upload file to R2 out of band
   2. Register with upload_asset tool (pass r2Key, filename, mimeType, dimensions)
   3. Use returned asset ID in media/media_gallery fields
 
@@ -536,6 +553,8 @@ Steps:
 export interface CreateMcpLayerOptions {
   readonly mode?: "admin" | "editor";
   readonly path?: string;
+  readonly r2Bucket?: R2Bucket;
+  readonly fetch?: typeof globalThis.fetch;
 }
 
 export function createMcpLayer(
@@ -548,8 +567,12 @@ export function createMcpLayer(
   const toolkitAny = toolkit as typeof CmsToolkit;
   const defaultVectorizeLayer: Layer.Layer<VectorizeContext> = Layer.succeed(VectorizeContext, Option.none());
   const defaultHooksLayer: Layer.Layer<HooksContext> = Layer.succeed(HooksContext, Option.none());
-  const fullLayer: Layer.Layer<SqlClient.SqlClient | VectorizeContext | HooksContext> = Layer.merge(
-    Layer.merge(defaultVectorizeLayer, defaultHooksLayer),
+  const defaultAssetImportLayer: Layer.Layer<AssetImportContext> = Layer.succeed(AssetImportContext, {
+    r2Bucket: options?.r2Bucket,
+    fetch: options?.fetch ?? globalThis.fetch,
+  });
+  const fullLayer: Layer.Layer<SqlClient.SqlClient | VectorizeContext | HooksContext | AssetImportContext> = Layer.merge(
+    Layer.merge(Layer.merge(defaultVectorizeLayer, defaultHooksLayer), defaultAssetImportLayer),
     sqlLayer,
   );
   const serverLayer = McpServer.layerHttpRouter({
@@ -716,6 +739,7 @@ export function createMcpLayer(
         };
       })),
     upload_asset: withDecoded(AssetInput, AssetService.createAsset),
+    import_asset_from_url: withDecoded(ImportAssetFromUrlInput, AssetService.importAssetFromUrl),
     list_assets: () => AssetService.listAssets(),
     replace_asset: withDecoded(ReplaceAssetInput, ({ assetId, ...rest }) => AssetService.replaceAsset(assetId, rest)),
     export_schema: () => SchemaIO.exportSchema(),

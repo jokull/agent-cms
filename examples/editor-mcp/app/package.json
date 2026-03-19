@@ -1,0 +1,16 @@
+{
+  "name": "jokull-editor-mcp-example-app",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "check": "wrangler check"
+  },
+  "dependencies": {
+    "agent-cms": "file:../../..",
+    "hono": "^4.9.7",
+    "wrangler": "^4.73.0"
+  }
+}
