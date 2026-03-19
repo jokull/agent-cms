@@ -2,10 +2,13 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { createWebHandler } from "../src/http/router.js";
 
-export async function createTestMcpClient(sqlLayer: any) {
+export async function createTestMcpClient(
+  sqlLayer: any,
+  options?: { path?: "/mcp" | "/mcp/editor"; token?: string },
+) {
   const handler = createWebHandler(sqlLayer, { writeKey: "write-key" }).fetch;
-  const transport = new StreamableHTTPClientTransport(new URL("http://localhost/mcp"), {
-    requestInit: { headers: { Authorization: "Bearer write-key" } },
+  const transport = new StreamableHTTPClientTransport(new URL(`http://localhost${options?.path ?? "/mcp"}`), {
+    requestInit: { headers: { Authorization: `Bearer ${options?.token ?? "write-key"}` } },
     fetch: (input, init) => {
       const url =
         typeof input === "string"

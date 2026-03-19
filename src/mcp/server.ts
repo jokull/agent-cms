@@ -225,6 +225,17 @@ function toMcpInputSchema(tool: AiTool.Any) {
     : { type: "object", properties: {}, additionalProperties: false };
 }
 
+function pickToolkitHandlers<T extends Record<string, unknown>>(
+  toolkit: { readonly tools: Record<string, AiTool.Any> },
+  handlers: T,
+) {
+  const filtered: Record<string, unknown> = {};
+  for (const name of Object.keys(toolkit.tools)) {
+    filtered[name] = handlers[name];
+  }
+  return filtered;
+}
+
 const ListModelsTool = cmsTool("list_models", "List all content models and block types with their fields");
 const DescribeModelTool = cmsTool("describe_model", "Get detailed info about a model", ApiKeyInput.fields);
 const CreateModelTool = cmsTool("create_model", "Create a content model or block type. Use isBlock:true for block types (embeddable in StructuredText). Use singleton:true for models with exactly one record (e.g. site settings). After creating a model, add fields with create_field.", CreateModelInput.fields);
@@ -314,7 +325,7 @@ const CreateEditorTokenTool = cmsTool("create_editor_token", "Create an editor t
 const ListEditorTokensTool = cmsTool("list_editor_tokens", "List all non-expired editor tokens");
 const RevokeEditorTokenTool = cmsTool("revoke_editor_token", "Revoke an editor token by its ID", TokenIdInput.fields);
 
-const CmsToolkit = Toolkit.make(
+const AdminTools = [
   ListModelsTool,
   DescribeModelTool,
   CreateModelTool,
@@ -352,7 +363,36 @@ const CmsToolkit = Toolkit.make(
   CreateEditorTokenTool,
   ListEditorTokensTool,
   RevokeEditorTokenTool,
-);
+];
+
+const EditorTools = [
+  ListModelsTool,
+  DescribeModelTool,
+  SchemaInfoTool,
+  CreateRecordTool,
+  UpdateRecordTool,
+  PatchBlocksTool,
+  DeleteRecordTool,
+  QueryRecordsTool,
+  BulkCreateRecordsTool,
+  PublishRecordTool,
+  UnpublishRecordTool,
+  ListRecordVersionsTool,
+  GetRecordVersionTool,
+  RestoreRecordVersionTool,
+  ReorderRecordsTool,
+  BuildStructuredTextTool,
+  UploadAssetTool,
+  ListAssetsTool,
+  ReplaceAssetTool,
+  ExportSchemaTool,
+  SearchContentTool,
+  GetSiteSettingsTool,
+  UpdateSiteSettingsTool,
+] as const;
+
+const CmsToolkit = Toolkit.make(...AdminTools);
+const EditorToolkit = Toolkit.make(...EditorTools);
 
 function createGuideResource() {
   return McpServer.resource({
@@ -493,9 +533,19 @@ Steps:
   });
 }
 
+export interface CreateMcpLayerOptions {
+  readonly mode?: "admin" | "editor";
+  readonly path?: string;
+}
+
 export function createMcpLayer(
   sqlLayer: Layer.Layer<SqlClient.SqlClient | VectorizeContext | HooksContext>,
+  options?: CreateMcpLayerOptions,
 ){
+  const mode = options?.mode ?? "admin";
+  const path = options?.path ?? (mode === "editor" ? "/mcp/editor" : "/mcp");
+  const toolkit = mode === "editor" ? EditorToolkit : CmsToolkit;
+  const toolkitAny = toolkit as typeof CmsToolkit;
   const defaultVectorizeLayer: Layer.Layer<VectorizeContext> = Layer.succeed(VectorizeContext, Option.none());
   const defaultHooksLayer: Layer.Layer<HooksContext> = Layer.succeed(HooksContext, Option.none());
   const fullLayer: Layer.Layer<SqlClient.SqlClient | VectorizeContext | HooksContext> = Layer.merge(
@@ -503,12 +553,12 @@ export function createMcpLayer(
     sqlLayer,
   );
   const serverLayer = McpServer.layerHttpRouter({
-    name: "agent-cms",
+    name: mode === "editor" ? "agent-cms-editor" : "agent-cms",
     version: "0.1.0",
-    path: "/mcp",
+    path: path as never,
   });
 
-  const toolkitHandlers = CmsToolkit.toLayer({
+  const toolHandlers = {
     list_models: () =>
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
@@ -677,11 +727,13 @@ export function createMcpLayer(
     create_editor_token: withDecoded(CreateEditorTokenMcpInput, TokenService.createEditorToken),
     list_editor_tokens: () => TokenService.listEditorTokens(),
     revoke_editor_token: withDecoded(TokenIdInput, ({ tokenId }) => TokenService.revokeEditorToken(tokenId)),
-  });
+  } as const;
+
+  const toolkitHandlers = toolkitAny.toLayer(pickToolkitHandlers(toolkitAny, toolHandlers) as never);
 
   const toolkitRegistration = Layer.effectDiscard(Effect.gen(function* () {
     const registry = yield* McpServer.McpServer;
-    const built = yield* CmsToolkit;
+    const built = yield* toolkitAny;
     const context = yield* Effect.context();
 
     for (const tool of Object.values(built.tools)) {
@@ -702,7 +754,7 @@ export function createMcpLayer(
         tool: mcpTool,
         handle(payload) {
           const params = isToolPayload(payload) ? payload : {};
-          return built.handle(tool.name, params).pipe(
+          return built.handle(tool.name as never, params as never).pipe(
             Effect.provide(context),
             Effect.match({
               onFailure: (error) =>
@@ -711,7 +763,7 @@ export function createMcpLayer(
                   structuredContent: toStructuredContent(error),
                   content: [{ type: "text", text: encodeJson(error) }],
                 }),
-              onSuccess: (result) =>
+              onSuccess: (result: { encodedResult: unknown }) =>
                 new McpSchema.CallToolResult({
                   isError: false,
                   structuredContent: toStructuredContent(result.encodedResult),

@@ -579,6 +579,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
   let mcpHandler: ((req: Request) => Promise<Response>) | null = null;
   let chatHandler: ((req: Request) => Promise<Response>) | null = null;
   let graphqlModulePromise: Promise<typeof import("../graphql/handler.js")> | null = null;
+  let mcpEditorHandler: ((req: Request) => Promise<Response>) | null = null;
 
   function invalidateGraphqlSchemaCache() {
     if (graphqlInstance) graphqlInstance.invalidateSchema();
@@ -664,6 +665,23 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
     });
   }
 
+  async function getCredentialType(request: Request): Promise<"admin" | "editor" | null> {
+    if (!options?.writeKey) return "admin";
+    const token = getBearerToken(request);
+    if (token === options.writeKey) return "admin";
+    if (token && token.startsWith("etk_")) {
+      try {
+        await Effect.runPromise(
+          TokenService.validateEditorToken(token).pipe(Effect.provide(fullLayer))
+        );
+        return "editor";
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+
   const fetchHandler = async (request: Request): Promise<Response> => {
     const requestId = getRequestIdFromHeaders(request.headers);
     const headers = new Headers(request.headers);
@@ -739,23 +757,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
 
       // /graphql — no auth required, but detect credential type for draft visibility
       if (url.pathname === "/graphql") {
-        const token = getBearerToken(instrumentedRequest);
-        let credentialType: "admin" | "editor" | null = null;
-        if (!options?.writeKey) {
-          // No writeKey configured (local dev) — treat as admin (respects X-Include-Drafts)
-          credentialType = "admin";
-        } else if (token === options.writeKey) {
-          credentialType = "admin";
-        } else if (token && token.startsWith("etk_")) {
-          try {
-            await Effect.runPromise(
-              TokenService.validateEditorToken(token).pipe(Effect.provide(fullLayer))
-            );
-            credentialType = "editor";
-          } catch {
-            // Invalid/expired token — treat as unauthenticated (published only)
-          }
-        }
+        const credentialType = await getCredentialType(instrumentedRequest);
         // Always overwrite — prevents forged X-Credential-Type headers
         const h = new Headers(instrumentedRequest.headers);
         if (credentialType) {
@@ -768,7 +770,26 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
       }
       // /mcp — admin only
       else if (url.pathname === "/mcp") {
+        const credentialType = await getCredentialType(instrumentedRequest);
+        if (credentialType === "editor") {
+          return finish(new Response(JSON.stringify({
+            error: "Unauthorized. Editor tokens must use /mcp/editor.",
+          }), {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          }));
+        }
         const denied = await checkWriteAuth(instrumentedRequest, true);
+        if (denied) {
+          const mapped = errorToResponse(denied);
+          return finish(new Response(JSON.stringify(mapped.body), {
+            status: mapped.status,
+            headers: { "Content-Type": "application/json" },
+          }));
+        }
+      }
+      else if (url.pathname === "/mcp/editor") {
+        const denied = await checkWriteAuth(instrumentedRequest, false);
         if (denied) {
           const mapped = errorToResponse(denied);
           return finish(new Response(JSON.stringify(mapped.body), {
@@ -795,9 +816,17 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
       if (url.pathname === "/mcp") {
         if (!mcpHandler) {
           const { createMcpHttpHandler } = await import("../mcp/http-transport.js");
-          mcpHandler = createMcpHttpHandler(fullLayer);
+          mcpHandler = createMcpHttpHandler(fullLayer, { mode: "admin", path: "/mcp" });
         }
         return finish(await mcpHandler(instrumentedRequest));
+      }
+
+      if (url.pathname === "/mcp/editor") {
+        if (!mcpEditorHandler) {
+          const { createMcpHttpHandler } = await import("../mcp/http-transport.js");
+          mcpEditorHandler = createMcpHttpHandler(fullLayer, { mode: "editor", path: "/mcp/editor" });
+        }
+        return finish(await mcpEditorHandler(instrumentedRequest));
       }
 
       // Route /graphql to Yoga

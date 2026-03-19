@@ -152,6 +152,59 @@ describe("API key auth", () => {
         }),
       }));
       expect(res.status).toBe(401);
+      await expect(res.json()).resolves.toEqual({
+        error: "Unauthorized. Editor tokens must use /mcp/editor.",
+      });
+    });
+
+    it("editor MCP allowed with editor token on /mcp/editor", async () => {
+      const token = await Effect.runPromise(
+        TokenService.createEditorToken({ name: "test-editor" }).pipe(Effect.provide(sqlLayer))
+      );
+      const res = await handler(new Request("http://localhost/mcp/editor", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json, text/event-stream",
+          "Authorization": `Bearer ${token.token}`,
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0", id: 1, method: "initialize",
+          params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "test", version: "1.0" } },
+        }),
+      }));
+      expect(res.status).toBe(200);
+    });
+
+    it("editor MCP allowed with write key on /mcp/editor", async () => {
+      const res = await handler(new Request("http://localhost/mcp/editor", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json, text/event-stream",
+          "Authorization": "Bearer write-key-456",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0", id: 1, method: "initialize",
+          params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "test", version: "1.0" } },
+        }),
+      }));
+      expect(res.status).toBe(200);
+    });
+
+    it("editor MCP rejected without credentials", async () => {
+      const res = await handler(new Request("http://localhost/mcp/editor", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json, text/event-stream",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0", id: 1, method: "initialize",
+          params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "test", version: "1.0" } },
+        }),
+      }));
+      expect(res.status).toBe(401);
     });
 
     it("chat endpoint rejected without write key", async () => {

@@ -34,6 +34,16 @@ Connect Claude to the MCP server:
 }
 ```
 
+For editorial agents, use the reduced-scope MCP endpoint instead:
+
+```json
+{
+  "mcpServers": {
+    "my-cms-editor": { "url": "http://localhost:8787/mcp/editor" }
+  }
+}
+```
+
 Deploy to production:
 
 ```bash
@@ -45,6 +55,25 @@ pnpm run deploy
 ### `/mcp` — Agent interface
 
 MCP server with tools for schema management (create models, add fields, configure block types), content operations (CRUD, bulk insert, publish/unpublish, reorder), asset uploads, and schema import/export. This is the primary interface.
+
+Requires admin authentication (`writeKey`). Editor tokens are rejected here and should use `/mcp/editor`.
+
+### `/mcp/editor` — Editorial agent interface
+
+Reduced MCP server for content-authoring agents. Accepts either an editor token or the admin `writeKey`.
+
+It exposes:
+- read-only schema introspection (`list_models`, `describe_model`, `schema_info`, `export_schema`)
+- record CRUD, drafts, publish/unpublish, reorder, and version restore
+- full asset CRUD
+- site settings read/update
+- content search
+
+It does not expose:
+- schema mutation tools
+- token management tools
+- schema import/setup tools
+- search reindex/admin repair operations
 
 ### `/graphql` — Content delivery
 
@@ -158,6 +187,38 @@ The structured text field stores content as DAST. Block types are defined per-mo
 ## Draft and publish
 
 Records start as drafts. Publishing captures a snapshot — edits to the draft don't affect the published version until you publish again. The GraphQL API serves published content by default; pass `X-Include-Drafts: true` to preview draft state.
+
+Authentication changes draft visibility:
+- unauthenticated GraphQL callers only see published content
+- `writeKey` callers can opt into drafts with `X-Include-Drafts: true`
+- editor tokens always see drafts in GraphQL previews
+
+## Editor Tokens
+
+Editor tokens are the browser-safe and agent-safe credential for non-admin editing flows.
+
+How they are granted:
+- an admin creates them through `POST /api/tokens`
+- or through MCP admin tools (`create_editor_token`, `list_editor_tokens`, `revoke_editor_token`)
+- the raw bearer token is shown only at creation time; the server stores only a hash plus a prefix for listing/revocation
+
+What they power:
+- visual editing clients via `CmsEditConfig.token`
+- draft GraphQL previews without exposing the admin `writeKey`
+- editorial MCP access via `/mcp/editor`
+- REST content and asset operations that do not mutate schema
+
+What they cannot do:
+- use `/mcp`
+- mutate schema, locales, or setup/import surfaces
+- manage other editor tokens
+- run admin maintenance operations like search reindex
+
+Recommended model:
+- keep `writeKey` server-side only
+- mint editor tokens for browser visual editing and authoring agents
+- connect general-purpose admin agents to `/mcp`
+- connect writing/editing agents to `/mcp/editor`
 
 ## Localization
 
