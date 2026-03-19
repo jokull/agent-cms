@@ -126,7 +126,7 @@ export function computeIsValid(
 
 function isValueValidForField(
   value: unknown,
-  fieldType: SupportedFieldType | string,
+  fieldType: string,
   validators: Record<string, unknown>,
 ): boolean {
   if (isRequired(validators) && !hasMeaningfulValue(value)) {
@@ -202,7 +202,7 @@ function passesFormatValidation(value: unknown, fieldType: string, validators: R
       return false;
     }
   }
-  if (typeof format === "object" && format !== null && !Array.isArray(format) && typeof (format as { custom_pattern?: unknown }).custom_pattern === "string") {
+  if (typeof format === "object" && !Array.isArray(format) && typeof (format as { custom_pattern?: unknown }).custom_pattern === "string") {
     try {
       return new RegExp((format as { custom_pattern: string }).custom_pattern).test(value);
     } catch {

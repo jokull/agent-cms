@@ -235,9 +235,9 @@ function toMcpInputSchema(tool: AiTool.Any) {
     : { type: "object", properties: {}, additionalProperties: false };
 }
 
-function pickToolkitHandlers<T extends Record<string, unknown>>(
+function pickToolkitHandlers(
   toolkit: { readonly tools: Record<string, AiTool.Any> },
-  handlers: T,
+  handlers: Record<string, unknown>,
 ) {
   const filtered: Record<string, unknown> = {};
   for (const name of Object.keys(toolkit.tools)) {

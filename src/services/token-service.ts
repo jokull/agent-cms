@@ -101,10 +101,10 @@ export function validateEditorToken(token: string) {
         [token]
       )
       : [];
-    const row = hashedRows[0] ?? legacyRows[0];
-    if (!row) {
+    if (hashedRows.length === 0 && legacyRows.length === 0) {
       return yield* new UnauthorizedError({ message: "Invalid editor token" });
     }
+    const row = hashedRows[0] ?? legacyRows[0];
     if (row.expires_at && new Date(row.expires_at) < new Date()) {
       return yield* new UnauthorizedError({ message: "Editor token has expired" });
     }

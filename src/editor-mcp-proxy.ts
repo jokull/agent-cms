@@ -98,7 +98,7 @@ async function importHmacKey(secret: string) {
   );
 }
 
-async function signJwt<T extends object>(secret: string, claims: T): Promise<string> {
+async function signJwt(secret: string, claims: object): Promise<string> {
   const key = await importHmacKey(secret);
   const header = base64UrlEncodeText(JSON.stringify({ alg: "HS256", typ: "JWT" }));
   const payload = base64UrlEncodeText(JSON.stringify(claims));
@@ -296,7 +296,7 @@ export function createEditorMcpProxy(config: EditorMcpProxyConfig): EditorMcpPro
   }
 
   async function handleRegister(request: Request): Promise<Response> {
-    const metadata = await request.json() as OAuthClientRegistration;
+    const metadata = await request.json<OAuthClientRegistration>();
     const clientId = metadata.client_id || `editor-mcp-${crypto.randomUUID()}`;
     return jsonResponse({
       ...metadata,

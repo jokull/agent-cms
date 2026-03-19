@@ -72,19 +72,19 @@ export function createCmsAdminClient(config: CmsAdminClientConfig) {
         method: "POST",
         body: JSON.stringify(input),
       });
-      return response.json() as Promise<CreateEditorTokenResponse>;
+      return response.json<CreateEditorTokenResponse>();
     },
 
     async listEditorTokens(): Promise<EditorTokenListItem[]> {
       const response = await request("/api/tokens");
-      return response.json() as Promise<EditorTokenListItem[]>;
+      return response.json<EditorTokenListItem[]>();
     },
 
     async revokeEditorToken(id: string): Promise<{ ok: true }> {
       const response = await request(`/api/tokens/${id}`, {
         method: "DELETE",
       });
-      return response.json() as Promise<{ ok: true }>;
+      return response.json<{ ok: true }>();
     },
   };
 }
