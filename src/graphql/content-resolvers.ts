@@ -468,6 +468,11 @@ export function buildContentModelResolvers(
           const localized = f.localized
             ? pickLocalizedEntry(parent[f.api_key], context, defaultLocale)
             : { locale: null, value: parent[f.api_key] };
+          const prefetched = parent[`__prefetch_st_${f.api_key}`];
+          if (prefetched && typeof prefetched === "object" && !Array.isArray(prefetched)) {
+            return prefetched;
+          }
+
           let dast = localized.value;
           if (!dast) return null;
           const includeDrafts = context.includeDrafts ?? false;

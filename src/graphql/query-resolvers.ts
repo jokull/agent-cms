@@ -11,6 +11,7 @@ import type { SchemaBuilderContext, ModelQueryMeta, DynamicRow, GqlContext } fro
 import { toCamelCase, pluralize, getRegistryDef, deserializeRecord, decodeSnapshot } from "./gql-utils.js";
 import { buildLinkPrefetchSpecs, collectSelectedFieldNames } from "./sqlite-json-prefetch.js";
 import { materializeStructuredTextValues } from "../services/structured-text-service.js";
+import { resolveStructuredTextValue } from "./structured-text-resolver.js";
 import { decodeJsonIfString } from "../json.js";
 
 /**
@@ -200,16 +201,20 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
         rawValue: unknown;
       }> = [];
       const assignments: Array<{
-        record: DynamicRow;
+        allowedBlockApiKeys: readonly string[];
         fieldApiKey: string;
-        requestKey: string;
         locale: string | null;
         localized: boolean;
+        record: DynamicRow;
+        requestKey: string;
+        rootFieldApiKey: string;
       }> = [];
 
       for (const field of fields) {
         if (field.field_type !== "structured_text") continue;
         if (!selectedFieldNames.has(toCamelCase(field.api_key))) continue;
+
+        const allowedBlockApiKeys = getBlockWhitelist(field.validators) ?? [];
 
         for (const record of records) {
           const selected = field.localized
@@ -228,7 +233,7 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
           const requestKey = `${field.api_key}:${selected.locale ?? ""}:${record.id}`;
           requests.push({
             requestKey,
-            allowedBlockApiKeys: getBlockWhitelist(field.validators) ?? [],
+            allowedBlockApiKeys,
             parentContainerModelApiKey: model.api_key,
             parentBlockId: null,
             parentFieldApiKey: field.api_key,
@@ -237,11 +242,13 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
             rawValue,
           });
           assignments.push({
-            record,
+            allowedBlockApiKeys,
             fieldApiKey: field.api_key,
-            requestKey,
             locale: selected.locale,
             localized: Boolean(field.localized),
+            record,
+            requestKey,
+            rootFieldApiKey,
           });
         }
       }
@@ -249,17 +256,39 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
       if (requests.length === 0) return;
 
       const materialized = await runSql(materializeStructuredTextValues({ requests }));
-      for (const assignment of assignments) {
+      const prefetchedResults = await Promise.all(assignments.map(async (assignment) => {
         const envelope = materialized.get(assignment.requestKey);
-        if (!envelope) continue;
+        if (!envelope) return null;
         if (assignment.localized && assignment.locale) {
           const existing = assignment.record[assignment.fieldApiKey];
           if (typeof existing === "object" && existing !== null && !Array.isArray(existing)) {
             Reflect.set(existing, assignment.locale, envelope);
           }
-          continue;
+        } else {
+          assignment.record[assignment.fieldApiKey] = envelope;
         }
-        assignment.record[assignment.fieldApiKey] = envelope;
+
+        const resolved = await resolveStructuredTextValue({
+          runSql,
+          rawValue: envelope,
+          rootRecordId: String(assignment.record.id),
+          rootFieldApiKey: assignment.rootFieldApiKey,
+          parentContainerModelApiKey: model.api_key,
+          parentBlockId: null,
+          parentFieldApiKey: assignment.fieldApiKey,
+          models: ctx.models,
+          blockModels: ctx.blockModels,
+          allowedBlockApiKeys: assignment.allowedBlockApiKeys,
+          typeNames: ctx.typeNames,
+          includeDrafts,
+          linkedRecordCache: context.linkedRecordCache,
+        });
+        return { assignment, resolved };
+      }));
+
+      for (const prefetched of prefetchedResults) {
+        if (!prefetched?.resolved) continue;
+        prefetched.assignment.record[`__prefetch_st_${prefetched.assignment.fieldApiKey}`] = prefetched.resolved;
       }
     }
 
