@@ -20,6 +20,7 @@ import {
   normalizeDatoLocale,
   patchRecordOverrides,
   publishRecord,
+  readJson,
   seoValue,
   upsertRecord,
   writeJson,
@@ -33,11 +34,67 @@ let skip = 0;
 let findings = [];
 let touchedRecords = new Map();
 let touchedOverrides = new Map();
+let completedRootIds = new Set();
 const FATAL_FINDING_TYPES = new Set(["asset_fallback", "skipped_block"]);
 let recordImportPromises = new Map();
 let assetImportPromises = new Map();
 const LINKED_IMPORT_CONCURRENCY = 4;
 const ASSET_IMPORT_CONCURRENCY = 6;
+let runStartedAt = new Date().toISOString();
+
+function checkpointFilename() {
+  return `checkpoint-${model}-${skip}-${limit}-${IMPORT_LOCALE}.json`;
+}
+
+function serializeTouchedRecords() {
+  return Object.fromEntries(
+    [...touchedRecords.entries()].map(([modelApiKey, ids]) => [modelApiKey, [...ids]]),
+  );
+}
+
+function serializeTouchedOverrides() {
+  return Object.fromEntries(
+    [...touchedOverrides.entries()].map(([modelApiKey, overrides]) => [modelApiKey, Object.fromEntries(overrides)]),
+  );
+}
+
+function restoreCheckpoint(checkpoint) {
+  findings = Array.isArray(checkpoint.findings) ? checkpoint.findings : [];
+  completedRootIds = new Set(Array.isArray(checkpoint.completedRootIds) ? checkpoint.completedRootIds : []);
+  touchedRecords = new Map(
+    Object.entries(checkpoint.touchedRecords ?? {}).map(([modelApiKey, ids]) => [modelApiKey, new Set(Array.isArray(ids) ? ids : [])]),
+  );
+  touchedOverrides = new Map(
+    Object.entries(checkpoint.touchedOverrides ?? {}).map(([modelApiKey, overrides]) => [
+      modelApiKey,
+      new Map(Object.entries(overrides ?? {})),
+    ]),
+  );
+  runStartedAt = typeof checkpoint.startedAt === "string" ? checkpoint.startedAt : new Date().toISOString();
+}
+
+function checkpointSnapshot(status, extra = {}) {
+  return {
+    version: 1,
+    adapter: "trip",
+    model,
+    skip,
+    limit,
+    locale: IMPORT_LOCALE,
+    status,
+    startedAt: runStartedAt,
+    updatedAt: new Date().toISOString(),
+    completedRootIds: [...completedRootIds],
+    touchedRecords: serializeTouchedRecords(),
+    touchedOverrides: serializeTouchedOverrides(),
+    findings,
+    ...extra,
+  };
+}
+
+async function saveCheckpoint(status, extra = {}) {
+  return writeJson(checkpointFilename(), checkpointSnapshot(status, extra));
+}
 
 function promiseEffect(thunk) {
   return Effect.tryPromise({
@@ -942,7 +999,9 @@ async function importGuide(record) {
 
 async function listSourceRecords(modelApiKey) {
   if (modelApiKey === "location") {
-    return (await datoListItemsByType("location", { limit, offset: skip })).map((item) => ({
+    return (await datoListItemsByType("location", { limit, offset: skip }))
+      .filter((item) => !completedRootIds.has(item.id))
+      .map((item) => ({
       id: item.id,
       overrides: toRecordOverrides(item.meta),
       slug: item.attributes.slug ?? null,
@@ -954,7 +1013,8 @@ async function listSourceRecords(modelApiKey) {
   }
 
   if (modelApiKey === "place") {
-    const items = await datoListItemsByType("place", { limit, offset: skip });
+    const items = (await datoListItemsByType("place", { limit, offset: skip }))
+      .filter((item) => !completedRootIds.has(item.id));
     return Effect.runPromise(Effect.forEach(items, (item) => promiseEffect(async () => {
       const content = item.attributes.content?.[IMPORT_LOCALE] ?? null;
       await runTasks([
@@ -986,7 +1046,8 @@ async function listSourceRecords(modelApiKey) {
   }
 
   if (modelApiKey === "article") {
-    const items = await datoListItemsByType("article", { limit, offset: skip });
+    const items = (await datoListItemsByType("article", { limit, offset: skip }))
+      .filter((item) => !completedRootIds.has(item.id));
     return Effect.runPromise(Effect.forEach(items, (item) => promiseEffect(async () => {
       const body = item.attributes.body?.[IMPORT_LOCALE] ?? null;
       await runTasks([
@@ -1017,7 +1078,8 @@ async function listSourceRecords(modelApiKey) {
   }
 
   if (modelApiKey === "guide") {
-    const items = await datoListItemsByType("guide", { limit, offset: skip });
+    const items = (await datoListItemsByType("guide", { limit, offset: skip }))
+      .filter((item) => !completedRootIds.has(item.id));
     return Effect.runPromise(Effect.forEach(items, (item) => promiseEffect(async () => {
       const body = item.attributes.body?.[IMPORT_LOCALE] ?? null;
       await runTasks([
@@ -1062,8 +1124,10 @@ export function createImportProgram(options = {}) {
   findings = [];
   touchedRecords = new Map();
   touchedOverrides = new Map();
+  completedRootIds = new Set();
   recordImportPromises = new Map();
   assetImportPromises = new Map();
+  runStartedAt = new Date().toISOString();
 
   const importRootRecord = (record) =>
     promiseEffect(async () => {
@@ -1074,11 +1138,35 @@ export function createImportProgram(options = {}) {
     });
 
   return Effect.gen(function* () {
-    yield* Effect.logInfo(`Starting Dato import for ${model} (${IMPORT_LOCALE})`);
+    const existingCheckpoint = yield* promiseEffect(() => readJson(checkpointFilename()));
+    if (existingCheckpoint?.value?.status && existingCheckpoint.value.status !== "completed") {
+      restoreCheckpoint(existingCheckpoint.value);
+      yield* Effect.logInfo(
+        `Resuming Dato import for ${model} (${IMPORT_LOCALE}) with ${completedRootIds.size} completed root record(s)`,
+      );
+    } else if (existingCheckpoint?.value?.status === "completed") {
+      yield* Effect.logInfo(`Starting fresh Dato import for ${model} (${IMPORT_LOCALE}); previous checkpoint was already completed`);
+    } else {
+      yield* Effect.logInfo(`Starting Dato import for ${model} (${IMPORT_LOCALE})`);
+    }
+
+    yield* promiseEffect(() => saveCheckpoint("running"));
     yield* promiseEffect(() => importSiteSettings());
     const records = yield* promiseEffect(() => listSourceRecords(model));
 
-    yield* Effect.forEach(records, importRootRecord, { concurrency: 1 });
+    yield* Effect.forEach(
+      records,
+      (record) =>
+        importRootRecord(record).pipe(
+          Effect.zipRight(
+            Effect.sync(() => {
+              completedRootIds.add(record.id);
+            }),
+          ),
+          Effect.zipRight(promiseEffect(() => saveCheckpoint("running"))),
+        ),
+      { concurrency: 1 },
+    );
     yield* publishTouchedRecordsEffect();
 
     const findingsPath = yield* promiseEffect(() => writeJson(`findings-${model}-${skip}-${limit}.json`, findings));
@@ -1115,11 +1203,19 @@ export function createImportProgram(options = {}) {
     }
 
     yield* Effect.logInfo("Verification query succeeded");
+    yield* promiseEffect(() => saveCheckpoint("completed", { completedAt: new Date().toISOString(), findingsPath }));
     return {
       findingsPath,
       recordsImported: records.length,
     };
-  }).pipe(Effect.ensuring(promiseEffect(() => disposeLocalR2Context())));
+  }).pipe(
+    Effect.catchAll((error) =>
+      promiseEffect(() => saveCheckpoint("failed", {
+        lastError: error instanceof Error ? error.message : String(error),
+      })).pipe(Effect.zipRight(Effect.fail(error))),
+    ),
+    Effect.ensuring(promiseEffect(() => disposeLocalR2Context())),
+  );
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

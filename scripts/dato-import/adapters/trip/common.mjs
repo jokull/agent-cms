@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { createAgentCmsClient } from "../../core/agent-cms.mjs";
 import { createDatoClient } from "../../core/datocms.mjs";
 import { createLocalR2Client } from "../../core/local-r2.mjs";
-import { getArg, writeJson as writeJsonToDir } from "../../core/runtime.mjs";
+import { getArg, readJson as readJsonFromDir, writeJson as writeJsonToDir } from "../../core/runtime.mjs";
 
 export let CMS_URL = process.env.CMS_URL ?? "http://127.0.0.1:8791";
 export let DATOCMS_API_TOKEN = process.env.DATOCMS_API_TOKEN;
@@ -59,6 +59,10 @@ export function denormalizeCmsLocale(code) {
 
 export async function writeJson(filename, value) {
   return writeJsonToDir(OUT_DIR, filename, value);
+}
+
+export async function readJson(filename) {
+  return readJsonFromDir(OUT_DIR, filename);
 }
 
 export { getArg };

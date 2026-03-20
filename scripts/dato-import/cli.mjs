@@ -106,12 +106,21 @@ const statusCommand = Command.make("status", { outDir: outDirOption }).pipe(
     Effect.tryPromise(async () => {
       const status = await readStatus(outDir);
       console.log(`Out dir: ${status.outDir}`);
-      if (!status.latest) {
+      if (!status.latestCheckpoint && !status.latestFindings) {
         console.log("No import output found.");
         return;
       }
-      console.log(`Latest: ${status.latest.name}`);
-      console.log(`Path: ${status.latest.path}`);
+      if (status.latestCheckpoint) {
+        console.log(`Latest checkpoint: ${status.latestCheckpoint.name}`);
+        console.log(`  Path: ${status.latestCheckpoint.path}`);
+        if (status.latestCheckpoint.value?.status) {
+          console.log(`  Status: ${status.latestCheckpoint.value.status}`);
+        }
+      }
+      if (status.latestFindings) {
+        console.log(`Latest findings: ${status.latestFindings.name}`);
+        console.log(`  Path: ${status.latestFindings.path}`);
+      }
     })),
 );
 

@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 export function sleep(ms) {
@@ -20,6 +20,19 @@ export async function writeJson(outDir, filename, value) {
   const path = resolve(outDir, filename);
   await writeFile(path, JSON.stringify(value, null, 2));
   return path;
+}
+
+export async function readJson(outDir, filename) {
+  const path = resolve(outDir, filename);
+  try {
+    const value = JSON.parse(await readFile(path, "utf8"));
+    return { path, value };
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
 }
 
 export function summarizeFindings(findings) {
