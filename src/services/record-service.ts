@@ -18,6 +18,7 @@ import * as SearchService from "../search/search-service.js";
 import type { CreateRecordInput, PatchRecordInput, BulkCreateRecordsInput, PatchBlocksInput } from "./input-schemas.js";
 import { getFieldTypeDef } from "../field-types.js";
 import { isFieldType } from "../types.js";
+import { parseMediaFieldReference, parseMediaGalleryReferences } from "../media-field.js";
 import { StructuredTextWriteInput } from "../dast/schema.js";
 import { pruneBlockNodes } from "../dast/index.js";
 import { fireHook } from "../hooks.js";
@@ -315,6 +316,36 @@ function processCreateLikeRecordFields({
                 field: field.api_key,
               }))
             );
+          }
+        }
+      }
+
+      // Validate asset existence for media fields
+      if (
+        (field.field_type === "media" || field.field_type === "media_gallery")
+        && data[field.api_key] !== undefined
+        && data[field.api_key] !== null
+      ) {
+        const assetIds: string[] = [];
+        if (field.field_type === "media") {
+          const ref = parseMediaFieldReference(data[field.api_key]);
+          if (ref) assetIds.push(ref.uploadId);
+        } else {
+          const refs = parseMediaGalleryReferences(data[field.api_key]);
+          assetIds.push(...refs.map((r) => r.uploadId));
+        }
+        if (assetIds.length > 0) {
+          const placeholders = assetIds.map(() => "?").join(", ");
+          const found = yield* sql.unsafe<{ id: string }>(
+            `SELECT id FROM assets WHERE id IN (${placeholders})`, assetIds,
+          );
+          const foundIds = new Set(found.map((r) => r.id));
+          const missing = assetIds.filter((id) => !foundIds.has(id));
+          if (missing.length > 0) {
+            return yield* new ValidationError({
+              message: createFieldErrorMessage(errorPrefix, `Asset(s) not found for field '${field.api_key}': ${missing.join(", ")}`),
+              field: field.api_key,
+            });
           }
         }
       }

@@ -918,12 +918,14 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
               mode: "admin",
               path: "/mcp",
               r2Bucket: options?.r2Bucket,
+              assetBaseUrl: options?.assetBaseUrl,
               actor,
             }))
           : createMcpHttpHandler(fullLayer, {
               mode: "admin",
               path: "/mcp",
               r2Bucket: options?.r2Bucket,
+              assetBaseUrl: options?.assetBaseUrl,
               actor,
             });
         return finish(await handler(instrumentedRequest));
@@ -937,12 +939,14 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
               mode: "editor",
               path: "/mcp/editor",
               r2Bucket: options?.r2Bucket,
+              assetBaseUrl: options?.assetBaseUrl,
               actor,
             })
           : (mcpEditorHandler ??= createMcpHttpHandler(fullLayer, {
               mode: "editor",
               path: "/mcp/editor",
               r2Bucket: options?.r2Bucket,
+              assetBaseUrl: options?.assetBaseUrl,
               actor,
             }));
         return finish(await handler(instrumentedRequest));

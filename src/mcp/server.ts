@@ -449,7 +449,9 @@ Use this when you have an image URL and want an agent-friendly path.
 Flow:
 1. Provide the source URL
 2. The CMS fetches the file, stores it in R2, and creates the asset record
-3. Use the returned asset ID in media fields`, ImportAssetFromUrlInput.fields);
+3. Use the returned asset ID in media fields (e.g. {image: "<asset_id>"})
+
+The response includes id, r2Key, url (full public URL), and metadata. The id is what you pass to media fields — the CMS validates that the asset exists when creating/updating records.`, ImportAssetFromUrlInput.fields);
 const ListAssetsTool = cmsTool("list_assets", "List all assets with their IDs, filenames, and R2 keys");
 const ReplaceAssetTool = cmsTool("replace_asset", `Replace an asset's file metadata while keeping the same ID and URL. All content references remain stable.
 
@@ -703,6 +705,7 @@ export interface CreateMcpLayerOptions {
   readonly r2Bucket?: R2Bucket;
   readonly fetch?: typeof globalThis.fetch;
   readonly actor?: RequestActor | null;
+  readonly assetBaseUrl?: string;
 }
 
 export function createMcpLayer(
@@ -728,6 +731,16 @@ export function createMcpLayer(
     version: "0.1.0",
     path: path as never,
   });
+
+  function assetUrl(r2Key: string): string | undefined {
+    if (!options?.assetBaseUrl) return undefined;
+    return `${options.assetBaseUrl.replace(/\/$/, "")}/${r2Key}`;
+  }
+
+  function withAssetUrl<T extends { r2Key: string }>(asset: T) {
+    const url = assetUrl(asset.r2Key);
+    return url ? { ...asset, url } : asset;
+  }
 
   const toolHandlers = {
     list_models: () =>
@@ -933,10 +946,17 @@ export function createMcpLayer(
           blocks: blockMap,
         };
       })),
-    upload_asset: withDecoded(AssetInput, (input) => AssetService.createAsset(input, options?.actor)),
-    import_asset_from_url: withDecoded(ImportAssetFromUrlInput, (input) => AssetService.importAssetFromUrl(input, options?.actor)),
-    list_assets: () => AssetService.listAssets(),
-    replace_asset: withDecoded(ReplaceAssetInput, ({ assetId, ...rest }) => AssetService.replaceAsset(assetId, rest, options?.actor)),
+    upload_asset: withDecoded(AssetInput, (input) =>
+      AssetService.createAsset(input, options?.actor).pipe(Effect.map(withAssetUrl))),
+    import_asset_from_url: withDecoded(ImportAssetFromUrlInput, (input) =>
+      AssetService.importAssetFromUrl(input, options?.actor).pipe(Effect.map(withAssetUrl))),
+    list_assets: () =>
+      AssetService.listAssets().pipe(Effect.map((assets) => assets.map((a) => {
+        const url = assetUrl(a.r2_key);
+        return url ? { ...a, url } : a;
+      }))),
+    replace_asset: withDecoded(ReplaceAssetInput, ({ assetId, ...rest }) =>
+      AssetService.replaceAsset(assetId, rest, options?.actor).pipe(Effect.map(withAssetUrl))),
     export_schema: () => SchemaIO.exportSchema(),
     import_schema: withDecoded(ImportSchemaToolInput, ({ schema }) => SchemaIO.importSchema(schema)),
     search_content: withDecoded(SearchContentInput, SearchService.search),
