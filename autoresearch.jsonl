@@ -1,0 +1,1 @@
+{"type":"config","name":"Reduce GraphQL resolver time for relationship traversal into SQLite queries","metricName":"total_ms","metricUnit":"ms","bestDirection":"lower"}
