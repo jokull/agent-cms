@@ -1,30 +1,62 @@
+import { Data, Effect } from "effect";
+
+class AgentCmsRequestError extends Data.TaggedError("AgentCmsRequestError") {}
+class AgentCmsResponseError extends Data.TaggedError("AgentCmsResponseError") {}
+
 export function createAgentCmsClient({ cmsUrl }) {
-  async function request(method, path, body) {
-    const response = await fetch(`${cmsUrl}${path}`, {
-      method,
-      headers: { "content-type": "application/json" },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  function requestEffect(method, path, body) {
+    return Effect.gen(function* () {
+      const response = yield* Effect.tryPromise({
+        try: () =>
+          fetch(`${cmsUrl}${path}`, {
+            method,
+            headers: { "content-type": "application/json" },
+            ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+          }),
+        catch: (cause) => new AgentCmsRequestError({ message: `${method} ${path} failed to send`, cause }),
+      }).pipe(Effect.retry({ times: 2 }));
+
+      const text = yield* Effect.tryPromise({
+        try: () => response.text(),
+        catch: (cause) => new AgentCmsResponseError({ message: `${method} ${path} body read failed`, cause }),
+      });
+
+      let parsed;
+      try {
+        parsed = text ? JSON.parse(text) : null;
+      } catch {
+        parsed = text;
+      }
+
+      return {
+        ok: response.ok,
+        status: response.status,
+        body: parsed,
+      };
     });
-    const text = await response.text();
-    let parsed;
-    try {
-      parsed = text ? JSON.parse(text) : null;
-    } catch {
-      parsed = text;
-    }
-    return {
-      ok: response.ok,
-      status: response.status,
-      body: parsed,
-    };
+  }
+
+  function jsonEffect(method, path, body) {
+    return requestEffect(method, path, body).pipe(
+      Effect.flatMap((result) =>
+        result.ok
+          ? Effect.succeed(result.body)
+          : Effect.fail(
+              new AgentCmsResponseError({
+                message: `${method} ${path} failed (${result.status}): ${JSON.stringify(result.body)}`,
+                cause: result.body,
+              }),
+            ),
+      ),
+    );
+  }
+
+  async function request(method, path, body) {
+    return Effect.runPromise(requestEffect(method, path, body));
   }
 
   async function json(method, path, body) {
-    const result = await request(method, path, body);
-    if (!result.ok) {
-      throw new Error(`${method} ${path} failed (${result.status}): ${JSON.stringify(result.body)}`);
-    }
-    return result.body;
+    return Effect.runPromise(jsonEffect(method, path, body));
   }
 
   async function listModels() {
@@ -139,7 +171,9 @@ export function createAgentCmsClient({ cmsUrl }) {
 
   return {
     request,
+    requestEffect,
     json,
+    jsonEffect,
     listModels,
     listFields,
     listLocales,

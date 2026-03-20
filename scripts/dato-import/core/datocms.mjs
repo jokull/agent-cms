@@ -1,6 +1,9 @@
 import { Data, Effect } from "effect";
 
-class DatoRequestError extends Data.TaggedError("DatoRequestError") {}
+class DatoNetworkError extends Data.TaggedError("DatoNetworkError") {}
+class DatoDecodeError extends Data.TaggedError("DatoDecodeError") {}
+class DatoApiError extends Data.TaggedError("DatoApiError") {}
+class DatoRateLimitError extends Data.TaggedError("DatoRateLimitError") {}
 
 export function createDatoClient({
   token,
@@ -19,11 +22,11 @@ export function createDatoClient({
     return Effect.gen(function* () {
       const response = yield* Effect.tryPromise({
         try: () => fetch(url, init),
-        catch: (cause) => new DatoRequestError({ message: `Dato request failed for ${url}`, cause }),
-      });
+        catch: (cause) => new DatoNetworkError({ message: `Dato request failed for ${url}`, cause }),
+      }).pipe(Effect.retry({ times: 2 }));
       const body = yield* Effect.tryPromise({
         try: () => response.json(),
-        catch: (cause) => new DatoRequestError({ message: `Dato response JSON decode failed for ${url}`, cause }),
+        catch: (cause) => new DatoDecodeError({ message: `Dato response JSON decode failed for ${url}`, cause }),
       });
       return { response, body };
     });
@@ -43,7 +46,7 @@ export function createDatoClient({
       });
       if (!response.ok || body.errors) {
         yield* Effect.fail(
-          new DatoRequestError({
+          new DatoApiError({
             message: `Dato query failed: ${JSON.stringify(body.errors ?? body, null, 2)}`,
             cause: body.errors ?? body,
           }),
@@ -68,8 +71,7 @@ export function createDatoClient({
       }
     }
 
-    const runAttempt = (attempt) =>
-      Effect.gen(function* () {
+    const cmaRequestEffect = Effect.gen(function* () {
         const { response, body } = yield* requestJson(url, {
           headers: {
             authorization: `Bearer ${token}`,
@@ -86,26 +88,41 @@ export function createDatoClient({
           return body;
         }
 
-        if (rateLimitError && attempt < 4) {
-          const reset = Number(body?.data?.[0]?.attributes?.details?.reset ?? 1);
-          yield* Effect.sleep(Math.max(reset, 1) * 1000);
-          return yield* runAttempt(attempt + 1);
+        if (rateLimitError) {
+          yield* Effect.fail(
+            new DatoRateLimitError({
+              message: `Dato CMA request exhausted rate-limit retries for ${url.pathname}`,
+              resetSeconds: Number(body?.data?.[0]?.attributes?.details?.reset ?? 1),
+              cause: body.errors ?? body,
+            }),
+          );
         }
 
         yield* Effect.fail(
-          new DatoRequestError({
+          new DatoApiError({
             message: `Dato CMA request failed: ${JSON.stringify(body.errors ?? body, null, 2)}`,
             cause: body.errors ?? body,
           }),
         );
-      });
+      }).pipe(
+      Effect.catchAll((error) => {
+        if (error instanceof DatoRateLimitError) {
+          return Effect.logWarning(
+            `Dato CMA rate limited for ${url.pathname}; retrying in ${Math.max(error.resetSeconds ?? 1, 1)}s`,
+          ).pipe(
+            Effect.zipRight(Effect.sleep(Math.max(error.resetSeconds ?? 1, 1) * 1000)),
+            Effect.zipRight(Effect.fail(error)),
+          );
+        }
+        return Effect.fail(error);
+      }),
+      Effect.retry({
+        while: (error) => error instanceof DatoRateLimitError,
+        times: 4,
+      }),
+    );
 
-    return Effect.runPromise(runAttempt(0)).catch((error) => {
-      if (error instanceof DatoRequestError) {
-        throw error;
-      }
-      throw new Error(`Dato CMA request failed after retries for ${url.pathname}`);
-    });
+    return Effect.runPromise(cmaRequestEffect);
   }
 
   async function listItemsByType(type, { limit = 20, offset = 0 } = {}) {

@@ -36,12 +36,24 @@ let touchedOverrides = new Map();
 const FATAL_FINDING_TYPES = new Set(["asset_fallback", "skipped_block"]);
 let recordImportPromises = new Map();
 let assetImportPromises = new Map();
+const LINKED_IMPORT_CONCURRENCY = 4;
+const ASSET_IMPORT_CONCURRENCY = 6;
 
 function promiseEffect(thunk) {
   return Effect.tryPromise({
     try: thunk,
     catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
   });
+}
+
+async function runConcurrent(items, fn, concurrency = LINKED_IMPORT_CONCURRENCY) {
+  await Effect.runPromise(
+    Effect.forEach(items, (item) => promiseEffect(() => fn(item)), { concurrency }).pipe(Effect.asVoid),
+  );
+}
+
+async function runTasks(tasks, concurrency = LINKED_IMPORT_CONCURRENCY) {
+  await runConcurrent(tasks, (task) => task(), concurrency);
 }
 
 function noteFinding(record) {
@@ -150,25 +162,6 @@ async function upsertImportedRecord(modelApiKey, id, data, overrides) {
   await upsertRecord(modelApiKey, id, data, { publish: false, overrides });
   markTouched(modelApiKey, id);
   rememberOverrides(modelApiKey, id, overrides);
-}
-
-async function publishTouchedRecords() {
-  if (IMPORT_LOCALE !== "en") {
-    noteFinding({
-      type: "deferred_publish",
-      detail: `Skipped auto-publish for locale '${IMPORT_LOCALE}'. Non-default locale imports only merge localized values onto existing records.`,
-    });
-    return;
-  }
-  for (const modelApiKey of contentModelDependencyOrder()) {
-    for (const id of touchedRecords.get(modelApiKey) ?? []) {
-      await publishRecord(modelApiKey, id);
-      const overrides = touchedOverrides.get(modelApiKey)?.get(id);
-      if (overrides) {
-        await patchRecordOverrides(modelApiKey, id, overrides);
-      }
-    }
-  }
 }
 
 function publishTouchedRecordsEffect() {
@@ -427,7 +420,7 @@ async function importAssetsFromRecord(record) {
     pushAsset(block.heroImage);
   }
 
-  for (const asset of candidates) {
+  await runConcurrent(candidates, async (asset) => {
     const result = await ensureAssetOnce(asset);
     if (result?.metadataOnly) {
       noteFinding({
@@ -436,7 +429,7 @@ async function importAssetsFromRecord(record) {
         detail: `Imported metadata only for asset '${asset.filename}'. Original blob could not be copied this run.${result.uploadError ? ` Cause: ${result.uploadError}` : ""}`,
       });
     }
-  }
+  }, ASSET_IMPORT_CONCURRENCY);
 }
 
 async function importSiteSettings() {
@@ -500,9 +493,9 @@ async function importSiteSettings() {
 }
 
 async function importAssetRefs(...refs) {
-  for (const ref of refs) {
+  await runConcurrent(refs, async (ref) => {
     const asset = assetFromUploadRef(ref);
-    if (!asset?.id) continue;
+    if (!asset?.id) return;
     const result = await ensureAssetOnce(asset);
     if (result?.metadataOnly) {
       noteFinding({
@@ -511,7 +504,7 @@ async function importAssetRefs(...refs) {
         detail: `Imported metadata only for asset '${asset.id}'. Original blob could not be copied this run.${result.uploadError ? ` Cause: ${result.uploadError}` : ""}`,
       });
     }
-  }
+  }, ASSET_IMPORT_CONCURRENCY);
 }
 
 async function importContributorById(id) {
@@ -545,24 +538,14 @@ async function importPlaceById(id) {
     const place = await datoGetItem(id);
     const content = place.attributes.content?.[IMPORT_LOCALE] ?? null;
     await importAssetRefs(place.attributes.hero_image, ...(place.attributes.gallery ?? []));
-    for (const locationId of place.attributes.locations ?? []) {
-      await importLocationById(locationId);
-    }
-    for (const tourId of place.attributes.tours ?? []) {
-      await importTourById(tourId);
-    }
-    for (const articleId of place.attributes.blogs ?? []) {
-      await importArticleById(articleId);
-    }
-    for (const nearbyPlaceId of place.attributes.nearby_places ?? []) {
-      await importPlaceById(nearbyPlaceId);
-    }
-    for (const qaId of localizedIds(place.attributes.questions)) {
-      await importQaById(qaId);
-    }
-    if (content) {
-      await importDependenciesFromRawBody(content);
-    }
+    await runTasks([
+      ...(place.attributes.locations ?? []).map((locationId) => () => importLocationById(locationId)),
+      ...(place.attributes.tours ?? []).map((tourId) => () => importTourById(tourId)),
+      ...(place.attributes.blogs ?? []).map((articleId) => () => importArticleById(articleId)),
+      ...(place.attributes.nearby_places ?? []).map((nearbyPlaceId) => () => importPlaceById(nearbyPlaceId)),
+      ...localizedIds(place.attributes.questions).map((qaId) => () => importQaById(qaId)),
+      ...(content ? [() => importDependenciesFromRawBody(content)] : []),
+    ]);
     await upsertImportedRecord("place", place.id, {
       ...(localizedInput(localizedValue(place.attributes.title)) ? { title: localizedInput(localizedValue(place.attributes.title)) } : {}),
       ...(place.attributes.slug == null ? {} : { slug: place.attributes.slug }),
@@ -615,18 +598,12 @@ async function importArticleById(id) {
   await importRecordOnce("article", id, async () => {
     const article = await datoGetItem(id);
     const body = article.attributes.body?.[IMPORT_LOCALE] ?? null;
-    if (article.attributes.contributor) {
-      await importContributorById(article.attributes.contributor);
-    }
-    if (article.attributes.location) {
-      await importLocationById(article.attributes.location);
-    }
-    for (const qaId of localizedIds(article.attributes.questions)) {
-      await importQaById(qaId);
-    }
-    if (body) {
-      await importDependenciesFromRawBody(body);
-    }
+    await runTasks([
+      ...(article.attributes.contributor ? [() => importContributorById(article.attributes.contributor)] : []),
+      ...(article.attributes.location ? [() => importLocationById(article.attributes.location)] : []),
+      ...localizedIds(article.attributes.questions).map((qaId) => () => importQaById(qaId)),
+      ...(body ? [() => importDependenciesFromRawBody(body)] : []),
+    ]);
     await importAssetRefs(article.attributes.hero, article.attributes.thumbnail);
     await upsertImportedRecord("article", article.id, {
       ...(localizedInput(localizedValue(article.attributes.title)) ? { title: localizedInput(localizedValue(article.attributes.title)) } : {}),
@@ -679,37 +656,28 @@ async function ensureAssetOnce(asset) {
 }
 
 async function importNestedSupportRecords(record) {
-  if (record.contributor?.id) {
-    await importContributorById(record.contributor.id);
-  }
-
-  if (record.location?.id) {
-    await importLocationById(record.location.id);
-  }
-
-  for (const block of record.body?.blocks ?? []) {
-    if (block.tour?.id) {
-      await importTourById(block.tour.id);
-    }
-
-    if (block.place?.id) {
-      await importPlaceById(block.place.id);
-    }
-  }
+  await runTasks([
+    ...(record.contributor?.id ? [() => importContributorById(record.contributor.id)] : []),
+    ...(record.location?.id ? [() => importLocationById(record.location.id)] : []),
+    ...(record.body?.blocks ?? []).flatMap((block) => [
+      ...(block.tour?.id ? [() => importTourById(block.tour.id)] : []),
+      ...(block.place?.id ? [() => importPlaceById(block.place.id)] : []),
+    ]),
+  ]);
 }
 
 async function importDependenciesFromRawBody(dast) {
-  for (const block of await getRawBlockItems(dast)) {
+  await runConcurrent(await getRawBlockItems(dast), async (block) => {
     const blockType = await datoGetItemTypeApiKey(block.relationships.item_type.data.id);
     if (blockType === "image") {
       await importAssetRefs(block.attributes.image);
-      continue;
+      return;
     }
     if (blockType === "tour_card") {
       if (block.attributes.tour) {
         await importTourById(block.attributes.tour);
       }
-      continue;
+      return;
     }
     if (blockType === "place_card") {
       if (block.attributes.place) {
@@ -718,15 +686,15 @@ async function importDependenciesFromRawBody(dast) {
       if (block.attributes.description) {
         await importDependenciesFromRawBody(block.attributes.description);
       }
-      continue;
+      return;
     }
     if (blockType === "google_place_card") {
       if (block.attributes.description) {
         await importDependenciesFromRawBody(block.attributes.description);
       }
-      continue;
+      return;
     }
-  }
+  });
 }
 
 async function transformStructuredTextRaw(dast, scopeId) {
@@ -987,26 +955,16 @@ async function listSourceRecords(modelApiKey) {
 
   if (modelApiKey === "place") {
     const items = await datoListItemsByType("place", { limit, offset: skip });
-    return Promise.all(items.map(async (item) => {
+    return Effect.runPromise(Effect.forEach(items, (item) => promiseEffect(async () => {
       const content = item.attributes.content?.[IMPORT_LOCALE] ?? null;
-      for (const locationId of item.attributes.locations ?? []) {
-        await importLocationById(locationId);
-      }
-      for (const tourId of item.attributes.tours ?? []) {
-        await importTourById(tourId);
-      }
-      for (const articleId of item.attributes.blogs ?? []) {
-        await importArticleById(articleId);
-      }
-      for (const nearbyPlaceId of item.attributes.nearby_places ?? []) {
-        await importPlaceById(nearbyPlaceId);
-      }
-      for (const qaId of localizedIds(item.attributes.questions)) {
-        await importQaById(qaId);
-      }
-      if (content) {
-        await importDependenciesFromRawBody(content);
-      }
+      await runTasks([
+        ...(item.attributes.locations ?? []).map((locationId) => () => importLocationById(locationId)),
+        ...(item.attributes.tours ?? []).map((tourId) => () => importTourById(tourId)),
+        ...(item.attributes.blogs ?? []).map((articleId) => () => importArticleById(articleId)),
+        ...(item.attributes.nearby_places ?? []).map((nearbyPlaceId) => () => importPlaceById(nearbyPlaceId)),
+        ...localizedIds(item.attributes.questions).map((qaId) => () => importQaById(qaId)),
+        ...(content ? [() => importDependenciesFromRawBody(content)] : []),
+      ]);
       await importAssetRefs(item.attributes.hero_image, ...(item.attributes.gallery ?? []));
       return {
         id: item.id,
@@ -1024,25 +982,19 @@ async function listSourceRecords(modelApiKey) {
         blogs: (item.attributes.blogs ?? []).map((id) => ({ id })),
         questions: localizedIds(item.attributes.questions).map((id) => ({ id })),
       };
-    }));
+    }), { concurrency: LINKED_IMPORT_CONCURRENCY }));
   }
 
   if (modelApiKey === "article") {
     const items = await datoListItemsByType("article", { limit, offset: skip });
-    return Promise.all(items.map(async (item) => {
+    return Effect.runPromise(Effect.forEach(items, (item) => promiseEffect(async () => {
       const body = item.attributes.body?.[IMPORT_LOCALE] ?? null;
-      if (item.attributes.contributor) {
-        await importContributorById(item.attributes.contributor);
-      }
-      if (item.attributes.location) {
-        await importLocationById(item.attributes.location);
-      }
-      for (const qaId of localizedIds(item.attributes.questions)) {
-        await importQaById(qaId);
-      }
-      if (body) {
-        await importDependenciesFromRawBody(body);
-      }
+      await runTasks([
+        ...(item.attributes.contributor ? [() => importContributorById(item.attributes.contributor)] : []),
+        ...(item.attributes.location ? [() => importLocationById(item.attributes.location)] : []),
+        ...localizedIds(item.attributes.questions).map((qaId) => () => importQaById(qaId)),
+        ...(body ? [() => importDependenciesFromRawBody(body)] : []),
+      ]);
       await importAssetRefs(item.attributes.hero, item.attributes.thumbnail);
       return {
         id: item.id,
@@ -1061,19 +1013,17 @@ async function listSourceRecords(modelApiKey) {
         questions: localizedIds(item.attributes.questions).map((id) => ({ id })),
         body: body ? await transformStructuredTextRaw(body, `${item.id}__body__${IMPORT_LOCALE}`) : null,
       };
-    }));
+    }), { concurrency: LINKED_IMPORT_CONCURRENCY }));
   }
 
   if (modelApiKey === "guide") {
     const items = await datoListItemsByType("guide", { limit, offset: skip });
-    return Promise.all(items.map(async (item) => {
+    return Effect.runPromise(Effect.forEach(items, (item) => promiseEffect(async () => {
       const body = item.attributes.body?.[IMPORT_LOCALE] ?? null;
-      if (item.attributes.location) {
-        await importLocationById(item.attributes.location);
-      }
-      if (body) {
-        await importDependenciesFromRawBody(body);
-      }
+      await runTasks([
+        ...(item.attributes.location ? [() => importLocationById(item.attributes.location)] : []),
+        ...(body ? [() => importDependenciesFromRawBody(body)] : []),
+      ]);
       await importAssetRefs(item.attributes.hero, item.attributes.thumbnail);
       return {
         id: item.id,
@@ -1088,7 +1038,7 @@ async function listSourceRecords(modelApiKey) {
         location: item.attributes.location ? { id: item.attributes.location } : null,
         body: body ? await transformStructuredTextRaw(body, `${item.id}__body__${IMPORT_LOCALE}`) : null,
       };
-    }));
+    }), { concurrency: LINKED_IMPORT_CONCURRENCY }));
   }
 
   const query = queryForModel(modelApiKey);
