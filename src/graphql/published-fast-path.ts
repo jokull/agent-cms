@@ -11,14 +11,14 @@ import {
   type SelectionSetNode,
   type ValueNode,
 } from "graphql";
-import type { AssetRow, ContentRow, FieldRow, ModelRow, ParsedFieldRow } from "../db/row-types.js";
+import type { AssetRow, FieldRow, ModelRow, ParsedFieldRow } from "../db/row-types.js";
 import { parseFieldValidators } from "../db/row-types.js";
 import { getLinkTargets, getLinksTargets } from "../db/validators.js";
 import { extractBlockIds, extractInlineBlockIds, extractLinkIds } from "../dast/index.js";
 import { compileOrderBy, type FilterCompilerOpts } from "./filter-compiler.js";
 import { decodeJsonIfString } from "../json.js";
 import { batchResolveLinkedRecordsCached } from "./structured-text-resolver.js";
-import { decodeSnapshot, deserializeRecord, pluralize, toCamelCase, toContentTypeName, toTypeName } from "./gql-utils.js";
+import { decodeSnapshot, pluralize, toCamelCase, toContentTypeName, toTypeName } from "./gql-utils.js";
 import { mergeAssetWithMediaReference, parseMediaFieldReference, parseMediaGalleryReferences } from "../media-field.js";
 import type { AssetObject } from "./gql-types.js";
 
@@ -32,6 +32,13 @@ interface AssetSelectionPlan {
   readonly fields: readonly {
     readonly responseKey: string;
     readonly fieldName: string;
+  }[];
+}
+
+interface LatLonSelectionPlan {
+  readonly fields: readonly {
+    readonly responseKey: string;
+    readonly fieldName: "latitude" | "longitude";
   }[];
 }
 
@@ -63,6 +70,12 @@ type SelectionPlan =
       readonly field: ParsedFieldRow;
       readonly targetApiKeys: readonly string[];
       readonly nested: readonly SelectionPlan[];
+    }
+  | {
+      readonly kind: "lat_lon";
+      readonly responseKey: string;
+      readonly field: ParsedFieldRow;
+      readonly nested: LatLonSelectionPlan;
     }
   | {
       readonly kind: "media";
@@ -440,6 +453,27 @@ function buildAssetSelectionPlan(
   return { fields };
 }
 
+function buildLatLonSelectionPlan(
+  fieldNode: FieldNode,
+  fragments: Map<string, FragmentDefinitionNode>,
+): LatLonSelectionPlan | null {
+  const selections = collectObjectSelections(fieldNode.selectionSet, fragments, "LatLonField");
+  if (!selections || selections.length === 0) return null;
+  const fields: Array<{ responseKey: string; fieldName: "latitude" | "longitude" }> = [];
+
+  for (const selection of selections) {
+    if (selection.kind !== Kind.FIELD) return null;
+    if (selection.selectionSet) return null;
+    if (selection.name.value !== "latitude" && selection.name.value !== "longitude") return null;
+    fields.push({
+      responseKey: selection.alias?.value ?? selection.name.value,
+      fieldName: selection.name.value,
+    });
+  }
+
+  return { fields };
+}
+
 function buildStructuredTextBlocksPlan(
   fieldNode: FieldNode,
   metadata: PublishedFastPathMetadata,
@@ -585,6 +619,13 @@ function buildSelectionPlanFromSelections(
       continue;
     }
 
+    if (field.field_type === "lat_lon") {
+      const latLonPlan = buildLatLonSelectionPlan(selection, fragments);
+      if (!latLonPlan) return null;
+      plan.push({ kind: "lat_lon", responseKey, field, nested: latLonPlan });
+      continue;
+    }
+
     if (field.field_type === "link") {
       if (!selection.selectionSet) return null;
       const targets = getLinkTargets(field.validators);
@@ -681,6 +722,7 @@ function buildJsonObjectSql(
         break;
       }
       case "links":
+      case "lat_lon":
       case "media":
       case "media_gallery":
       case "structured_text":
@@ -1023,6 +1065,8 @@ function collectModelDependencies(
         );
         break;
       }
+      case "lat_lon":
+        break;
       case "media": {
         const reference = parseMediaFieldReference(Reflect.get(source, selection.field.api_key));
         if (reference) pending.assetIds.add(reference.uploadId);
@@ -1060,6 +1104,19 @@ function pickAssetField(asset: AssetObject, fieldName: string): unknown {
     default:
       return Reflect.get(asset, fieldName);
   }
+}
+
+function projectLatLonField(
+  rawValue: unknown,
+  plan: LatLonSelectionPlan,
+): Record<string, unknown> | null {
+  const parsed = parseJsonValue(rawValue);
+  if (!isRecord(parsed)) return null;
+  const result: Record<string, unknown> = {};
+  for (const field of plan.fields) {
+    result[field.responseKey] = Reflect.get(parsed, field.fieldName) ?? null;
+  }
+  return result;
 }
 
 async function projectAsset(
@@ -1222,6 +1279,9 @@ async function projectModelSelections(
         result[selection.responseKey] = projected;
         break;
       }
+      case "lat_lon":
+        result[selection.responseKey] = projectLatLonField(Reflect.get(source, selection.field.api_key), selection.nested);
+        break;
       case "media":
         result[selection.responseKey] = await projectAsset(ctx, Reflect.get(source, selection.field.api_key), selection.nested);
         break;
@@ -1326,51 +1386,23 @@ async function projectStructuredText(
   return result;
 }
 
-async function executeContentRoot(
+async function projectFetchedContentRoot(
   ctx: FastPathExecutionContext,
   root: Extract<RootPlan, { kind: "list" | "singleton" }>,
-  variables: Record<string, unknown>,
+  fetched:
+    | { readonly kind: "list"; readonly sources: readonly Record<string, unknown>[] }
+    | { readonly kind: "singleton"; readonly sources: readonly Record<string, unknown>[]; readonly source: Record<string, unknown> | null },
 ): Promise<unknown> {
-  const filter = buildFilterSql(root.filter, variables);
-
   if (root.kind === "list") {
-    const orderBy = resolveStringListArg(root.orderBy, variables);
-    const compiledOrderBy = compileOrderBy(orderBy ?? (typeof root.meta.model.ordering === "string" ? [root.meta.model.ordering] : undefined), buildFilterOpts(root.meta));
-    let sqlText = `SELECT * FROM "${root.meta.tableName}" row_data WHERE row_data."_status" IN ('published', 'updated')${filter.sql}`;
-    if (compiledOrderBy) {
-      sqlText += ` ORDER BY ${compiledOrderBy}`;
-    }
-    const params: unknown[] = [...filter.params, Math.min(resolveIntArg(root.first, variables) ?? 20, 500)];
-    sqlText += " LIMIT ?";
-    const skip = resolveIntArg(root.skip, variables);
-    if (skip && skip > 0) {
-      sqlText += " OFFSET ?";
-      params.push(skip);
-    }
-    const rows = await runSql<ContentRow>(ctx.sqlLayer, sqlText, params, { metrics: ctx.metrics, category: "root" });
-    const mergedRows = rows.map((row) => decodeSnapshot(deserializeRecord(row), false));
-    await preloadDependencies(
-      ctx,
-      mergedRows.map((source) => ({ source, plan: root.selectionPlan })),
-    );
     const result: Record<string, unknown>[] = [];
-    for (const merged of mergedRows) {
+    for (const merged of fetched.sources) {
       result.push(await projectModelSelections(ctx, root.meta, merged, root.selectionPlan));
     }
     return result;
   }
 
-  const rows = await runSql<ContentRow>(
-    ctx.sqlLayer,
-    `SELECT * FROM "${root.meta.tableName}" row_data WHERE row_data."_status" IN ('published', 'updated')${filter.sql} LIMIT 1`,
-    filter.params,
-    { metrics: ctx.metrics, category: "root" },
-  );
-  const row = rows[0];
-  if (!row) return null;
-  const merged = decodeSnapshot(deserializeRecord(row), false);
-  await preloadDependencies(ctx, [{ source: merged, plan: root.selectionPlan }]);
-  return projectModelSelections(ctx, root.meta, merged, root.selectionPlan);
+  if (!("source" in fetched) || !fetched.source) return null;
+  return projectModelSelections(ctx, root.meta, fetched.source, root.selectionPlan);
 }
 
 function buildRootResultSql(
@@ -1417,6 +1449,45 @@ function buildRootResultSql(
   };
 }
 
+function buildRecursiveRootFetchSql(
+  root: Extract<RootPlan, { kind: "list" | "singleton" }>,
+  variables: Record<string, unknown>,
+): { readonly sql: string; readonly params: readonly unknown[] } {
+  const filter = buildFilterSql(root.filter, variables);
+
+  if (root.kind === "list") {
+    const orderBy = resolveStringListArg(root.orderBy, variables);
+    const compiledOrderBy = compileOrderBy(
+      orderBy ?? (typeof root.meta.model.ordering === "string" ? [root.meta.model.ordering] : undefined),
+      buildFilterOpts(root.meta),
+    );
+    let innerSql =
+      `SELECT json_object('id', row_data.id, '_published_snapshot', row_data."_published_snapshot") AS item_json ` +
+      `FROM "${root.meta.tableName}" row_data WHERE row_data."_status" IN ('published', 'updated')${filter.sql}`;
+    if (compiledOrderBy) {
+      innerSql += ` ORDER BY ${compiledOrderBy}`;
+    }
+    const params: unknown[] = [...filter.params, Math.min(resolveIntArg(root.first, variables) ?? 20, 500)];
+    innerSql += " LIMIT ?";
+    const skip = resolveIntArg(root.skip, variables);
+    if (skip && skip > 0) {
+      innerSql += " OFFSET ?";
+      params.push(skip);
+    }
+    return {
+      sql: `(SELECT COALESCE(json_group_array(json(item_json)), '[]') FROM (${innerSql}) fetched_rows)`,
+      params,
+    };
+  }
+
+  return {
+    sql:
+      `(SELECT json_object('id', row_data.id, '_published_snapshot', row_data."_published_snapshot") ` +
+      `FROM "${root.meta.tableName}" row_data WHERE row_data."_status" IN ('published', 'updated')${filter.sql} LIMIT 1)`,
+    params: filter.params,
+  };
+}
+
 async function executePlan(
   sqlLayer: Layer.Layer<SqlClient.SqlClient>,
   metadata: PublishedFastPathMetadata,
@@ -1445,38 +1516,83 @@ async function executePlan(
     }
   }
 
-  if (sqlRoots.length > 0) {
-    const jsonParts: string[] = [];
-    const params: unknown[] = [];
+  const jsonParts: string[] = [];
+  const params: unknown[] = [];
 
-    for (const root of sqlRoots) {
-      const resultSql = buildRootResultSql(root, variables);
-      if (!resultSql) continue;
-      jsonParts.push(`${sqlQuote(root.responseKey)}, json(COALESCE(${resultSql.sql}, 'null'))`);
-      params.push(...resultSql.params);
-    }
+  for (const root of sqlRoots) {
+    const resultSql = buildRootResultSql(root, variables);
+    if (!resultSql) continue;
+    jsonParts.push(`${sqlQuote(root.responseKey)}, json(COALESCE(${resultSql.sql}, 'null'))`);
+    params.push(...resultSql.params);
+  }
 
-    if (jsonParts.length > 0) {
-      const rows = await runSql<{ result: string }>(
-        sqlLayer,
-        `SELECT json_object(${jsonParts.join(", ")}) AS result`,
-        params,
-        {
-          metrics: ctx.metrics,
-          category: sqlRoots.every((root) => root.kind === "meta") ? "meta" : "root",
-        },
-      );
-      const sqlData = parseJsonValue(rows[0]?.result);
-      if (isRecord(sqlData)) {
-        for (const [key, value] of Object.entries(sqlData)) {
-          data[key] = value;
+  for (const root of recursiveRoots) {
+    const fetchSql = buildRecursiveRootFetchSql(root, variables);
+    jsonParts.push(`${sqlQuote(`__rows__${root.responseKey}`)}, json(COALESCE(${fetchSql.sql}, 'null'))`);
+    params.push(...fetchSql.params);
+  }
+
+  const fetchedRecursiveRoots: Array<{
+    readonly root: Extract<RootPlan, { kind: "list" | "singleton" }>;
+    readonly fetched:
+      | { readonly kind: "list"; readonly sources: readonly Record<string, unknown>[] }
+      | { readonly kind: "singleton"; readonly sources: readonly Record<string, unknown>[]; readonly source: Record<string, unknown> | null };
+  }> = [];
+
+  if (jsonParts.length > 0) {
+    const rows = await runSql<{ result: string }>(
+      sqlLayer,
+      `SELECT json_object(${jsonParts.join(", ")}) AS result`,
+      params,
+      {
+        metrics: ctx.metrics,
+        category: plan.roots.every((root) => root.kind === "meta") ? "meta" : "root",
+      },
+    );
+    const sqlData = parseJsonValue(rows[0]?.result);
+    if (isRecord(sqlData)) {
+      for (const root of sqlRoots) {
+        if (Object.prototype.hasOwnProperty.call(sqlData, root.responseKey)) {
+          data[root.responseKey] = Reflect.get(sqlData, root.responseKey);
+        }
+      }
+      for (const root of recursiveRoots) {
+        const rawPayload = Reflect.get(sqlData, `__rows__${root.responseKey}`);
+        if (root.kind === "list") {
+          const rowsPayload = Array.isArray(rawPayload)
+            ? rawPayload.filter((entry): entry is Record<string, unknown> => isRecord(entry))
+            : [];
+          const sources = rowsPayload.map((row) => decodeSnapshot(row, false));
+          fetchedRecursiveRoots.push({
+            root,
+            fetched: { kind: "list", sources },
+          });
+        } else {
+          const source = isRecord(rawPayload) ? decodeSnapshot(rawPayload, false) : null;
+          fetchedRecursiveRoots.push({
+            root,
+            fetched: {
+              kind: "singleton",
+              sources: source ? [source] : [],
+              source,
+            },
+          });
         }
       }
     }
   }
 
-  for (const root of recursiveRoots) {
-    data[root.responseKey] = await executeContentRoot(ctx, root, variables);
+  if (fetchedRecursiveRoots.length > 0) {
+    await preloadDependencies(
+      ctx,
+      fetchedRecursiveRoots.flatMap(({ root, fetched }) =>
+        fetched.sources.map((source) => ({ source, plan: root.selectionPlan })),
+      ),
+    );
+  }
+
+  for (const entry of fetchedRecursiveRoots) {
+    data[entry.root.responseKey] = await projectFetchedContentRoot(ctx, entry.root, entry.fetched);
   }
 
   return { response: { data }, metrics: ctx.metrics };

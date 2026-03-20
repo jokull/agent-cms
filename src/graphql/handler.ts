@@ -1,6 +1,17 @@
 import { createYoga, type YogaSchemaDefinition } from "graphql-yoga";
 import { Effect, Layer, Logger } from "effect";
-import { type GraphQLSchema, parse, execute as gqlExecute, validate } from "graphql";
+import {
+  Kind,
+  type DocumentNode,
+  type FragmentDefinitionNode,
+  type GraphQLSchema,
+  type OperationDefinitionNode,
+  parse,
+  print,
+  execute as gqlExecute,
+  validate,
+  visit,
+} from "graphql";
 import { SqlClient } from "@effect/sql";
 import { buildGraphQLSchema } from "./schema-builder.js";
 import { enforceQueryLimits } from "./query-limits.js";
@@ -48,6 +59,99 @@ function inferOperationName(query: string | null | undefined): string | null {
   if (!query) return null;
   const match = query.match(/\b(query|mutation|subscription)\s+([A-Za-z_][A-Za-z0-9_]*)/);
   return match?.[2] ?? null;
+}
+
+function buildFragments(document: DocumentNode) {
+  const fragments = new Map<string, FragmentDefinitionNode>();
+  for (const definition of document.definitions) {
+    if (definition.kind === Kind.FRAGMENT_DEFINITION) {
+      fragments.set(definition.name.value, definition);
+    }
+  }
+  return fragments;
+}
+
+function getOperation(document: DocumentNode, operationName?: string | null): OperationDefinitionNode | null {
+  const operations = document.definitions.filter((definition): definition is OperationDefinitionNode => definition.kind === Kind.OPERATION_DEFINITION);
+  if (operations.length === 0) return null;
+  if (!operationName) return operations.length === 1 ? operations[0] : null;
+  return operations.find((operation) => operation.name?.value === operationName) ?? null;
+}
+
+function collectReferencedFragmentNames(
+  selectionSet: OperationDefinitionNode["selectionSet"],
+  fragments: Map<string, FragmentDefinitionNode>,
+  result: Set<string>,
+) {
+  for (const selection of selectionSet.selections) {
+    if (selection.kind === Kind.FIELD && selection.selectionSet) {
+      collectReferencedFragmentNames(selection.selectionSet, fragments, result);
+      continue;
+    }
+    if (selection.kind === Kind.INLINE_FRAGMENT) {
+      collectReferencedFragmentNames(selection.selectionSet, fragments, result);
+      continue;
+    }
+    if (selection.kind === Kind.FRAGMENT_SPREAD) {
+      const name = selection.name.value;
+      if (result.has(name)) continue;
+      result.add(name);
+      const fragment = fragments.get(name);
+      if (fragment) {
+        collectReferencedFragmentNames(fragment.selectionSet, fragments, result);
+      }
+    }
+  }
+}
+
+function buildSubsetDocument(
+  document: DocumentNode,
+  operation: OperationDefinitionNode,
+  rootSelections: OperationDefinitionNode["selectionSet"]["selections"],
+): DocumentNode {
+  const fragments = buildFragments(document);
+  const includedFragments = new Set<string>();
+  collectReferencedFragmentNames({ kind: Kind.SELECTION_SET, selections: rootSelections }, fragments, includedFragments);
+
+  const subsetOperation: OperationDefinitionNode = {
+    ...operation,
+    selectionSet: {
+      kind: Kind.SELECTION_SET,
+      selections: rootSelections,
+    },
+  };
+
+  const subsetDocument: DocumentNode = {
+    kind: Kind.DOCUMENT,
+    definitions: [
+      subsetOperation,
+      ...[...includedFragments].map((name) => fragments.get(name)).filter((value): value is FragmentDefinitionNode => value !== undefined),
+    ],
+  };
+
+  const usedVariables = new Set<string>();
+  visit(subsetDocument, {
+    Variable(node) {
+      usedVariables.add(node.name.value);
+    },
+  });
+
+  const finalizedOperation: OperationDefinitionNode = {
+    ...subsetOperation,
+    variableDefinitions: operation.variableDefinitions?.filter((definition) => usedVariables.has(definition.variable.name.value)),
+  };
+
+  return {
+    ...subsetDocument,
+    definitions: [
+      finalizedOperation,
+      ...subsetDocument.definitions.slice(1),
+    ],
+  };
+}
+
+function getRootResponseKey(selection: OperationDefinitionNode["selectionSet"]["selections"][number]) {
+  return selection.kind === Kind.FIELD ? (selection.alias?.value ?? selection.name.value) : null;
 }
 
 function formatFastPathSqlBreakdown(
@@ -167,6 +271,150 @@ export function createGraphQLHandler(
     );
   }
 
+  async function executeDocument(
+    document: DocumentNode,
+    variables?: Record<string, unknown>,
+    context?: { includeDrafts?: boolean; excludeInvalid?: boolean },
+  ): Promise<{ data: unknown; errors?: ReadonlyArray<{ message: string }> }> {
+    const schema = await getSchema();
+    const validationErrors = validate(schema, document);
+    if (validationErrors.length > 0) {
+      return { data: null, errors: validationErrors.map((error) => ({ message: error.message })) };
+    }
+    const result = await gqlExecute({
+      schema,
+      document,
+      variableValues: variables,
+      contextValue: {
+        includeDrafts: context?.includeDrafts ?? false,
+        excludeInvalid: context?.excludeInvalid ?? false,
+      },
+    });
+    return result as { data: unknown; errors?: ReadonlyArray<{ message: string }> };
+  }
+
+  async function executeWithRootFallback(
+    query: string,
+    variables?: Record<string, unknown>,
+    context?: { includeDrafts?: boolean; excludeInvalid?: boolean },
+  ): Promise<{ data: unknown; errors?: ReadonlyArray<{ message: string }>; _trace?: Record<string, unknown> }> {
+    const directFastPath = await publishedFastPath.tryExecute({
+      query,
+      variables,
+      operationName: null,
+    }, {
+      includeDrafts: context?.includeDrafts ?? false,
+      excludeInvalid: context?.excludeInvalid ?? false,
+    });
+    if (directFastPath) {
+      return {
+        ...directFastPath.response,
+        _trace: {
+          path: "fast-path",
+          rootPaths: Object.fromEntries(Object.keys(directFastPath.response.data).map((key) => [key, "fast-path"])),
+          fastPathSql: directFastPath.metrics,
+        },
+      };
+    }
+
+    const document = parse(query);
+    const operation = getOperation(document, null);
+    if (!operation || operation.operation !== "query") {
+      const yogaResult = await executeDocument(document, variables, context);
+      return { ...yogaResult, _trace: { path: "yoga" } };
+    }
+
+    const rootSelections = operation.selectionSet.selections.filter((selection) => selection.kind === Kind.FIELD);
+    if (rootSelections.length !== operation.selectionSet.selections.length) {
+      const yogaResult = await executeDocument(document, variables, context);
+      return { ...yogaResult, _trace: { path: "yoga" } };
+    }
+
+    const supportedSelections: typeof rootSelections = [];
+    const unsupportedSelections: typeof rootSelections = [];
+    const rootPaths: Record<string, string> = {};
+
+    for (const selection of rootSelections) {
+      const subsetDocument = buildSubsetDocument(document, operation, [selection]);
+      const subsetResult = await publishedFastPath.tryExecute({
+        query: print(subsetDocument),
+        variables,
+        operationName: operation.name?.value ?? null,
+      }, {
+        includeDrafts: context?.includeDrafts ?? false,
+        excludeInvalid: context?.excludeInvalid ?? false,
+      });
+      const responseKey = getRootResponseKey(selection) ?? "unknown";
+      if (subsetResult) {
+        supportedSelections.push(selection);
+        rootPaths[responseKey] = "fast-path";
+      } else {
+        unsupportedSelections.push(selection);
+        rootPaths[responseKey] = "yoga";
+      }
+    }
+
+    if (supportedSelections.length === 0) {
+      const yogaResult = await executeDocument(document, variables, context);
+      return { ...yogaResult, _trace: { path: "yoga", rootPaths } };
+    }
+
+    const mergedData: Record<string, unknown> = {};
+    const mergedErrors: Array<{ message: string }> = [];
+    let fastPathMetrics: Record<string, unknown> | undefined;
+
+    const supportedDocument = buildSubsetDocument(document, operation, supportedSelections);
+    const supportedCombinedResult = await publishedFastPath.tryExecute({
+      query: print(supportedDocument),
+      variables,
+      operationName: operation.name?.value ?? null,
+    }, {
+      includeDrafts: context?.includeDrafts ?? false,
+      excludeInvalid: context?.excludeInvalid ?? false,
+    });
+
+    if (supportedCombinedResult) {
+      Object.assign(mergedData, supportedCombinedResult.response.data);
+      fastPathMetrics = supportedCombinedResult.metrics as unknown as Record<string, unknown>;
+    } else {
+      for (const selection of supportedSelections) {
+        const subsetDocument = buildSubsetDocument(document, operation, [selection]);
+        const subsetResult = await publishedFastPath.tryExecute({
+          query: print(subsetDocument),
+          variables,
+          operationName: operation.name?.value ?? null,
+        }, {
+          includeDrafts: context?.includeDrafts ?? false,
+          excludeInvalid: context?.excludeInvalid ?? false,
+        });
+        if (subsetResult) {
+          Object.assign(mergedData, subsetResult.response.data);
+        }
+      }
+    }
+
+    if (unsupportedSelections.length > 0) {
+      const unsupportedDocument = buildSubsetDocument(document, operation, unsupportedSelections);
+      const unsupportedResult = await executeDocument(unsupportedDocument, variables, context);
+      if (unsupportedResult.data && typeof unsupportedResult.data === "object" && unsupportedResult.data !== null) {
+        Object.assign(mergedData, unsupportedResult.data as Record<string, unknown>);
+      }
+      if (unsupportedResult.errors) {
+        mergedErrors.push(...unsupportedResult.errors);
+      }
+    }
+
+    return {
+      data: mergedData,
+      ...(mergedErrors.length > 0 ? { errors: mergedErrors } : {}),
+      _trace: {
+        path: unsupportedSelections.length > 0 ? "partial" : "fast-path",
+        rootPaths,
+        fastPathSql: fastPathMetrics,
+      },
+    };
+  }
+
   const handle = async (request: Request): Promise<Response> => {
     const debugSql = request.headers.get("X-Debug-Sql") === "true";
     const traceEnabled = request.headers.get("X-Bench-Trace") === "1" || debugSql;
@@ -281,34 +529,8 @@ export function createGraphQLHandler(
     query: string,
     variables?: Record<string, unknown>,
     context?: { includeDrafts?: boolean; excludeInvalid?: boolean }
-  ): Promise<{ data: unknown; errors?: ReadonlyArray<{ message: string }> }> {
-    const fastPathResult = await publishedFastPath.tryExecute({
-      query,
-      variables,
-      operationName: null,
-    }, {
-      includeDrafts: context?.includeDrafts ?? false,
-      excludeInvalid: context?.excludeInvalid ?? false,
-    });
-    if (fastPathResult) {
-      return fastPathResult.response;
-    }
-    const schema = await getSchema();
-    const document = parse(query);
-    const validationErrors = validate(schema, document);
-    if (validationErrors.length > 0) {
-      return { data: null, errors: validationErrors.map((e) => ({ message: e.message })) };
-    }
-    const result = await gqlExecute({
-      schema,
-      document,
-      variableValues: variables,
-      contextValue: {
-        includeDrafts: context?.includeDrafts ?? false,
-        excludeInvalid: context?.excludeInvalid ?? false,
-      },
-    });
-    return result as { data: unknown; errors?: ReadonlyArray<{ message: string }> };
+  ): Promise<{ data: unknown; errors?: ReadonlyArray<{ message: string }>; _trace?: Record<string, unknown> }> {
+    return executeWithRootFallback(query, variables, context);
   }
 
   return { handle, getSchema, invalidateSchema, execute };
