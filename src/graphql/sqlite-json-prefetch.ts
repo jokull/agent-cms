@@ -88,6 +88,14 @@ export function collectImmediateSelectionMap(info: GraphQLResolveInfo) {
   return result;
 }
 
+export function collectSelectedFieldNames(info: GraphQLResolveInfo) {
+  const result = new Set<string>();
+  for (const fieldNode of info.fieldNodes) {
+    collectSelectionSetFields(fieldNode.selectionSet, info, result);
+  }
+  return result;
+}
+
 function isSimplePrefetchableField(field: ParsedFieldRow) {
   return ![
     "link",

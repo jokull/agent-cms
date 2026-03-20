@@ -9,7 +9,7 @@ import { computeIsValid, findUniqueConstraintViolations, getBlockWhitelist } fro
 import type { GraphQLResolveInfo } from "graphql";
 import type { SchemaBuilderContext, ModelQueryMeta, DynamicRow, GqlContext } from "./gql-types.js";
 import { toCamelCase, pluralize, getRegistryDef, deserializeRecord, decodeSnapshot } from "./gql-utils.js";
-import { buildLinkPrefetchSpecs, collectImmediateSelectionMap } from "./sqlite-json-prefetch.js";
+import { buildLinkPrefetchSpecs, collectSelectedFieldNames } from "./sqlite-json-prefetch.js";
 import { materializeStructuredTextValues } from "../services/structured-text-service.js";
 import { decodeJsonIfString } from "../json.js";
 
@@ -188,7 +188,7 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
     ) {
       if (!includeDrafts || records.length === 0) return;
 
-      const selectionMap = collectImmediateSelectionMap(info);
+      const selectedFieldNames = collectSelectedFieldNames(info);
       const requests: Array<{
         requestKey: string;
         allowedBlockApiKeys?: readonly string[];
@@ -209,7 +209,7 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
 
       for (const field of fields) {
         if (field.field_type !== "structured_text") continue;
-        if (!selectionMap.has(toCamelCase(field.api_key))) continue;
+        if (!selectedFieldNames.has(toCamelCase(field.api_key))) continue;
 
         for (const record of records) {
           const selected = field.localized
