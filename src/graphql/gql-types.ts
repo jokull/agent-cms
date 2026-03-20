@@ -94,7 +94,7 @@ export interface ModelQueryMeta {
 /** The shared context passed between schema builder sub-modules */
 export interface SchemaBuilderContext {
   runSql: <A>(effect: Effect.Effect<A, unknown, SqlClient.SqlClient>) => Promise<A>;
-  assetUrl: (id: string, filename: string) => string;
+  assetUrl: (r2Key: string) => string;
   cfImageUrl: (assetPath: string, params: Record<string, string | number>) => string;
   models: readonly ModelRow[];
   blockModels: readonly ModelRow[];

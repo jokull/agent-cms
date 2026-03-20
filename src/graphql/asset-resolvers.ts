@@ -289,7 +289,13 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
       const outH = requestedH ? Math.min(requestedH, origH) : Math.round(outW / aspect);
       const outAspect = outW / outH;
 
-      const baseAssetPath = `/assets/${asset.id}/${asset.filename}`;
+      // Extract path portion from asset URL for image transform routing
+      let baseAssetPath: string;
+      try {
+        baseAssetPath = new URL(asset.url).pathname;
+      } catch {
+        baseAssetPath = asset.url.startsWith("/") ? asset.url : `/${asset.url}`;
+      }
 
       // Build transform URL using Cloudflare Image Resizing (production) or query params (dev)
       function transformUrl(targetWidth: number, targetFormat?: string): string {

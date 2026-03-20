@@ -177,7 +177,7 @@ export function buildContentModelResolvers(
                 return rows.length > 0 ? rows[0] : null;
               })
             );
-            if (asset) imageUrl = assetUrl(asset.id, asset.filename);
+            if (asset) imageUrl = assetUrl(asset.r2_key);
           }
         }
       }
@@ -204,7 +204,7 @@ export function buildContentModelResolvers(
             return rows.length > 0 ? rows[0] : null;
           })
         );
-        if (asset) imageUrl = assetUrl(asset.id, asset.filename);
+        if (asset) imageUrl = assetUrl(asset.r2_key);
       }
 
       // Generate tags

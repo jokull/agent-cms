@@ -39,7 +39,7 @@ export function parseMediaGalleryReferences(value: unknown): MediaFieldReference
 export function mergeAssetWithMediaReference(
   asset: AssetRow,
   reference: MediaFieldReference | null,
-  assetUrl: (id: string, filename: string) => string,
+  assetUrl: (r2Key: string) => string,
 ): AssetObject {
   const defaultCustomData = asset.custom_data ? decodeJsonStringOr(asset.custom_data, null) : null;
   const defaultFocalPoint = asset.focal_point ? decodeJsonStringOr(asset.focal_point, null) : null;
@@ -60,7 +60,7 @@ export function mergeAssetWithMediaReference(
     customData: isJsonRecord(reference?.customData)
       ? reference.customData
       : (isJsonRecord(defaultCustomData) ? defaultCustomData : null),
-    url: assetUrl(asset.id, asset.filename),
+    url: assetUrl(asset.r2_key),
     _createdAt: asset.created_at,
     _updatedAt: asset.updated_at,
     _createdBy: asset.created_by,
