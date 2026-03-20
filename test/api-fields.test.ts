@@ -75,6 +75,26 @@ describe("Fields REST API", () => {
       const body = await res.json();
       expect(body.error).toContain("number_range");
     });
+
+    it("rejects unknown validator keys", async () => {
+      const res = await jsonRequest(handler, "POST", `/api/models/${modelId}/fields`, {
+        label: "Title", apiKey: "title", fieldType: "string",
+        validators: { totally_made_up: true },
+      });
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toContain("Unknown validator key");
+    });
+
+    it("rejects validator keys on the wrong field type", async () => {
+      const res = await jsonRequest(handler, "POST", `/api/models/${modelId}/fields`, {
+        label: "Title", apiKey: "title", fieldType: "string",
+        validators: { item_item_type: ["author"] },
+      });
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toContain("item_item_type");
+    });
   });
 
   describe("GET /api/models/:modelId/fields", () => {

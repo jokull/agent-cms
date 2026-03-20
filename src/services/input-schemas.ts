@@ -4,6 +4,45 @@
  */
 import { Schema } from "effect";
 
+const Int = Schema.Number.pipe(Schema.int());
+
+function finiteNumber(message: string) {
+  return Schema.Number.pipe(
+    Schema.filter((value) => Number.isFinite(value), { message: () => message }),
+  );
+}
+
+function positiveInt(label: string) {
+  return Int.pipe(
+    Schema.filter((value) => Number.isFinite(value) && value > 0, {
+      message: () => `${label} must be a positive integer`,
+    }),
+  );
+}
+
+function nonNegativeFiniteNumber(label: string) {
+  return finiteNumber(`${label} must be a finite number`).pipe(
+    Schema.filter((value) => value >= 0, { message: () => `${label} must be >= 0` }),
+  );
+}
+
+const UnitIntervalNumber = finiteNumber("Expected a finite number").pipe(
+  Schema.filter((value) => value >= 0 && value <= 1, {
+    message: () => "Expected a number between 0 and 1",
+  }),
+);
+
+const HttpUrlString = Schema.String.pipe(
+  Schema.filter((value) => {
+    try {
+      const url = new URL(value);
+      return url.protocol === "http:" || url.protocol === "https:";
+    } catch {
+      return false;
+    }
+  }, { message: () => "Expected a valid http:// or https:// URL" }),
+);
+
 export const CreateModelInput = Schema.Struct({
   name: Schema.NonEmptyString,
   apiKey: Schema.NonEmptyString,
@@ -21,7 +60,9 @@ export const CreateFieldInput = Schema.Struct({
   label: Schema.NonEmptyString,
   apiKey: Schema.NonEmptyString,
   fieldType: Schema.NonEmptyString,
-  position: Schema.optional(Schema.Number),
+  position: Schema.optional(Int.pipe(
+    Schema.filter((value) => value >= 0, { message: () => "position must be >= 0" }),
+  )),
   localized: Schema.optionalWith(Schema.Boolean, { default: () => false }),
   validators: Schema.optionalWith(
     Schema.Record({ key: Schema.String, value: Schema.Unknown }),
@@ -73,21 +114,28 @@ export const CreateAssetInput = Schema.Struct({
   id: Schema.optional(Schema.String),
   filename: Schema.NonEmptyString,
   mimeType: Schema.NonEmptyString,
-  size: Schema.optionalWith(Schema.Number, { default: () => 0 }),
-  width: Schema.optional(Schema.Number),
-  height: Schema.optional(Schema.Number),
+  size: Schema.optionalWith(nonNegativeFiniteNumber("size"), { default: () => 0 }),
+  width: Schema.optional(nonNegativeFiniteNumber("width")),
+  height: Schema.optional(nonNegativeFiniteNumber("height")),
   alt: Schema.optional(Schema.String),
   title: Schema.optional(Schema.String),
   r2Key: Schema.optional(Schema.String),
   blurhash: Schema.optional(Schema.String),
-  colors: Schema.optional(Schema.Array(Schema.String)),
-  focalPoint: Schema.optional(Schema.Struct({ x: Schema.Number, y: Schema.Number })),
-  tags: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
+  colors: Schema.optional(Schema.Array(Schema.String).pipe(
+    Schema.filter((value) => value.length <= 16, { message: () => "colors must contain at most 16 entries" }),
+  )),
+  focalPoint: Schema.optional(Schema.Struct({ x: UnitIntervalNumber, y: UnitIntervalNumber })),
+  tags: Schema.optionalWith(
+    Schema.Array(Schema.String).pipe(
+      Schema.filter((value) => value.length <= 50, { message: () => "tags must contain at most 50 entries" }),
+    ),
+    { default: () => [] },
+  ),
 });
 export type CreateAssetInput = typeof CreateAssetInput.Type;
 
 export const ImportAssetFromUrlInput = Schema.Struct({
-  url: Schema.NonEmptyString,
+  url: HttpUrlString,
   filename: Schema.optional(Schema.String),
   mimeType: Schema.optional(Schema.String),
   alt: Schema.optional(Schema.String),
@@ -98,8 +146,10 @@ export type ImportAssetFromUrlInput = typeof ImportAssetFromUrlInput.Type;
 
 export const SearchAssetsInput = Schema.Struct({
   query: Schema.optional(Schema.String),
-  limit: Schema.optionalWith(Schema.Number, { default: () => 24 }),
-  offset: Schema.optionalWith(Schema.Number, { default: () => 0 }),
+  limit: Schema.optionalWith(positiveInt("limit"), { default: () => 24 }),
+  offset: Schema.optionalWith(Int.pipe(
+    Schema.filter((value) => value >= 0, { message: () => "offset must be >= 0" }),
+  ), { default: () => 0 }),
 });
 export type SearchAssetsInput = typeof SearchAssetsInput.Type;
 
@@ -111,21 +161,29 @@ export type UpdateAssetMetadataInput = typeof UpdateAssetMetadataInput.Type;
 
 export const ReorderInput = Schema.Struct({
   modelApiKey: Schema.NonEmptyString,
-  recordIds: Schema.Array(Schema.String),
+  recordIds: Schema.Array(Schema.String).pipe(
+    Schema.filter((value) => value.length <= 1000, { message: () => "recordIds must contain at most 1000 entries" }),
+  ),
 });
 export type ReorderInput = typeof ReorderInput.Type;
 
 export const ScheduleRecordInput = Schema.Struct({
   modelApiKey: Schema.NonEmptyString,
-  at: Schema.NullOr(Schema.String),
+  at: Schema.NullOr(Schema.String.pipe(
+    Schema.filter((value) => !Number.isNaN(Date.parse(value)), {
+      message: () => "at must be a valid ISO datetime string or null",
+    }),
+  )),
 });
 export type ScheduleRecordInput = typeof ScheduleRecordInput.Type;
 
 export const SearchInput = Schema.Struct({
   query: Schema.String,
   modelApiKey: Schema.optional(Schema.String),
-  first: Schema.optional(Schema.Number),
-  skip: Schema.optional(Schema.Number),
+  first: Schema.optional(positiveInt("first")),
+  skip: Schema.optional(Int.pipe(
+    Schema.filter((value) => value >= 0, { message: () => "skip must be >= 0" }),
+  )),
   mode: Schema.optional(Schema.Literal("keyword", "semantic", "hybrid")),
 });
 export type SearchInput = typeof SearchInput.Type;
@@ -139,7 +197,9 @@ export type ReindexSearchInput = typeof ReindexSearchInput.Type;
 
 export const CreateLocaleInput = Schema.Struct({
   code: Schema.NonEmptyString,
-  position: Schema.optional(Schema.Number),
+  position: Schema.optional(Int.pipe(
+    Schema.filter((value) => value >= 0, { message: () => "position must be >= 0" }),
+  )),
   fallbackLocaleId: Schema.optional(Schema.String),
 });
 export type CreateLocaleInput = typeof CreateLocaleInput.Type;
@@ -159,7 +219,9 @@ export const UpdateFieldInput = Schema.Struct({
   label: Schema.optional(Schema.NonEmptyString),
   apiKey: Schema.optional(Schema.NonEmptyString),
   fieldType: Schema.optional(Schema.NonEmptyString),
-  position: Schema.optional(Schema.Number),
+  position: Schema.optional(Int.pipe(
+    Schema.filter((value) => value >= 0, { message: () => "position must be >= 0" }),
+  )),
   localized: Schema.optional(Schema.Boolean),
   validators: Schema.optional(
     Schema.Record({ key: Schema.String, value: Schema.Unknown })
@@ -229,6 +291,11 @@ export type CreateUploadUrlInput = typeof CreateUploadUrlInput.Type;
 
 export const CreateEditorTokenInput = Schema.Struct({
   name: Schema.NonEmptyString,
-  expiresIn: Schema.optional(Schema.Number.pipe(Schema.int(), Schema.positive())),
+  expiresIn: Schema.optional(Int.pipe(
+    Schema.positive(),
+    Schema.filter((value) => value <= 60 * 60 * 24 * 365, {
+      message: () => "expiresIn must be <= 31536000 seconds",
+    }),
+  )),
 });
 export type CreateEditorTokenInput = typeof CreateEditorTokenInput.Type;

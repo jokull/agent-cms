@@ -167,6 +167,158 @@ describe("MCP HTTP transport", () => {
     await transport.close();
   });
 
+  it("rejects importing an asset from localhost-style URLs", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "agent-cms-mcp-editor-import-localhost-"));
+    const dbPath = join(tmpDir, "test.db");
+    const sqlLayer = SqliteClient.layer({ filename: dbPath, disableWAL: true });
+
+    Effect.runSync(runMigrations().pipe(Effect.provide(sqlLayer)));
+
+    const editorToken = await Effect.runPromise(
+      TokenService.createEditorToken({ name: "editor" }).pipe(Effect.provide(sqlLayer))
+    );
+
+    const fetchSpy = vi.fn(async () => new Response("should not fetch", { status: 200 }));
+    vi.stubGlobal("fetch", fetchSpy);
+    const fakeBucket = { put: vi.fn(async () => undefined) } as unknown as R2Bucket;
+    const handler = createWebHandler(sqlLayer, { writeKey: "write-key", r2Bucket: fakeBucket }).fetch;
+
+    const transport = new StreamableHTTPClientTransport(new URL("http://localhost/mcp/editor"), {
+      requestInit: { headers: { Authorization: `Bearer ${editorToken.token}` } },
+      fetch: (input, init) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        return handler(new Request(url, init));
+      },
+    });
+    const client = new Client({ name: "test-editor-import-localhost-client", version: "1.0.0" });
+
+    await client.connect(transport);
+
+    const result = await client.callTool({
+      name: "import_asset_from_url",
+      arguments: {
+        url: "http://localhost/pigeon.png",
+      },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toMatchObject({ message: expect.stringMatching(/host is not allowed/i) });
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    await transport.close();
+  });
+
+  it("rejects redirecting asset imports", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "agent-cms-mcp-editor-import-redirect-"));
+    const dbPath = join(tmpDir, "test.db");
+    const sqlLayer = SqliteClient.layer({ filename: dbPath, disableWAL: true });
+
+    Effect.runSync(runMigrations().pipe(Effect.provide(sqlLayer)));
+
+    const editorToken = await Effect.runPromise(
+      TokenService.createEditorToken({ name: "editor" }).pipe(Effect.provide(sqlLayer))
+    );
+
+    const fetchSpy = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      expect(init?.redirect).toBe("manual");
+      return new Response(null, {
+        status: 302,
+        headers: { Location: "https://example.com/final.png" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    const fakeBucket = { put: vi.fn(async () => undefined) } as unknown as R2Bucket;
+    const handler = createWebHandler(sqlLayer, { writeKey: "write-key", r2Bucket: fakeBucket }).fetch;
+
+    const transport = new StreamableHTTPClientTransport(new URL("http://localhost/mcp/editor"), {
+      requestInit: { headers: { Authorization: `Bearer ${editorToken.token}` } },
+      fetch: (input, init) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        return handler(new Request(url, init));
+      },
+    });
+    const client = new Client({ name: "test-editor-import-redirect-client", version: "1.0.0" });
+
+    await client.connect(transport);
+
+    const result = await client.callTool({
+      name: "import_asset_from_url",
+      arguments: {
+        url: "https://example.com/redirect.png",
+      },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toMatchObject({ message: expect.stringMatching(/redirects are not allowed/i) });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    await transport.close();
+  });
+
+  it("rejects oversized asset imports before storing them", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "agent-cms-mcp-editor-import-oversized-"));
+    const dbPath = join(tmpDir, "test.db");
+    const sqlLayer = SqliteClient.layer({ filename: dbPath, disableWAL: true });
+
+    Effect.runSync(runMigrations().pipe(Effect.provide(sqlLayer)));
+
+    const editorToken = await Effect.runPromise(
+      TokenService.createEditorToken({ name: "editor" }).pipe(Effect.provide(sqlLayer))
+    );
+
+    const put = vi.fn(async () => undefined);
+    const fakeBucket = { put } as unknown as R2Bucket;
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(new Uint8Array([1, 2, 3]), {
+        status: 200,
+        headers: {
+          "Content-Type": "image/png",
+          "Content-Length": String(26 * 1024 * 1024),
+        },
+      })));
+
+    const handler = createWebHandler(sqlLayer, { writeKey: "write-key", r2Bucket: fakeBucket }).fetch;
+
+    const transport = new StreamableHTTPClientTransport(new URL("http://localhost/mcp/editor"), {
+      requestInit: { headers: { Authorization: `Bearer ${editorToken.token}` } },
+      fetch: (input, init) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        return handler(new Request(url, init));
+      },
+    });
+    const client = new Client({ name: "test-editor-import-oversized-client", version: "1.0.0" });
+
+    await client.connect(transport);
+
+    const result = await client.callTool({
+      name: "import_asset_from_url",
+      arguments: {
+        url: "https://example.com/huge.png",
+      },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toMatchObject({ message: expect.stringMatching(/too large to import/i) });
+
+    expect(put).not.toHaveBeenCalled();
+    await transport.close();
+  });
+
   it("threads editor attribution through MCP record mutations", async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "agent-cms-mcp-editor-attribution-"));
     const dbPath = join(tmpDir, "test.db");

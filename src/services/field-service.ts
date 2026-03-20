@@ -11,15 +11,59 @@ import { deleteBlockSubtrees } from "./structured-text-service.js";
 import { isUnique, supportsUniqueValidation } from "../db/validators.js";
 import { decodeJsonRecordStringOr, encodeJson } from "../json.js";
 
+const ALLOWED_FIELD_VALIDATOR_KEYS = new Set([
+  "required",
+  "unique",
+  "enum",
+  "length",
+  "number_range",
+  "format",
+  "date_range",
+  "slug_source",
+  "item_item_type",
+  "items_item_type",
+  "structured_text_blocks",
+  "blocks_only",
+  "searchable",
+]);
+
 function validateFieldValidators(
   fieldType: string,
   apiKey: string,
   validators: Record<string, unknown>,
 ) {
   return Effect.gen(function* () {
+    const unknownKeys = Object.keys(validators).filter((key) => !ALLOWED_FIELD_VALIDATOR_KEYS.has(key));
+    if (unknownKeys.length > 0) {
+      return yield* new ValidationError({
+        message: `Unknown validator key(s): ${unknownKeys.join(", ")}`,
+        field: apiKey,
+      });
+    }
+
+    if (validators.required !== undefined && typeof validators.required !== "boolean") {
+      return yield* new ValidationError({
+        message: `required validator must be a boolean`,
+        field: apiKey,
+      });
+    }
+
     if (isUnique(validators) && !supportsUniqueValidation(fieldType)) {
       return yield* new ValidationError({
         message: `unique validator is not supported for field type '${fieldType}'`,
+        field: apiKey,
+      });
+    }
+    if (validators.unique !== undefined && typeof validators.unique !== "boolean") {
+      return yield* new ValidationError({
+        message: `unique validator must be a boolean`,
+        field: apiKey,
+      });
+    }
+
+    if (validators.searchable !== undefined && typeof validators.searchable !== "boolean") {
+      return yield* new ValidationError({
+        message: `searchable validator must be a boolean`,
         field: apiKey,
       });
     }
@@ -64,6 +108,86 @@ function validateFieldValidators(
       if (lengthConfig.max !== undefined && (typeof lengthConfig.max !== "number" || lengthConfig.max < 0)) {
         return yield* new ValidationError({
           message: `length.max must be a non-negative number`,
+          field: apiKey,
+        });
+      }
+    }
+
+    const slugSource = validators.slug_source;
+    if (slugSource !== undefined) {
+      if (fieldType !== "slug") {
+        return yield* new ValidationError({
+          message: `slug_source validator is only supported for slug fields`,
+          field: apiKey,
+        });
+      }
+      if (typeof slugSource !== "string" || slugSource.length === 0) {
+        return yield* new ValidationError({
+          message: `slug_source validator must be a non-empty string`,
+          field: apiKey,
+        });
+      }
+    }
+
+    const itemItemType = validators.item_item_type;
+    if (itemItemType !== undefined) {
+      if (fieldType !== "link") {
+        return yield* new ValidationError({
+          message: `item_item_type validator is only supported for link fields`,
+          field: apiKey,
+        });
+      }
+      if (!Array.isArray(itemItemType) || !itemItemType.every((value) => typeof value === "string")) {
+        return yield* new ValidationError({
+          message: `item_item_type validator must be an array of strings`,
+          field: apiKey,
+        });
+      }
+    }
+
+    const itemsItemType = validators.items_item_type;
+    if (itemsItemType !== undefined) {
+      if (fieldType !== "links") {
+        return yield* new ValidationError({
+          message: `items_item_type validator is only supported for links fields`,
+          field: apiKey,
+        });
+      }
+      if (!Array.isArray(itemsItemType) || !itemsItemType.every((value) => typeof value === "string")) {
+        return yield* new ValidationError({
+          message: `items_item_type validator must be an array of strings`,
+          field: apiKey,
+        });
+      }
+    }
+
+    const blocksOnly = validators.blocks_only;
+    if (blocksOnly !== undefined) {
+      if (fieldType !== "structured_text") {
+        return yield* new ValidationError({
+          message: `blocks_only validator is only supported for structured_text fields`,
+          field: apiKey,
+        });
+      }
+      if (typeof blocksOnly !== "boolean") {
+        return yield* new ValidationError({
+          message: `blocks_only validator must be a boolean`,
+          field: apiKey,
+        });
+      }
+    }
+
+    const structuredTextBlocks = validators.structured_text_blocks;
+    if (structuredTextBlocks !== undefined) {
+      if (fieldType !== "structured_text") {
+        return yield* new ValidationError({
+          message: `structured_text_blocks validator is only supported for structured_text fields`,
+          field: apiKey,
+        });
+      }
+      if (!Array.isArray(structuredTextBlocks) || !structuredTextBlocks.every((value) => typeof value === "string")) {
+        return yield* new ValidationError({
+          message: `structured_text_blocks validator must be an array of strings`,
           field: apiKey,
         });
       }

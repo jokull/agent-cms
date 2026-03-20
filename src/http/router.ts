@@ -21,6 +21,7 @@ import {
   CreateRecordInput, PatchRecordInput,
   PatchBlocksInput,
   CreateAssetInput,
+  SearchAssetsInput,
   UpdateAssetMetadataInput,
   CreateLocaleInput,
   BulkCreateRecordsInput,
@@ -391,10 +392,15 @@ const assetsRouter = HttpRouter.empty.pipe(
       const limit = url.searchParams.get("limit");
       const offset = url.searchParams.get("offset");
       if (q !== null || limit !== null || offset !== null) {
-        return yield* handle(AssetService.searchAssets({
+        const parsed = yield* decodeUnknownInput(SearchAssetsInput, {
           query: q ?? undefined,
-          limit: limit ? parseInt(limit, 10) : 24,
-          offset: offset ? parseInt(offset, 10) : 0,
+          limit: limit !== null ? Number(limit) : undefined,
+          offset: offset !== null ? Number(offset) : undefined,
+        }, "Invalid asset search input");
+        return yield* handle(AssetService.searchAssets({
+          query: parsed.query,
+          limit: Math.min(parsed.limit, 100),
+          offset: parsed.offset,
         }));
       }
       return yield* handle(AssetService.listAssets());

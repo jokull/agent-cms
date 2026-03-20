@@ -15,6 +15,114 @@ export class AssetImportContext extends Context.Tag("AssetImportContext")<
   }
 >() {}
 
+const MAX_REMOTE_ASSET_BYTES = 25 * 1024 * 1024;
+
+function normalizeHostname(hostname: string) {
+  return hostname.replace(/^\[|\]$/g, "").toLowerCase();
+}
+
+function isPrivateIpv4(hostname: string) {
+  if (!/^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname)) return false;
+  const octets = hostname.split(".").map(Number);
+  if (octets.some((octet) => Number.isNaN(octet) || octet < 0 || octet > 255)) return false;
+  return octets[0] === 10
+    || octets[0] === 127
+    || (octets[0] === 169 && octets[1] === 254)
+    || (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31)
+    || (octets[0] === 192 && octets[1] === 168);
+}
+
+function isPrivateIpv6(hostname: string) {
+  const normalized = normalizeHostname(hostname);
+  return normalized === "::1"
+    || normalized.startsWith("fc")
+    || normalized.startsWith("fd")
+    || normalized.startsWith("fe80:");
+}
+
+function isBlockedHostname(hostname: string) {
+  const normalized = normalizeHostname(hostname);
+  return normalized === "localhost"
+    || normalized.endsWith(".localhost")
+    || normalized.endsWith(".local")
+    || normalized.endsWith(".internal")
+    || isPrivateIpv4(normalized)
+    || isPrivateIpv6(normalized);
+}
+
+function validateRemoteAssetUrl(input: string) {
+  return Effect.try({
+    try: () => new URL(input),
+    catch: () => new ValidationError({ message: "Asset URL must be a valid http:// or https:// URL" }),
+  }).pipe(
+    Effect.flatMap((url) => {
+      if (url.protocol !== "http:" && url.protocol !== "https:") {
+        return new ValidationError({ message: "Asset URL must use http:// or https://" });
+      }
+      if (!url.hostname || isBlockedHostname(url.hostname)) {
+        return new ValidationError({ message: `Asset URL host is not allowed: ${url.hostname || "<empty>"}` });
+      }
+      if (url.username || url.password) {
+        return new ValidationError({ message: "Asset URL must not contain embedded credentials" });
+      }
+      return Effect.succeed(url);
+    }),
+  );
+}
+
+function parseContentLength(header: string | null) {
+  if (!header) return null;
+  const parsed = Number(header);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function readResponseBytes(response: Response, url: string) {
+  return Effect.gen(function* () {
+    const contentLength = parseContentLength(response.headers.get("content-length"));
+    if (contentLength !== null && contentLength > MAX_REMOTE_ASSET_BYTES) {
+      return yield* new ValidationError({
+        message: `Asset URL is too large to import (${contentLength} bytes > ${MAX_REMOTE_ASSET_BYTES} byte limit)`,
+      });
+    }
+
+    if (!response.body) {
+      return new Uint8Array();
+    }
+
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+
+    let done = false;
+    while (!done) {
+      const chunk = yield* Effect.tryPromise({
+        try: () => reader.read(),
+        catch: () => new ValidationError({ message: `Failed to read asset bytes from: ${url}` }),
+      });
+      if (chunk.done) {
+        done = true;
+        continue;
+      }
+      const value = chunk.value;
+      total += value.byteLength;
+      if (total > MAX_REMOTE_ASSET_BYTES) {
+        return yield* new ValidationError({
+          message: `Asset URL is too large to import (${total} bytes > ${MAX_REMOTE_ASSET_BYTES} byte limit)`,
+        });
+      }
+      chunks.push(value);
+    }
+
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return bytes;
+  });
+}
+
 function inferFilename(input: { url: string; filename?: string; mimeType?: string }) {
   if (input.filename && input.filename.length > 0) return input.filename;
   const pathname = new URL(input.url).pathname;
@@ -205,12 +313,18 @@ export function importAssetFromUrl(input: ImportAssetFromUrlInput, actor?: Reque
       return yield* new ValidationError({ message: "Asset import requires an R2 bucket binding" });
     }
 
+    const url = yield* validateRemoteAssetUrl(input.url);
     const filename = inferFilename(input);
     const id = ulid();
     const response = yield* Effect.tryPromise({
-      try: () => fetch(input.url),
+      try: () => fetch(url, { redirect: "manual" }),
       catch: () => new ValidationError({ message: `Failed to fetch asset URL: ${input.url}` }),
     });
+    if (response.status >= 300 && response.status < 400) {
+      return yield* new ValidationError({
+        message: `Redirects are not allowed when importing assets from URL: ${input.url}`,
+      });
+    }
     if (!response.ok) {
       return yield* new ValidationError({
         message: `Failed to fetch asset URL: ${input.url} (${response.status})`,
@@ -218,10 +332,7 @@ export function importAssetFromUrl(input: ImportAssetFromUrlInput, actor?: Reque
     }
 
     const mimeType = input.mimeType ?? response.headers.get("content-type")?.split(";")[0] ?? "application/octet-stream";
-    const bytes = yield* Effect.tryPromise({
-      try: () => response.arrayBuffer(),
-      catch: () => new ValidationError({ message: `Failed to read asset bytes from: ${input.url}` }),
-    });
+    const bytes = yield* readResponseBytes(response, input.url);
     const r2Key = `uploads/${id}/${filename}`;
 
     yield* Effect.tryPromise({

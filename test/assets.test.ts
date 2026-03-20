@@ -75,6 +75,23 @@ describe("Asset REST API", () => {
       const assets = await res.json();
       expect(assets).toEqual([]);
     });
+
+    it("clamps oversized asset search limits and rejects invalid offsets", async () => {
+      await jsonRequest(handler, "POST", "/api/assets", { filename: "a.jpg", mimeType: "image/jpeg" });
+      await jsonRequest(handler, "POST", "/api/assets", { filename: "b.jpg", mimeType: "image/jpeg" });
+
+      const clamped = await handler(new Request("http://localhost/api/assets?limit=1000"));
+      expect(clamped.status).toBe(200);
+      const body = await clamped.json();
+      expect(body.assets).toHaveLength(2);
+      expect(body.total).toBe(2);
+
+      const invalidOffset = await handler(new Request("http://localhost/api/assets?offset=-1"));
+      expect(invalidOffset.status).toBe(400);
+
+      const notANumber = await handler(new Request("http://localhost/api/assets?limit=nope"));
+      expect(notANumber.status).toBe(400);
+    });
   });
 
   describe("GET /api/assets/:id", () => {
