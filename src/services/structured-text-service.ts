@@ -1,5 +1,6 @@
-import { Effect, ParseResult, Schema } from "effect";
+import { Effect, Option, ParseResult, Schema } from "effect";
 import { SqlClient, SqlError } from "@effect/sql";
+import { D1Client as D1 } from "@effect/sql-d1";
 import { validateBlocksOnly, extractAllBlockIds } from "../dast/index.js";
 import { ValidationError } from "../errors.js";
 import { DastDocumentInput, DastDocumentSchema, StructuredTextWriteInput } from "../dast/schema.js";
@@ -146,6 +147,24 @@ function getCandidateBlockModelsCached(
     : blockModels;
   ctx.candidateBlockModels.set(cacheKey, candidateBlockModels);
   return candidateBlockModels;
+}
+
+function runHotBlockQuery<T extends object>(query: { sql: string; params: ReadonlyArray<unknown> }) {
+  return Effect.gen(function* () {
+    const d1Client = yield* Effect.serviceOption(D1.D1Client);
+    if (Option.isSome(d1Client)) {
+      return yield* Effect.tryPromise({
+        try: async () => {
+          const result = await d1Client.value.config.db.prepare(query.sql).bind(...query.params).all<T>();
+          return result.results;
+        },
+        catch: (cause) => new SqlError.SqlError({ cause, message: "Failed to execute D1 query" }),
+      });
+    }
+
+    const sql = yield* SqlClient.SqlClient;
+    return yield* sql.unsafe<T>(query.sql, query.params);
+  });
 }
 
 function formatDastParseErrors(error: ParseResult.ParseError): string {
@@ -575,18 +594,18 @@ export function materializeStructuredTextValues(params: {
       const blockPlaceholders = blockIds.map(() => "?").join(", ");
 
       for (const model of candidateBlockModels) {
-        const rows = yield* sql.unsafe<DynamicRow>(
-          `SELECT * FROM "block_${model.api_key}"
+        const rows = yield* runHotBlockQuery<DynamicRow>({
+          sql: `SELECT * FROM "block_${model.api_key}"
            WHERE _root_record_id IN (${rootRecordPlaceholders})
              AND _root_field_api_key = ?
              AND _parent_container_model_api_key = ?
              AND _parent_field_api_key = ?
              AND ${sample.params.parentBlockId === null ? "_parent_block_id IS NULL" : "_parent_block_id = ?"}
              AND id IN (${blockPlaceholders})`,
-          sample.params.parentBlockId === null
+          params: sample.params.parentBlockId === null
             ? [...rootRecordIds, sample.params.rootFieldApiKey, sample.params.parentContainerModelApiKey, sample.params.parentFieldApiKey, ...blockIds]
-            : [...rootRecordIds, sample.params.rootFieldApiKey, sample.params.parentContainerModelApiKey, sample.params.parentFieldApiKey, sample.params.parentBlockId, ...blockIds]
-        );
+            : [...rootRecordIds, sample.params.rootFieldApiKey, sample.params.parentContainerModelApiKey, sample.params.parentFieldApiKey, sample.params.parentBlockId, ...blockIds],
+        });
         if (rows.length === 0) continue;
 
         const blockModel = yield* getBlockModelSchemaCached(materializeContext, sql, model.api_key);
