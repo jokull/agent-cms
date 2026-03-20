@@ -196,6 +196,10 @@ function parseJsonValue(value: unknown): unknown {
   return decodeJsonIfString(value);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function isSimpleScalarField(field: ParsedFieldRow): boolean {
   return !field.localized && ![
     "link",
@@ -419,56 +423,61 @@ async function runSql<A extends object>(
   );
 }
 
+function buildRootResultSql(root: RootPlan, variables: Record<string, unknown>) {
+  if (root.kind === "meta") {
+    return {
+      sql: `(SELECT json_object('count', COUNT(*)) FROM "${root.meta.tableName}" WHERE "_status" IN ('published', 'updated'))`,
+      params: [] as unknown[],
+    };
+  }
+
+  if (root.kind === "list") {
+    const orderBy = resolveStringListArg(root.orderBy, variables);
+    const compiledOrderBy = compileOrderBy(orderBy ?? (typeof root.meta.model.ordering === "string" ? [root.meta.model.ordering] : undefined), buildFilterOpts(root.meta));
+    let innerSql = `SELECT ${root.objectSql} AS item_json FROM "${root.meta.tableName}" row_data WHERE row_data."_status" IN ('published', 'updated')`;
+    if (compiledOrderBy) {
+      innerSql += ` ORDER BY ${compiledOrderBy}`;
+    }
+    const params: unknown[] = [Math.min(resolveIntArg(root.first, variables) ?? 20, 500)];
+    innerSql += ` LIMIT ?`;
+    const skip = resolveIntArg(root.skip, variables);
+    if (skip && skip > 0) {
+      innerSql += ` OFFSET ?`;
+      params.push(skip);
+    }
+    return {
+      sql: `(SELECT COALESCE(json_group_array(json(item_json)), '[]') FROM (${innerSql}) ordered_rows)`,
+      params,
+    };
+  }
+
+  return {
+    sql: `(SELECT ${root.objectSql} FROM "${root.meta.tableName}" row_data WHERE row_data."_status" IN ('published', 'updated') LIMIT 1)`,
+    params: [] as unknown[],
+  };
+}
+
 async function executePlan(
   sqlLayer: Layer.Layer<SqlClient.SqlClient>,
   plan: CompiledFastPathPlan,
   variables: Record<string, unknown>,
 ): Promise<{ data: Record<string, unknown> }> {
-  const data: Record<string, unknown> = {};
+  const jsonParts: string[] = [];
+  const params: unknown[] = [];
 
   for (const root of plan.roots) {
-    if (root.kind === "meta") {
-      const rows = await runSql<{ result: string }>(
-        sqlLayer,
-        `SELECT json_object('count', COUNT(*)) AS result FROM "${root.meta.tableName}" WHERE "_status" IN ('published', 'updated')`,
-        [],
-      );
-      data[root.responseKey] = parseJsonValue(rows[0]?.result);
-      continue;
-    }
-
-    if (root.kind === "list") {
-      const orderBy = resolveStringListArg(root.orderBy, variables);
-      const compiledOrderBy = compileOrderBy(orderBy ?? (typeof root.meta.model.ordering === "string" ? [root.meta.model.ordering] : undefined), buildFilterOpts(root.meta));
-      let innerSql = `SELECT ${root.objectSql} AS item_json FROM "${root.meta.tableName}" row_data WHERE row_data."_status" IN ('published', 'updated')`;
-      if (compiledOrderBy) {
-        innerSql += ` ORDER BY ${compiledOrderBy}`;
-      }
-      const params: unknown[] = [Math.min(resolveIntArg(root.first, variables) ?? 20, 500)];
-      innerSql += ` LIMIT ?`;
-      const skip = resolveIntArg(root.skip, variables);
-      if (skip && skip > 0) {
-        innerSql += ` OFFSET ?`;
-        params.push(skip);
-      }
-      const rows = await runSql<{ result: string }>(
-        sqlLayer,
-        `SELECT COALESCE(json_group_array(json(item_json)), '[]') AS result FROM (${innerSql}) ordered_rows`,
-        params,
-      );
-      data[root.responseKey] = parseJsonValue(rows[0]?.result);
-      continue;
-    }
-
-    const rows = await runSql<{ result: string }>(
-      sqlLayer,
-      `SELECT ${root.objectSql} AS result FROM "${root.meta.tableName}" row_data WHERE row_data."_status" IN ('published', 'updated') LIMIT 1`,
-      [],
-    );
-    data[root.responseKey] = rows[0]?.result ? parseJsonValue(rows[0].result) : null;
+    const resultSql = buildRootResultSql(root, variables);
+    jsonParts.push(`${sqlQuote(root.responseKey)}, json(COALESCE(${resultSql.sql}, 'null'))`);
+    params.push(...resultSql.params);
   }
 
-  return { data };
+  const rows = await runSql<{ result: string }>(
+    sqlLayer,
+    `SELECT json_object(${jsonParts.join(", ")}) AS result`,
+    params,
+  );
+  const data = parseJsonValue(rows[0]?.result);
+  return { data: isRecord(data) ? data : {} };
 }
 
 export function createPublishedFastPath(sqlLayer: Layer.Layer<SqlClient.SqlClient>) {
