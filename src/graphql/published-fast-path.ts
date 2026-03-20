@@ -44,6 +44,16 @@ type StringListArgPlan =
   | null
   | undefined;
 
+type ValueArgPlan =
+  | { readonly kind: "const"; readonly value: string | number | boolean | null }
+  | { readonly kind: "var"; readonly name: string };
+
+type FilterEqPlan = {
+  readonly fieldKey: string;
+  readonly field: ParsedFieldRow | null;
+  readonly value: ValueArgPlan;
+};
+
 type RootPlan =
   | { readonly kind: "meta"; readonly responseKey: string; readonly meta: FastPathModelMeta }
   | {
@@ -53,6 +63,7 @@ type RootPlan =
       readonly orderBy: StringListArgPlan;
       readonly first: IntArgPlan;
       readonly skip: IntArgPlan;
+      readonly filter: FilterEqPlan | null;
       readonly objectSql: string;
     };
 
@@ -163,6 +174,25 @@ function compileStringListArg(fieldNode: FieldNode, name: string): StringListArg
   return null;
 }
 
+function compileValueArg(value: ValueNode): ValueArgPlan | null {
+  switch (value.kind) {
+    case Kind.STRING:
+      return { kind: "const", value: value.value };
+    case Kind.INT:
+      return { kind: "const", value: Number(value.value) };
+    case Kind.FLOAT:
+      return { kind: "const", value: Number(value.value) };
+    case Kind.BOOLEAN:
+      return { kind: "const", value: value.value };
+    case Kind.NULL:
+      return { kind: "const", value: null };
+    case Kind.VARIABLE:
+      return { kind: "var", name: value.name.value };
+    default:
+      return null;
+  }
+}
+
 function resolveIntArg(plan: IntArgPlan, variables: Record<string, unknown>): number | null {
   if (!plan) return null;
   if (plan.kind === "const") return plan.value;
@@ -177,6 +207,10 @@ function resolveStringListArg(plan: StringListArgPlan, variables: Record<string,
   return Array.isArray(value) && value.every((entry) => typeof entry === "string") ? value : undefined;
 }
 
+function resolveValueArg(plan: ValueArgPlan, variables: Record<string, unknown>): unknown {
+  return plan.kind === "const" ? plan.value : variables[plan.name];
+}
+
 function buildFilterOpts(meta: FastPathModelMeta): FilterCompilerOpts {
   return {
     fieldIsLocalized: (fieldName) => meta.localizedCamelKeys.has(fieldName),
@@ -185,6 +219,29 @@ function buildFilterOpts(meta: FastPathModelMeta): FilterCompilerOpts {
     jsonArrayFields: meta.jsonArrayFields,
     jsonObjectIdFields: meta.jsonObjectIdFields,
   };
+}
+
+function compileFilterEqArg(fieldNode: FieldNode, meta: FastPathModelMeta): FilterEqPlan | null {
+  const filterValue = getArgumentValueNode(fieldNode, "filter");
+  if (!filterValue) return null;
+  if (filterValue.kind !== Kind.OBJECT || filterValue.fields.length !== 1) return null;
+
+  const filterField = filterValue.fields[0];
+  const filterKey = filterField.name.value;
+  if (filterField.value.kind !== Kind.OBJECT || filterField.value.fields.length !== 1) return null;
+  const operator = filterField.value.fields[0];
+  if (operator.name.value !== "eq") return null;
+  const value = compileValueArg(operator.value);
+  if (!value) return null;
+
+  if (filterKey === "id") {
+    return { fieldKey: filterKey, field: null, value };
+  }
+
+  const field = meta.fieldsByGqlName.get(filterKey);
+  if (!field || field.localized) return null;
+  if (!isSimpleScalarField(field) && field.field_type !== "link") return null;
+  return { fieldKey: filterKey, field, value };
 }
 
 function sqlQuote(value: string): string {
@@ -390,12 +447,15 @@ function compilePlan(request: GraphqlFastPathRequest, metadata: PublishedFastPat
         orderBy,
         first,
         skip,
+        filter: null,
         objectSql,
       });
       continue;
     }
 
-    if (selection.arguments && selection.arguments.length > 0 && meta.model.singleton !== 1) return null;
+    const filter = compileFilterEqArg(selection, meta);
+    const supportedArgCount = filter ? 1 : 0;
+    if ((selection.arguments?.length ?? 0) > supportedArgCount && meta.model.singleton !== 1) return null;
     roots.push({
       kind: "singleton",
       responseKey,
@@ -403,6 +463,7 @@ function compilePlan(request: GraphqlFastPathRequest, metadata: PublishedFastPat
       orderBy: undefined,
       first: null,
       skip: null,
+      filter,
       objectSql,
     });
   }
@@ -423,6 +484,22 @@ async function runSql<A extends object>(
   );
 }
 
+function buildFilterSql(filter: FilterEqPlan | null, variables: Record<string, unknown>) {
+  if (!filter) return { sql: "", params: [] as unknown[] };
+  const value = resolveValueArg(filter.value, variables);
+  if (filter.fieldKey === "id") {
+    return { sql: ` AND row_data.id = ?`, params: [value] };
+  }
+  if (!filter.field) return { sql: "", params: [] as unknown[] };
+  const compareValue = filter.field.field_type === "boolean" && typeof value === "boolean"
+    ? (value ? 1 : 0)
+    : value;
+  return {
+    sql: ` AND json_extract(row_data."_published_snapshot", '$.${filter.field.api_key}') = ?`,
+    params: [compareValue],
+  };
+}
+
 function buildRootResultSql(root: RootPlan, variables: Record<string, unknown>) {
   if (root.kind === "meta") {
     return {
@@ -434,11 +511,12 @@ function buildRootResultSql(root: RootPlan, variables: Record<string, unknown>) 
   if (root.kind === "list") {
     const orderBy = resolveStringListArg(root.orderBy, variables);
     const compiledOrderBy = compileOrderBy(orderBy ?? (typeof root.meta.model.ordering === "string" ? [root.meta.model.ordering] : undefined), buildFilterOpts(root.meta));
-    let innerSql = `SELECT ${root.objectSql} AS item_json FROM "${root.meta.tableName}" row_data WHERE row_data."_status" IN ('published', 'updated')`;
+    const filter = buildFilterSql(root.filter, variables);
+    let innerSql = `SELECT ${root.objectSql} AS item_json FROM "${root.meta.tableName}" row_data WHERE row_data."_status" IN ('published', 'updated')${filter.sql}`;
     if (compiledOrderBy) {
       innerSql += ` ORDER BY ${compiledOrderBy}`;
     }
-    const params: unknown[] = [Math.min(resolveIntArg(root.first, variables) ?? 20, 500)];
+    const params: unknown[] = [...filter.params, Math.min(resolveIntArg(root.first, variables) ?? 20, 500)];
     innerSql += ` LIMIT ?`;
     const skip = resolveIntArg(root.skip, variables);
     if (skip && skip > 0) {
@@ -451,9 +529,10 @@ function buildRootResultSql(root: RootPlan, variables: Record<string, unknown>) 
     };
   }
 
+  const filter = buildFilterSql(root.filter, variables);
   return {
-    sql: `(SELECT ${root.objectSql} FROM "${root.meta.tableName}" row_data WHERE row_data."_status" IN ('published', 'updated') LIMIT 1)`,
-    params: [] as unknown[],
+    sql: `(SELECT ${root.objectSql} FROM "${root.meta.tableName}" row_data WHERE row_data."_status" IN ('published', 'updated')${filter.sql} LIMIT 1)`,
+    params: filter.params,
   };
 }
 
