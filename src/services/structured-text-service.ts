@@ -433,38 +433,7 @@ export function deleteBlockSubtrees(params: {
   });
 }
 
-function materializeBlockPayload(
-  ctx: MaterializeContext,
-  sql: SqlClient.SqlClient,
-  blockApiKey: string,
-  row: DynamicRow,
-): Effect.Effect<DynamicRow, unknown, SqlClient.SqlClient> {
-  return Effect.gen(function* () {
-    const blockModel = yield* getBlockModelSchemaCached(ctx, sql, blockApiKey);
-    const payload: DynamicRow = { _type: blockApiKey };
-    for (const field of blockModel.fields) {
-      const rawValue = deserializeValue(row[field.api_key]);
-      if (rawValue === undefined) continue;
-      if (field.field_type === "structured_text" && rawValue !== null) {
-        payload[field.api_key] = yield* materializeStructuredTextValue({
-          materializeContext: ctx,
-          allowedBlockApiKeys: getBlockWhitelist(field.validators) ?? [],
-          parentContainerModelApiKey: blockApiKey,
-          parentBlockId: String(row.id),
-          parentFieldApiKey: field.api_key,
-          rootRecordId: String(row._root_record_id),
-          rootFieldApiKey: String(row._root_field_api_key),
-          rawValue,
-        });
-      } else {
-        payload[field.api_key] = rawValue;
-      }
-    }
-    return payload;
-  });
-}
-
-export function materializeStructuredTextValue(params: {
+interface MaterializeStructuredTextParams {
   materializeContext?: MaterializeContext;
   allowedBlockApiKeys?: readonly string[];
   parentContainerModelApiKey: string;
@@ -473,48 +442,189 @@ export function materializeStructuredTextValue(params: {
   rootRecordId: string;
   rootFieldApiKey: string;
   rawValue: unknown;
-}): Effect.Effect<StructuredTextEnvelope | null, unknown, SqlClient.SqlClient> {
+}
+
+interface MaterializeStructuredTextRequest extends MaterializeStructuredTextParams {
+  requestKey: string;
+}
+
+interface ParsedMaterializeStructuredTextRequest {
+  requestKey: string;
+  params: MaterializeStructuredTextParams;
+  doc: DastDocumentInput;
+  blockIds: readonly string[];
+}
+
+function parseMaterializeStructuredTextRequest(request: MaterializeStructuredTextRequest) {
+  const dast = decodeJsonIfString(request.rawValue);
+  if (!dast || typeof dast !== "object") return null;
+  if (!("document" in dast) || typeof dast.document !== "object" || dast.document === null || !("children" in dast.document)) {
+    return null;
+  }
+
+  const doc = dast as DastDocumentInput;
+  return {
+    requestKey: request.requestKey,
+    params: request,
+    doc,
+    blockIds: extractAllBlockIds(doc),
+  } satisfies ParsedMaterializeStructuredTextRequest;
+}
+
+function getMaterializeBatchGroupKey(params: MaterializeStructuredTextParams) {
+  const allowed = params.allowedBlockApiKeys?.join(",") ?? "*";
+  return [
+    params.parentContainerModelApiKey,
+    params.parentBlockId ?? "root",
+    params.parentFieldApiKey,
+    params.rootFieldApiKey,
+    allowed,
+  ].join(":");
+}
+
+export function materializeStructuredTextValues(params: {
+  materializeContext?: MaterializeContext;
+  requests: readonly MaterializeStructuredTextRequest[];
+}): Effect.Effect<Map<string, StructuredTextEnvelope | null>, unknown, SqlClient.SqlClient> {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const materializeContext = params.materializeContext ?? { blockModelSchemas: new Map<string, BlockModelSchema>() };
-    const dast = decodeJsonIfString(params.rawValue);
-    if (!dast || typeof dast !== "object") return null;
-    if (!("document" in dast) || typeof dast.document !== "object" || dast.document === null || !("children" in dast.document)) {
-      return null;
-    }
-    const doc = dast as { document: { children: readonly unknown[] } };
+    const results = new Map<string, StructuredTextEnvelope | null>();
+    const parsedRequests: ParsedMaterializeStructuredTextRequest[] = [];
 
-    const blockIds = extractAllBlockIds(doc);
-    if (blockIds.length === 0) {
-      return { value: doc as DastDocumentInput, blocks: {} } satisfies StructuredTextEnvelope;
+    for (const request of params.requests) {
+      const parsed = parseMaterializeStructuredTextRequest(request);
+      if (!parsed) {
+        results.set(request.requestKey, null);
+        continue;
+      }
+      if (parsed.blockIds.length === 0) {
+        results.set(parsed.requestKey, { value: parsed.doc, blocks: {} });
+        continue;
+      }
+      parsedRequests.push(parsed);
+    }
+
+    if (parsedRequests.length === 0) {
+      return results;
     }
 
     const blockModels = yield* fetchBlockModelsCached(materializeContext, sql);
-    const candidateBlockModels = params.allowedBlockApiKeys && params.allowedBlockApiKeys.length > 0
-      ? blockModels.filter((model) => params.allowedBlockApiKeys?.includes(model.api_key))
-      : blockModels;
-    const blocks: Record<string, DynamicRow> = {};
-    const placeholders = blockIds.map(() => "?").join(", ");
+    const requestsByGroup = new Map<string, ParsedMaterializeStructuredTextRequest[]>();
 
-    for (const model of candidateBlockModels) {
-      const rows = yield* sql.unsafe<DynamicRow>(
-        `SELECT * FROM "block_${model.api_key}"
-         WHERE _root_record_id = ?
-           AND _root_field_api_key = ?
-           AND _parent_container_model_api_key = ?
-           AND _parent_field_api_key = ?
-           AND ${params.parentBlockId === null ? "_parent_block_id IS NULL" : "_parent_block_id = ?"}
-           AND id IN (${placeholders})`,
-        params.parentBlockId === null
-          ? [params.rootRecordId, params.rootFieldApiKey, params.parentContainerModelApiKey, params.parentFieldApiKey, ...blockIds]
-          : [params.rootRecordId, params.rootFieldApiKey, params.parentContainerModelApiKey, params.parentFieldApiKey, params.parentBlockId, ...blockIds]
-      );
-      for (const row of rows) {
-        blocks[String(row.id)] = yield* materializeBlockPayload(materializeContext, sql, model.api_key, row);
+    for (const request of parsedRequests) {
+      const groupKey = getMaterializeBatchGroupKey(request.params);
+      const group = requestsByGroup.get(groupKey);
+      if (group) group.push(request);
+      else requestsByGroup.set(groupKey, [request]);
+      results.set(request.requestKey, { value: request.doc, blocks: {} });
+    }
+
+    const nestedRequests: MaterializeStructuredTextRequest[] = [];
+    const nestedAssignments: Array<{ requestKey: string; target: DynamicRow; fieldApiKey: string }> = [];
+
+    for (const requests of requestsByGroup.values()) {
+      const sample = requests[0];
+      if (!sample) continue;
+
+      const requestByRootRecordId = new Map<string, ParsedMaterializeStructuredTextRequest>();
+      const requestBlockIds = new Map<string, Set<string>>();
+      const allBlockIds = new Set<string>();
+
+      for (const request of requests) {
+        requestByRootRecordId.set(request.params.rootRecordId, request);
+        requestBlockIds.set(request.requestKey, new Set(request.blockIds));
+        for (const blockId of request.blockIds) {
+          allBlockIds.add(blockId);
+        }
+      }
+
+      const candidateBlockModels = sample.params.allowedBlockApiKeys && sample.params.allowedBlockApiKeys.length > 0
+        ? blockModels.filter((model) => sample.params.allowedBlockApiKeys?.includes(model.api_key))
+        : blockModels;
+      const rootRecordIds = [...requestByRootRecordId.keys()];
+      const rootRecordPlaceholders = rootRecordIds.map(() => "?").join(", ");
+      const blockIds = [...allBlockIds];
+      const blockPlaceholders = blockIds.map(() => "?").join(", ");
+
+      for (const model of candidateBlockModels) {
+        const rows = yield* sql.unsafe<DynamicRow>(
+          `SELECT * FROM "block_${model.api_key}"
+           WHERE _root_record_id IN (${rootRecordPlaceholders})
+             AND _root_field_api_key = ?
+             AND _parent_container_model_api_key = ?
+             AND _parent_field_api_key = ?
+             AND ${sample.params.parentBlockId === null ? "_parent_block_id IS NULL" : "_parent_block_id = ?"}
+             AND id IN (${blockPlaceholders})`,
+          sample.params.parentBlockId === null
+            ? [...rootRecordIds, sample.params.rootFieldApiKey, sample.params.parentContainerModelApiKey, sample.params.parentFieldApiKey, ...blockIds]
+            : [...rootRecordIds, sample.params.rootFieldApiKey, sample.params.parentContainerModelApiKey, sample.params.parentFieldApiKey, sample.params.parentBlockId, ...blockIds]
+        );
+        if (rows.length === 0) continue;
+
+        const blockModel = yield* getBlockModelSchemaCached(materializeContext, sql, model.api_key);
+
+        for (const row of rows) {
+          const rootRecordId = String(row._root_record_id);
+          const request = requestByRootRecordId.get(rootRecordId);
+          if (!request) continue;
+
+          const allowedBlockIds = requestBlockIds.get(request.requestKey);
+          const rowId = String(row.id);
+          if (!allowedBlockIds?.has(rowId)) continue;
+
+          const payload: DynamicRow = { _type: model.api_key };
+          for (const field of blockModel.fields) {
+            const rawValue = deserializeValue(row[field.api_key]);
+            if (rawValue === undefined) continue;
+            if (field.field_type === "structured_text" && rawValue !== null) {
+              const requestKey = `nested:${nestedAssignments.length}`;
+              nestedRequests.push({
+                requestKey,
+                materializeContext,
+                allowedBlockApiKeys: getBlockWhitelist(field.validators) ?? [],
+                parentContainerModelApiKey: model.api_key,
+                parentBlockId: rowId,
+                parentFieldApiKey: field.api_key,
+                rootRecordId,
+                rootFieldApiKey: String(row._root_field_api_key),
+                rawValue,
+              });
+              nestedAssignments.push({ requestKey, target: payload, fieldApiKey: field.api_key });
+              continue;
+            }
+            payload[field.api_key] = rawValue;
+          }
+
+          const envelope = results.get(request.requestKey);
+          if (envelope) {
+            envelope.blocks[rowId] = payload;
+          }
+        }
       }
     }
 
-    return { value: dast as DastDocumentInput, blocks } satisfies StructuredTextEnvelope;
+    if (nestedRequests.length > 0) {
+      const nestedResults = yield* materializeStructuredTextValues({
+        materializeContext,
+        requests: nestedRequests,
+      });
+      for (const assignment of nestedAssignments) {
+        assignment.target[assignment.fieldApiKey] = nestedResults.get(assignment.requestKey) ?? null;
+      }
+    }
+
+    return results;
+  });
+}
+
+export function materializeStructuredTextValue(params: MaterializeStructuredTextParams): Effect.Effect<StructuredTextEnvelope | null, unknown, SqlClient.SqlClient> {
+  return Effect.gen(function* () {
+    const results = yield* materializeStructuredTextValues({
+      materializeContext: params.materializeContext,
+      requests: [{ requestKey: "single", ...params }],
+    });
+    return results.get("single") ?? null;
   });
 }
 

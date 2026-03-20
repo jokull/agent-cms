@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import type { SqlClient } from "@effect/sql";
 import type { GqlContext } from "./gql-types.js";
-import { materializeStructuredTextValue } from "../services/structured-text-service.js";
+import { materializeStructuredTextValues } from "../services/structured-text-service.js";
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -91,17 +91,12 @@ function scheduleFlush(params: {
 
     try {
       const results = await params.runSql(
-        Effect.gen(function* () {
-          const envelopes = new Map<string, unknown>();
-          const materializeContext = { blockModelSchemas: new Map() };
-          for (const [requestKey, entry] of pending) {
-            const envelope = yield* materializeStructuredTextValue({
-              ...entry.params,
-              materializeContext,
-            });
-            envelopes.set(requestKey, envelope);
-          }
-          return envelopes;
+        materializeStructuredTextValues({
+          materializeContext: { blockModelSchemas: new Map() },
+          requests: pending.map(([requestKey, entry]) => ({
+            requestKey,
+            ...entry.params,
+          })),
         })
       );
 
@@ -124,7 +119,13 @@ export async function loadStructuredTextEnvelope(params: {
 } & MaterializeParams) {
   const loader = getLoader(params.context, params);
   if (!loader) {
-    return params.runSql(materializeStructuredTextValue(params));
+    const results = await params.runSql(
+      materializeStructuredTextValues({
+        materializeContext: { blockModelSchemas: new Map() },
+        requests: [{ requestKey: "single", ...params }],
+      })
+    );
+    return results.get("single") ?? null;
   }
 
   const requestKey = getRequestKey(params);

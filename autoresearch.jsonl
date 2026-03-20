@@ -1,1 +1,3 @@
 {"type":"config","name":"Reduce GraphQL resolver time for relationship traversal into SQLite queries","metricName":"total_ms","metricUnit":"ms","bestDirection":"lower"}
+{"run":1,"commit":"f5fd505","metric":325.231,"metrics":{},"status":"keep","description":"Baseline before changes for GraphQL resolver relationship traversal into SQLite queries.","timestamp":1774019205323,"segment":0,"confidence":null}
+{"run":2,"commit":"f5fd505","metric":222.62,"metrics":{},"status":"checks_failed","description":"Batched preview structured-text materialization across pending resolver requests and nested block fields, but TypeScript checks failed from a stale single-call reference in src/graphql/structured-text-loader.ts.","timestamp":1774019390694,"segment":0,"confidence":null}
