@@ -472,6 +472,7 @@ interface ParsedMaterializeStructuredTextRequest {
   params: MaterializeStructuredTextParams;
   doc: DastDocumentInput;
   blockIds: readonly string[];
+  blockIdSet: ReadonlySet<string>;
 }
 
 function parseMaterializeStructuredTextRequest(request: MaterializeStructuredTextRequest) {
@@ -482,11 +483,13 @@ function parseMaterializeStructuredTextRequest(request: MaterializeStructuredTex
   }
 
   const doc = dast as DastDocumentInput;
+  const blockIds = extractAllBlockIds(doc);
   return {
     requestKey: request.requestKey,
     params: request,
     doc,
-    blockIds: extractAllBlockIds(doc),
+    blockIds,
+    blockIdSet: new Set(blockIds),
   } satisfies ParsedMaterializeStructuredTextRequest;
 }
 
@@ -550,12 +553,12 @@ export function materializeStructuredTextValues(params: {
       if (!sample) continue;
 
       const requestByRootRecordId = new Map<string, ParsedMaterializeStructuredTextRequest>();
-      const requestBlockIds = new Map<string, Set<string>>();
+      const requestBlockIds = new Map<string, ReadonlySet<string>>();
       const allBlockIds = new Set<string>();
 
       for (const request of requests) {
         requestByRootRecordId.set(request.params.rootRecordId, request);
-        requestBlockIds.set(request.requestKey, new Set(request.blockIds));
+        requestBlockIds.set(request.requestKey, request.blockIdSet);
         for (const blockId of request.blockIds) {
           allBlockIds.add(blockId);
         }
