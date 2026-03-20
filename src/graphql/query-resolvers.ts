@@ -5,15 +5,53 @@
 import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
 import { compileFilterToSql, compileOrderBy, type FilterCompilerOpts } from "./filter-compiler.js";
-import { computeIsValid, findUniqueConstraintViolations } from "../db/validators.js";
+import { computeIsValid, findUniqueConstraintViolations, getBlockWhitelist } from "../db/validators.js";
 import type { GraphQLResolveInfo } from "graphql";
 import type { SchemaBuilderContext, ModelQueryMeta, DynamicRow, GqlContext } from "./gql-types.js";
 import { toCamelCase, pluralize, getRegistryDef, deserializeRecord, decodeSnapshot } from "./gql-utils.js";
-import { buildLinkPrefetchSpecs } from "./sqlite-json-prefetch.js";
+import { buildLinkPrefetchSpecs, collectImmediateSelectionMap } from "./sqlite-json-prefetch.js";
+import { materializeStructuredTextValues } from "../services/structured-text-service.js";
+import { decodeJsonIfString } from "../json.js";
 
 /**
  * Build filter/orderBy type defs and Query resolvers for each content model.
  */
+function pickLocalizedStructuredTextValue(rawValue: unknown, context: GqlContext, defaultLocale?: string | null) {
+  if (rawValue === null || rawValue === undefined) return { locale: null, value: null };
+
+  const localeMap = decodeJsonIfString(rawValue);
+  if (typeof localeMap !== "object" || localeMap === null || Array.isArray(localeMap)) {
+    return { locale: null, value: rawValue };
+  }
+
+  const locale = context.locale ?? defaultLocale;
+  const fallbacks = context.fallbackLocales ?? [];
+
+  if (locale) {
+    const localeValue = Reflect.get(localeMap, locale);
+    if (localeValue !== undefined && localeValue !== null && localeValue !== "") {
+      return { locale, value: localeValue };
+    }
+  }
+
+  for (const fallback of fallbacks) {
+    const fallbackValue = Reflect.get(localeMap, fallback);
+    if (fallbackValue !== undefined && fallbackValue !== null && fallbackValue !== "") {
+      return { locale: fallback, value: fallbackValue };
+    }
+  }
+
+  if (defaultLocale) {
+    const defaultValue = Reflect.get(localeMap, defaultLocale);
+    if (defaultValue !== undefined) {
+      return { locale: defaultLocale, value: defaultValue };
+    }
+  }
+
+  const firstEntry = Object.entries(localeMap)[0];
+  return firstEntry ? { locale: firstEntry[0], value: firstEntry[1] } : { locale: null, value: null };
+}
+
 export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: ModelQueryMeta[]): void {
   const { resolvers, typeDefs, queryFieldDefs, runSql, defaultLocale } = ctx;
 
@@ -142,6 +180,89 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
       );
     }
 
+    async function prefetchStructuredTextFields(
+      records: DynamicRow[],
+      includeDrafts: boolean,
+      context: GqlContext,
+      info: GraphQLResolveInfo
+    ) {
+      if (!includeDrafts || records.length === 0) return;
+
+      const selectionMap = collectImmediateSelectionMap(info);
+      const requests: Array<{
+        requestKey: string;
+        allowedBlockApiKeys?: readonly string[];
+        parentContainerModelApiKey: string;
+        parentBlockId: null;
+        parentFieldApiKey: string;
+        rootRecordId: string;
+        rootFieldApiKey: string;
+        rawValue: unknown;
+      }> = [];
+      const assignments: Array<{
+        record: DynamicRow;
+        fieldApiKey: string;
+        requestKey: string;
+        locale: string | null;
+        localized: boolean;
+      }> = [];
+
+      for (const field of fields) {
+        if (field.field_type !== "structured_text") continue;
+        if (!selectionMap.has(toCamelCase(field.api_key))) continue;
+
+        for (const record of records) {
+          const selected = field.localized
+            ? pickLocalizedStructuredTextValue(record[field.api_key], context, defaultLocale)
+            : { locale: null, value: record[field.api_key] };
+          const rawValue = selected.value;
+          if (!rawValue) continue;
+          if (typeof rawValue === "object" && rawValue !== null && !Array.isArray(rawValue)
+            && "value" in rawValue && "blocks" in rawValue) {
+            continue;
+          }
+
+          const rootFieldApiKey = field.localized
+            ? `${field.api_key}:${selected.locale ?? defaultLocale ?? ""}`.replace(/:$/, "")
+            : field.api_key;
+          const requestKey = `${field.api_key}:${selected.locale ?? ""}:${record.id}`;
+          requests.push({
+            requestKey,
+            allowedBlockApiKeys: getBlockWhitelist(field.validators) ?? [],
+            parentContainerModelApiKey: model.api_key,
+            parentBlockId: null,
+            parentFieldApiKey: field.api_key,
+            rootRecordId: String(record.id),
+            rootFieldApiKey,
+            rawValue,
+          });
+          assignments.push({
+            record,
+            fieldApiKey: field.api_key,
+            requestKey,
+            locale: selected.locale,
+            localized: Boolean(field.localized),
+          });
+        }
+      }
+
+      if (requests.length === 0) return;
+
+      const materialized = await runSql(materializeStructuredTextValues({ requests }));
+      for (const assignment of assignments) {
+        const envelope = materialized.get(assignment.requestKey);
+        if (!envelope) continue;
+        if (assignment.localized && assignment.locale) {
+          const existing = assignment.record[assignment.fieldApiKey];
+          if (typeof existing === "object" && existing !== null && !Array.isArray(existing)) {
+            Reflect.set(existing, assignment.locale, envelope);
+          }
+          continue;
+        }
+        assignment.record[assignment.fieldApiKey] = envelope;
+      }
+    }
+
     async function countWithFilter(filter: DynamicRow | undefined, includeDrafts: boolean): Promise<number> {
       return await runSql(
         Effect.gen(function* () {
@@ -194,6 +315,7 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
         locale,
         info
       );
+      await prefetchStructuredTextFields(results, includeDrafts, context, info);
       if (excludeInvalid) {
         const validity = await Promise.all(results.map(async (record) => {
           const required = computeIsValid(record, fields, defaultLocale);
@@ -235,7 +357,10 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
             if (rows.length === 0) return null;
             return decodeSnapshot(deserializeRecord(rows[0]), includeDrafts);
           })
-        );
+        ).then(async (record) => {
+          if (record) await prefetchStructuredTextFields([record], includeDrafts, context, info);
+          return record;
+        });
       }
       if (args.filter) {
         const records = await queryWithFilter(
@@ -244,11 +369,13 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
           locale,
           info
         );
+        await prefetchStructuredTextFields(records, includeDrafts, context, info);
         return records[0] ?? null;
       }
       // Singleton models: return the single record without arguments
       if (model.singleton) {
         const records = await queryWithFilter({ first: 1 }, includeDrafts, locale, info);
+        await prefetchStructuredTextFields(records, includeDrafts, context, info);
         return records[0] ?? null;
       }
       return null;

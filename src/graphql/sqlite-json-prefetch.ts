@@ -80,7 +80,7 @@ function collectImmediateSelectionMapFromNode(
   }
 }
 
-function collectImmediateSelectionMap(info: GraphQLResolveInfo) {
+export function collectImmediateSelectionMap(info: GraphQLResolveInfo) {
   const result = new Map<string, Set<string>>();
   for (const fieldNode of info.fieldNodes) {
     collectImmediateSelectionMapFromSet(fieldNode.selectionSet, info, result);
