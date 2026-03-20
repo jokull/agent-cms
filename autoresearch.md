@@ -1,135 +1,139 @@
-# Autoresearch: GraphQL Resolver Performance
+# Autoresearch: Published Read Latency
 
 ## Objective
 
-Reduce wall-clock time of GraphQL queries by optimizing how resolvers traverse relationships and turn them into SQLite queries. Every GraphQL field that references another record — link fields, StructuredText with blocks, assets, reverse links — becomes one or more SQL lookups. The total query time is dominated by how many of these lookups happen and whether they run sequentially or batched.
+Minimize wall-clock time for published (non-draft) GraphQL queries. These are the queries real users hit on every page load. Published reads have simple SQL needs — the data is already pre-materialized — but the current GraphQL execution pipeline adds significant overhead.
 
-### Baseline (local Miniflare, 30 posts with nested blocks)
+Current published query times on local Miniflare: **8-13ms per query**. On deployed Workers (co-located with D1): **55-60ms per trivial query, 100-300ms for deep queries**.
 
-| Query | Published | Preview | Gap |
-|-------|-----------|---------|-----|
-| posts_deep_12 | 13ms | 61ms | 4.7x |
-| posts_deep_36 | 11ms | 107ms | 9.7x |
-| posts_deep_72 | 10ms | 96ms | 9.6x |
-
-The published path proves the data volume is fine — the preview overhead is entirely from the resolver/materialization code path.
+Target: **3-5ms per query locally**, which would translate to ~15-25ms on deployed Workers.
 
 ## Metrics
 
-- **Primary**: total_ms (milliseconds, lower is better) — sum of median durations across all 10 queries in the scale suite
-- **Secondary**: preview_deep_ms (sum of preview deep query medians), sql_statements (total SQL statement count)
+- **Primary**: total_ms (milliseconds, lower is better) — sum of median durations across all queries in the published benchmark suite
+- **Secondary**: sql_statements (total SQL statement count)
 
 ## How to Run
 
-`./autoresearch.sh` — starts local wrangler if needed, seeds, runs benchmarks, outputs `METRIC` lines.
+`./autoresearch.sh` — builds, starts wrangler if needed, seeds, runs published-only benchmarks, outputs `METRIC` lines.
 
-**Important**: after changing source files, run `npm run build` before the benchmark. The wrangler dev server uses the built output, not raw TypeScript. The `autoresearch.checks.sh` script runs `npm run build` as part of its checks.
+## Why Published Reads Are Special
 
-## The Code Path (read these files before making changes)
+Published records store a `_published_snapshot` column containing the full pre-materialized StructuredText envelope as JSON. This means:
 
-### `src/services/structured-text-service.ts` — StructuredText materialization
+- **No block table traversal** — the nested block structure is already in the snapshot
+- **No recursive materialization** — blocks, inline blocks, links are pre-resolved
+- **Simple SQL** — one `SELECT` for root rows, one `IN (...)` for linked records, done
 
-`materializeStructuredTextValues()` — batched materialization. Groups requests by ancestry, collects all block IDs across roots, queries each block table once with wide `IN (...)`, then recurses for nested StructuredText. Uses direct D1 `prepare().bind().all()` for the hot block fetch loop, bypassing Effect SQL wrapper overhead.
+The overhead is NOT in the database. It's in the layers between the SQL result and the HTTP response:
 
-### `src/graphql/structured-text-loader.ts` — Batch loader
+1. **GraphQL Yoga** — parse query, validate, build execution plan, resolve field-by-field
+2. **Resolver dispatch** — one function call per field per record, even for trivial reads
+3. **Effect runtime** — `Effect.runPromise()` for schema cache lookup
+4. **DataLoader scheduling** — microtask-based batching for link fields (queueMicrotask overhead)
+5. **Response assembly** — building the nested JSON response from flat resolver results
 
-Request-scoped microbatch loader. Collects pending materialization requests via `queueMicrotask`, flushes them through `materializeStructuredTextValues()` in one call with a shared `materializeContext`.
+## The Benchmark Suite
 
-### `src/graphql/structured-text-resolver.ts` — Entry point
+10 published-only queries testing realistic patterns:
 
-`resolveStructuredTextValue()`: checks if a pre-materialized envelope exists (published path), otherwise calls the loader/materializer (preview path).
+- `singleton_minimal` — site settings, 2 fields (pure overhead floor)
+- `singleton_with_seo` — site settings with nested SEO object
+- `list_summary_12/40` — post listings with linked author/category (homepage-style)
+- `list_deep_12/36` — posts with full nested StructuredText blocks (article pages)
+- `single_by_slug` — single post lookup by slug with deep content
+- `filter_by_category` — filtered list + meta count (category page)
+- `page_simulation` — multi-root query: site settings + posts + categories + meta (full page)
+- `meta_count` — just record counts (absolute minimum query)
 
-### `src/graphql/content-resolvers.ts` and `block-resolvers.ts` — Field resolvers
+## The Code Path
 
-Resolve all field types on content/block records: scalars, links, assets, StructuredText. Each relationship field triggers SQL lookups via the `runSql` helper.
+### `src/graphql/handler.ts` — Entry point
 
-### `src/graphql/linked-record-loader.ts` — Link field batch loader
+`handle()`:
+- Line 178: `getSchemaTiming()` — 2x `Effect.runPromise()` per request for schema cache hit check
+- Line 117: `schema` function called by Yoga — another `getSchema()` → `Effect.runPromise()`
+- Lines 120-128: `enforceQueryLimits()` plugin — `parse(query)` before Yoga's own parse (double parse)
+- Lines 160-231: wraps everything in `withSqlMetrics()` AsyncLocalStorage context
 
-Request-scoped microbatch loader for link fields (author, category). Batches `IN (...)` queries.
+`execute()` (in-process path, used by rvkfoodie):
+- Lines 233-254: `getSchema()` → `parse()` → `validate()` → `gqlExecute()` — leaner than HTTP but still runs full resolver tree
 
-### `src/graphql/handler.ts` — GraphQL handler
+### `src/graphql/query-resolvers.ts` — Root resolvers
 
-Schema caching, query limit enforcement, Yoga setup. The `execute()` method is used by in-process callers (e.g. rvkfoodie) — no HTTP overhead.
+Fetches top-level records. For published reads, also does AST-driven prefetch of linked records and StructuredText. The prefetch is good but still feeds into the resolver-per-field pattern.
+
+### `src/graphql/content-resolvers.ts` — Field resolvers
+
+One resolver function per field per record. For published reads, StructuredText resolvers read from `_published_snapshot` (fast), link resolvers read from the prefetched cache or DataLoader (fast). But the overhead is the resolver dispatch itself × (fields × records).
 
 ### `src/graphql/schema-builder.ts` — Schema construction
 
-Builds GraphQL SDL and resolvers from CMS model/field metadata. Cached after first build.
+Builds GraphQL SDL and resolvers from CMS metadata. Cached after first build. The schema is correct but generates one resolver per field — no query compilation.
 
-## Architecture invariants (don't break these)
+### `src/http/router.ts` — Request routing
 
-- Published mode reads `_published_snapshot` JSON on the record. Don't change snapshot semantics.
-- Block tables are named `block_<model_api_key>`, one per block type.
-- Block rows have ancestry columns: `_root_record_id`, `_root_field_api_key`, `_parent_container_model_api_key`, `_parent_field_api_key`, `_parent_block_id`.
-- The DAST document references block IDs. The resolver fetches only those IDs.
-- GraphQL responses must be identical — same data, same shape.
-- All code uses Effect patterns: `Effect.gen`, `SqlClient.SqlClient`, tagged errors.
-- SQLite is the database (D1 in production, Miniflare locally). No Postgres-only features.
+Lines 855-867: runs `getCredentialType()` on every `/graphql` request even without auth header.
+Lines 777-781: clones request with new headers.
+Lines 962-998: lazy-loads GraphQL module, routes to Yoga.
 
-## Optimization directions
+## Architecture invariants
 
-### Tier 1: AST-driven prefetch (most promising lateral move)
+- Published records have `_published_snapshot` with pre-materialized StructuredText
+- Block tables (`block_<model>`) are NOT queried for published reads
+- GraphQL responses must be byte-identical — same data, same shape
+- All code uses Effect patterns
+- The `execute()` method (in-process) must also benefit from optimizations
 
-**Idea**: Before resolvers execute, walk the GraphQL selection set to predict what data will be needed, then prefetch it in bulk. This is what Hasura calls "query decomposition" — but without full GraphQL-to-SQL compilation.
+## Optimization Directions
 
-Concretely:
-1. After the root query returns N records, inspect the GraphQL AST for selected relationship fields
-2. If StructuredText fields are selected, batch-prefetch ALL block rows for ALL N records in one query per block table
-3. Seed the existing loader caches so resolvers find cache hits instead of triggering new SQL
-4. Same pattern works for link fields — if `author` is selected, prefetch all authors for the batch
+### Primary: SQLite JSON compilation (Drizzle-style)
 
-This works *with* the existing resolver/loader architecture, not against it. The resolvers still run, they just find warm caches instead of cold ones.
+Compile GraphQL queries into single SQL statements that return nested JSON directly. Bypass the resolver layer entirely for published reads.
 
-**Where to implement**: In `src/graphql/content-resolvers.ts` or as a Yoga plugin that runs after root query execution. The GraphQL `info` object (passed to every resolver) contains the full selection set — use it to predict child fetches.
+**How it works** (proven by Drizzle ORM, Hasura, PostGraphile):
+- Walk the GraphQL AST + CMS schema metadata
+- For each selected field: add column to SELECT
+- For each link field: add correlated subquery `(SELECT json_array(col1, col2) FROM content_<target> WHERE id = parent.link_col)`
+- For StructuredText: read `_published_snapshot` column directly
+- For lists: `json_group_array()` wraps child rows
+- Result: one SQL statement → one `JSON.parse()` → done
 
-**Reference**: Hasura's architecture blog describes this as the key insight — metadata about the data model enables proactive query planning. Join Monster (github.com/join-monster/join-monster) does similar AST walking to generate SQL plans before execution.
-
-### Tier 2: SQLite JSON compilation (Drizzle-style correlated subqueries)
-
-**Idea**: Compile GraphQL queries into a single SQL statement that returns nested JSON directly, using SQLite's `json_group_array()`, `json_array()`, and correlated subqueries. This is exactly what Drizzle ORM does for its relational query system — it generates one SQL statement regardless of nesting depth.
-
-**How Drizzle does it** (study `drizzle-orm/src/sqlite-core/dialect.ts` `buildRelationalQuery()`):
-- Each nested relation becomes a correlated subquery: `(SELECT coalesce(json_group_array(json_array(col1, col2, ...)), json_array()) FROM related_table WHERE related_table.fk = parent.id)`
-- For many-to-one (link fields): subquery returns one row
-- For one-to-many (blocks): subquery wraps in `json_group_array()`
-- Recursion: nested relations generate nested correlated subqueries
-- Result: one SQL statement, flat result, JSON parsed in JS
-
-**Applied to this CMS — published reads:**
+**Example — list with links:**
 ```sql
-SELECT p.id, p.title, p.slug,
-  (SELECT json_array(a.id, a.name) FROM content_author a WHERE a.id = p.author) as author,
-  (SELECT json_array(c.id, c.name, c.slug) FROM content_category c WHERE c.id = p.category) as category,
-  p._published_snapshot as content
-FROM content_post p ORDER BY p.published_date DESC LIMIT 12
+SELECT json_group_array(json_array(
+  p.id, p.title, p.slug, p.excerpt, p.published_date,
+  (SELECT json_array(a.id, a.name) FROM content_author a WHERE a.id = p.author),
+  (SELECT json_array(c.id, c.name, c.slug) FROM content_category c WHERE c.id = p.category)
+))
+FROM (SELECT * FROM content_post WHERE _status IN ('published','updated') ORDER BY published_date DESC LIMIT 12) p
 ```
 
-**Applied to this CMS — preview reads (the harder case):**
+**Example — singleton:**
 ```sql
-SELECT p.id, p.title, p.slug, p.content as content_dast,
-  (SELECT coalesce(json_group_array(json_array(b.id, b.headline, b.subheadline)), json_array())
-   FROM block_hero_section b
-   WHERE b._root_record_id = p.id AND b._root_field_api_key = 'content'
-     AND b._parent_block_id IS NULL
-     AND b.id IN (/* block IDs from DAST */)) as hero_blocks,
-  (SELECT coalesce(json_group_array(json_array(b.id, b.language, b.code)), json_array())
-   FROM block_code_block b
-   WHERE b._root_record_id = p.id AND b._root_field_api_key = 'content'
-     AND b._parent_block_id IS NULL) as code_blocks
-FROM content_post p ORDER BY p.published_date DESC LIMIT 12
+SELECT json_array(s.site_name, s.tagline)
+FROM content_site_settings s
+WHERE _status IN ('published','updated')
+LIMIT 1
 ```
 
-This eliminates resolver overhead completely — no Effect.gen, no microtask batching, no sequential loops. The SQL engine does all the work. The resolver just parses the JSON result.
+**Where to implement**: New module `src/graphql/query-compiler.ts` that takes `(graphqlQuery, schema, cmsMetadata) → SQL string`. Wire into `handler.ts` or `query-resolvers.ts` as a fast path that short-circuits Yoga's resolver execution when the query can be compiled.
 
-**Where to implement**: Build a query compiler in `src/graphql/` that walks the GraphQL AST + CMS schema metadata to generate SQL. Wire it into the query resolvers as an alternative execution path. Start with published list queries (simplest case, biggest volume), extend to preview.
+**Reference implementations**:
+- Drizzle ORM `buildRelationalQuery()` in `drizzle-orm/src/sqlite-core/dialect.ts`
+- Join Monster (github.com/join-monster/join-monster) — AST-to-SQL with batch fetching
+- Hasura — compiles GraphQL to single SQL with LATERAL JOINs + JSON aggregation
 
-**Reference**: Study Drizzle's `buildRelationalQuery()` in the SQLite dialect and Join Monster's AST-to-SQL approach. Both prove this pattern works at scale with SQLite.
+### Secondary: Handler overhead reduction
 
-### Tier 3: Micro-optimizations in current path
+- Replace Effect.Cache for schema with a plain JS variable
+- Eliminate double query parse (move limit checking into Yoga plugin with pre-parsed AST)
+- Skip auth check when no Authorization header
+- Skip `getSchemaTiming()` when tracing is off
 
-- Reduce Effect.runPromise overhead on the handler hot path (schema cache, query parsing)
-- Short-circuit auth check when no Authorization header present
-- Eliminate double query parse (enforceQueryLimits + Yoga both parse)
-- Cache query limit results by query string
+### Tertiary: execute() fast path
+
+For in-process callers (like rvkfoodie), the HTTP layer is already skipped. But `execute()` still runs full `parse() → validate() → gqlExecute()`. If the query is compiled to SQL, `execute()` could skip all of that and just run the SQL directly.
 
 ## Constraints
 
@@ -137,36 +141,14 @@ This eliminates resolver overhead completely — no Effect.gen, no microtask bat
 - TypeScript must compile: `npx tsc --noEmit`
 - Build must succeed: `npm run build`
 - No `as` casts, no `any` types
-- Effect patterns only (consult `~/Forks/effect-solutions/` before writing Effect code)
-- Published query performance must not regress
+- Effect patterns (consult `~/Forks/effect-solutions/` before writing Effect code)
 - No new npm dependencies
-- GraphQL API must return identical responses
+- GraphQL API must return identical responses for identical queries
 
 ## What's Been Tried
 
-### Autoresearch segment 1 (40 runs, 325ms → 208ms)
+### Preview optimization (prior session, 57 experiments)
 
-**Kept (4 wins):**
-1. Batch ST materialization by ancestry group — one flush fetches across all pending roots (325→220ms)
-2. Cache candidate block-model table lists in materialization context (→215ms)
-3. Precompute block-id Sets once per parsed request (→210ms)
-4. Direct D1 `prepare().bind().all()` for hot block fetch, bypassing Effect SQL wrapper (→208ms)
+Reduced total suite time from 325ms to 197.8ms via batched materialization, AST-driven prefetch, and direct D1 hot paths. These changes are committed and help both published and preview paths. See `docs/architecture/performance.md` for details.
 
-**Explored and discarded:**
-- Concurrent Effect.forEach for block table queries — D1 contention regressed
-- Breadth-first iterative materialization — bookkeeping overhead regressed
-- D1 batch() API — unstable, regressed when checks passed
-- SELECT specific columns instead of * — no measurable win
-- Extending direct-D1 beyond hot block fetch loop — always regressed
-- Module-level prepared statement reuse — D1's own cache is better
-- Various caching (WeakMap validators, null-prototype objects, precomputed whitelists) — all regressed
-- Sharing materialization contexts across flushes/fields — regressed
-
-**Key insight from segment 1**: The remaining bottleneck is not individual query cost — it's the number of sequential round-trips. Further micro-optimization of each query yields diminishing returns. The next win requires reducing total round-trips, which means predicting what data resolvers will need *before* they ask for it.
-
-### Prior rounds (2026-03-16)
-1. Block ancestry indexes — composite index on lookup columns
-2. Schema/handler caching — eliminated per-request schema rebuild
-3. Block whitelist + metadata caching — fewer tables scanned
-4. Linked record microbatch loader — batched author/category fetches (161 → 3 SQL calls)
-5. StructuredText envelope batch loader — batched per-record materializations (39 → 4 SQL calls)
+This session starts fresh, focused exclusively on published read latency.

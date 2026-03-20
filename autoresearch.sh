@@ -7,7 +7,7 @@ CMS_URL="http://127.0.0.1:${CMS_PORT}"
 EXTRA_POST_COUNT="${EXTRA_POST_COUNT:-24}"
 BENCH_ITERATIONS="${BENCH_ITERATIONS:-3}"
 BENCH_WARMUP="${BENCH_WARMUP:-1}"
-SUITE="benchmarks/blog-query-suite-scale.json"
+SUITE="benchmarks/blog-query-suite-published.json"
 
 # --- Build first (wrangler dev uses built output) ---
 npm run build --silent 2>&1 | tail -3
@@ -58,9 +58,6 @@ echo "$RESULT"
 # --- Parse (macOS-compatible) ---
 TOTAL_MS=$(echo "$RESULT" | perl -nle 'print $1 if /median=([0-9.]+)/' | awk '{sum+=$1} END {printf "%.3f", sum}')
 SQL_TOTAL=$(echo "$RESULT" | perl -nle 'print $1 if /sql=([0-9]+)/' | awk '{sum+=$1} END {printf "%d", sum}')
-PREVIEW_DEEP_MS=$(echo "$RESULT" | grep 'deep.*preview' | perl -nle 'print $1 if /median=([0-9.]+)/' | awk '{sum+=$1} END {printf "%.3f", sum}')
-
 echo ""
 echo "METRIC total_ms=${TOTAL_MS}"
 echo "METRIC sql_statements=${SQL_TOTAL}"
-echo "METRIC preview_deep_ms=${PREVIEW_DEEP_MS}"

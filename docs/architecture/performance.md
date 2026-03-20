@@ -473,14 +473,41 @@ Iteration notes and benchmark files are recorded in:
 
 - [`benchmarks/iterations-2026-03-16.md`](/Users/jokull/Code/agent-cms/benchmarks/iterations-2026-03-16.md)
 
+## Preview Optimization Results (2026-03-20)
+
+An automated autoresearch loop ran 57 experiments against the blog benchmark suite (30 posts, nested StructuredText with 3-level block nesting). Results on a sum-of-medians metric across 10 queries (published + preview, multiple scales):
+
+**325ms → 197.8ms (39% reduction)**
+
+Key wins:
+
+1. **Batched ancestry-group materialization** — one loader flush fetches block rows across all pending roots together instead of materializing each request sequentially (325→220ms)
+2. **AST-driven link prefetch** — root query resolvers walk the GraphQL selection set and inline linked record rows via SQLite JSON subqueries, so link field resolvers return prefetched data (→216ms)
+3. **AST-driven StructuredText bulk pre-materialization** — root query resolvers batch one `materializeStructuredTextValues()` call across all result records, caching ready envelopes so child resolvers skip per-record materialization (→212ms)
+4. **Direct D1 hot path** — the innermost block fetch loop uses `prepare().bind().all()` directly, bypassing the Effect SQL wrapper overhead (→208ms)
+5. **Cached block model whitelists** — block model schema's structured_text field whitelists are cached per materialization context (→207ms)
+6. **Flat AST scan for prefetch** — cheaper selected-field-name scan replaces full nested selection-map construction (→200ms)
+7. **Eager payload resolution** — prefetch resolves final `{ value, blocks, inlineBlocks, links }` payloads once per record so content field resolvers return cached objects (→197.8ms)
+
+Explored and discarded (47 experiments):
+
+- Concurrent Effect.forEach for block table queries — D1 contention regressed
+- D1 batch() API — unstable, regressed when type checks passed
+- Breadth-first iterative materialization — bookkeeping overhead regressed
+- Extending direct-D1 beyond the hot block fetch loop — always regressed
+- Module-level prepared statement reuse — D1's own cache is better
+- Various caching strategies (WeakMap validators, null-prototype objects, precomputed whitelists) — all regressed
+- LEFT JOIN-based JSON projection for links — broke on self-referential cases
+
+**Key insight**: The remaining preview bottleneck is not individual query cost — it's the number of sequential resolver round-trips. Further micro-optimization yields diminishing returns. The next win requires either (a) full SQLite JSON compilation that bypasses the resolver layer, or (b) accepting that preview materialization scales linearly with content volume by design.
+
 ## What To Optimize Next
 
-If more performance is needed, the next likely win is not more GraphQL resolver microbatching. The current bottleneck is inside preview StructuredText materialization itself.
+The published read path is the primary delivery path for end users. Published queries currently take ~8-13ms locally (55ms+ on deployed Workers), even though the SQL is trivial — one root query, one batched link fetch, and a pre-materialized snapshot read.
 
-The next likely step is:
+The overhead is in the GraphQL execution pipeline: Yoga parse/validate/execute, resolver-per-field dispatch, Effect runtime, DataLoader scheduling.
 
-- set-oriented block fetching for many roots at once
+The next optimization target is **published read latency**, potentially via:
 
-In practice that means replacing per-root recursive traversal with larger batched SQL passes over many root records and many block ids together.
-
-That would further reduce preview deep-query cost, especially for wide list queries.
+- **SQLite JSON compilation**: compile GraphQL queries into single SQL statements with correlated subqueries and `json_group_array()`, bypassing the resolver layer entirely. This is the approach used by Drizzle ORM's relational query system and Hasura's query engine.
+- **Handler overhead reduction**: eliminate double query parsing, skip schema cache Effect.runPromise calls, short-circuit auth for unauthenticated reads.

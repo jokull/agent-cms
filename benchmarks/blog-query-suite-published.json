@@ -1,0 +1,59 @@
+[
+  {
+    "name": "singleton_minimal",
+    "includeDrafts": false,
+    "query": "query BenchSiteSettings { siteSettings { siteName tagline } }"
+  },
+  {
+    "name": "singleton_with_seo",
+    "includeDrafts": false,
+    "query": "query BenchSiteSettingsFull { siteSettings { siteName tagline defaultSeo { title description } } }"
+  },
+  {
+    "name": "list_summary_12",
+    "includeDrafts": false,
+    "variables": { "first": 12 },
+    "query": "query BenchPostsSummary($first: Int) { allPosts(first: $first, orderBy: [publishedDate_DESC]) { id title slug excerpt publishedDate readingTime featured category { name slug } author { name } } }"
+  },
+  {
+    "name": "list_summary_40",
+    "includeDrafts": false,
+    "variables": { "first": 40 },
+    "query": "query BenchPostsSummary($first: Int) { allPosts(first: $first, orderBy: [publishedDate_DESC]) { id title slug excerpt publishedDate readingTime featured category { name slug } author { name } } }"
+  },
+  {
+    "name": "list_deep_12",
+    "includeDrafts": false,
+    "variables": { "first": 12 },
+    "query": "query BenchPostsDeep($first: Int) { allPosts(first: $first, orderBy: [publishedDate_DESC]) { id title slug content { value blocks { __typename ... on HeroSectionRecord { id headline subheadline } ... on CodeBlockRecord { id language filename code } ... on FeatureGridRecord { id heading features { value blocks { __typename ... on FeatureCardRecord { id title description details { value blocks { __typename ... on CodeBlockRecord { id language filename code } } } } } } } ... on FeatureCardRecord { id title description details { value blocks { __typename ... on CodeBlockRecord { id language filename code } } } } } } category { id name slug } author { id name } } }"
+  },
+  {
+    "name": "list_deep_36",
+    "includeDrafts": false,
+    "variables": { "first": 36 },
+    "query": "query BenchPostsDeep($first: Int) { allPosts(first: $first, orderBy: [publishedDate_DESC]) { id title slug content { value blocks { __typename ... on HeroSectionRecord { id headline subheadline } ... on CodeBlockRecord { id language filename code } ... on FeatureGridRecord { id heading features { value blocks { __typename ... on FeatureCardRecord { id title description details { value blocks { __typename ... on CodeBlockRecord { id language filename code } } } } } } } ... on FeatureCardRecord { id title description details { value blocks { __typename ... on CodeBlockRecord { id language filename code } } } } } } category { id name slug } author { id name } } }"
+  },
+  {
+    "name": "single_by_slug",
+    "includeDrafts": false,
+    "variables": { "slug": "beyond-keyword-matching" },
+    "query": "query BenchPostBySlug($slug: String!) { post(filter: { slug: { eq: $slug } }) { id title slug content { value blocks { __typename ... on HeroSectionRecord { id headline subheadline } ... on CodeBlockRecord { id language filename code } ... on FeatureGridRecord { id heading features { value blocks { __typename ... on FeatureCardRecord { id title description details { value blocks { __typename ... on CodeBlockRecord { id language filename code } } } } } } } } } author { id name } category { id name slug } } }"
+  },
+  {
+    "name": "filter_by_category",
+    "includeDrafts": false,
+    "variables": { "categoryId": "__CATEGORY_ID__:engineering", "first": 20 },
+    "query": "query BenchPostsByCategory($categoryId: ID!, $first: Int) { allPosts(first: $first, filter: { category: { eq: $categoryId } }, orderBy: [publishedDate_DESC]) { id title slug excerpt publishedDate category { id name slug } author { id name } } _allPostsMeta(filter: { category: { eq: $categoryId } }) { count } }"
+  },
+  {
+    "name": "page_simulation",
+    "includeDrafts": false,
+    "variables": { "first": 12 },
+    "query": "query BenchPageSimulation($first: Int) { siteSettings { siteName tagline } allPosts(first: $first, orderBy: [publishedDate_DESC]) { id title slug excerpt publishedDate readingTime featured category { name slug } author { name } } allCategories { id name slug } _allPostsMeta { count } }"
+  },
+  {
+    "name": "meta_count",
+    "includeDrafts": false,
+    "query": "query BenchMeta { _allPostsMeta { count } _allCategoriesMeta { count } }"
+  }
+]

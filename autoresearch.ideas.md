@@ -1,3 +1,0 @@
-- Extend the new AST-aware SQLite JSON prefetch path beyond simple single-target `link` fields: try `links`/reverse-link arrays via `json_group_array()` and measure whether the extra SQL text still beats resolver-side batching on real workloads.
-- Prototype a constrained StructuredText SQL compiler for preview list queries that emits one correlated JSON subquery per allowed block table and seeds the existing envelope shape, so resolvers can reuse the current response code without per-root block scans.
-- Look for cheap hot-path wins inside candidate block-model selection and nested request assembly in `src/services/structured-text-service.ts` now that the obvious D1-adjacent metadata reads have all regressed.
