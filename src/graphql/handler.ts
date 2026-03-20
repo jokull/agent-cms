@@ -50,6 +50,16 @@ function inferOperationName(query: string | null | undefined): string | null {
   return match?.[2] ?? null;
 }
 
+function formatFastPathSqlBreakdown(
+  metrics: {
+    byCategory: Partial<Record<"metadata" | "root" | "meta" | "linked_record" | "asset", { statementCount: number; totalDurationMs: number }>>;
+  },
+) {
+  return Object.entries(metrics.byCategory)
+    .map(([category, value]) => `${category}:${value?.statementCount ?? 0}/${value?.totalDurationMs.toFixed(3) ?? "0.000"}`)
+    .join(",");
+}
+
 /**
  * Create a GraphQL Yoga web handler.
  * Reads X-Include-Drafts / X-Exclude-Invalid headers and passes them to resolvers via context.
@@ -112,7 +122,9 @@ export function createGraphQLHandler(
     };
   }
 
-  const publishedFastPath = createPublishedFastPath(sqlLayer);
+  const publishedFastPath = createPublishedFastPath(sqlLayer, {
+    assetBaseUrl: options?.assetBaseUrl,
+  });
 
   const yoga = createYoga({
     // Yoga's schema function type expects the full context, but our schema is context-agnostic
@@ -182,7 +194,14 @@ export function createGraphQLHandler(
                 excludeInvalid,
               });
               if (fastPathResult) {
-                return Response.json(fastPathResult);
+                return Response.json(fastPathResult.response, {
+                  headers: {
+                    "X-Published-Fast-Path": "hit",
+                    "X-Published-Fast-Path-Sql-Count": String(fastPathResult.metrics.statementCount),
+                    "X-Published-Fast-Path-Sql-Total-Ms": fastPathResult.metrics.totalDurationMs.toFixed(3),
+                    "X-Published-Fast-Path-Sql-Breakdown": formatFastPathSqlBreakdown(fastPathResult.metrics),
+                  },
+                });
               }
             }
           }
@@ -272,7 +291,7 @@ export function createGraphQLHandler(
       excludeInvalid: context?.excludeInvalid ?? false,
     });
     if (fastPathResult) {
-      return fastPathResult;
+      return fastPathResult.response;
     }
     const schema = await getSchema();
     const document = parse(query);

@@ -7,20 +7,45 @@ import {
   type FieldNode,
   type FragmentDefinitionNode,
   type OperationDefinitionNode,
+  type SelectionNode,
+  type SelectionSetNode,
   type ValueNode,
 } from "graphql";
-import type { FieldRow, ModelRow, ParsedFieldRow } from "../db/row-types.js";
+import type { AssetRow, ContentRow, FieldRow, ModelRow, ParsedFieldRow } from "../db/row-types.js";
 import { parseFieldValidators } from "../db/row-types.js";
-import { getLinkTargets } from "../db/validators.js";
+import { getLinkTargets, getLinksTargets } from "../db/validators.js";
+import { extractBlockIds, extractInlineBlockIds, extractLinkIds } from "../dast/index.js";
 import { compileOrderBy, type FilterCompilerOpts } from "./filter-compiler.js";
 import { decodeJsonIfString } from "../json.js";
-import { pluralize, toCamelCase, toTypeName } from "./gql-utils.js";
+import { batchResolveLinkedRecordsCached } from "./structured-text-resolver.js";
+import { decodeSnapshot, deserializeRecord, pluralize, toCamelCase, toContentTypeName, toTypeName } from "./gql-utils.js";
+import { mergeAssetWithMediaReference, parseMediaFieldReference, parseMediaGalleryReferences } from "../media-field.js";
+import type { AssetObject } from "./gql-types.js";
 
 interface GraphqlFastPathRequest {
   readonly query: string;
   readonly variables?: Record<string, unknown>;
   readonly operationName?: string | null;
 }
+
+interface AssetSelectionPlan {
+  readonly fields: readonly {
+    readonly responseKey: string;
+    readonly fieldName: string;
+  }[];
+}
+
+interface StructuredTextBlocksPlanGeneric {
+  readonly kind: "generic";
+}
+
+interface StructuredTextBlocksPlanTyped {
+  readonly kind: "typed";
+  readonly includeTypename: boolean;
+  readonly selectionsByBlockApiKey: ReadonlyMap<string, readonly SelectionPlan[]>;
+}
+
+type StructuredTextBlocksPlan = StructuredTextBlocksPlanGeneric | StructuredTextBlocksPlanTyped;
 
 type SelectionPlan =
   | { readonly kind: "id"; readonly responseKey: string }
@@ -29,8 +54,36 @@ type SelectionPlan =
       readonly kind: "link";
       readonly responseKey: string;
       readonly field: ParsedFieldRow;
-      readonly target: FastPathModelMeta;
+      readonly targetApiKeys: readonly string[];
       readonly nested: readonly SelectionPlan[];
+    }
+  | {
+      readonly kind: "links";
+      readonly responseKey: string;
+      readonly field: ParsedFieldRow;
+      readonly targetApiKeys: readonly string[];
+      readonly nested: readonly SelectionPlan[];
+    }
+  | {
+      readonly kind: "media";
+      readonly responseKey: string;
+      readonly field: ParsedFieldRow;
+      readonly nested: AssetSelectionPlan;
+    }
+  | {
+      readonly kind: "media_gallery";
+      readonly responseKey: string;
+      readonly field: ParsedFieldRow;
+      readonly nested: AssetSelectionPlan;
+    }
+  | {
+      readonly kind: "structured_text";
+      readonly responseKey: string;
+      readonly field: ParsedFieldRow;
+      readonly valueSelected: boolean;
+      readonly blocksPlan: StructuredTextBlocksPlan | null;
+      readonly inlineBlocksPlan: StructuredTextBlocksPlan | null;
+      readonly linksSelected: boolean;
     };
 
 type IntArgPlan =
@@ -64,7 +117,8 @@ type RootPlan =
       readonly first: IntArgPlan;
       readonly skip: IntArgPlan;
       readonly filter: FilterEqPlan | null;
-      readonly objectSql: string;
+      readonly selectionPlan: readonly SelectionPlan[];
+      readonly objectSql: string | null;
     };
 
 interface CompiledFastPathPlan {
@@ -73,7 +127,9 @@ interface CompiledFastPathPlan {
 
 interface FastPathModelMeta {
   readonly model: ModelRow;
+  readonly apiKey: string;
   readonly tableName: string;
+  readonly gqlTypeName: string;
   readonly singleName: string;
   readonly listName: string;
   readonly metaName: string;
@@ -87,23 +143,96 @@ interface FastPathModelMeta {
 
 interface PublishedFastPathMetadata {
   readonly modelsByRootField: Map<string, FastPathModelMeta>;
+  readonly contentModelsByApiKey: Map<string, FastPathModelMeta>;
+  readonly blockModelsByApiKey: Map<string, FastPathModelMeta>;
+  readonly blockModelsByGqlTypeName: Map<string, FastPathModelMeta>;
+  readonly contentTypeNames: Map<string, string>;
+  readonly contentApiKeys: readonly string[];
 }
 
-function isSupportedQueryText(query: string): boolean {
-  return !query.includes("...")
-    && !query.includes("content")
-    && !query.includes("defaultSeo")
-    && !query.includes("_seoMetaTags")
-    && !query.includes("responsiveImage")
-    && !query.includes(" blocks ")
-    && !query.includes(" blocks{")
-    && !query.includes(" blocks\n")
-    && !query.includes("value {")
-    && !query.includes("filter:")
-    && !query.includes(" id:")
-    && !query.includes("locale:")
-    && !query.includes("fallbackLocales:")
-    && !query.includes("excludeInvalid:");
+interface PublishedFastPathOptions {
+  readonly assetBaseUrl?: string;
+}
+
+type FastPathSqlCategory = "metadata" | "root" | "meta" | "linked_record" | "asset";
+
+interface FastPathSqlMetrics {
+  statementCount: number;
+  totalDurationMs: number;
+  byCategory: Partial<Record<FastPathSqlCategory, { statementCount: number; totalDurationMs: number }>>;
+}
+
+interface FastPathExecutionResult {
+  readonly response: { data: Record<string, unknown> };
+  readonly metrics: FastPathSqlMetrics;
+}
+
+interface FastPathExecutionContext {
+  readonly sqlLayer: Layer.Layer<SqlClient.SqlClient>;
+  readonly metadata: PublishedFastPathMetadata;
+  readonly assetBaseUrl: string;
+  readonly assetCache: Map<string, AssetRow | null>;
+  readonly linkedRecordCache: Map<string, Promise<Record<string, unknown> | null>>;
+  readonly metrics: FastPathSqlMetrics;
+}
+
+interface PendingLinkRequest {
+  readonly targetApiKeys: readonly string[];
+  readonly ids: Set<string>;
+  readonly nestedPlans: (readonly SelectionPlan[])[];
+}
+
+interface DependencyAccumulator {
+  readonly linkRequests: Map<string, PendingLinkRequest>;
+  readonly assetIds: Set<string>;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseJsonValue(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  return decodeJsonIfString(value);
+}
+
+function isStructuredTextEnvelope(value: unknown): value is { value: Record<string, unknown>; blocks: Record<string, unknown> } {
+  if (!isRecord(value)) return false;
+  const rawValue = Reflect.get(value, "value");
+  const rawBlocks = Reflect.get(value, "blocks");
+  return isRecord(rawValue) && isRecord(rawBlocks);
+}
+
+interface DastLikeDocument {
+  readonly document: {
+    readonly children: readonly unknown[];
+  };
+}
+
+function isDastLikeDocument(value: unknown): value is DastLikeDocument {
+  if (!isRecord(value)) return false;
+  const document = Reflect.get(value, "document");
+  if (!isRecord(document)) return false;
+  const children = Reflect.get(document, "children");
+  return Array.isArray(children);
+}
+
+function isSimpleScalarField(field: ParsedFieldRow): boolean {
+  return !field.localized && ![
+    "link",
+    "links",
+    "structured_text",
+    "seo",
+    "media",
+    "media_gallery",
+    "video",
+    "lat_lon",
+    "color",
+  ].includes(field.field_type);
+}
+
+function sqlQuote(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
 }
 
 function buildFragments(document: DocumentNode) {
@@ -116,35 +245,28 @@ function buildFragments(document: DocumentNode) {
   return fragments;
 }
 
+function createFastPathSqlMetrics(): FastPathSqlMetrics {
+  return {
+    statementCount: 0,
+    totalDurationMs: 0,
+    byCategory: {},
+  };
+}
+
+function recordFastPathSqlMetrics(metrics: FastPathSqlMetrics, category: FastPathSqlCategory, durationMs: number) {
+  metrics.statementCount += 1;
+  metrics.totalDurationMs = Number((metrics.totalDurationMs + durationMs).toFixed(3));
+  const bucket = metrics.byCategory[category] ?? { statementCount: 0, totalDurationMs: 0 };
+  bucket.statementCount += 1;
+  bucket.totalDurationMs = Number((bucket.totalDurationMs + durationMs).toFixed(3));
+  metrics.byCategory[category] = bucket;
+}
+
 function getOperation(document: DocumentNode, operationName?: string | null): OperationDefinitionNode | null {
   const operations = document.definitions.filter((definition): definition is OperationDefinitionNode => definition.kind === Kind.OPERATION_DEFINITION);
   if (operations.length === 0) return null;
   if (!operationName) return operations.length === 1 ? operations[0] : null;
   return operations.find((operation) => operation.name?.value === operationName) ?? null;
-}
-
-function collectFields(selectionSet: FieldNode["selectionSet"], fragments: Map<string, FragmentDefinitionNode>): FieldNode[] {
-  if (!selectionSet) return [];
-  const result: FieldNode[] = [];
-  for (const selection of selectionSet.selections) {
-    switch (selection.kind) {
-      case Kind.FIELD:
-        result.push(selection);
-        break;
-      case Kind.INLINE_FRAGMENT:
-        return [];
-      case Kind.FRAGMENT_SPREAD: {
-        const fragment = fragments.get(selection.name.value);
-        if (!fragment) return [];
-        for (const nested of fragment.selectionSet.selections) {
-          if (nested.kind !== Kind.FIELD) return [];
-          result.push(nested);
-        }
-        break;
-      }
-    }
-  }
-  return result;
 }
 
 function getArgumentValueNode(fieldNode: FieldNode, name: string): ValueNode | null {
@@ -244,31 +366,271 @@ function compileFilterEqArg(fieldNode: FieldNode, meta: FastPathModelMeta): Filt
   return { fieldKey: filterKey, field, value };
 }
 
-function sqlQuote(value: string): string {
-  return `'${value.replaceAll("'", "''")}'`;
+function collectObjectSelections(
+  selectionSet: SelectionSetNode | undefined,
+  fragments: Map<string, FragmentDefinitionNode>,
+  typeName: string,
+): readonly SelectionNode[] | null {
+  if (!selectionSet) return [];
+  const result: SelectionNode[] = [];
+  for (const selection of selectionSet.selections) {
+    switch (selection.kind) {
+      case Kind.FIELD:
+        result.push(selection);
+        break;
+      case Kind.INLINE_FRAGMENT:
+        if (selection.typeCondition && selection.typeCondition.name.value !== typeName) return null;
+        {
+          const nested = collectObjectSelections(selection.selectionSet, fragments, typeName);
+          if (!nested) return null;
+          result.push(...nested);
+        }
+        break;
+      case Kind.FRAGMENT_SPREAD: {
+        const fragment = fragments.get(selection.name.value);
+        if (!fragment) return null;
+        if (fragment.typeCondition.name.value !== typeName) return null;
+        const nested = collectObjectSelections(fragment.selectionSet, fragments, typeName);
+        if (!nested) return null;
+        result.push(...nested);
+        break;
+      }
+    }
+  }
+  return result;
 }
 
-function parseJsonValue(value: unknown): unknown {
-  if (typeof value !== "string") return value;
-  return decodeJsonIfString(value);
+function buildAssetSelectionPlan(
+  fieldNode: FieldNode,
+  fragments: Map<string, FragmentDefinitionNode>,
+): AssetSelectionPlan | null {
+  const selections = collectObjectSelections(fieldNode.selectionSet, fragments, "Asset");
+  if (!selections || selections.length === 0) return null;
+  const fields: Array<{ responseKey: string; fieldName: string }> = [];
+
+  for (const selection of selections) {
+    if (selection.kind !== Kind.FIELD) return null;
+    if (selection.selectionSet) return null;
+    if (selection.name.value === "responsiveImage") return null;
+    const fieldName = selection.name.value;
+    if (![
+      "id",
+      "filename",
+      "mimeType",
+      "size",
+      "width",
+      "height",
+      "alt",
+      "title",
+      "blurhash",
+      "focalPoint",
+      "customData",
+      "url",
+      "_createdAt",
+      "_updatedAt",
+      "_createdBy",
+      "_updatedBy",
+    ].includes(fieldName)) return null;
+    fields.push({
+      responseKey: selection.alias?.value ?? fieldName,
+      fieldName,
+    });
+  }
+
+  return { fields };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+function buildStructuredTextBlocksPlan(
+  fieldNode: FieldNode,
+  metadata: PublishedFastPathMetadata,
+  fragments: Map<string, FragmentDefinitionNode>,
+): StructuredTextBlocksPlan | null {
+  if (!fieldNode.selectionSet) return { kind: "generic" };
+
+  let includeTypename = false;
+  const rawSelectionsByType = new Map<string, SelectionNode[]>();
+
+  function collectUnionSelections(selectionSet: SelectionSetNode): boolean {
+    for (const selection of selectionSet.selections) {
+      switch (selection.kind) {
+        case Kind.FIELD:
+          if (selection.name.value !== "__typename" || selection.selectionSet) return false;
+          includeTypename = true;
+          break;
+        case Kind.INLINE_FRAGMENT: {
+          if (!selection.typeCondition) return false;
+          const typeName = selection.typeCondition.name.value;
+          const existing = rawSelectionsByType.get(typeName) ?? [];
+          existing.push(...selection.selectionSet.selections);
+          rawSelectionsByType.set(typeName, existing);
+          break;
+        }
+        case Kind.FRAGMENT_SPREAD: {
+          const fragment = fragments.get(selection.name.value);
+          if (!fragment) return false;
+          const existing = rawSelectionsByType.get(fragment.typeCondition.name.value) ?? [];
+          existing.push(...fragment.selectionSet.selections);
+          rawSelectionsByType.set(fragment.typeCondition.name.value, existing);
+          break;
+        }
+      }
+    }
+    return true;
+  }
+
+  if (!collectUnionSelections(fieldNode.selectionSet)) return null;
+
+  const selectionsByBlockApiKey = new Map<string, readonly SelectionPlan[]>();
+  for (const [typeName, selections] of rawSelectionsByType) {
+    const blockMeta = metadata.blockModelsByGqlTypeName.get(typeName);
+    if (!blockMeta) return null;
+    const nested = buildSelectionPlanFromSelections(blockMeta, selections, metadata, fragments);
+    if (!nested) return null;
+    selectionsByBlockApiKey.set(blockMeta.apiKey, nested);
+  }
+
+  return {
+    kind: "typed",
+    includeTypename,
+    selectionsByBlockApiKey,
+  };
 }
 
-function isSimpleScalarField(field: ParsedFieldRow): boolean {
-  return !field.localized && ![
-    "link",
-    "links",
-    "structured_text",
-    "seo",
-    "media",
-    "media_gallery",
-    "video",
-    "lat_lon",
-    "color",
-  ].includes(field.field_type);
+function buildStructuredTextPlan(
+  field: ParsedFieldRow,
+  fieldNode: FieldNode,
+  metadata: PublishedFastPathMetadata,
+  fragments: Map<string, FragmentDefinitionNode>,
+): SelectionPlan | null {
+  const selections = collectObjectSelections(fieldNode.selectionSet, fragments, "StructuredText");
+  if (!selections) return null;
+
+  let valueSelected = false;
+  let blocksPlan: StructuredTextBlocksPlan | null = null;
+  let inlineBlocksPlan: StructuredTextBlocksPlan | null = null;
+  let linksSelected = false;
+
+  for (const selection of selections) {
+    if (selection.kind !== Kind.FIELD) return null;
+    const fieldName = selection.name.value;
+    if (fieldName === "value") {
+      if (selection.selectionSet) return null;
+      valueSelected = true;
+      continue;
+    }
+    if (fieldName === "links") {
+      if (selection.selectionSet) return null;
+      linksSelected = true;
+      continue;
+    }
+    if (fieldName === "blocks") {
+      blocksPlan = buildStructuredTextBlocksPlan(selection, metadata, fragments);
+      if (!blocksPlan) return null;
+      continue;
+    }
+    if (fieldName === "inlineBlocks") {
+      inlineBlocksPlan = buildStructuredTextBlocksPlan(selection, metadata, fragments);
+      if (!inlineBlocksPlan) return null;
+      continue;
+    }
+    return null;
+  }
+
+  return {
+    kind: "structured_text",
+    responseKey: fieldNode.alias?.value ?? fieldNode.name.value,
+    field,
+    valueSelected,
+    blocksPlan,
+    inlineBlocksPlan,
+    linksSelected,
+  };
+}
+
+function buildSelectionPlanFromSelections(
+  meta: FastPathModelMeta,
+  selections: readonly SelectionNode[],
+  metadata: PublishedFastPathMetadata,
+  fragments: Map<string, FragmentDefinitionNode>,
+): readonly SelectionPlan[] | null {
+  const plan: SelectionPlan[] = [];
+
+  for (const selection of selections) {
+    if (selection.kind !== Kind.FIELD) return null;
+    const responseKey = selection.alias?.value ?? selection.name.value;
+
+    if (selection.name.value === "id") {
+      if (selection.selectionSet) return null;
+      plan.push({ kind: "id", responseKey });
+      continue;
+    }
+
+    if (selection.name.value === "__typename" || selection.name.value.startsWith("_")) {
+      return null;
+    }
+
+    const field = meta.fieldsByGqlName.get(selection.name.value);
+    if (!field || field.localized) return null;
+
+    if (isSimpleScalarField(field)) {
+      if (selection.selectionSet) return null;
+      plan.push({ kind: "scalar", responseKey, field });
+      continue;
+    }
+
+    if (field.field_type === "structured_text") {
+      const structuredTextPlan = buildStructuredTextPlan(field, selection, metadata, fragments);
+      if (!structuredTextPlan) return null;
+      plan.push(structuredTextPlan);
+      continue;
+    }
+
+    if (field.field_type === "link") {
+      if (!selection.selectionSet) return null;
+      const targets = getLinkTargets(field.validators);
+      if (!targets || targets.length !== 1) return null;
+      const targetMeta = metadata.contentModelsByApiKey.get(targets[0]);
+      if (!targetMeta) return null;
+      const nestedSelections = collectObjectSelections(selection.selectionSet, fragments, targetMeta.gqlTypeName);
+      if (!nestedSelections) return null;
+      const nested = buildSelectionPlanFromSelections(targetMeta, nestedSelections, metadata, fragments);
+      if (!nested) return null;
+      plan.push({ kind: "link", responseKey, field, targetApiKeys: targets, nested });
+      continue;
+    }
+
+    if (field.field_type === "links") {
+      if (!selection.selectionSet) return null;
+      const targets = getLinksTargets(field.validators);
+      if (!targets || targets.length !== 1) return null;
+      const targetMeta = metadata.contentModelsByApiKey.get(targets[0]);
+      if (!targetMeta) return null;
+      const nestedSelections = collectObjectSelections(selection.selectionSet, fragments, targetMeta.gqlTypeName);
+      if (!nestedSelections) return null;
+      const nested = buildSelectionPlanFromSelections(targetMeta, nestedSelections, metadata, fragments);
+      if (!nested) return null;
+      plan.push({ kind: "links", responseKey, field, targetApiKeys: targets, nested });
+      continue;
+    }
+
+    if (field.field_type === "media") {
+      const assetPlan = buildAssetSelectionPlan(selection, fragments);
+      if (!assetPlan) return null;
+      plan.push({ kind: "media", responseKey, field, nested: assetPlan });
+      continue;
+    }
+
+    if (field.field_type === "media_gallery") {
+      const assetPlan = buildAssetSelectionPlan(selection, fragments);
+      if (!assetPlan) return null;
+      plan.push({ kind: "media_gallery", responseKey, field, nested: assetPlan });
+      continue;
+    }
+
+    return null;
+  }
+
+  return plan;
 }
 
 function buildSelectionPlan(
@@ -277,43 +639,9 @@ function buildSelectionPlan(
   metadata: PublishedFastPathMetadata,
   fragments: Map<string, FragmentDefinitionNode>,
 ): readonly SelectionPlan[] | null {
-  const selectedFields = collectFields(fieldNode.selectionSet, fragments);
-  if (selectedFields.length === 0) return null;
-
-  const plan: SelectionPlan[] = [];
-  for (const selectedField of selectedFields) {
-    const responseKey = selectedField.alias?.value ?? selectedField.name.value;
-
-    if (selectedField.name.value === "id") {
-      if (selectedField.selectionSet) return null;
-      plan.push({ kind: "id", responseKey });
-      continue;
-    }
-
-    if (selectedField.name.value === "__typename" || selectedField.name.value.startsWith("_")) {
-      return null;
-    }
-
-    const field = meta.fieldsByGqlName.get(selectedField.name.value);
-    if (!field) return null;
-
-    if (field.field_type === "link") {
-      if (!selectedField.selectionSet) return null;
-      const targets = getLinkTargets(field.validators);
-      if (!targets || targets.length !== 1) return null;
-      const targetMeta = metadata.modelsByRootField.get(toCamelCase(targets[0]));
-      if (!targetMeta) return null;
-      const nested = buildSelectionPlan(targetMeta, selectedField, metadata, fragments);
-      if (!nested || nested.some((selection) => selection.kind === "link")) return null;
-      plan.push({ kind: "link", responseKey, field, target: targetMeta, nested });
-      continue;
-    }
-
-    if (selectedField.selectionSet || !isSimpleScalarField(field)) return null;
-    plan.push({ kind: "scalar", responseKey, field });
-  }
-
-  return plan;
+  const selections = collectObjectSelections(fieldNode.selectionSet, fragments, meta.gqlTypeName);
+  if (!selections || selections.length === 0) return null;
+  return buildSelectionPlanFromSelections(meta, selections, metadata, fragments);
 }
 
 function buildSnapshotValueSql(tableAlias: string, field: ParsedFieldRow) {
@@ -324,8 +652,13 @@ function buildSnapshotValueSql(tableAlias: string, field: ParsedFieldRow) {
   return raw;
 }
 
-function buildJsonObjectSql(tableAlias: string, plan: readonly SelectionPlan[]): string | null {
+function buildJsonObjectSql(
+  tableAlias: string,
+  plan: readonly SelectionPlan[],
+  metadata: PublishedFastPathMetadata,
+): string | null {
   const parts: string[] = [];
+
   for (const selection of plan) {
     switch (selection.kind) {
       case "id":
@@ -335,27 +668,50 @@ function buildJsonObjectSql(tableAlias: string, plan: readonly SelectionPlan[]):
         parts.push(`${sqlQuote(selection.responseKey)}, ${buildSnapshotValueSql(tableAlias, selection.field)}`);
         break;
       case "link": {
-        const nestedSql = buildJsonObjectSql("linked", selection.nested);
+        const targetMeta = metadata.contentModelsByApiKey.get(selection.targetApiKeys[0]);
+        if (!targetMeta) return null;
+        const nestedSql = buildJsonObjectSql("linked", selection.nested, metadata);
         if (!nestedSql) return null;
         parts.push(
           `${sqlQuote(selection.responseKey)}, (` +
-          `SELECT ${nestedSql} FROM "${selection.target.tableName}" linked ` +
+          `SELECT ${nestedSql} FROM "${targetMeta.tableName}" linked ` +
           `WHERE linked.id = json_extract(${tableAlias}."_published_snapshot", '$.${selection.field.api_key}') ` +
           `AND linked."_status" IN ('published', 'updated') LIMIT 1)`
         );
         break;
       }
+      case "links":
+      case "media":
+      case "media_gallery":
+      case "structured_text":
+        return null;
     }
   }
+
   return parts.length > 0 ? `json_object(${parts.join(", ")})` : null;
 }
 
 async function loadMetadata(sqlLayer: Layer.Layer<SqlClient.SqlClient>): Promise<PublishedFastPathMetadata> {
+  return loadMetadataWithMetrics(sqlLayer);
+}
+
+async function loadMetadataWithMetrics(
+  sqlLayer: Layer.Layer<SqlClient.SqlClient>,
+  metrics?: FastPathSqlMetrics,
+): Promise<PublishedFastPathMetadata> {
   const loaded = await Effect.runPromise(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      const models = yield* sql.unsafe<ModelRow>("SELECT * FROM models WHERE is_block = 0 ORDER BY created_at");
+      const modelsStartedAt = performance.now();
+      const models = yield* sql.unsafe<ModelRow>("SELECT * FROM models ORDER BY created_at");
+      if (metrics) {
+        recordFastPathSqlMetrics(metrics, "metadata", Number((performance.now() - modelsStartedAt).toFixed(3)));
+      }
+      const fieldsStartedAt = performance.now();
       const fields = yield* sql.unsafe<FieldRow>("SELECT * FROM fields ORDER BY position");
+      if (metrics) {
+        recordFastPathSqlMetrics(metrics, "metadata", Number((performance.now() - fieldsStartedAt).toFixed(3)));
+      }
       return { models, fields };
     }).pipe(Effect.provide(sqlLayer), Effect.orDie),
   );
@@ -369,9 +725,13 @@ async function loadMetadata(sqlLayer: Layer.Layer<SqlClient.SqlClient>): Promise
   }
 
   const modelsByRootField = new Map<string, FastPathModelMeta>();
+  const contentModelsByApiKey = new Map<string, FastPathModelMeta>();
+  const blockModelsByApiKey = new Map<string, FastPathModelMeta>();
+  const blockModelsByGqlTypeName = new Map<string, FastPathModelMeta>();
+  const contentTypeNames = new Map<string, string>();
+
   for (const model of loaded.models) {
     const fields = fieldsByModelId.get(model.id) ?? [];
-    const baseTypeName = toTypeName(model.api_key);
     const fieldsByGqlName = new Map<string, ParsedFieldRow>();
     const fieldNameMap: Record<string, string> = {};
     const localizedCamelKeys = new Set<string>();
@@ -387,9 +747,13 @@ async function loadMetadata(sqlLayer: Layer.Layer<SqlClient.SqlClient>): Promise
       if (field.field_type === "media") jsonObjectIdFields.add(gqlName);
     }
 
+    const gqlTypeName = model.is_block === 1 ? `${toTypeName(model.api_key)}Record` : toContentTypeName(model.api_key);
+    const baseTypeName = toTypeName(model.api_key);
     const meta: FastPathModelMeta = {
       model,
-      tableName: `content_${model.api_key}`,
+      apiKey: model.api_key,
+      tableName: `${model.is_block === 1 ? "block" : "content"}_${model.api_key}`,
+      gqlTypeName,
       singleName: toCamelCase(model.api_key),
       listName: `all${pluralize(baseTypeName)}`,
       metaName: `_all${pluralize(baseTypeName)}Meta`,
@@ -401,17 +765,30 @@ async function loadMetadata(sqlLayer: Layer.Layer<SqlClient.SqlClient>): Promise
       jsonObjectIdFields,
     };
 
+    if (model.is_block === 1) {
+      blockModelsByApiKey.set(meta.apiKey, meta);
+      blockModelsByGqlTypeName.set(meta.gqlTypeName, meta);
+      continue;
+    }
+
+    contentTypeNames.set(meta.apiKey, meta.gqlTypeName);
+    contentModelsByApiKey.set(meta.apiKey, meta);
     modelsByRootField.set(meta.singleName, meta);
     modelsByRootField.set(meta.listName, meta);
     modelsByRootField.set(meta.metaName, meta);
   }
 
-  return { modelsByRootField };
+  return {
+    modelsByRootField,
+    contentModelsByApiKey,
+    blockModelsByApiKey,
+    blockModelsByGqlTypeName,
+    contentTypeNames,
+    contentApiKeys: [...contentModelsByApiKey.keys()],
+  };
 }
 
 function compilePlan(request: GraphqlFastPathRequest, metadata: PublishedFastPathMetadata): CompiledFastPathPlan | null {
-  if (!isSupportedQueryText(request.query)) return null;
-
   const document = parse(request.query);
   const operation = getOperation(document, request.operationName);
   if (!operation || operation.operation !== "query") return null;
@@ -432,8 +809,8 @@ function compilePlan(request: GraphqlFastPathRequest, metadata: PublishedFastPat
     }
 
     const selectionPlan = buildSelectionPlan(meta, selection, metadata, fragments);
-    const objectSql = selectionPlan ? buildJsonObjectSql("row_data", selectionPlan) : null;
-    if (!selectionPlan || !objectSql) return null;
+    if (!selectionPlan) return null;
+    const objectSql = buildJsonObjectSql("row_data", selectionPlan, metadata);
 
     if (selection.name.value === meta.listName) {
       const first = compileIntArg(selection, "first");
@@ -448,6 +825,7 @@ function compilePlan(request: GraphqlFastPathRequest, metadata: PublishedFastPat
         first,
         skip,
         filter: null,
+        selectionPlan,
         objectSql,
       });
       continue;
@@ -464,6 +842,7 @@ function compilePlan(request: GraphqlFastPathRequest, metadata: PublishedFastPat
       first: null,
       skip: null,
       filter,
+      selectionPlan,
       objectSql,
     });
   }
@@ -475,11 +854,17 @@ async function runSql<A extends object>(
   sqlLayer: Layer.Layer<SqlClient.SqlClient>,
   sqlText: string,
   params: readonly unknown[],
+  options?: { readonly metrics?: FastPathSqlMetrics; readonly category?: FastPathSqlCategory },
 ): Promise<readonly A[]> {
+  const startedAt = performance.now();
   return Effect.runPromise(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      return yield* sql.unsafe<A>(sqlText, params);
+      const rows = yield* sql.unsafe<A>(sqlText, params);
+      if (options?.metrics && options.category) {
+        recordFastPathSqlMetrics(options.metrics, options.category, Number((performance.now() - startedAt).toFixed(3)));
+      }
+      return rows;
     }).pipe(Effect.provide(sqlLayer), Effect.orDie),
   );
 }
@@ -488,7 +873,7 @@ function buildFilterSql(filter: FilterEqPlan | null, variables: Record<string, u
   if (!filter) return { sql: "", params: [] as unknown[] };
   const value = resolveValueArg(filter.value, variables);
   if (filter.fieldKey === "id") {
-    return { sql: ` AND row_data.id = ?`, params: [value] };
+    return { sql: " AND row_data.id = ?", params: [value] };
   }
   if (!filter.field) return { sql: "", params: [] as unknown[] };
   const compareValue = filter.field.field_type === "boolean" && typeof value === "boolean"
@@ -500,27 +885,523 @@ function buildFilterSql(filter: FilterEqPlan | null, variables: Record<string, u
   };
 }
 
-function buildRootResultSql(root: RootPlan, variables: Record<string, unknown>) {
-  if (root.kind === "meta") {
-    return {
-      sql: `(SELECT json_object('count', COUNT(*)) FROM "${root.meta.tableName}" WHERE "_status" IN ('published', 'updated'))`,
-      params: [] as unknown[],
-    };
+function buildAssetUrl(assetBaseUrl: string, r2Key: string): string {
+  return `${assetBaseUrl}/${r2Key}`;
+}
+
+async function fetchAssetMap(ctx: FastPathExecutionContext, ids: readonly string[]) {
+  const uniqueIds = [...new Set(ids.filter((id) => !ctx.assetCache.has(id)))];
+  if (uniqueIds.length > 0) {
+    const placeholders = uniqueIds.map(() => "?").join(", ");
+    const rows = await runSql<AssetRow>(
+      ctx.sqlLayer,
+      `SELECT * FROM assets WHERE id IN (${placeholders})`,
+      uniqueIds,
+      { metrics: ctx.metrics, category: "asset" },
+    );
+    const foundIds = new Set<string>();
+    for (const row of rows) {
+      ctx.assetCache.set(row.id, row);
+      foundIds.add(row.id);
+    }
+    for (const id of uniqueIds) {
+      if (!foundIds.has(id)) ctx.assetCache.set(id, null);
+    }
   }
+
+  const result = new Map<string, AssetRow>();
+  for (const id of ids) {
+    const asset = ctx.assetCache.get(id);
+    if (asset) result.set(id, asset);
+  }
+  return result;
+}
+
+function getLinkedRecordCacheKey(targetApiKeys: readonly string[], id: string) {
+  return `published:${targetApiKeys.join(",")}:${id}`;
+}
+
+function createDependencyAccumulator(): DependencyAccumulator {
+  return {
+    linkRequests: new Map(),
+    assetIds: new Set(),
+  };
+}
+
+function addPendingLinkRequest(
+  pending: DependencyAccumulator,
+  targetApiKeys: readonly string[],
+  ids: readonly string[],
+  nestedPlan?: readonly SelectionPlan[],
+) {
+  if (ids.length === 0) return;
+  const key = targetApiKeys.join(",");
+  const existing = pending.linkRequests.get(key) ?? {
+    targetApiKeys,
+    ids: new Set<string>(),
+    nestedPlans: [],
+  };
+  for (const id of ids) {
+    if (id.length > 0) existing.ids.add(id);
+  }
+  if (nestedPlan && !existing.nestedPlans.some((plan) => plan === nestedPlan)) {
+    existing.nestedPlans.push(nestedPlan);
+  }
+  pending.linkRequests.set(key, existing);
+}
+
+function collectStructuredTextDependencies(
+  metadata: PublishedFastPathMetadata,
+  rawValue: unknown,
+  plan: Extract<SelectionPlan, { kind: "structured_text" }>,
+  pending: DependencyAccumulator,
+): void {
+  const parsed = parseJsonValue(rawValue);
+  if (!isStructuredTextEnvelope(parsed)) return;
+
+  const dast = parsed.value;
+  const envelopeBlocks = parsed.blocks;
+  if (!isDastLikeDocument(dast)) return;
+
+  if (plan.blocksPlan?.kind === "typed") {
+    for (const id of extractBlockIds(dast)) {
+      const rawBlock = envelopeBlocks[id];
+      if (!isRecord(rawBlock)) continue;
+      const blockApiKey = Reflect.get(rawBlock, "_type");
+      if (typeof blockApiKey !== "string") continue;
+      const nestedPlan = plan.blocksPlan.selectionsByBlockApiKey.get(blockApiKey);
+      if (nestedPlan) {
+        collectModelDependencies(metadata, rawBlock, nestedPlan, pending);
+      }
+    }
+  }
+
+  if (plan.inlineBlocksPlan?.kind === "typed") {
+    for (const id of extractInlineBlockIds(dast)) {
+      const rawBlock = envelopeBlocks[id];
+      if (!isRecord(rawBlock)) continue;
+      const blockApiKey = Reflect.get(rawBlock, "_type");
+      if (typeof blockApiKey !== "string") continue;
+      const nestedPlan = plan.inlineBlocksPlan.selectionsByBlockApiKey.get(blockApiKey);
+      if (nestedPlan) {
+        collectModelDependencies(metadata, rawBlock, nestedPlan, pending);
+      }
+    }
+  }
+
+  if (plan.linksSelected) {
+    addPendingLinkRequest(pending, metadata.contentApiKeys, extractLinkIds(dast));
+  }
+}
+
+function collectModelDependencies(
+  metadata: PublishedFastPathMetadata,
+  source: Record<string, unknown>,
+  plan: readonly SelectionPlan[],
+  pending: DependencyAccumulator,
+): void {
+  for (const selection of plan) {
+    switch (selection.kind) {
+      case "id":
+      case "scalar":
+        break;
+      case "link": {
+        const rawId = Reflect.get(source, selection.field.api_key);
+        if (typeof rawId === "string" && rawId.length > 0) {
+          addPendingLinkRequest(pending, selection.targetApiKeys, [rawId], selection.nested);
+        }
+        break;
+      }
+      case "links": {
+        const rawValue = parseJsonValue(Reflect.get(source, selection.field.api_key));
+        if (!Array.isArray(rawValue)) break;
+        addPendingLinkRequest(
+          pending,
+          selection.targetApiKeys,
+          rawValue.filter((entry): entry is string => typeof entry === "string"),
+          selection.nested,
+        );
+        break;
+      }
+      case "media": {
+        const reference = parseMediaFieldReference(Reflect.get(source, selection.field.api_key));
+        if (reference) pending.assetIds.add(reference.uploadId);
+        break;
+      }
+      case "media_gallery": {
+        for (const reference of parseMediaGalleryReferences(Reflect.get(source, selection.field.api_key))) {
+          pending.assetIds.add(reference.uploadId);
+        }
+        break;
+      }
+      case "structured_text":
+        collectStructuredTextDependencies(metadata, Reflect.get(source, selection.field.api_key), selection, pending);
+        break;
+    }
+  }
+}
+
+function pickAssetField(asset: AssetObject, fieldName: string): unknown {
+  switch (fieldName) {
+    case "mimeType":
+      return asset.mimeType;
+    case "focalPoint":
+      return asset.focalPoint;
+    case "customData":
+      return asset.customData;
+    case "_createdAt":
+      return asset._createdAt;
+    case "_updatedAt":
+      return asset._updatedAt;
+    case "_createdBy":
+      return asset._createdBy;
+    case "_updatedBy":
+      return asset._updatedBy;
+    default:
+      return Reflect.get(asset, fieldName);
+  }
+}
+
+async function projectAsset(
+  ctx: FastPathExecutionContext,
+  rawValue: unknown,
+  plan: AssetSelectionPlan,
+): Promise<Record<string, unknown> | null> {
+  const reference = parseMediaFieldReference(rawValue);
+  if (!reference) return null;
+  const assetMap = await fetchAssetMap(ctx, [reference.uploadId]);
+  const asset = assetMap.get(reference.uploadId);
+  if (!asset) return null;
+  const mergedAsset = mergeAssetWithMediaReference(asset, reference, (r2Key) => buildAssetUrl(ctx.assetBaseUrl, r2Key));
+  const result: Record<string, unknown> = {};
+  for (const field of plan.fields) {
+    result[field.responseKey] = pickAssetField(mergedAsset, field.fieldName);
+  }
+  return result;
+}
+
+async function projectAssetGallery(
+  ctx: FastPathExecutionContext,
+  rawValue: unknown,
+  plan: AssetSelectionPlan,
+): Promise<readonly Record<string, unknown>[]> {
+  const references = parseMediaGalleryReferences(rawValue);
+  if (references.length === 0) return [];
+  const assetMap = await fetchAssetMap(ctx, references.map((reference) => reference.uploadId));
+  const result: Record<string, unknown>[] = [];
+
+  for (const reference of references) {
+    const asset = assetMap.get(reference.uploadId);
+    if (!asset) continue;
+    const mergedAsset = mergeAssetWithMediaReference(asset, reference, (r2Key) => buildAssetUrl(ctx.assetBaseUrl, r2Key));
+    const projected: Record<string, unknown> = {};
+    for (const field of plan.fields) {
+      projected[field.responseKey] = pickAssetField(mergedAsset, field.fieldName);
+    }
+    result.push(projected);
+  }
+
+  return result;
+}
+
+async function loadLinkedRecordMap(
+  ctx: FastPathExecutionContext,
+  targetApiKeys: readonly string[],
+  ids: readonly string[],
+): Promise<Map<string, Record<string, unknown>>> {
+  return batchResolveLinkedRecordsCached({
+    runSql: <A>(effect: Effect.Effect<A, unknown, SqlClient.SqlClient>) => {
+      const startedAt = performance.now();
+      return Effect.runPromise(effect.pipe(Effect.provide(ctx.sqlLayer), Effect.orDie)).then((value) => {
+        recordFastPathSqlMetrics(ctx.metrics, "linked_record", Number((performance.now() - startedAt).toFixed(3)));
+        return value;
+      });
+    },
+    targetApiKeys: [...targetApiKeys],
+    ids: [...ids],
+    typeNames: ctx.metadata.contentTypeNames,
+    includeDrafts: false,
+    cache: ctx.linkedRecordCache,
+  });
+}
+
+async function preloadDependencies(
+  ctx: FastPathExecutionContext,
+  sources: readonly {
+    readonly source: Record<string, unknown>;
+    readonly plan: readonly SelectionPlan[];
+  }[],
+): Promise<void> {
+  const pending = createDependencyAccumulator();
+  for (const entry of sources) {
+    collectModelDependencies(ctx.metadata, entry.source, entry.plan, pending);
+  }
+
+  while (true) {
+    const uncachedAssetIds = [...pending.assetIds].filter((id) => !ctx.assetCache.has(id));
+    const uncachedLinkRequests = [...pending.linkRequests.values()].map((request) => ({
+      targetApiKeys: request.targetApiKeys,
+      nestedPlans: request.nestedPlans,
+      ids: [...request.ids].filter((id) => !ctx.linkedRecordCache.has(getLinkedRecordCacheKey(request.targetApiKeys, id))),
+    })).filter((request) => request.ids.length > 0);
+
+    if (uncachedAssetIds.length === 0 && uncachedLinkRequests.length === 0) {
+      return;
+    }
+
+    if (uncachedAssetIds.length > 0) {
+      await fetchAssetMap(ctx, uncachedAssetIds);
+    }
+
+    for (const request of uncachedLinkRequests) {
+      const fetched = await loadLinkedRecordMap(ctx, request.targetApiKeys, request.ids);
+      if (request.nestedPlans.length === 0) continue;
+      for (const record of fetched.values()) {
+        for (const nestedPlan of request.nestedPlans) {
+          collectModelDependencies(ctx.metadata, record, nestedPlan, pending);
+        }
+      }
+    }
+  }
+}
+
+async function projectModelSelections(
+  ctx: FastPathExecutionContext,
+  meta: FastPathModelMeta,
+  source: Record<string, unknown>,
+  plan: readonly SelectionPlan[],
+  explicitId?: string,
+): Promise<Record<string, unknown>> {
+  const result: Record<string, unknown> = {};
+
+  for (const selection of plan) {
+    switch (selection.kind) {
+      case "id":
+        result[selection.responseKey] = explicitId ?? source.id ?? null;
+        break;
+      case "scalar":
+        result[selection.responseKey] = parseJsonValue(Reflect.get(source, selection.field.api_key));
+        break;
+      case "link": {
+        const rawId = Reflect.get(source, selection.field.api_key);
+        if (typeof rawId !== "string" || rawId.length === 0) {
+          result[selection.responseKey] = null;
+          break;
+        }
+        const linkedMap = await loadLinkedRecordMap(ctx, selection.targetApiKeys, [rawId]);
+        const linked = linkedMap.get(rawId);
+        result[selection.responseKey] = linked
+          ? await projectModelSelections(
+            ctx,
+            ctx.metadata.contentModelsByApiKey.get(selection.targetApiKeys[0]) ?? meta,
+            linked,
+            selection.nested,
+          )
+          : null;
+        break;
+      }
+      case "links": {
+        const rawValue = parseJsonValue(Reflect.get(source, selection.field.api_key));
+        if (!Array.isArray(rawValue)) {
+          result[selection.responseKey] = [];
+          break;
+        }
+        const ids = rawValue.filter((entry): entry is string => typeof entry === "string");
+        const linkedMap = await loadLinkedRecordMap(ctx, selection.targetApiKeys, ids);
+        const projected: Record<string, unknown>[] = [];
+        const targetMeta = ctx.metadata.contentModelsByApiKey.get(selection.targetApiKeys[0]);
+        if (!targetMeta) {
+          result[selection.responseKey] = [];
+          break;
+        }
+        for (const id of ids) {
+          const linked = linkedMap.get(id);
+          if (!linked) continue;
+          projected.push(await projectModelSelections(ctx, targetMeta, linked, selection.nested));
+        }
+        result[selection.responseKey] = projected;
+        break;
+      }
+      case "media":
+        result[selection.responseKey] = await projectAsset(ctx, Reflect.get(source, selection.field.api_key), selection.nested);
+        break;
+      case "media_gallery":
+        result[selection.responseKey] = await projectAssetGallery(ctx, Reflect.get(source, selection.field.api_key), selection.nested);
+        break;
+      case "structured_text":
+        result[selection.responseKey] = await projectStructuredText(ctx, Reflect.get(source, selection.field.api_key), selection);
+        break;
+    }
+  }
+
+  return result;
+}
+
+async function projectStructuredTextBlockArray(
+  ctx: FastPathExecutionContext,
+  envelopeBlocks: Record<string, unknown>,
+  ids: readonly string[],
+  plan: StructuredTextBlocksPlan,
+): Promise<readonly unknown[]> {
+  const result: unknown[] = [];
+
+  for (const id of ids) {
+    const raw = envelopeBlocks[id];
+    if (!isRecord(raw)) continue;
+    const blockApiKeyValue = Reflect.get(raw, "_type");
+    const typename = typeof blockApiKeyValue === "string" ? `${toTypeName(blockApiKeyValue)}Record` : undefined;
+
+    if (plan.kind === "generic") {
+      result.push({
+        id,
+        ...raw,
+        ...(typename ? { __typename: typename } : {}),
+      });
+      continue;
+    }
+
+    const projected: Record<string, unknown> = {};
+    if (plan.includeTypename && typename) {
+      projected.__typename = typename;
+    }
+
+    if (typeof blockApiKeyValue === "string") {
+      const blockMeta = ctx.metadata.blockModelsByApiKey.get(blockApiKeyValue);
+      const nestedPlan = plan.selectionsByBlockApiKey.get(blockApiKeyValue);
+      if (blockMeta && nestedPlan) {
+        const nestedObject = await projectModelSelections(ctx, blockMeta, raw, nestedPlan, id);
+        for (const [key, value] of Object.entries(nestedObject)) {
+          projected[key] = value;
+        }
+      }
+    }
+
+    result.push(projected);
+  }
+
+  return result;
+}
+
+async function projectStructuredText(
+  ctx: FastPathExecutionContext,
+  rawValue: unknown,
+  plan: Extract<SelectionPlan, { kind: "structured_text" }>,
+): Promise<Record<string, unknown> | null> {
+  const parsed = parseJsonValue(rawValue);
+  if (!isStructuredTextEnvelope(parsed)) return null;
+
+  const dast = parsed.value;
+  const envelopeBlocks = parsed.blocks;
+  if (!isDastLikeDocument(dast)) return null;
+  const result: Record<string, unknown> = {};
+
+  if (plan.valueSelected) {
+    result.value = dast;
+  }
+
+  if (plan.blocksPlan) {
+    result.blocks = await projectStructuredTextBlockArray(
+      ctx,
+      envelopeBlocks,
+      extractBlockIds(dast),
+      plan.blocksPlan,
+    );
+  }
+
+  if (plan.inlineBlocksPlan) {
+    result.inlineBlocks = await projectStructuredTextBlockArray(
+      ctx,
+      envelopeBlocks,
+      extractInlineBlockIds(dast),
+      plan.inlineBlocksPlan,
+    );
+  }
+
+  if (plan.linksSelected) {
+    const linkIds = extractLinkIds(dast);
+    const linkedMap = await loadLinkedRecordMap(ctx, ctx.metadata.contentApiKeys, linkIds);
+    result.links = linkIds.map((id) => linkedMap.get(id) ?? null).filter((value): value is Record<string, unknown> => value !== null);
+  }
+
+  return result;
+}
+
+async function executeContentRoot(
+  ctx: FastPathExecutionContext,
+  root: Extract<RootPlan, { kind: "list" | "singleton" }>,
+  variables: Record<string, unknown>,
+): Promise<unknown> {
+  const filter = buildFilterSql(root.filter, variables);
 
   if (root.kind === "list") {
     const orderBy = resolveStringListArg(root.orderBy, variables);
     const compiledOrderBy = compileOrderBy(orderBy ?? (typeof root.meta.model.ordering === "string" ? [root.meta.model.ordering] : undefined), buildFilterOpts(root.meta));
+    let sqlText = `SELECT * FROM "${root.meta.tableName}" row_data WHERE row_data."_status" IN ('published', 'updated')${filter.sql}`;
+    if (compiledOrderBy) {
+      sqlText += ` ORDER BY ${compiledOrderBy}`;
+    }
+    const params: unknown[] = [...filter.params, Math.min(resolveIntArg(root.first, variables) ?? 20, 500)];
+    sqlText += " LIMIT ?";
+    const skip = resolveIntArg(root.skip, variables);
+    if (skip && skip > 0) {
+      sqlText += " OFFSET ?";
+      params.push(skip);
+    }
+    const rows = await runSql<ContentRow>(ctx.sqlLayer, sqlText, params, { metrics: ctx.metrics, category: "root" });
+    const mergedRows = rows.map((row) => decodeSnapshot(deserializeRecord(row), false));
+    await preloadDependencies(
+      ctx,
+      mergedRows.map((source) => ({ source, plan: root.selectionPlan })),
+    );
+    const result: Record<string, unknown>[] = [];
+    for (const merged of mergedRows) {
+      result.push(await projectModelSelections(ctx, root.meta, merged, root.selectionPlan));
+    }
+    return result;
+  }
+
+  const rows = await runSql<ContentRow>(
+    ctx.sqlLayer,
+    `SELECT * FROM "${root.meta.tableName}" row_data WHERE row_data."_status" IN ('published', 'updated')${filter.sql} LIMIT 1`,
+    filter.params,
+    { metrics: ctx.metrics, category: "root" },
+  );
+  const row = rows[0];
+  if (!row) return null;
+  const merged = decodeSnapshot(deserializeRecord(row), false);
+  await preloadDependencies(ctx, [{ source: merged, plan: root.selectionPlan }]);
+  return projectModelSelections(ctx, root.meta, merged, root.selectionPlan);
+}
+
+function buildRootResultSql(
+  root: RootPlan,
+  variables: Record<string, unknown>,
+): { readonly sql: string; readonly params: readonly unknown[] } | null {
+  if (root.kind === "meta") {
+    return {
+      sql: `(SELECT json_object('count', COUNT(*)) FROM "${root.meta.tableName}" WHERE "_status" IN ('published', 'updated'))`,
+      params: [],
+    };
+  }
+
+  if (!root.objectSql) return null;
+
+  if (root.kind === "list") {
+    const orderBy = resolveStringListArg(root.orderBy, variables);
+    const compiledOrderBy = compileOrderBy(
+      orderBy ?? (typeof root.meta.model.ordering === "string" ? [root.meta.model.ordering] : undefined),
+      buildFilterOpts(root.meta),
+    );
     const filter = buildFilterSql(root.filter, variables);
     let innerSql = `SELECT ${root.objectSql} AS item_json FROM "${root.meta.tableName}" row_data WHERE row_data."_status" IN ('published', 'updated')${filter.sql}`;
     if (compiledOrderBy) {
       innerSql += ` ORDER BY ${compiledOrderBy}`;
     }
     const params: unknown[] = [...filter.params, Math.min(resolveIntArg(root.first, variables) ?? 20, 500)];
-    innerSql += ` LIMIT ?`;
+    innerSql += " LIMIT ?";
     const skip = resolveIntArg(root.skip, variables);
     if (skip && skip > 0) {
-      innerSql += ` OFFSET ?`;
+      innerSql += " OFFSET ?";
       params.push(skip);
     }
     return {
@@ -538,28 +1419,70 @@ function buildRootResultSql(root: RootPlan, variables: Record<string, unknown>) 
 
 async function executePlan(
   sqlLayer: Layer.Layer<SqlClient.SqlClient>,
+  metadata: PublishedFastPathMetadata,
   plan: CompiledFastPathPlan,
   variables: Record<string, unknown>,
-): Promise<{ data: Record<string, unknown> }> {
-  const jsonParts: string[] = [];
-  const params: unknown[] = [];
+  metrics: FastPathSqlMetrics,
+  options?: PublishedFastPathOptions,
+): Promise<FastPathExecutionResult> {
+  const ctx: FastPathExecutionContext = {
+    sqlLayer,
+    metadata,
+    assetBaseUrl: (options?.assetBaseUrl ?? "").replace(/\/$/, ""),
+    assetCache: new Map(),
+    linkedRecordCache: new Map(),
+    metrics,
+  };
+  const data: Record<string, unknown> = {};
+  const sqlRoots: RootPlan[] = [];
+  const recursiveRoots: Extract<RootPlan, { kind: "list" | "singleton" }>[] = [];
 
   for (const root of plan.roots) {
-    const resultSql = buildRootResultSql(root, variables);
-    jsonParts.push(`${sqlQuote(root.responseKey)}, json(COALESCE(${resultSql.sql}, 'null'))`);
-    params.push(...resultSql.params);
+    if (root.kind === "meta" || root.objectSql) {
+      sqlRoots.push(root);
+    } else {
+      recursiveRoots.push(root);
+    }
   }
 
-  const rows = await runSql<{ result: string }>(
-    sqlLayer,
-    `SELECT json_object(${jsonParts.join(", ")}) AS result`,
-    params,
-  );
-  const data = parseJsonValue(rows[0]?.result);
-  return { data: isRecord(data) ? data : {} };
+  if (sqlRoots.length > 0) {
+    const jsonParts: string[] = [];
+    const params: unknown[] = [];
+
+    for (const root of sqlRoots) {
+      const resultSql = buildRootResultSql(root, variables);
+      if (!resultSql) continue;
+      jsonParts.push(`${sqlQuote(root.responseKey)}, json(COALESCE(${resultSql.sql}, 'null'))`);
+      params.push(...resultSql.params);
+    }
+
+    if (jsonParts.length > 0) {
+      const rows = await runSql<{ result: string }>(
+        sqlLayer,
+        `SELECT json_object(${jsonParts.join(", ")}) AS result`,
+        params,
+        {
+          metrics: ctx.metrics,
+          category: sqlRoots.every((root) => root.kind === "meta") ? "meta" : "root",
+        },
+      );
+      const sqlData = parseJsonValue(rows[0]?.result);
+      if (isRecord(sqlData)) {
+        for (const [key, value] of Object.entries(sqlData)) {
+          data[key] = value;
+        }
+      }
+    }
+  }
+
+  for (const root of recursiveRoots) {
+    data[root.responseKey] = await executeContentRoot(ctx, root, variables);
+  }
+
+  return { response: { data }, metrics: ctx.metrics };
 }
 
-export function createPublishedFastPath(sqlLayer: Layer.Layer<SqlClient.SqlClient>) {
+export function createPublishedFastPath(sqlLayer: Layer.Layer<SqlClient.SqlClient>, options?: PublishedFastPathOptions) {
   let metadataPromise: Promise<PublishedFastPathMetadata> | null = null;
   const planCache = new Map<string, CompiledFastPathPlan | null>();
   const planCacheOrder: string[] = [];
@@ -594,11 +1517,21 @@ export function createPublishedFastPath(sqlLayer: Layer.Layer<SqlClient.SqlClien
   }
 
   return {
-    async tryExecute(request: GraphqlFastPathRequest, options: { includeDrafts: boolean; excludeInvalid: boolean }) {
-      if (options.includeDrafts || options.excludeInvalid) return null;
+    async tryExecute(request: GraphqlFastPathRequest, executionOptions: { includeDrafts: boolean; excludeInvalid: boolean }) {
+      if (executionOptions.includeDrafts || executionOptions.excludeInvalid) return null;
+      const metrics = createFastPathSqlMetrics();
+      const metadata = metadataPromise
+        ? await getMetadata()
+        : await loadMetadataWithMetrics(sqlLayer, metrics).then((loaded) => {
+          metadataPromise = Promise.resolve(loaded);
+          return loaded;
+        }).catch((error) => {
+          metadataPromise = null;
+          throw error;
+        });
       const plan = await compile(request);
       if (!plan) return null;
-      return executePlan(sqlLayer, plan, request.variables ?? {});
+      return executePlan(sqlLayer, metadata, plan, request.variables ?? {}, metrics, options);
     },
   };
 }
