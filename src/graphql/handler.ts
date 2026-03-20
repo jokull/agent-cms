@@ -5,6 +5,7 @@ import { SqlClient } from "@effect/sql";
 import { buildGraphQLSchema } from "./schema-builder.js";
 import { enforceQueryLimits } from "./query-limits.js";
 import { getSqlMetrics, withSqlMetrics } from "./sql-metrics.js";
+import { createPublishedFastPath } from "./published-fast-path.js";
 
 export type CredentialType = "admin" | "editor" | null;
 
@@ -28,14 +29,19 @@ interface SchemaTiming {
 interface GraphqlRequestBody {
   operationName?: string | null;
   query?: string | null;
+  variables?: Record<string, unknown> | null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isGraphqlRequestBody(value: unknown): value is GraphqlRequestBody {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const record = value as Record<string, unknown>;
-  const operationNameValid = record.operationName === undefined || record.operationName === null || typeof record.operationName === "string";
-  const queryValid = record.query === undefined || record.query === null || typeof record.query === "string";
-  return operationNameValid && queryValid;
+  if (!isRecord(value)) return false;
+  const operationNameValid = value.operationName === undefined || value.operationName === null || typeof value.operationName === "string";
+  const queryValid = value.query === undefined || value.query === null || typeof value.query === "string";
+  const variablesValid = value.variables === undefined || value.variables === null || isRecord(value.variables);
+  return operationNameValid && queryValid && variablesValid;
 }
 
 function inferOperationName(query: string | null | undefined): string | null {
@@ -106,6 +112,8 @@ export function createGraphQLHandler(
     };
   }
 
+  const publishedFastPath = createPublishedFastPath(sqlLayer);
+
   const yoga = createYoga({
     // Yoga's schema function type expects the full context, but our schema is context-agnostic
     schema: (() => getSchema()) as YogaSchemaDefinition<object, GraphQLContext>,
@@ -152,6 +160,36 @@ export function createGraphQLHandler(
     const traceEnabled = request.headers.get("X-Bench-Trace") === "1" || debugSql;
 
     if (!traceEnabled) {
+      const credentialType = request.headers.get("X-Credential-Type") as CredentialType;
+      const headerDrafts = request.headers.get("X-Include-Drafts") === "true";
+      const includeDrafts = credentialType === "editor" ? true
+        : credentialType === "admin" ? headerDrafts
+        : false;
+      const excludeInvalid = request.headers.get("X-Exclude-Invalid") === "true";
+      const contentType = request.headers.get("content-type") ?? "";
+      if (request.method === "POST" && contentType.includes("application/json")) {
+        try {
+          const body = await request.clone().json();
+          if (isGraphqlRequestBody(body) && typeof body.query === "string") {
+            const errors = enforceQueryLimits(body.query, queryLimits);
+            if (errors.length === 0) {
+              const fastPathResult = await publishedFastPath.tryExecute({
+                query: body.query,
+                variables: body.variables ?? undefined,
+                operationName: body.operationName,
+              }, {
+                includeDrafts,
+                excludeInvalid,
+              });
+              if (fastPathResult) {
+                return Response.json(fastPathResult);
+              }
+            }
+          }
+        } catch {
+          // Fall through to Yoga when the request body is unsupported.
+        }
+      }
       return yoga.handle(request);
     }
 
@@ -225,6 +263,17 @@ export function createGraphQLHandler(
     variables?: Record<string, unknown>,
     context?: { includeDrafts?: boolean; excludeInvalid?: boolean }
   ): Promise<{ data: unknown; errors?: ReadonlyArray<{ message: string }> }> {
+    const fastPathResult = await publishedFastPath.tryExecute({
+      query,
+      variables,
+      operationName: null,
+    }, {
+      includeDrafts: context?.includeDrafts ?? false,
+      excludeInvalid: context?.excludeInvalid ?? false,
+    });
+    if (fastPathResult) {
+      return fastPathResult;
+    }
     const schema = await getSchema();
     const document = parse(query);
     const validationErrors = validate(schema, document);
