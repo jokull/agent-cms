@@ -1,5 +1,5 @@
 import { pathToFileURL } from "node:url";
-import { Effect } from "effect";
+import { Data, Effect } from "effect";
 
 import {
   IMPORT_LOCALE,
@@ -41,6 +41,15 @@ let assetImportPromises = new Map();
 const LINKED_IMPORT_CONCURRENCY = 4;
 const ASSET_IMPORT_CONCURRENCY = 6;
 let runStartedAt = new Date().toISOString();
+
+class ImportInfrastructureError extends Data.TaggedError("ImportInfrastructureError") {}
+class ImportRootRecordError extends Data.TaggedError("ImportRootRecordError") {}
+class ImportIntegrityError extends Data.TaggedError("ImportIntegrityError") {}
+class ImportVerificationError extends Data.TaggedError("ImportVerificationError") {}
+
+function errorMessage(cause) {
+  return cause instanceof Error ? cause.message : String(cause);
+}
 
 function checkpointFilename() {
   return `checkpoint-${model}-${skip}-${limit}-${IMPORT_LOCALE}.json`;
@@ -96,21 +105,46 @@ async function saveCheckpoint(status, extra = {}) {
   return writeJson(checkpointFilename(), checkpointSnapshot(status, extra));
 }
 
-function promiseEffect(thunk) {
-  return Effect.tryPromise({
-    try: thunk,
-    catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+function readCheckpointEffect() {
+  return promiseEffect(() => readJson(checkpointFilename()), "read checkpoint", {
+    checkpoint: checkpointFilename(),
   });
 }
 
-async function runConcurrent(items, fn, concurrency = LINKED_IMPORT_CONCURRENCY) {
-  await Effect.runPromise(
-    Effect.forEach(items, (item) => promiseEffect(() => fn(item)), { concurrency }).pipe(Effect.asVoid),
+function saveCheckpointEffect(status, extra = {}) {
+  return promiseEffect(() => saveCheckpoint(status, extra), "write checkpoint", {
+    checkpoint: checkpointFilename(),
+    status,
+  });
+}
+
+function writeFindingsEffect() {
+  return promiseEffect(
+    () => writeJson(`findings-${model}-${skip}-${limit}.json`, findings),
+    "write findings",
+    { model, skip, limit },
   );
 }
 
-async function runTasks(tasks, concurrency = LINKED_IMPORT_CONCURRENCY) {
-  await runConcurrent(tasks, (task) => task(), concurrency);
+function promiseEffect(thunk, label = "import operation", context = {}) {
+  return Effect.tryPromise({
+    try: thunk,
+    catch: (cause) =>
+      new ImportInfrastructureError({
+        operation: label,
+        message: `${label} failed: ${errorMessage(cause)}`,
+        cause,
+        ...context,
+      }),
+  });
+}
+
+function runConcurrentEffect(items, fn, concurrency = LINKED_IMPORT_CONCURRENCY) {
+  return Effect.forEach(items, (item) => promiseEffect(() => fn(item)), { concurrency }).pipe(Effect.asVoid);
+}
+
+function runTasksEffect(tasks, concurrency = LINKED_IMPORT_CONCURRENCY) {
+  return runConcurrentEffect(tasks, (task) => task(), concurrency);
 }
 
 function noteFinding(record) {
@@ -477,7 +511,7 @@ async function importAssetsFromRecord(record) {
     pushAsset(block.heroImage);
   }
 
-  await runConcurrent(candidates, async (asset) => {
+  await Effect.runPromise(runConcurrentEffect(candidates, async (asset) => {
     const result = await ensureAssetOnce(asset);
     if (result?.metadataOnly) {
       noteFinding({
@@ -486,7 +520,7 @@ async function importAssetsFromRecord(record) {
         detail: `Imported metadata only for asset '${asset.filename}'. Original blob could not be copied this run.${result.uploadError ? ` Cause: ${result.uploadError}` : ""}`,
       });
     }
-  }, ASSET_IMPORT_CONCURRENCY);
+  }, ASSET_IMPORT_CONCURRENCY));
 }
 
 async function importSiteSettings() {
@@ -550,7 +584,7 @@ async function importSiteSettings() {
 }
 
 async function importAssetRefs(...refs) {
-  await runConcurrent(refs, async (ref) => {
+  await Effect.runPromise(runConcurrentEffect(refs, async (ref) => {
     const asset = assetFromUploadRef(ref);
     if (!asset?.id) return;
     const result = await ensureAssetOnce(asset);
@@ -561,7 +595,7 @@ async function importAssetRefs(...refs) {
         detail: `Imported metadata only for asset '${asset.id}'. Original blob could not be copied this run.${result.uploadError ? ` Cause: ${result.uploadError}` : ""}`,
       });
     }
-  }, ASSET_IMPORT_CONCURRENCY);
+  }, ASSET_IMPORT_CONCURRENCY));
 }
 
 async function importContributorById(id) {
@@ -595,14 +629,14 @@ async function importPlaceById(id) {
     const place = await datoGetItem(id);
     const content = place.attributes.content?.[IMPORT_LOCALE] ?? null;
     await importAssetRefs(place.attributes.hero_image, ...(place.attributes.gallery ?? []));
-    await runTasks([
+    await Effect.runPromise(runTasksEffect([
       ...(place.attributes.locations ?? []).map((locationId) => () => importLocationById(locationId)),
       ...(place.attributes.tours ?? []).map((tourId) => () => importTourById(tourId)),
       ...(place.attributes.blogs ?? []).map((articleId) => () => importArticleById(articleId)),
       ...(place.attributes.nearby_places ?? []).map((nearbyPlaceId) => () => importPlaceById(nearbyPlaceId)),
       ...localizedIds(place.attributes.questions).map((qaId) => () => importQaById(qaId)),
       ...(content ? [() => importDependenciesFromRawBody(content)] : []),
-    ]);
+    ]));
     await upsertImportedRecord("place", place.id, {
       ...(localizedInput(localizedValue(place.attributes.title)) ? { title: localizedInput(localizedValue(place.attributes.title)) } : {}),
       ...(place.attributes.slug == null ? {} : { slug: place.attributes.slug }),
@@ -655,12 +689,12 @@ async function importArticleById(id) {
   await importRecordOnce("article", id, async () => {
     const article = await datoGetItem(id);
     const body = article.attributes.body?.[IMPORT_LOCALE] ?? null;
-    await runTasks([
+    await Effect.runPromise(runTasksEffect([
       ...(article.attributes.contributor ? [() => importContributorById(article.attributes.contributor)] : []),
       ...(article.attributes.location ? [() => importLocationById(article.attributes.location)] : []),
       ...localizedIds(article.attributes.questions).map((qaId) => () => importQaById(qaId)),
       ...(body ? [() => importDependenciesFromRawBody(body)] : []),
-    ]);
+    ]));
     await importAssetRefs(article.attributes.hero, article.attributes.thumbnail);
     await upsertImportedRecord("article", article.id, {
       ...(localizedInput(localizedValue(article.attributes.title)) ? { title: localizedInput(localizedValue(article.attributes.title)) } : {}),
@@ -713,18 +747,18 @@ async function ensureAssetOnce(asset) {
 }
 
 async function importNestedSupportRecords(record) {
-  await runTasks([
+  await Effect.runPromise(runTasksEffect([
     ...(record.contributor?.id ? [() => importContributorById(record.contributor.id)] : []),
     ...(record.location?.id ? [() => importLocationById(record.location.id)] : []),
     ...(record.body?.blocks ?? []).flatMap((block) => [
       ...(block.tour?.id ? [() => importTourById(block.tour.id)] : []),
       ...(block.place?.id ? [() => importPlaceById(block.place.id)] : []),
     ]),
-  ]);
+  ]));
 }
 
 async function importDependenciesFromRawBody(dast) {
-  await runConcurrent(await getRawBlockItems(dast), async (block) => {
+  await Effect.runPromise(runConcurrentEffect(await getRawBlockItems(dast), async (block) => {
     const blockType = await datoGetItemTypeApiKey(block.relationships.item_type.data.id);
     if (blockType === "image") {
       await importAssetRefs(block.attributes.image);
@@ -751,7 +785,7 @@ async function importDependenciesFromRawBody(dast) {
       }
       return;
     }
-  });
+  }));
 }
 
 async function transformStructuredTextRaw(dast, scopeId) {
@@ -1017,14 +1051,14 @@ async function listSourceRecords(modelApiKey) {
       .filter((item) => !completedRootIds.has(item.id));
     return Effect.runPromise(Effect.forEach(items, (item) => promiseEffect(async () => {
       const content = item.attributes.content?.[IMPORT_LOCALE] ?? null;
-      await runTasks([
+      await Effect.runPromise(runTasksEffect([
         ...(item.attributes.locations ?? []).map((locationId) => () => importLocationById(locationId)),
         ...(item.attributes.tours ?? []).map((tourId) => () => importTourById(tourId)),
         ...(item.attributes.blogs ?? []).map((articleId) => () => importArticleById(articleId)),
         ...(item.attributes.nearby_places ?? []).map((nearbyPlaceId) => () => importPlaceById(nearbyPlaceId)),
         ...localizedIds(item.attributes.questions).map((qaId) => () => importQaById(qaId)),
         ...(content ? [() => importDependenciesFromRawBody(content)] : []),
-      ]);
+      ]));
       await importAssetRefs(item.attributes.hero_image, ...(item.attributes.gallery ?? []));
       return {
         id: item.id,
@@ -1050,12 +1084,12 @@ async function listSourceRecords(modelApiKey) {
       .filter((item) => !completedRootIds.has(item.id));
     return Effect.runPromise(Effect.forEach(items, (item) => promiseEffect(async () => {
       const body = item.attributes.body?.[IMPORT_LOCALE] ?? null;
-      await runTasks([
+      await Effect.runPromise(runTasksEffect([
         ...(item.attributes.contributor ? [() => importContributorById(item.attributes.contributor)] : []),
         ...(item.attributes.location ? [() => importLocationById(item.attributes.location)] : []),
         ...localizedIds(item.attributes.questions).map((qaId) => () => importQaById(qaId)),
         ...(body ? [() => importDependenciesFromRawBody(body)] : []),
-      ]);
+      ]));
       await importAssetRefs(item.attributes.hero, item.attributes.thumbnail);
       return {
         id: item.id,
@@ -1082,10 +1116,10 @@ async function listSourceRecords(modelApiKey) {
       .filter((item) => !completedRootIds.has(item.id));
     return Effect.runPromise(Effect.forEach(items, (item) => promiseEffect(async () => {
       const body = item.attributes.body?.[IMPORT_LOCALE] ?? null;
-      await runTasks([
+      await Effect.runPromise(runTasksEffect([
         ...(item.attributes.location ? [() => importLocationById(item.attributes.location)] : []),
         ...(body ? [() => importDependenciesFromRawBody(body)] : []),
-      ]);
+      ]));
       await importAssetRefs(item.attributes.hero, item.attributes.thumbnail);
       return {
         id: item.id,
@@ -1135,10 +1169,10 @@ export function createImportProgram(options = {}) {
       if (model === "place") await importPlace(record);
       if (model === "article") await importArticle(record);
       if (model === "guide") await importGuide(record);
-    });
+    }, "import root record", { model, recordId: record.id });
 
   return Effect.gen(function* () {
-    const existingCheckpoint = yield* promiseEffect(() => readJson(checkpointFilename()));
+    const existingCheckpoint = yield* readCheckpointEffect();
     if (existingCheckpoint?.value?.status && existingCheckpoint.value.status !== "completed") {
       restoreCheckpoint(existingCheckpoint.value);
       yield* Effect.logInfo(
@@ -1150,9 +1184,9 @@ export function createImportProgram(options = {}) {
       yield* Effect.logInfo(`Starting Dato import for ${model} (${IMPORT_LOCALE})`);
     }
 
-    yield* promiseEffect(() => saveCheckpoint("running"));
-    yield* promiseEffect(() => importSiteSettings());
-    const records = yield* promiseEffect(() => listSourceRecords(model));
+    yield* saveCheckpointEffect("running");
+    yield* promiseEffect(() => importSiteSettings(), "import site settings");
+    const records = yield* promiseEffect(() => listSourceRecords(model), "list source records", { model, skip, limit });
 
     yield* Effect.forEach(
       records,
@@ -1163,20 +1197,33 @@ export function createImportProgram(options = {}) {
               completedRootIds.add(record.id);
             }),
           ),
-          Effect.zipRight(promiseEffect(() => saveCheckpoint("running"))),
+          Effect.catchAll((error) =>
+            Effect.fail(
+              new ImportRootRecordError({
+                model,
+                recordId: record.id,
+                message: `Failed to import root ${model} record '${record.id}'`,
+                cause: error,
+              }),
+            ),
+          ),
+          Effect.zipRight(saveCheckpointEffect("running", { recordId: record.id })),
         ),
       { concurrency: 1 },
     );
     yield* publishTouchedRecordsEffect();
 
-    const findingsPath = yield* promiseEffect(() => writeJson(`findings-${model}-${skip}-${limit}.json`, findings));
+    const findingsPath = yield* writeFindingsEffect();
     const integrityViolations = fatalFindings();
 
     if (integrityViolations.length > 0) {
       yield* Effect.fail(
-        new Error(
-          `Import aborted for ${model}: ${integrityViolations.length} referential integrity violation(s). See ${findingsPath}`,
-        ),
+        new ImportIntegrityError({
+          model,
+          findingsPath,
+          violationCount: integrityViolations.length,
+          message: `Import aborted for ${model}: ${integrityViolations.length} referential integrity violation(s). See ${findingsPath}`,
+        }),
       );
     }
 
@@ -1196,25 +1243,35 @@ export function createImportProgram(options = {}) {
         `,
         variables: { first: limit + skip + 5 },
       }),
+      "verify imported records",
+      { model, skip, limit },
     );
 
     if (!summary.ok) {
-      yield* Effect.fail(new Error(`Verification query failed (${summary.status}): ${JSON.stringify(summary.body)}`));
+      yield* Effect.fail(
+        new ImportVerificationError({
+          model,
+          status: summary.status,
+          body: summary.body,
+          message: `Verification query failed (${summary.status}): ${JSON.stringify(summary.body)}`,
+        }),
+      );
     }
 
     yield* Effect.logInfo("Verification query succeeded");
-    yield* promiseEffect(() => saveCheckpoint("completed", { completedAt: new Date().toISOString(), findingsPath }));
+    yield* saveCheckpointEffect("completed", { completedAt: new Date().toISOString(), findingsPath });
     return {
       findingsPath,
       recordsImported: records.length,
     };
   }).pipe(
     Effect.catchAll((error) =>
-      promiseEffect(() => saveCheckpoint("failed", {
-        lastError: error instanceof Error ? error.message : String(error),
-      })).pipe(Effect.zipRight(Effect.fail(error))),
+      saveCheckpointEffect("failed", {
+          lastError: errorMessage(error),
+          lastErrorTag: error && typeof error === "object" && "_tag" in error ? error._tag : undefined,
+        }).pipe(Effect.zipRight(Effect.fail(error))),
     ),
-    Effect.ensuring(promiseEffect(() => disposeLocalR2Context())),
+    Effect.ensuring(promiseEffect(() => disposeLocalR2Context(), "dispose local R2 context")),
   );
 }
 
