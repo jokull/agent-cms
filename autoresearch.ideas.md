@@ -1,0 +1,1 @@
+- Flatten StructuredText preview materialization into an iterative breadth-first pass: collect nested structured_text envelopes from fetched block rows into a work queue, fetch each table once per depth/group, then assemble all envelopes at the end. This could remove the remaining recursive envelope-building overhead after the current ancestry-group batching win.

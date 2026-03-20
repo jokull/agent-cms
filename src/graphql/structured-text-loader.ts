@@ -92,7 +92,7 @@ function scheduleFlush(params: {
     try {
       const results = await params.runSql(
         materializeStructuredTextValues({
-          materializeContext: { blockModelSchemas: new Map() },
+          materializeContext: { blockModelSchemas: new Map(), candidateBlockModels: new Map() },
           requests: pending.map(([requestKey, entry]) => ({
             requestKey,
             ...entry.params,
@@ -121,7 +121,7 @@ export async function loadStructuredTextEnvelope(params: {
   if (!loader) {
     const results = await params.runSql(
       materializeStructuredTextValues({
-        materializeContext: { blockModelSchemas: new Map() },
+        materializeContext: { blockModelSchemas: new Map(), candidateBlockModels: new Map() },
         requests: [{ requestKey: "single", ...params }],
       })
     );

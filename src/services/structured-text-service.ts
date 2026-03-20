@@ -40,6 +40,7 @@ interface BlockModelSchema {
 
 interface MaterializeContext {
   blockModels?: ReadonlyArray<{ api_key: string }>;
+  candidateBlockModels: Map<string, ReadonlyArray<{ api_key: string }>>;
   blockModelSchemas: Map<string, BlockModelSchema>;
 }
 
@@ -127,6 +128,24 @@ function fetchBlockModelsCached(ctx: MaterializeContext, sql: SqlClient.SqlClien
     ctx.blockModels = blockModels;
     return blockModels;
   });
+}
+
+function getCandidateBlockModelsCached(
+  ctx: MaterializeContext,
+  blockModels: ReadonlyArray<{ api_key: string }>,
+  allowedBlockApiKeys?: readonly string[]
+) {
+  const cacheKey = allowedBlockApiKeys && allowedBlockApiKeys.length > 0
+    ? allowedBlockApiKeys.join(",")
+    : "*";
+  const cached = ctx.candidateBlockModels.get(cacheKey);
+  if (cached) return cached;
+
+  const candidateBlockModels = allowedBlockApiKeys && allowedBlockApiKeys.length > 0
+    ? blockModels.filter((model) => allowedBlockApiKeys.includes(model.api_key))
+    : blockModels;
+  ctx.candidateBlockModels.set(cacheKey, candidateBlockModels);
+  return candidateBlockModels;
 }
 
 function formatDastParseErrors(error: ParseResult.ParseError): string {
@@ -488,7 +507,10 @@ export function materializeStructuredTextValues(params: {
 }): Effect.Effect<Map<string, StructuredTextEnvelope | null>, unknown, SqlClient.SqlClient> {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const materializeContext = params.materializeContext ?? { blockModelSchemas: new Map<string, BlockModelSchema>() };
+    const materializeContext = params.materializeContext ?? {
+      blockModelSchemas: new Map<string, BlockModelSchema>(),
+      candidateBlockModels: new Map<string, ReadonlyArray<{ api_key: string }>>(),
+    };
     const results = new Map<string, StructuredTextEnvelope | null>();
     const parsedRequests: ParsedMaterializeStructuredTextRequest[] = [];
 
@@ -539,9 +561,11 @@ export function materializeStructuredTextValues(params: {
         }
       }
 
-      const candidateBlockModels = sample.params.allowedBlockApiKeys && sample.params.allowedBlockApiKeys.length > 0
-        ? blockModels.filter((model) => sample.params.allowedBlockApiKeys?.includes(model.api_key))
-        : blockModels;
+      const candidateBlockModels = getCandidateBlockModelsCached(
+        materializeContext,
+        blockModels,
+        sample.params.allowedBlockApiKeys
+      );
       const rootRecordIds = [...requestByRootRecordId.keys()];
       const rootRecordPlaceholders = rootRecordIds.map(() => "?").join(", ");
       const blockIds = [...allBlockIds];
@@ -639,7 +663,10 @@ export function materializeRecordStructuredTextFields(params: {
       if (field.field_type !== "structured_text") continue;
       const rawValue = params.record[field.api_key];
       if (rawValue === null || rawValue === undefined) continue;
-      const materializeContext = { blockModelSchemas: new Map<string, BlockModelSchema>() };
+      const materializeContext = {
+        blockModelSchemas: new Map<string, BlockModelSchema>(),
+        candidateBlockModels: new Map<string, ReadonlyArray<{ api_key: string }>>(),
+      };
       if (field.localized) {
         const localeMap = decodeJsonIfString(rawValue);
         if (typeof localeMap !== "object" || localeMap === null || Array.isArray(localeMap)) {
