@@ -37,6 +37,7 @@ interface BlockModelSchema {
   id: string;
   apiKey: string;
   fields: ParsedFieldRow[];
+  structuredTextAllowedBlockApiKeysByField: Map<string, readonly string[]>;
 }
 
 interface MaterializeContext {
@@ -108,7 +109,17 @@ function getBlockModelSchema(sql: SqlClient.SqlClient, blockApiKey: string) {
     }
     const model = rows[0];
     const fields = yield* getParsedFields(sql, model.id);
-    return { id: model.id, apiKey: model.api_key, fields } satisfies BlockModelSchema;
+    const structuredTextAllowedBlockApiKeysByField = new Map<string, readonly string[]>();
+    for (const field of fields) {
+      if (field.field_type !== "structured_text") continue;
+      structuredTextAllowedBlockApiKeysByField.set(field.api_key, getBlockWhitelist(field.validators) ?? []);
+    }
+    return {
+      id: model.id,
+      apiKey: model.api_key,
+      fields,
+      structuredTextAllowedBlockApiKeysByField,
+    } satisfies BlockModelSchema;
   });
 }
 
@@ -628,7 +639,7 @@ export function materializeStructuredTextValues(params: {
               nestedRequests.push({
                 requestKey,
                 materializeContext,
-                allowedBlockApiKeys: getBlockWhitelist(field.validators) ?? [],
+                allowedBlockApiKeys: blockModel.structuredTextAllowedBlockApiKeysByField.get(field.api_key) ?? [],
                 parentContainerModelApiKey: model.api_key,
                 parentBlockId: rowId,
                 parentFieldApiKey: field.api_key,
