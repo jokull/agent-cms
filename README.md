@@ -1,30 +1,35 @@
 # agent-cms
 
-Fully featured agent-first CMS. Experimental.
+Agent-first headless CMS. Runs as a Cloudflare Worker backed by D1 and R2 in your own account. No hosted service, no admin UI. Agents define schemas, manage content, and publish — via MCP.
 
-A headless content management system designed to be driven by AI agents via MCP. Runs as a Cloudflare Worker backed by D1 and R2 in your own Cloudflare account. There is no hosted service.
+## What you get
 
-Agents handle what CMS admin panels used to: defining schemas, uploading assets, interlinking content, managing draft/publish workflows. Point an MCP client at a Google Drive folder with drafts and images and let it handle the rest — proofreading, image uploading, link resolution, publishing. The traditional CMS UI is the bottleneck, not the content.
-
-Content writers who use Claude Code, Cursor, or any MCP-capable tool can manage a full content operation without learning an admin interface. Developers get a typed GraphQL API with no vendor lock-in.
-
-The structured text format is [DAST](https://www.datocms.com/docs/structured-text/dast), a robust open standard. Existing rendering components like [`react-datocms`](https://github.com/datocms/react-datocms), `vue-datocms`, and `datocms-svelte` work out of the box.
+- **Structured text with typed blocks** — a document tree where rich components (code blocks, media, custom types) are embedded inline. One GraphQL query returns the full tree with discriminated block unions. Map directly to React/Svelte/Vue components in a single server hop. Render with [`react-datocms`](https://github.com/datocms/react-datocms), `vue-datocms`, or `datocms-svelte` — the structured text format is [DAST](https://www.datocms.com/docs/structured-text/dast), an open standard.
+- **Hybrid search** — FTS5 for keyword matching, Cloudflare Vectorize for semantic similarity, combined with reciprocal rank fusion. All on D1.
+- **Draft/publish with scheduling** — records start as drafts. Publishing captures a version snapshot. Schedule publish/unpublish at future datetimes. Full version history — restore to any snapshot, and the restore itself is reversible.
+- **Geospatial filtering** — `lat_lon` field type with `near(latitude, longitude, radius)` queries in GraphQL.
+- **Automatic reverse references** — link model A to model B, and B gets a query field for all records in A that reference it, with full filtering, ordering, and pagination.
+- **Two MCP servers** — admin MCP (`/mcp`) for schema and content, editor MCP (`/mcp/editor`) scoped to content operations only. Create editor tokens with optional expiry.
+- **Multi-locale with fallback chains** — per-field opt-in. Locale A falls back to B falls back to C. The GraphQL resolver walks the chain.
+- **24 field types** — string, text, boolean, integer, float, date, date_time, slug (auto-generated), media (with focal point + blurhash), media_gallery, link, links, structured_text, seo (title + description + image + twitter card), json, color (RGBA), lat_lon, video. All validated with Effect schemas.
+- **Tree hierarchies and sortable collections** — parent-child nesting and explicit position ordering as first-class model properties.
+- **Dynamic SQL builder** — the query engine builds SQL at runtime from the content schema. No ORM, no generated client. The content schema is decoupled from your application schema — run this on the same D1 database as your site.
+- **Responsive images** — Cloudflare Image Resizing with focal points, blurhash for progressive loading, color palette extraction. R2 storage, no external service.
+- **Bulk operations** — create up to 1000 records in a single call.
+- **Schema portability** — export the full schema as JSON (no IDs, just api_keys), import it on a fresh instance.
+- **Three interfaces** — REST API, GraphQL, and MCP, all auto-generated from the content schema.
+- **Effect-TS throughout** — typed errors, dependency injection via services and layers, no try/catch. The whole CMS is a single Worker.
 
 ## Quick start
 
 ```bash
 pnpm create agent-cms my-cms
 cd my-cms
-```
-
-The scaffold creates a Cloudflare Worker, provisions a D1 database and R2 bucket, and installs dependencies. Then bootstrap the CMS explicitly:
-
-```bash
 pnpm dev
 pnpm run setup -- http://127.0.0.1:8787
 ```
 
-Connect Claude to the MCP server:
+Connect an agent to the MCP server:
 
 ```json
 {
@@ -34,21 +39,10 @@ Connect Claude to the MCP server:
 }
 ```
 
-For editorial agents, use the reduced-scope MCP endpoint instead:
-
-```json
-{
-  "mcpServers": {
-    "my-cms-editor": { "url": "http://localhost:8787/mcp/editor" }
-  }
-}
-```
-
-With Claude Code, the equivalent CLI command is:
+Or with Claude Code:
 
 ```bash
 claude mcp add --transport http my-cms http://127.0.0.1:8787/mcp
-claude mcp add --transport http my-cms-editor http://127.0.0.1:8787/mcp/editor
 ```
 
 Deploy to production:
@@ -57,34 +51,23 @@ Deploy to production:
 pnpm run deploy
 ```
 
+### Guided setup
+
+For more control — standalone vs. service binding vs. mounting in an existing Worker — copy the prompt from [`PROMPT.md`](./PROMPT.md) into Claude Code. It assesses your repo, asks how you want to integrate, and wires everything up.
+
 ## Interfaces
 
-### `/mcp` — Agent interface
+### `/mcp` — Admin agent interface
 
-MCP server with tools for schema management (create models, add fields, configure block types), content operations (CRUD, bulk insert, publish/unpublish, reorder), asset uploads, and schema import/export. This is the primary interface.
-
-Requires admin authentication (`writeKey`). Editor tokens are rejected here and should use `/mcp/editor`.
+MCP server with tools for schema management, content operations (CRUD, bulk insert, publish/unpublish, reorder), asset management, search, and schema import/export. Requires `writeKey`.
 
 ### `/mcp/editor` — Editorial agent interface
 
-Reduced MCP server for content-authoring agents. Accepts either an editor token or the admin `writeKey`.
-
-It exposes:
-- read-only schema introspection (`list_models`, `describe_model`, `schema_info`, `export_schema`)
-- record CRUD, drafts, publish/unpublish, reorder, and version restore
-- full asset CRUD
-- site settings read/update
-- content search
-
-It does not expose:
-- schema mutation tools
-- token management tools
-- schema import/setup tools
-- search reindex/admin repair operations
+Reduced MCP server for content-authoring agents. Accepts either an editor token or `writeKey`. Exposes schema introspection, record CRUD, drafts, publish/unpublish, version restore, assets, site settings, and search. Does not expose schema mutation, token management, or admin operations.
 
 ### `/graphql` — Content delivery
 
-Read-only GraphQL API for frontends. Supports filtering, ordering, pagination, locale fallback, and draft previews via the `X-Include-Drafts` header.
+Read-only GraphQL API. Supports filtering, ordering, pagination, locale fallback, and draft previews via `X-Include-Drafts`.
 
 ```graphql
 {
@@ -116,7 +99,7 @@ Read-only GraphQL API for frontends. Supports filtering, ordering, pagination, l
 }
 ```
 
-#### GraphQL naming conventions
+#### Naming conventions
 
 Model `api_key` values (snake_case) map to GraphQL names:
 
@@ -131,49 +114,41 @@ Field `api_key` values stay snake_case in queries: `cover_image`, `published_at`
 
 #### Performance model
 
-GraphQL nesting here is not compiled into one giant SQL join. The server fetches root records, batches linked records and StructuredText work into set-oriented SQL, then assembles the nested GraphQL shape in memory. That keeps SQL simple and indexable, but preview StructuredText still costs more than published reads because it is reconstructed from relational block tables.
-
-See [`docs/architecture/performance.md`](/Users/jokull/Code/agent-cms/docs/architecture/performance.md) for the GraphQL-to-SQL architecture, batching strategy, indexing tradeoffs, and measured behavior.
+GraphQL nesting is not compiled into one giant SQL join. The server fetches root records, batches linked records and StructuredText work into set-oriented SQL, then assembles the nested shape in memory. See [`docs/architecture/performance.md`](./docs/architecture/performance.md).
 
 #### MCP resources and prompts
 
-Agents connecting via MCP get two resources for upfront context:
-- **`agent-cms://guide`** — workflow order, naming conventions, field value formats, and lifecycle summary
-- **`agent-cms://schema`** — current schema (models, fields, locales) as JSON
+Agents connecting via MCP get two resources:
+- **`agent-cms://guide`** — workflow order, naming conventions, field value formats
+- **`agent-cms://schema`** — current schema as JSON
 
-Two prompts encode common multi-step workflows:
+Two prompts for common workflows:
 - **`setup-content-model`** — design and create content models from a description
-- **`generate-graphql-queries`** — generate correctly-typed GraphQL queries for a model
+- **`generate-graphql-queries`** — generate typed GraphQL queries for a model
 
-### `/api` — REST admin
+### `/api` — REST
 
-JSON REST API for programmatic content management. Models, fields, records, assets, locales, publish/unpublish, bulk operations, schema import/export.
-
-Scheduling is available but optional:
-- `POST /api/records/:id/schedule-publish`
-- `POST /api/records/:id/schedule-unpublish`
-- `POST /api/records/:id/clear-schedule`
-
-GraphQL exposes:
-- `_publicationScheduledAt`
-- `_unpublishingScheduledAt`
+JSON REST API for programmatic access. Models, fields, records, assets, locales, publish/unpublish, scheduling, bulk operations, schema import/export.
 
 ### `/api/search` — Search
 
-Fulltext search powered by SQLite FTS5 with BM25 ranking and snippets. Records are automatically indexed on create, update, and delete. Searches across all models or scoped to a single model. Supports FTS5 query syntax including phrase matching.
+FTS5 keyword search with BM25 ranking and snippets, scoped to all models or a single model. When `AI` + `VECTORIZE` bindings are configured:
 
-```bash
-curl -X POST https://my-cms.workers.dev/api/search \
-  -d '{"query": "serverless computing", "modelApiKey": "post", "first": 10}'
-```
+- **`keyword`** — FTS5. Phrases (`"exact match"`), prefix (`word*`), boolean (`AND`/`OR`).
+- **`semantic`** — Vectorize cosine similarity.
+- **`hybrid`** (default) — Reciprocal rank fusion of keyword + semantic results.
 
-Vector search via Cloudflare Vectorize provides semantic similarity — hybrid rank fusion combines keyword and vector results.
+## Editor tokens
 
-## Optional cron scheduling
+Editor tokens are the credential for non-admin editing flows. Create them via `POST /api/tokens` or the `create_editor_token` MCP tool. The raw token is shown once; the server stores a hash.
 
-Scheduled publish/unpublish does not need extra bindings or services.
+Editor tokens can access `/mcp/editor`, REST content/asset operations, and draft GraphQL previews. They cannot mutate schema, manage tokens, or run admin operations.
 
-If you want automatic execution, add a Worker `scheduled()` handler and a cron trigger:
+For editor onboarding with OAuth, the package exports `createCmsAdminClient` and `createEditorMcpProxy` to stand up an app-land MCP gateway. See [`examples/editor-mcp/`](./examples/editor-mcp/).
+
+## Scheduling
+
+Schedule publish/unpublish at future datetimes via REST or MCP. To execute schedules automatically, add a cron trigger:
 
 ```ts
 import { createCMSHandler } from "agent-cms";
@@ -183,11 +158,7 @@ let cachedHandler: ReturnType<typeof createCMSHandler> | null = null;
 function getHandler(env: Env) {
   if (!cachedHandler) {
     cachedHandler = createCMSHandler({
-      bindings: {
-        db: env.DB,
-        assets: env.ASSETS,
-        writeKey: env.CMS_WRITE_KEY,
-      },
+      bindings: { db: env.DB, assets: env.ASSETS, writeKey: env.CMS_WRITE_KEY },
     });
   }
   return cachedHandler;
@@ -204,166 +175,39 @@ export default {
 ```
 
 ```json
-{
-  "triggers": {
-    "crons": ["* * * * *"]
-  }
-}
+{ "triggers": { "crons": ["* * * * *"] } }
 ```
 
-Without a cron trigger, schedules can still be created and queried, but they will not execute automatically.
+Without a cron trigger, schedules are stored and queryable but do not execute.
 
-## Field types
+## Lifecycle hooks
 
-| Type | Description |
-|------|-------------|
-| `string` | Single-line text |
-| `text` | Multi-line text |
-| `boolean` | True/false |
-| `integer` | Whole number |
-| `float` | Decimal number |
-| `date` | Date without time |
-| `date_time` | Date with time |
-| `slug` | URL slug, auto-generated from a source field |
-| `media` | Single file/image with metadata |
-| `media_gallery` | Multiple files/images |
-| `link` | Reference to another record |
-| `links` | References to multiple records |
-| `structured_text` | Rich text (DAST) with embedded blocks |
-| `seo` | Composite: title, description, image |
-| `json` | Arbitrary JSON |
-| `color` | Color value |
-| `lat_lon` | Geographic coordinates |
-
-## Structured text
-
-The structured text field stores content as DAST. Block types are defined per-model and embedded within the document tree — code blocks, CTAs, image galleries, whatever you need. Render with existing libraries:
-
-- **React**: `react-datocms` `<StructuredText>` component
-- **Vue**: `vue-datocms`
-- **Svelte**: `datocms-svelte`
-- **Astro**: Direct DAST traversal or any of the above
-
-## Draft and publish
-
-Records start as drafts. Publishing captures a snapshot — edits to the draft don't affect the published version until you publish again. The GraphQL API serves published content by default; pass `X-Include-Drafts: true` to preview draft state.
-
-Authentication changes draft visibility:
-- unauthenticated GraphQL callers only see published content
-- `writeKey` callers can opt into drafts with `X-Include-Drafts: true`
-- editor tokens always see drafts in GraphQL previews
-
-## Editor Tokens
-
-Editor tokens are the browser-safe and agent-safe credential for non-admin editing flows.
-
-How they are granted:
-- an admin creates them through `POST /api/tokens`
-- or through MCP admin tools (`create_editor_token`, `list_editor_tokens`, `revoke_editor_token`)
-- the raw bearer token is shown only at creation time; the server stores only a hash plus a prefix for listing/revocation
-
-What they power:
-- visual editing clients via `CmsEditConfig.token`
-- draft GraphQL previews without exposing the admin `writeKey`
-- editorial MCP access via `/mcp/editor`
-- REST content and asset operations that do not mutate schema
-
-What they cannot do:
-- use `/mcp`
-- mutate schema, locales, or setup/import surfaces
-- manage other editor tokens
-- run admin maintenance operations like search reindex
-
-Recommended model:
-- keep `writeKey` server-side only
-- mint editor tokens for browser visual editing and authoring agents
-- connect general-purpose admin agents to `/mcp`
-- connect writing/editing agents to `/mcp/editor`
-
-## App-Land Editor MCP
-
-For editor onboarding, the recommended shape is:
-
-- developers connect directly to the CMS `/mcp` endpoint with `writeKey`
-- browser visual-edit sessions receive a CMS editor token and talk to the CMS `/mcp/editor` endpoint directly
-- editors using MCP clients connect to an app-land MCP gateway on a distinct URL
-- app-land owns user auth and session UX
-- app-land proxies editor MCP traffic to the CMS `/mcp/editor` endpoint
-
-The package now exports two server-side helpers for this:
+React to content events with hooks passed to `createCMSHandler`:
 
 ```ts
-import { createCmsAdminClient, createEditorMcpProxy } from "agent-cms";
+createCMSHandler({
+  bindings: { db: env.DB, assets: env.ASSETS, writeKey: env.CMS_WRITE_KEY },
+  hooks: {
+    onPublish: ({ modelApiKey, recordId }) => fetch(env.DEPLOY_HOOK_URL, { method: "POST" }),
+    onRecordCreate: ({ modelApiKey, recordId }) => { /* notify, sync, etc. */ },
+  },
+});
 ```
 
-Use `createCmsAdminClient(...)` for app-land token minting and `createEditorMcpProxy(...)` to stand up an OAuth-capable editor MCP gateway in your own Worker or Hono app.
-
-This keeps the mental model clean:
-- CMS owns content capabilities
-- app-land owns users and login
-- editors never see the admin `writeKey`
-- the app-land MCP URL should be distinct from the raw CMS editor endpoint so developers and editors do not confuse the two
-
-The focused example at [`examples/editor-mcp/`](/Users/jokull/Code/agent-cms/examples/editor-mcp) demonstrates this split:
-
-- direct CMS editor-token endpoint: `https://<cms>/mcp/editor`
-- app-land OAuth/editor gateway: `https://<app>/editor-access/mcp`
-
-For Claude Code, the editor-facing command looks like:
-
-```bash
-claude mcp add --transport http editor-mcp https://<app>/editor-access/mcp
-```
-
-## Localization
-
-Define locales with fallback chains. Localized fields store a value per locale. The GraphQL API respects the `Accept-Language` header and falls back through the chain when a locale is missing.
+Available: `onRecordCreate`, `onRecordUpdate`, `onRecordDelete`, `onPublish`, `onUnpublish`. All receive `{ modelApiKey, recordId }`. Fire-and-forget.
 
 ## Bindings
 
-Only `DB` is required. Everything else is optional — each binding unlocks capabilities that gracefully degrade when absent.
+Only `DB` is required. Everything else is optional and degrades gracefully.
 
 | Binding | Type | What it enables |
 |---------|------|-----------------|
-| `DB` | D1 | **Required.** Content storage, schema, FTS5 keyword search. |
-| `ASSETS` | R2 | Asset file storage. Without it, asset metadata is stored but files can't be served via `/assets/`. |
-| `AI` | Workers AI | Embedding generation for semantic search (uses `bge-small-en-v1.5`, 384 dimensions). |
-| `VECTORIZE` | Vectorize | Semantic vector search. Requires `AI`. Without both, search falls back to FTS5 keyword matching. |
-| `CMS_WRITE_KEY` | Secret | API key required for REST writes, MCP, and publish/unpublish. Without it, writes are open. |
-| `ASSET_BASE_URL` | Variable | Public URL prefix for asset URLs and Cloudflare Image Resizing. Must be a custom domain (not `workers.dev`) for image transforms. |
-
-## Assets
-
-Asset binaries live in your R2 bucket. agent-cms stores asset metadata in D1 and serves registered assets from `/assets/:id/:filename`.
-
-The canonical flow depends on the client:
-
-1. MCP/editor workflow: call `import_asset_from_url` with a public file URL
-2. Browser visual-edit workflow: upload bytes via `PUT /api/assets/:id/file`, then register/update metadata through the CMS API
-3. Manual/server workflow: upload the original file to R2, then register the asset via `/api/assets`
-4. Reference the asset by ID from content
-
-For large-scale imports and backfills, direct-to-R2 remains the default ingestion model. See [`docs/architecture/assets.md`](./docs/architecture/assets.md) for the full rationale.
-
-For DatoCMS migrations specifically, see [`docs/migrations/dato-import.md`](./docs/migrations/dato-import.md).
-
-`agent-cms` also includes an experimental first-class Dato importer:
-
-```bash
-pnpm run dato:import -- --help
-```
-
-Current workflow:
-
-```bash
-pnpm run dato:import -- inspect
-pnpm run dato:import -- bootstrap --adapter trip --cms-url http://127.0.0.1:8791
-pnpm run dato:import -- import --adapter trip --model article --limit 1 --locale en
-```
-
-The runtime and CLI are generic. The built-in `trip` adapter is the first proven large real-world mapping and remains the validation wedge while broader automatic schema discovery and mapping are generalized.
-
-Example `wrangler.jsonc` with all bindings:
+| `DB` | D1 | **Required.** Content storage, schema, FTS5 search. |
+| `ASSETS` | R2 | Asset file storage and serving via `/assets/`. |
+| `AI` | Workers AI | Embedding generation for semantic search. |
+| `VECTORIZE` | Vectorize | Semantic vector search. Requires `AI`. |
+| `CMS_WRITE_KEY` | Secret | Auth for writes, MCP, and publish. Without it, writes are open. |
+| `ASSET_BASE_URL` | Variable | Public URL prefix for assets and Image Resizing. Must be a custom domain for transforms. |
 
 ```jsonc
 {
@@ -377,73 +221,15 @@ Example `wrangler.jsonc` with all bindings:
 
 To create the Vectorize index: `npx wrangler vectorize create my-cms-content --dimensions=384 --metric=cosine`
 
-### Search modes
+## Assets
 
-Search is always available via FTS5 (built into D1). When `AI` + `VECTORIZE` bindings are configured, two additional modes unlock:
+Asset binaries live in R2. Metadata in D1. Served from `/assets/:id/:filename`.
 
-- **`keyword`** — FTS5 BM25 ranking. Exact word matching, phrases (`"exact match"`), prefix (`word*`), boolean (`AND`/`OR`).
-- **`semantic`** — Vectorize cosine similarity. Finds conceptually related content even when query and document share no keywords.
-- **`hybrid`** (default when Vectorize available) — Reciprocal rank fusion of keyword + semantic results. Records appearing in both sets get boosted.
+- **MCP/editor**: `import_asset_from_url` — download, store, register in one step
+- **Browser**: `PUT /api/assets/:id/file` then register metadata
+- **Server**: upload to R2, then `POST /api/assets`
 
-All fields are indexed by default. Opt a field out with `{"searchable": false}` in its validators.
-
-## Lifecycle hooks
-
-React to content events with hooks passed to `createCMSHandler`. Hooks fire in the service layer after the operation completes — use them to trigger deploys, invalidate caches, or sync to external services.
-
-```typescript
-import { createCMSHandler } from "agent-cms";
-
-export default {
-  fetch(request: Request, env: Env) {
-    return getHandler(env).fetch(request);
-  },
-};
-
-let cachedHandler: ReturnType<typeof createCMSHandler> | null = null;
-
-function getHandler(env: Env) {
-  if (!cachedHandler) {
-    cachedHandler = createCMSHandler({
-      bindings: {
-        db: env.DB,
-        assets: env.ASSETS,
-        environment: env.ENVIRONMENT,
-        assetBaseUrl: env.ASSET_BASE_URL,
-        writeKey: env.CMS_WRITE_KEY,
-      },
-      hooks: {
-        onPublish: ({ modelApiKey, recordId }) => {
-          // Trigger a static site rebuild
-          return fetch(env.DEPLOY_HOOK_URL, { method: "POST" });
-        },
-        onRecordCreate: ({ modelApiKey, recordId }) => {
-          // Send a Slack notification, sync to analytics, etc.
-        },
-      },
-    });
-  }
-  return cachedHandler;
-}
-
-interface Env {
-  DB: D1Database;
-  ASSETS?: R2Bucket;
-  ENVIRONMENT?: string;
-  ASSET_BASE_URL?: string;
-  CMS_WRITE_KEY?: string;
-  DEPLOY_HOOK_URL: string;
-}
-```
-
-Available hooks: `onRecordCreate`, `onRecordUpdate`, `onRecordDelete`, `onPublish`, `onUnpublish`. All receive `{ modelApiKey, recordId }`. Hooks are fire-and-forget — errors are logged, not propagated to the caller.
-
-## Worker pattern
-
-Use a module-scoped handler/factory. Do not call `createCMSHandler()` directly inside `fetch()` on every request.
-
-- Cache the handler at module scope.
-- Run setup explicitly before serving traffic. Reads should stay read-only.
+Focal points, blurhash, and color palette are stored per-asset. Cloudflare Image Resizing generates responsive variants at the edge.
 
 ## Stack
 
@@ -451,22 +237,15 @@ Use a module-scoped handler/factory. Do not call `createCMSHandler()` directly i
 - **Database**: D1 (managed SQLite)
 - **Assets**: R2 + Cloudflare Image Resizing
 - **Search**: SQLite FTS5 + Cloudflare Vectorize
-- **Application**: [Effect](https://effect.website) — HTTP routing, SQL, validation, error handling, dependency injection
-- **Schema engine**: `@effect/sql` with hand-written DDL for both system tables and runtime-generated content tables
+- **Application**: [Effect](https://effect.website)
 - **GraphQL**: [graphql-yoga](https://the-guild.dev/graphql/yoga-server) with generated SDL
-- **Testing**: [Vitest](https://vitest.dev) (`pnpm test`, `pnpm run test:run`)
+- **Testing**: [Vitest](https://vitest.dev) (`pnpm test`)
 
-## Example
+## Examples
 
-See [`examples/blog/`](./examples/blog/) for a complete setup: a CMS Worker paired with an Astro site that queries the GraphQL API, renders structured text with block dispatch, and handles responsive images.
-
-For the editor-auth flow specifically, see [`examples/editor-mcp/`](./examples/editor-mcp/). It contains:
-- a direct CMS Worker
-- a separate app-land Worker using Hono
-- a distinct app-land MCP gateway URL for editors
-- a browser route that mints short-lived visual-edit editor tokens
-
-For inline visual editing specifically, see [`examples/visual-edit/`](./examples/visual-edit/). It demonstrates field tweaks and image replacement without a built-in chat surface.
+- [`examples/blog/`](./examples/blog/) — CMS Worker + Astro SSR site with typed GraphQL (gql.tada), structured text rendering, responsive images, service bindings
+- [`examples/editor-mcp/`](./examples/editor-mcp/) — editor onboarding: app-land OAuth gateway, scoped editor tokens, separate MCP URLs for developers and editors
+- [`examples/visual-edit/`](./examples/visual-edit/) — inline visual editing: field tweaks and image replacement without a chat surface
 
 ## License
 
