@@ -136,13 +136,17 @@ describe("Schema Lifecycle — Advanced Operations", () => {
   });
 
   describe("P5.4: StructuredText helper tool", () => {
-    it("builds a valid DAST document from prose and blocks", async () => {
+    it("builds a valid DAST document from typed nodes and referenced blocks", async () => {
       const result = parse(await agent.callTool({
         name: "build_structured_text",
         arguments: {
-          paragraphs: ["Welcome to our site.", "We build great things."],
           blocks: [
-            { type: "hero_section", data: { headline: "Hello World" } },
+            { id: "hero-1", type: "hero_section", data: { headline: "Hello World" } },
+          ],
+          nodes: [
+            { type: "paragraph", text: "Welcome to our site." },
+            { type: "block", ref: "hero-1" },
+            { type: "paragraph", text: "We build great things." },
           ],
         },
       }));
@@ -158,9 +162,8 @@ describe("Schema Lifecycle — Advanced Operations", () => {
       expect(children[1].type).toBe("block");
       expect(children[2].type).toBe("paragraph");
 
-      // Block should have auto-generated ULID
       const blockId = children[1].item;
-      expect(blockId).toBeTruthy();
+      expect(blockId).toBe("hero-1");
       expect(result.blocks[blockId]).toBeDefined();
       expect(result.blocks[blockId]._type).toBe("hero_section");
       expect(result.blocks[blockId].headline).toBe("Hello World");
@@ -171,8 +174,12 @@ describe("Schema Lifecycle — Advanced Operations", () => {
         name: "build_structured_text",
         arguments: {
           blocks: [
-            { type: "hero", data: { headline: "A" } },
-            { type: "cta", data: { text: "B" } },
+            { id: "hero-1", type: "hero", data: { headline: "A" } },
+            { id: "cta-1", type: "cta", data: { text: "B" } },
+          ],
+          nodes: [
+            { type: "block", ref: "hero-1" },
+            { type: "block", ref: "cta-1" },
           ],
         },
       }));
@@ -187,12 +194,101 @@ describe("Schema Lifecycle — Advanced Operations", () => {
       const result = parse(await agent.callTool({
         name: "build_structured_text",
         arguments: {
-          paragraphs: ["Hello", "World"],
+          nodes: [
+            { type: "paragraph", text: "Hello" },
+            { type: "paragraph", text: "World" },
+          ],
         },
       }));
 
       expect(result.value.document.children).toHaveLength(2);
       expect(result.blocks).toEqual({});
+    });
+
+    it("fails when markdown builder receives unused blocks", async () => {
+      await expect(agent.callTool({
+        name: "build_structured_text_from_markdown",
+        arguments: {
+          markdown: "# Hello",
+          blocks: [
+            { id: "hero-1", type: "hero", data: { headline: "Unused" } },
+          ],
+        },
+      })).rejects.toThrow(/Unused blocks/);
+    });
+
+    it("round-trips helper output through create_record and query_records", async () => {
+      const hero = parse(await agent.callTool({
+        name: "create_model",
+        arguments: { name: "Hero Section", apiKey: "hero_section", isBlock: true },
+      }));
+      parse(await agent.callTool({
+        name: "create_field",
+        arguments: { modelId: hero.id, label: "Headline", apiKey: "headline", fieldType: "string" },
+      }));
+
+      const page = parse(await agent.callTool({
+        name: "create_model",
+        arguments: { name: "Page", apiKey: "page" },
+      }));
+      parse(await agent.callTool({
+        name: "create_field",
+        arguments: {
+          modelId: page.id,
+          label: "Content",
+          apiKey: "content",
+          fieldType: "structured_text",
+          validators: { structured_text_blocks: ["hero_section"] },
+        },
+      }));
+
+      const structuredText = parse(await agent.callTool({
+        name: "build_structured_text",
+        arguments: {
+          blocks: [
+            { id: "hero-1", type: "hero_section", data: { headline: "Hello from MCP" } },
+          ],
+          nodes: [
+            { type: "paragraph", text: "Intro with **bold** copy." },
+            { type: "block", ref: "hero-1" },
+            { type: "paragraph", text: "Closing line." },
+          ],
+        },
+      }));
+
+      parse(await agent.callTool({
+        name: "create_record",
+        arguments: {
+          modelApiKey: "page",
+          data: {
+            content: structuredText,
+          },
+        },
+      }));
+
+      const records = parse(await agent.callTool({ name: "query_records", arguments: { modelApiKey: "page" } }));
+      const content = typeof records[0].content === "string" ? JSON.parse(records[0].content) : records[0].content;
+
+      expect(content.schema).toBe("dast");
+      expect(content.document.children).toHaveLength(3);
+      expect(content.document.children[0].type).toBe("paragraph");
+      expect(content.document.children[1]).toEqual({ type: "block", item: "hero-1" });
+      expect(content.document.children[2].type).toBe("paragraph");
+
+      const blocks = await Effect.runPromise(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          return yield* sql.unsafe<Record<string, any>>(
+            'SELECT * FROM "block_hero_section" WHERE _root_record_id = ?',
+            [records[0].id],
+          );
+        }).pipe(Effect.provide(sqlLayer))
+      );
+
+      expect(blocks).toHaveLength(1);
+      expect(blocks[0].id).toBe("hero-1");
+      expect(blocks[0].headline).toBe("Hello from MCP");
+      expect(blocks[0]._root_field_api_key).toBe("content");
     });
   });
 });

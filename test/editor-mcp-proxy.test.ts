@@ -143,4 +143,90 @@ describe("editor MCP proxy", () => {
     expect(resourceMetadata.resource).toBe("https://app.example.com/app-editor-mcp/mcp");
     expect(resourceMetadata.authorization_servers).toEqual(["https://app.example.com/app-editor-mcp"]);
   });
+
+  it("preserves a path prefix in cmsBaseUrl when proxying MCP traffic", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const request = input as Request;
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+
+      if (url === "https://cms.example.com/base/api/tokens") {
+        return new Response(JSON.stringify({
+          id: "etid_123",
+          token: "etk_real_editor_token",
+          tokenPrefix: "etk_real_edi",
+          name: "Sarah Editor",
+          createdAt: new Date().toISOString(),
+          expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+        }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (url === "https://cms.example.com/base/mcp/editor") {
+        return new Response(JSON.stringify({
+          proxiedTo: request.url,
+          authorization: request.headers.get("authorization"),
+        }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      return new Response("Not found", { status: 404 });
+    });
+
+    const proxy = createEditorMcpProxy({
+      appBaseUrl: "https://app.example.com",
+      cmsBaseUrl: "https://cms.example.com/base",
+      cmsWriteKey: "write-key",
+      oauthSecret: "super-secret",
+      getEditor: async () => ({ id: "user-1", name: "Sarah Editor" }),
+      getLoginUrl: () => "https://app.example.com/login",
+      fetch: fetchMock as typeof fetch,
+    });
+
+    const verifier = "verifier-123";
+    const challengeBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+    const challenge = btoa(String.fromCharCode(...new Uint8Array(challengeBuffer)))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/g, "");
+
+    const authorizeResponse = await proxy.fetch(new Request(
+      `https://app.example.com${proxy.paths.authorizationPath}?response_type=code&client_id=test-client&redirect_uri=${encodeURIComponent("https://client.example.com/callback")}&code_challenge=${challenge}&code_challenge_method=S256`,
+    ));
+    const authorizeLocation = new URL(authorizeResponse.headers.get("location")!);
+    const code = authorizeLocation.searchParams.get("code");
+
+    const formData = new FormData();
+    formData.set("grant_type", "authorization_code");
+    formData.set("code", code!);
+    formData.set("client_id", "test-client");
+    formData.set("redirect_uri", "https://client.example.com/callback");
+    formData.set("code_verifier", verifier);
+
+    const tokenResponse = await proxy.fetch(new Request(`https://app.example.com${proxy.paths.tokenPath}`, {
+      method: "POST",
+      body: formData,
+    }));
+    const tokens = await tokenResponse.json() as { access_token: string };
+
+    const mcpResponse = await proxy.fetch(new Request(`https://app.example.com${proxy.paths.mcpPath}`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${tokens.access_token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize" }),
+      duplex: "half",
+    } as RequestInit & { duplex: "half" }));
+
+    await expect(mcpResponse.json()).resolves.toEqual({
+      proxiedTo: "https://cms.example.com/base/mcp/editor",
+      authorization: "Bearer etk_real_editor_token",
+    });
+  });
 });

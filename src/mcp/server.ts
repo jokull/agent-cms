@@ -36,21 +36,59 @@ import type { ModelRow, FieldRow, LocaleRow } from "../db/row-types.js";
 import { VectorizeContext } from "../search/vectorize-context.js";
 import { HooksContext } from "../hooks.js";
 import { decodeJsonRecordStringOr, encodeJson } from "../json.js";
+import { markdownToDast } from "../dast/index.js";
 import type { RequestActor } from "../attribution.js";
 
 const JsonRecord = Schema.Record({ key: Schema.String, value: Schema.Unknown });
 const CommonDependencies = [SqlClient.SqlClient, VectorizeContext, HooksContext, AssetImportContext];
 
+const BlockEntry = Schema.Struct({
+  id: Schema.String,
+  type: Schema.String,
+  data: JsonRecord,
+});
+
 const BuildStructuredTextInput = Schema.Struct({
-  paragraphs: Schema.optional(Schema.Array(Schema.String)),
-  blocks: Schema.optional(
-    Schema.Array(
+  blocks: Schema.optional(Schema.Array(BlockEntry)),
+  nodes: Schema.Array(
+    Schema.Union(
       Schema.Struct({
-        type: Schema.String,
-        data: JsonRecord,
-      })
+        type: Schema.Literal("paragraph"),
+        text: Schema.String,
+      }),
+      Schema.Struct({
+        type: Schema.Literal("heading"),
+        level: Schema.Number,
+        text: Schema.String,
+      }),
+      Schema.Struct({
+        type: Schema.Literal("code"),
+        code: Schema.String,
+        language: Schema.optional(Schema.String),
+      }),
+      Schema.Struct({
+        type: Schema.Literal("blockquote"),
+        text: Schema.String,
+      }),
+      Schema.Struct({
+        type: Schema.Literal("list"),
+        style: Schema.optional(Schema.Literal("bulleted", "numbered")),
+        items: Schema.Array(Schema.String),
+      }),
+      Schema.Struct({
+        type: Schema.Literal("thematicBreak"),
+      }),
+      Schema.Struct({
+        type: Schema.Literal("block"),
+        ref: Schema.String,
+      }),
     )
   ),
+});
+
+const BuildStructuredTextFromMarkdownInput = Schema.Struct({
+  markdown: Schema.String,
+  blocks: Schema.optional(Schema.Array(BlockEntry)),
 });
 
 const UpdateModelInput = Schema.Struct({
@@ -192,6 +230,7 @@ function cmsTool<Name extends string>(
     || name.startsWith("get_")
     || name === "schema_info"
     || name === "build_structured_text"
+    || name === "build_structured_text_from_markdown"
     || name === "search_content"
     || name === "export_schema";
   tool = tool.annotate(AiTool.Readonly, isReadonly);
@@ -199,6 +238,49 @@ function cmsTool<Name extends string>(
   tool = tool.annotate(AiTool.Destructive, name.startsWith("delete_") || name.startsWith("remove_"));
   tool = tool.annotate(AiTool.OpenWorld, name === "search_content");
   return tool;
+}
+
+/**
+ * Parse a text string with inline markdown into DAST inline (span) nodes.
+ * Returns the children of the first paragraph, or a single span fallback.
+ */
+function parseInlineSpans(text: string): readonly unknown[] {
+  const doc = markdownToDast(text);
+  const first = doc.document.children.at(0);
+  if (first != null && "children" in first) {
+    return first.children as readonly unknown[];
+  }
+  return [{ type: "span", value: text }];
+}
+
+function collectBlockRefs(node: unknown, refs: Set<string> = new Set()): Set<string> {
+  if (node == null || typeof node !== "object") return refs;
+  if (Array.isArray(node)) {
+    for (const entry of node) collectBlockRefs(entry, refs);
+    return refs;
+  }
+  if ("type" in node && node.type === "block" && "item" in node && typeof node.item === "string") {
+    refs.add(node.item);
+  }
+  for (const value of Object.values(node)) {
+    collectBlockRefs(value, refs);
+  }
+  return refs;
+}
+
+function assertKnownBlockRefs(blockMap: Record<string, unknown>, refs: Iterable<string>) {
+  for (const ref of refs) {
+    if (!(ref in blockMap)) {
+      throw new Error(`Unknown block ref '${ref}'. Define it in blocks before referencing it.`);
+    }
+  }
+}
+
+function assertNoUnusedBlocks(blockMap: Record<string, unknown>, refs: ReadonlySet<string>) {
+  const unused = Object.keys(blockMap).filter((id) => !refs.has(id));
+  if (unused.length > 0) {
+    throw new Error(`Unused blocks: ${unused.join(", ")}. Every block must be referenced in the document.`);
+  }
 }
 
 function toStructuredContent(value: unknown) {
@@ -312,7 +394,48 @@ const ReorderRecordsTool = cmsTool("reorder_records", "Reorder records in a sort
 const RemoveBlockTypeTool = cmsTool("remove_block_type", "Remove a block type: cleans DAST trees, deletes blocks, drops table", RemoveBlockTypeInput.fields);
 const RemoveBlockFromWhitelistTool = cmsTool("remove_block_from_whitelist", "Remove a block type from a field's whitelist and clean affected DAST trees", RemoveBlockFromWhitelistInput.fields);
 const RemoveLocaleTool = cmsTool("remove_locale", "Remove a locale and strip it from all localized field values", LocaleIdInput.fields);
-const BuildStructuredTextTool = cmsTool("build_structured_text", "Build a valid StructuredText value from prose and blocks. Auto-assigns ULIDs to blocks.", BuildStructuredTextInput.fields);
+const BuildStructuredTextTool = cmsTool("build_structured_text", `Build a StructuredText value from typed nodes and block definitions. Preferred for precise control over document structure.
+
+Workflow: prepare blocks first, then reference them in the node array.
+
+blocks: [{id: "v1", type: "venue", data: {name: "Chickpea", image: "asset_id"}}]
+
+nodes (text structure referencing blocks by ID):
+- paragraph: {type:"paragraph", text:"Inline **markdown** and [links](url) supported"}
+- heading: {type:"heading", level:2, text:"Section Title"}
+- code: {type:"code", code:"const x = 1", language:"typescript"}
+- blockquote: {type:"blockquote", text:"Quote text"}
+- list: {type:"list", style:"bulleted"|"numbered", items:["First","Second"]}
+- thematicBreak: {type:"thematicBreak"}
+- block: {type:"block", ref:"v1"} — places a block defined in the blocks array
+
+Inline markdown in text fields: **bold**, *italic*, \`code\`, [links](url), ~~strikethrough~~.
+
+For nested blocks (e.g. sections containing venues), compose bottom-up:
+1. Build inner structured text (venues) → get {value, blocks} result
+2. Use that result as a field value in a parent block's data
+3. Build outer structured text (sections) referencing the parent blocks
+
+IMPORTANT: Call describe_model first to verify which block types are allowed on the target structured_text field (check the structured_text_blocks validator).
+
+If your MCP client supports code execution (e.g. Claude Desktop Analysis tool), consider constructing the StructuredText JSON directly in a script for maximum control. Otherwise, this tool or build_structured_text_from_markdown are the way to go.`, BuildStructuredTextInput.fields);
+
+const BuildStructuredTextFromMarkdownTool = cmsTool("build_structured_text_from_markdown", `Build a StructuredText value from markdown and block definitions. Best for prose-heavy content where you want natural formatting.
+
+Workflow: prepare blocks first, then reference them in the markdown with sentinels.
+
+blocks: [{id: "hero1", type: "hero_banner", data: {title: "Welcome"}}]
+
+Write standard markdown (headings, bold, italic, links, lists, code blocks, tables, blockquotes).
+Place blocks with sentinels: <!-- cms:block:BLOCK_ID -->
+
+Every block in the blocks array MUST have a matching sentinel in the markdown. Unused blocks cause the tool to fail.
+
+For nested blocks, compose bottom-up — same as build_structured_text.
+
+IMPORTANT: Call describe_model first to verify which block types are allowed on the target structured_text field (check the structured_text_blocks validator).
+
+If your MCP client supports code execution (e.g. Claude Desktop Analysis tool), consider constructing the StructuredText JSON directly in a script for maximum control. Otherwise, this tool or build_structured_text are the way to go.`, BuildStructuredTextFromMarkdownInput.fields);
 const UploadAssetTool = cmsTool("upload_asset", `Register an asset after uploading the original file to R2 out of band.
 
 Upload flow:
@@ -380,6 +503,7 @@ const AdminTools = [
   RemoveBlockFromWhitelistTool,
   RemoveLocaleTool,
   BuildStructuredTextTool,
+  BuildStructuredTextFromMarkdownTool,
   UploadAssetTool,
   ImportAssetFromUrlTool,
   ListAssetsTool,
@@ -415,6 +539,7 @@ const EditorTools = [
   RestoreRecordVersionTool,
   ReorderRecordsTool,
   BuildStructuredTextTool,
+  BuildStructuredTextFromMarkdownTool,
   UploadAssetTool,
   ImportAssetFromUrlTool,
   ListAssetsTool,
@@ -731,36 +856,80 @@ export function createMcpLayer(
     remove_block_type: withDecoded(RemoveBlockTypeInput, ({ blockApiKey }) => SchemaLifecycle.removeBlockType(blockApiKey)),
     remove_block_from_whitelist: withDecoded(RemoveBlockFromWhitelistInput, ({ fieldId, blockApiKey }) => SchemaLifecycle.removeBlockFromWhitelist({ fieldId, blockApiKey })),
     remove_locale: withDecoded(LocaleIdInput, ({ localeId }) => SchemaLifecycle.removeLocale(localeId)),
-    build_structured_text: withDecoded(BuildStructuredTextInput, ({ paragraphs, blocks }) =>
-      Effect.promise(async () => {
-        const { ulid } = await import("ulidx");
-        const safeParagraphs = paragraphs ?? [];
-        const safeBlocks = blocks ?? [];
-        const children: unknown[] = [];
+    build_structured_text: withDecoded(BuildStructuredTextInput, ({ blocks, nodes }) =>
+      Effect.sync(() => {
         const blockMap: Record<string, unknown> = {};
-        let blockIdx = 0;
-        for (const text of safeParagraphs) {
-          children.push({
-            type: "paragraph",
-            children: [{ type: "span", value: text }],
-          });
-          if (blockIdx < safeBlocks.length) {
-            const b = safeBlocks[blockIdx];
-            const id = ulid();
-            children.push({ type: "block", item: id });
-            blockMap[id] = { _type: b.type, ...b.data };
-            blockIdx++;
+        for (const b of blocks ?? []) {
+          blockMap[b.id] = { _type: b.type, ...b.data };
+        }
+
+        const children: unknown[] = [];
+        for (const node of nodes) {
+          switch (node.type) {
+            case "paragraph":
+              children.push({
+                type: "paragraph",
+                children: parseInlineSpans(node.text),
+              });
+              break;
+            case "heading":
+              children.push({
+                type: "heading",
+                level: node.level,
+                children: parseInlineSpans(node.text),
+              });
+              break;
+            case "code":
+              children.push({
+                type: "code",
+                code: node.code,
+                ...(node.language ? { language: node.language } : {}),
+              });
+              break;
+            case "blockquote":
+              children.push({
+                type: "blockquote",
+                children: [{ type: "paragraph", children: parseInlineSpans(node.text) }],
+              });
+              break;
+            case "list":
+              children.push({
+                type: "list",
+                style: node.style ?? "bulleted",
+                children: node.items.map((item) => ({
+                  type: "listItem",
+                  children: [{ type: "paragraph", children: parseInlineSpans(item) }],
+                })),
+              });
+              break;
+            case "thematicBreak":
+              children.push({ type: "thematicBreak" });
+              break;
+            case "block":
+              children.push({ type: "block", item: node.ref });
+              break;
           }
         }
-        while (blockIdx < safeBlocks.length) {
-          const b = safeBlocks[blockIdx];
-          const id = ulid();
-          children.push({ type: "block", item: id });
-          blockMap[id] = { _type: b.type, ...b.data };
-          blockIdx++;
-        }
+
+        assertKnownBlockRefs(blockMap, collectBlockRefs(children));
+
         return {
           value: { schema: "dast", document: { type: "root", children } },
+          blocks: blockMap,
+        };
+      })),
+    build_structured_text_from_markdown: withDecoded(BuildStructuredTextFromMarkdownInput, ({ markdown, blocks }) =>
+      Effect.sync(() => {
+        const doc = markdownToDast(markdown);
+        const blockMap: Record<string, unknown> = {};
+        for (const b of blocks ?? []) {
+          blockMap[b.id] = { _type: b.type, ...b.data };
+        }
+        const refs = collectBlockRefs(doc.document);
+        assertKnownBlockRefs(blockMap, refs);
+        assertNoUnusedBlocks(blockMap, refs);
+        return {
+          value: doc,
           blocks: blockMap,
         };
       })),

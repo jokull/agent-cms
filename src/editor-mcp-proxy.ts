@@ -317,7 +317,7 @@ export function createEditorMcpProxy(config: EditorMcpProxyConfig): EditorMcpPro
       return unauthorizedForMcp(protectedResourceMetadataUrl);
     }
 
-    const upstreamUrl = new URL("/mcp/editor", cmsBaseUrl);
+    const upstreamUrl = new URL(cmsBaseUrl + "/mcp/editor");
     const upstreamRequest = new Request(upstreamUrl, {
       method: request.method,
       headers: cloneHeadersWithoutAuthorization(request.headers),
