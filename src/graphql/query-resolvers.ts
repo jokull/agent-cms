@@ -6,8 +6,10 @@ import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
 import { compileFilterToSql, compileOrderBy, type FilterCompilerOpts } from "./filter-compiler.js";
 import { computeIsValid, findUniqueConstraintViolations } from "../db/validators.js";
+import type { GraphQLResolveInfo } from "graphql";
 import type { SchemaBuilderContext, ModelQueryMeta, DynamicRow, GqlContext } from "./gql-types.js";
 import { toCamelCase, pluralize, getRegistryDef, deserializeRecord, decodeSnapshot } from "./gql-utils.js";
+import { buildLinkPrefetchSpecs } from "./sqlite-json-prefetch.js";
 
 /**
  * Build filter/orderBy type defs and Query resolvers for each content model.
@@ -75,7 +77,8 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
     async function queryWithFilter(
       args: { filter?: DynamicRow; orderBy?: string[]; first?: number; skip?: number },
       includeDrafts: boolean,
-      locale?: string
+      locale?: string,
+      info?: GraphQLResolveInfo
     ): Promise<DynamicRow[]> {
       const filterLocale = locale ?? defaultLocale ?? undefined;
       const filterOpts: FilterCompilerOpts = {
@@ -91,7 +94,13 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
         Effect.gen(function* () {
           const s = yield* SqlClient.SqlClient;
 
-          let query = `SELECT * FROM "${tableName}"`;
+          const linkPrefetchSpecs = info
+            ? buildLinkPrefetchSpecs({ ctx, rootFields: fields, info, tableName })
+            : [];
+          const selectClause = linkPrefetchSpecs.length > 0
+            ? `SELECT "${tableName}".*, ${linkPrefetchSpecs.map((spec) => spec.sqlExpression).join(", ")}`
+            : `SELECT *`;
+          let query = `${selectClause} FROM "${tableName}"`;
           const conditions: string[] = [];
           let params: unknown[] = [];
 
@@ -168,7 +177,7 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
       );
     }
 
-    (resolvers.Query)[listName] = async (_: unknown, args: DynamicRow, context: GqlContext) => {
+    (resolvers.Query)[listName] = async (_: unknown, args: DynamicRow, context: GqlContext, info: GraphQLResolveInfo) => {
       const includeDrafts = context.includeDrafts ?? false;
       const excludeInvalid = typeof args.excludeInvalid === "boolean"
         ? args.excludeInvalid
@@ -182,7 +191,8 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
       let results = await queryWithFilter(
         args as { filter?: DynamicRow; orderBy?: string[]; first?: number; skip?: number },
         includeDrafts,
-        locale
+        locale,
+        info
       );
       if (excludeInvalid) {
         const validity = await Promise.all(results.map(async (record) => {
@@ -201,7 +211,7 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
       return results;
     };
 
-    (resolvers.Query)[singleName] = async (_: unknown, args: DynamicRow, context: GqlContext) => {
+    (resolvers.Query)[singleName] = async (_: unknown, args: DynamicRow, context: GqlContext, info: GraphQLResolveInfo) => {
       const includeDrafts = context.includeDrafts ?? false;
       const locale = typeof args.locale === "string"
         ? args.locale
@@ -214,8 +224,12 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
             const s = yield* SqlClient.SqlClient;
             const conditions = [`id = ?`];
             if (!includeDrafts) conditions.push(`"_status" IN ('published', 'updated')`);
+            const linkPrefetchSpecs = buildLinkPrefetchSpecs({ ctx, rootFields: fields, info, tableName });
+            const selectClause = linkPrefetchSpecs.length > 0
+              ? `SELECT "${tableName}".*, ${linkPrefetchSpecs.map((spec) => spec.sqlExpression).join(", ")}`
+              : `SELECT *`;
             const rows = yield* s.unsafe<DynamicRow>(
-              `SELECT * FROM "${tableName}" WHERE ${conditions.join(" AND ")}`,
+              `${selectClause} FROM "${tableName}" WHERE ${conditions.join(" AND ")}`,
               [args.id]
             );
             if (rows.length === 0) return null;
@@ -227,13 +241,14 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
         const records = await queryWithFilter(
           { filter: args.filter as DynamicRow, first: 1 },
           includeDrafts,
-          locale
+          locale,
+          info
         );
         return records[0] ?? null;
       }
       // Singleton models: return the single record without arguments
       if (model.singleton) {
-        const records = await queryWithFilter({ first: 1 }, includeDrafts, locale);
+        const records = await queryWithFilter({ first: 1 }, includeDrafts, locale, info);
         return records[0] ?? null;
       }
       return null;

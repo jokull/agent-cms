@@ -6,13 +6,17 @@ import { SqlClient } from "@effect/sql";
 import type { AssetRow } from "../db/row-types.js";
 import { getLinkTargets, getLinksTargets, computeIsValid, findUniqueConstraintViolations } from "../db/validators.js";
 import type { SchemaBuilderContext, ModelQueryMeta, DynamicRow, GqlContext, AssetObject } from "./gql-types.js";
-import { toTypeName, toCamelCase, fieldToSDL, getRegistryDef, deserializeRecord, resolveVideoField } from "./gql-utils.js";
+import { toTypeName, toCamelCase, fieldToSDL, getRegistryDef, deserializeRecord, decodeSnapshot, resolveVideoField } from "./gql-utils.js";
 import { resolveStructuredTextValue } from "./structured-text-resolver.js";
 import { loadLinkedRecords } from "./linked-record-loader.js";
 import { loadStructuredTextEnvelope } from "./structured-text-loader.js";
 import { getBlockWhitelist } from "../db/validators.js";
 import { decodeJsonIfString, decodeJsonStringOr } from "../json.js";
 import { mergeAssetWithMediaReference, parseMediaFieldReference, parseMediaGalleryReferences } from "../media-field.js";
+
+function isDynamicRow(value: unknown): value is DynamicRow {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 function pickLocalizedEntry(rawValue: unknown, context: GqlContext, defaultLocale?: string | null) {
   if (rawValue === null || rawValue === undefined) return { locale: null, value: null };
@@ -342,6 +346,10 @@ export function buildContentModelResolvers(
         const targets = getLinkTargets(f.validators);
         if (targets && targets.length > 0) {
           typeResolvers[gqlName] = async (parent: DynamicRow, _args: unknown, context: GqlContext) => {
+            const prefetched = parent[`__prefetch_${f.api_key}`];
+            if (isDynamicRow(prefetched)) {
+              return decodeSnapshot(prefetched, context.includeDrafts ?? false);
+            }
             const linkedId = parent[f.api_key];
             if (!linkedId) return null;
             return await loadLinkedRecords({
