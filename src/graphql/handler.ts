@@ -1,6 +1,6 @@
 import { createYoga, type YogaSchemaDefinition } from "graphql-yoga";
-import { Cache, Effect, Layer, Logger } from "effect";
-import { parse, execute as gqlExecute, validate } from "graphql";
+import { Effect, Layer, Logger } from "effect";
+import { type GraphQLSchema, parse, execute as gqlExecute, validate } from "graphql";
 import { SqlClient } from "@effect/sql";
 import { buildGraphQLSchema } from "./schema-builder.js";
 import { enforceQueryLimits } from "./query-limits.js";
@@ -61,48 +61,42 @@ export function createGraphQLHandler(
 
   let schemaBuildCount = 0;
   let lastSchemaBuildMs = 0;
-  const schemaCache = Effect.runSync(
-    Cache.make({
-      capacity: 1,
-      timeToLive: "24 hours",
-      lookup: () => {
-        const buildStartedAt = performance.now();
-        return buildGraphQLSchema(sqlLayer, {
-          assetBaseUrl: options?.assetBaseUrl,
-          assetPathPrefix: options?.assetPathPrefix,
-          isProduction: options?.isProduction,
-        }).pipe(
-          Effect.withSpan("graphql.build_schema"),
-          Effect.annotateSpans({
-            assetBaseUrl: options?.assetBaseUrl ?? "",
-            isProduction: options?.isProduction ?? false,
-          }),
-          Effect.tap(() => Effect.sync(() => {
-            lastSchemaBuildMs = Number((performance.now() - buildStartedAt).toFixed(3));
-            schemaBuildCount += 1;
-          })),
-          Effect.provide(runtimeLayer),
-        );
-      },
-    }),
-  );
+  let schemaPromise: Promise<GraphQLSchema> | null = null;
 
-  function getSchema() {
+  function buildSchema() {
+    const buildStartedAt = performance.now();
     return Effect.runPromise(
-      schemaCache.get("schema").pipe(
+      buildGraphQLSchema(sqlLayer, {
+        assetBaseUrl: options?.assetBaseUrl,
+        assetPathPrefix: options?.assetPathPrefix,
+        isProduction: options?.isProduction,
+      }).pipe(
+        Effect.withSpan("graphql.build_schema"),
+        Effect.annotateSpans({
+          assetBaseUrl: options?.assetBaseUrl ?? "",
+          isProduction: options?.isProduction ?? false,
+        }),
+        Effect.tap(() => Effect.sync(() => {
+          lastSchemaBuildMs = Number((performance.now() - buildStartedAt).toFixed(3));
+          schemaBuildCount += 1;
+        })),
         Effect.provide(runtimeLayer),
-        Effect.orDie,
       ),
     );
   }
 
+  function getSchema() {
+    if (!schemaPromise) {
+      schemaPromise = buildSchema().catch((error) => {
+        schemaPromise = null;
+        throw error;
+      });
+    }
+    return schemaPromise;
+  }
+
   async function getSchemaTiming(): Promise<SchemaTiming> {
-    const cacheHit = await Effect.runPromise(
-      schemaCache.contains("schema").pipe(
-        Effect.provide(runtimeLayer),
-        Effect.orDie,
-      ),
-    );
+    const cacheHit = schemaPromise !== null;
     const startedAt = performance.now();
     await getSchema();
     return {
@@ -139,12 +133,8 @@ export function createGraphQLHandler(
   });
 
   function invalidateSchema() {
-    return Effect.runPromise(
-      schemaCache.invalidate("schema").pipe(
-        Effect.provide(runtimeLayer),
-        Effect.orDie,
-      ),
-    );
+    schemaPromise = null;
+    return Promise.resolve();
   }
 
   function logGraphqlInfo(message: string, fields: Record<string, unknown>) {
@@ -158,20 +148,24 @@ export function createGraphQLHandler(
   }
 
   const handle = async (request: Request): Promise<Response> => {
+    const debugSql = request.headers.get("X-Debug-Sql") === "true";
+    const traceEnabled = request.headers.get("X-Bench-Trace") === "1" || debugSql;
+
+    if (!traceEnabled) {
+      return yoga.handle(request);
+    }
+
     return withSqlMetrics(async () => {
-      const traceEnabled = request.headers.get("X-Bench-Trace") === "1" || request.headers.get("X-Debug-Sql") === "true";
       const traceId = request.headers.get("X-Trace-Id") ?? crypto.randomUUID();
       let operationName: string | null = null;
 
-      if (traceEnabled) {
-        try {
-          const body = await request.clone().json();
-          if (isGraphqlRequestBody(body)) {
-            operationName = body.operationName ?? inferOperationName(body.query);
-          }
-        } catch {
-          operationName = null;
+      try {
+        const body = await request.clone().json();
+        if (isGraphqlRequestBody(body)) {
+          operationName = body.operationName ?? inferOperationName(body.query);
         }
+      } catch {
+        operationName = null;
       }
 
       const requestStartedAt = performance.now();
@@ -190,37 +184,33 @@ export function createGraphQLHandler(
         headers.set("X-Sql-Slowest-Ms", metrics.slowestSamplesMs.map((value) => value.toFixed(3)).join(","));
       }
 
-      if (traceEnabled) {
-        headers.set("X-Cms-Request-Ms", requestMs.toFixed(3));
-        headers.set("X-Cms-Yoga-Ms", yogaMs.toFixed(3));
-        headers.set("X-Cms-Schema-Wait-Ms", schemaTiming.waitMs.toFixed(3));
-        headers.set("X-Cms-Schema-Build-Ms", schemaTiming.buildMs.toFixed(3));
-        headers.set("X-Cms-Schema-Cache", schemaTiming.cacheHit ? "hit" : "miss");
-        headers.set("X-Cms-Schema-Build-Count", String(schemaBuildCount));
-        const serverTiming = [
-          `cms-total;dur=${requestMs.toFixed(3)}`,
-          `cms-schema;dur=${schemaTiming.waitMs.toFixed(3)};desc="${schemaTiming.cacheHit ? "hit" : "miss"}"`,
-          `cms-yoga;dur=${yogaMs.toFixed(3)}`,
-          `cms-sql;dur=${metrics?.totalDurationMs.toFixed(3) ?? "0.000"}`,
-        ];
-        headers.set("Server-Timing", serverTiming.join(", "));
-        logGraphqlInfo("graphql request completed", {
-          traceId,
-          operationName,
-          status: response.status,
-          requestMs,
-          yogaMs,
-          schemaWaitMs: schemaTiming.waitMs,
-          schemaBuildMs: schemaTiming.buildMs,
-          schemaCache: schemaTiming.cacheHit ? "hit" : "miss",
-          schemaBuildCount,
-          sqlStatementCount: metrics?.statementCount ?? 0,
-          sqlTotalMs: metrics?.totalDurationMs ?? 0,
-          sqlSlowestSamplesMs: metrics?.slowestSamplesMs ?? [],
-        });
-      } else if (request.headers.get("X-Debug-Sql") !== "true") {
-        return response;
-      }
+      headers.set("X-Cms-Request-Ms", requestMs.toFixed(3));
+      headers.set("X-Cms-Yoga-Ms", yogaMs.toFixed(3));
+      headers.set("X-Cms-Schema-Wait-Ms", schemaTiming.waitMs.toFixed(3));
+      headers.set("X-Cms-Schema-Build-Ms", schemaTiming.buildMs.toFixed(3));
+      headers.set("X-Cms-Schema-Cache", schemaTiming.cacheHit ? "hit" : "miss");
+      headers.set("X-Cms-Schema-Build-Count", String(schemaBuildCount));
+      const serverTiming = [
+        `cms-total;dur=${requestMs.toFixed(3)}`,
+        `cms-schema;dur=${schemaTiming.waitMs.toFixed(3)};desc="${schemaTiming.cacheHit ? "hit" : "miss"}"`,
+        `cms-yoga;dur=${yogaMs.toFixed(3)}`,
+        `cms-sql;dur=${metrics?.totalDurationMs.toFixed(3) ?? "0.000"}`,
+      ];
+      headers.set("Server-Timing", serverTiming.join(", "));
+      logGraphqlInfo("graphql request completed", {
+        traceId,
+        operationName,
+        status: response.status,
+        requestMs,
+        yogaMs,
+        schemaWaitMs: schemaTiming.waitMs,
+        schemaBuildMs: schemaTiming.buildMs,
+        schemaCache: schemaTiming.cacheHit ? "hit" : "miss",
+        schemaBuildCount,
+        sqlStatementCount: metrics?.statementCount ?? 0,
+        sqlTotalMs: metrics?.totalDurationMs ?? 0,
+        sqlSlowestSamplesMs: metrics?.slowestSamplesMs ?? [],
+      });
 
       return new Response(response.body, {
         status: response.status,

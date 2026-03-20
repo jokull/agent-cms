@@ -1,1 +1,2 @@
 {"type":"config","name":"Published read latency","metricName":"total_ms","metricUnit":"ms","bestDirection":"lower"}
+{"run":1,"commit":"58de837","metric":75.585,"metrics":{},"status":"keep","description":"Baseline published-read benchmark on current branch state before new optimizations.","timestamp":1774029617738,"segment":0,"confidence":null}
