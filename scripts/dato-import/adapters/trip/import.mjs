@@ -101,10 +101,6 @@ function checkpointSnapshot(status, extra = {}) {
   };
 }
 
-async function saveCheckpoint(status, extra = {}) {
-  return writeJson(checkpointFilename(), checkpointSnapshot(status, extra));
-}
-
 function readCheckpointEffect() {
   return promiseEffect(() => readJson(checkpointFilename()), "read checkpoint", {
     checkpoint: checkpointFilename(),
@@ -112,7 +108,7 @@ function readCheckpointEffect() {
 }
 
 function saveCheckpointEffect(status, extra = {}) {
-  return promiseEffect(() => saveCheckpoint(status, extra), "write checkpoint", {
+  return promiseEffect(() => writeJson(checkpointFilename(), checkpointSnapshot(status, extra)), "write checkpoint", {
     checkpoint: checkpointFilename(),
     status,
   });
@@ -147,12 +143,30 @@ function runTasksEffect(tasks, concurrency = LINKED_IMPORT_CONCURRENCY) {
   return runConcurrentEffect(tasks, (task) => task(), concurrency);
 }
 
+function mapConcurrentEffect(items, fn, concurrency = LINKED_IMPORT_CONCURRENCY) {
+  return Effect.forEach(items, (item) => promiseEffect(() => fn(item)), { concurrency });
+}
+
 function noteFinding(record) {
   findings.push(record);
 }
 
+function noteFindingEffect(record) {
+  return Effect.sync(() => {
+    noteFinding(record);
+  });
+}
+
 function fatalFindings() {
   return findings.filter((finding) => FATAL_FINDING_TYPES.has(finding.type));
+}
+
+function fatalFindingsEffect() {
+  return Effect.sync(() => fatalFindings());
+}
+
+function findingsCountEffect() {
+  return Effect.sync(() => findings.length);
 }
 
 function localizedInput(value) {
@@ -255,14 +269,44 @@ async function upsertImportedRecord(modelApiKey, id, data, overrides) {
   rememberOverrides(modelApiKey, id, overrides);
 }
 
+function upsertImportedRecordEffect(modelApiKey, id, data, overrides) {
+  return promiseEffect(
+    () => upsertImportedRecord(modelApiKey, id, data, overrides),
+    "upsert imported record",
+    { model: modelApiKey, recordId: id },
+  );
+}
+
+function singleFlightEffect(cache, key, effectFactory, context = {}) {
+  if (cache.has(key)) {
+    return promiseEffect(() => cache.get(key), "reuse in-flight import", {
+      key,
+      ...context,
+    });
+  }
+
+  const promise = Effect.runPromise(
+    effectFactory().pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          cache.delete(key);
+        }),
+      ),
+    ),
+  );
+  cache.set(key, promise);
+  return promiseEffect(() => promise, "await in-flight import", {
+    key,
+    ...context,
+  });
+}
+
 function publishTouchedRecordsEffect() {
   if (IMPORT_LOCALE !== "en") {
-    return Effect.sync(() => {
-      noteFinding({
+    return noteFindingEffect({
         type: "deferred_publish",
         detail: `Skipped auto-publish for locale '${IMPORT_LOCALE}'. Non-default locale imports only merge localized values onto existing records.`,
       });
-    });
   }
 
   return Effect.forEach(
@@ -512,7 +556,7 @@ async function importAssetsFromRecord(record) {
   }
 
   await Effect.runPromise(runConcurrentEffect(candidates, async (asset) => {
-    const result = await ensureAssetOnce(asset);
+    const result = await Effect.runPromise(ensureAssetOnceEffect(asset));
     if (result?.metadataOnly) {
       noteFinding({
         type: "asset_fallback",
@@ -532,7 +576,7 @@ async function importSiteSettings() {
     )
   );
 
-  await upsertImportedRecord("site_settings", "default", {
+  await Effect.runPromise(upsertImportedRecordEffect("site_settings", "default", {
     ...(localizedMap(
       Object.fromEntries(
         Object.entries(site.attributes?.global_seo ?? {}).map(([locale, entry]) => [locale, entry?.site_name ?? null])
@@ -580,14 +624,14 @@ async function importSiteSettings() {
         Object.entries(site.attributes?.global_seo ?? {}).map(([locale, entry]) => [locale, entry?.fallback_seo ?? null])
       )
     ) } : {}),
-  });
+  }));
 }
 
 async function importAssetRefs(...refs) {
   await Effect.runPromise(runConcurrentEffect(refs, async (ref) => {
     const asset = assetFromUploadRef(ref);
     if (!asset?.id) return;
-    const result = await ensureAssetOnce(asset);
+    const result = await Effect.runPromise(ensureAssetOnceEffect(asset));
     if (result?.metadataOnly) {
       noteFinding({
         type: "asset_fallback",
@@ -599,33 +643,33 @@ async function importAssetRefs(...refs) {
 }
 
 async function importContributorById(id) {
-  await importRecordOnce("contributor", id, async () => {
+  await Effect.runPromise(importRecordOnceEffect("contributor", id, () => promiseEffect(async () => {
     const contributor = await datoGetItem(id);
     await importAssetRefs(contributor.attributes.profile_picture);
-    await upsertImportedRecord("contributor", contributor.id, {
+    await Effect.runPromise(upsertImportedRecordEffect("contributor", contributor.id, {
       ...(contributor.attributes.name == null ? {} : { name: contributor.attributes.name }),
       ...(localizedValue(contributor.attributes.role) == null ? {} : { role: localizedValue(contributor.attributes.role) }),
       ...(assetFromUploadRef(contributor.attributes.profile_picture)?.id == null ? {} : { profile_picture: assetFromUploadRef(contributor.attributes.profile_picture).id }),
-    }, toRecordOverrides(contributor.meta));
-  });
+    }, toRecordOverrides(contributor.meta)));
+  }, "import contributor", { recordId: id })));
 }
 
 async function importLocationById(id) {
-  await importRecordOnce("location", id, async () => {
+  await Effect.runPromise(importRecordOnceEffect("location", id, () => promiseEffect(async () => {
     const location = await datoGetItem(id);
     await importAssetRefs(location.attributes.image);
-    await upsertImportedRecord("location", location.id, {
+    await Effect.runPromise(upsertImportedRecordEffect("location", location.id, {
       ...(localizedInput(localizedValue(location.attributes.name)) ? { name: localizedInput(localizedValue(location.attributes.name)) } : {}),
       ...(location.attributes.slug == null ? {} : { slug: location.attributes.slug }),
       ...(localizedInput(localizedValue(location.attributes.description)) ? { description: localizedInput(localizedValue(location.attributes.description)) } : {}),
       ...(assetFromUploadRef(location.attributes.image)?.id == null ? {} : { image: assetFromUploadRef(location.attributes.image).id }),
       ...(latLonValue(location.attributes.geolocation) == null ? {} : { geolocation: latLonValue(location.attributes.geolocation) }),
-    }, toRecordOverrides(location.meta));
-  });
+    }, toRecordOverrides(location.meta)));
+  }, "import location", { recordId: id })));
 }
 
 async function importPlaceById(id) {
-  await importRecordOnce("place", id, async () => {
+  await Effect.runPromise(importRecordOnceEffect("place", id, () => promiseEffect(async () => {
     const place = await datoGetItem(id);
     const content = place.attributes.content?.[IMPORT_LOCALE] ?? null;
     await importAssetRefs(place.attributes.hero_image, ...(place.attributes.gallery ?? []));
@@ -637,7 +681,7 @@ async function importPlaceById(id) {
       ...localizedIds(place.attributes.questions).map((qaId) => () => importQaById(qaId)),
       ...(content ? [() => importDependenciesFromRawBody(content)] : []),
     ]));
-    await upsertImportedRecord("place", place.id, {
+    await Effect.runPromise(upsertImportedRecordEffect("place", place.id, {
       ...(localizedInput(localizedValue(place.attributes.title)) ? { title: localizedInput(localizedValue(place.attributes.title)) } : {}),
       ...(place.attributes.slug == null ? {} : { slug: place.attributes.slug }),
       ...(place.attributes.google_places_id == null ? {} : { google_places_id: place.attributes.google_places_id }),
@@ -650,18 +694,18 @@ async function importPlaceById(id) {
       ...(Array.isArray(place.attributes.nearby_places) && place.attributes.nearby_places.length > 0 ? { nearby_places: place.attributes.nearby_places } : {}),
       ...(Array.isArray(place.attributes.blogs) && place.attributes.blogs.length > 0 ? { blogs: place.attributes.blogs } : {}),
       ...(localizedIds(place.attributes.questions).length > 0 ? { questions: localizedIds(place.attributes.questions) } : {}),
-    }, toRecordOverrides(place.meta));
-  });
+    }, toRecordOverrides(place.meta)));
+  }, "import place", { recordId: id })));
 }
 
 async function importTourById(id) {
-  await importRecordOnce("tour", id, async () => {
+  await Effect.runPromise(importRecordOnceEffect("tour", id, () => promiseEffect(async () => {
     const tour = await datoGetItem(id);
     await importAssetRefs(tour.attributes.hero_image);
     if (tour.attributes.location) {
       await importLocationById(tour.attributes.location);
     }
-    await upsertImportedRecord("tour", tour.id, {
+    await Effect.runPromise(upsertImportedRecordEffect("tour", tour.id, {
       ...(localizedInput(localizedValue(tour.attributes.title)) ? { title: localizedInput(localizedValue(tour.attributes.title)) } : {}),
       ...(tour.attributes.slug == null ? {} : { slug: tour.attributes.slug }),
       ...(localizedInput(localizedValue(tour.attributes.summary)) ? { summary: localizedInput(localizedValue(tour.attributes.summary)) } : {}),
@@ -671,22 +715,22 @@ async function importTourById(id) {
       ...(tour.attributes.tripadvisor_rating == null ? {} : { tripadvisor_rating: tour.attributes.tripadvisor_rating }),
       ...(assetFromUploadRef(tour.attributes.hero_image)?.id == null ? {} : { hero_image: assetFromUploadRef(tour.attributes.hero_image).id }),
       ...(tour.attributes.location == null ? {} : { location: tour.attributes.location }),
-    }, toRecordOverrides(tour.meta));
-  });
+    }, toRecordOverrides(tour.meta)));
+  }, "import tour", { recordId: id })));
 }
 
 async function importQaById(id) {
-  await importRecordOnce("qa", id, async () => {
+  await Effect.runPromise(importRecordOnceEffect("qa", id, () => promiseEffect(async () => {
     const qa = await datoGetItem(id);
-    await upsertImportedRecord("qa", qa.id, {
+    await Effect.runPromise(upsertImportedRecordEffect("qa", qa.id, {
       ...(qa.attributes.question == null ? {} : { question: qa.attributes.question }),
       ...(qa.attributes.answer == null ? {} : { answer: qa.attributes.answer }),
-    }, toRecordOverrides(qa.meta));
-  });
+    }, toRecordOverrides(qa.meta)));
+  }, "import qa", { recordId: id })));
 }
 
 async function importArticleById(id) {
-  await importRecordOnce("article", id, async () => {
+  await Effect.runPromise(importRecordOnceEffect("article", id, () => promiseEffect(async () => {
     const article = await datoGetItem(id);
     const body = article.attributes.body?.[IMPORT_LOCALE] ?? null;
     await Effect.runPromise(runTasksEffect([
@@ -696,7 +740,7 @@ async function importArticleById(id) {
       ...(body ? [() => importDependenciesFromRawBody(body)] : []),
     ]));
     await importAssetRefs(article.attributes.hero, article.attributes.thumbnail);
-    await upsertImportedRecord("article", article.id, {
+    await Effect.runPromise(upsertImportedRecordEffect("article", article.id, {
       ...(localizedInput(localizedValue(article.attributes.title)) ? { title: localizedInput(localizedValue(article.attributes.title)) } : {}),
       ...(article.attributes.slug == null ? {} : { slug: article.attributes.slug }),
       ...(localizedInput(localizedValue(article.attributes.summary)) ? { summary: localizedInput(localizedValue(article.attributes.summary)) } : {}),
@@ -710,40 +754,26 @@ async function importArticleById(id) {
       ...(article.attributes.contributor == null ? {} : { contributor: article.attributes.contributor }),
       ...(article.attributes.location == null ? {} : { location: article.attributes.location }),
       ...(localizedIds(article.attributes.questions).length > 0 ? { questions: localizedIds(article.attributes.questions) } : {}),
-    }, toRecordOverrides(article.meta));
+    }, toRecordOverrides(article.meta)));
+  }, "import article", { recordId: id })));
+}
+
+function importRecordOnceEffect(modelApiKey, id, loader) {
+  const key = `${modelApiKey}:${id}`;
+  return singleFlightEffect(recordImportPromises, key, loader, {
+    model: modelApiKey,
+    recordId: id,
   });
 }
 
-async function importRecordOnce(modelApiKey, id, loader) {
-  const key = `${modelApiKey}:${id}`;
-  if (recordImportPromises.has(key)) {
-    return recordImportPromises.get(key);
-  }
-  const promise = (async () => {
-    try {
-      await loader();
-    } finally {
-      recordImportPromises.delete(key);
-    }
-  })();
-  recordImportPromises.set(key, promise);
-  return promise;
-}
-
-async function ensureAssetOnce(asset) {
-  if (!asset?.id) return null;
-  if (assetImportPromises.has(asset.id)) {
-    return assetImportPromises.get(asset.id);
-  }
-  const promise = (async () => {
-    try {
-      return await ensureAsset(asset);
-    } finally {
-      assetImportPromises.delete(asset.id);
-    }
-  })();
-  assetImportPromises.set(asset.id, promise);
-  return promise;
+function ensureAssetOnceEffect(asset) {
+  if (!asset?.id) return Effect.succeed(null);
+  return singleFlightEffect(
+    assetImportPromises,
+    asset.id,
+    () => promiseEffect(() => ensureAsset(asset), "ensure asset", { assetId: asset.id }),
+    { assetId: asset.id },
+  );
 }
 
 async function importNestedSupportRecords(record) {
@@ -970,18 +1000,18 @@ function recordsFromData(modelApiKey, data) {
 
 async function importLocation(record) {
   await importAssetsFromRecord(record);
-  await upsertImportedRecord("location", record.id, {
+  await Effect.runPromise(upsertImportedRecordEffect("location", record.id, {
     ...(localizedInput(record.name) ? { name: localizedInput(record.name) } : {}),
     ...(record.slug == null ? {} : { slug: record.slug }),
     ...(localizedInput(record.description) ? { description: localizedInput(record.description) } : {}),
     ...(record.image?.id == null ? {} : { image: record.image.id }),
     ...(latLonValue(record.geolocation) == null ? {} : { geolocation: latLonValue(record.geolocation) }),
-  }, record.overrides);
+  }, record.overrides));
 }
 
 async function importPlace(record) {
   await importAssetsFromRecord(record);
-  await upsertImportedRecord("place", record.id, {
+  await Effect.runPromise(upsertImportedRecordEffect("place", record.id, {
     ...(localizedInput(record.title) ? { title: localizedInput(record.title) } : {}),
     ...(record.slug == null ? {} : { slug: record.slug }),
     ...(record.googlePlacesId == null ? {} : { google_places_id: record.googlePlacesId }),
@@ -994,12 +1024,12 @@ async function importPlace(record) {
     ...(Array.isArray(record.nearbyPlaces) && record.nearbyPlaces.length > 0 ? { nearby_places: record.nearbyPlaces.map((entry) => entry.id).filter(Boolean) } : {}),
     ...(Array.isArray(record.blogs) && record.blogs.length > 0 ? { blogs: record.blogs.map((entry) => entry.id).filter(Boolean) } : {}),
     ...(Array.isArray(record.questions) && record.questions.length > 0 ? { questions: record.questions.map((entry) => entry.id).filter(Boolean) } : {}),
-  }, record.overrides);
+  }, record.overrides));
 }
 
 async function importArticle(record) {
   await importAssetsFromRecord(record);
-  await upsertImportedRecord("article", record.id, {
+  await Effect.runPromise(upsertImportedRecordEffect("article", record.id, {
     ...(localizedInput(record.title) ? { title: localizedInput(record.title) } : {}),
     ...(record.slug == null ? {} : { slug: record.slug }),
     ...(localizedInput(record.summary) ? { summary: localizedInput(record.summary) } : {}),
@@ -1013,12 +1043,12 @@ async function importArticle(record) {
     ...(Array.isArray(record.questions) && record.questions.length > 0 ? { questions: record.questions.map((entry) => entry.id).filter(Boolean) } : {}),
     ...(record.seoMetadata ? { seo_metadata: record.seoMetadata } : {}),
     ...(record.tocIsVisible == null ? {} : { toc_is_visible: record.tocIsVisible }),
-  }, record.overrides);
+  }, record.overrides));
 }
 
 async function importGuide(record) {
   await importAssetsFromRecord(record);
-  await upsertImportedRecord("guide", record.id, {
+  await Effect.runPromise(upsertImportedRecordEffect("guide", record.id, {
     ...(localizedInput(record.title) ? { title: localizedInput(record.title) } : {}),
     ...(record.slug == null ? {} : { slug: record.slug }),
     ...(localizedInput(record.summary) ? { summary: localizedInput(record.summary) } : {}),
@@ -1028,7 +1058,7 @@ async function importGuide(record) {
     ...(latLonValue(record.geolocation) == null ? {} : { geolocation: latLonValue(record.geolocation) }),
     ...(record.location?.id == null ? {} : { location: record.location.id }),
     ...(record.seoMetadata ? { seo_metadata: record.seoMetadata } : {}),
-  }, record.overrides);
+  }, record.overrides));
 }
 
 async function listSourceRecords(modelApiKey) {
@@ -1049,7 +1079,7 @@ async function listSourceRecords(modelApiKey) {
   if (modelApiKey === "place") {
     const items = (await datoListItemsByType("place", { limit, offset: skip }))
       .filter((item) => !completedRootIds.has(item.id));
-    return Effect.runPromise(Effect.forEach(items, (item) => promiseEffect(async () => {
+    return Effect.runPromise(mapConcurrentEffect(items, async (item) => {
       const content = item.attributes.content?.[IMPORT_LOCALE] ?? null;
       await Effect.runPromise(runTasksEffect([
         ...(item.attributes.locations ?? []).map((locationId) => () => importLocationById(locationId)),
@@ -1076,13 +1106,13 @@ async function listSourceRecords(modelApiKey) {
         blogs: (item.attributes.blogs ?? []).map((id) => ({ id })),
         questions: localizedIds(item.attributes.questions).map((id) => ({ id })),
       };
-    }), { concurrency: LINKED_IMPORT_CONCURRENCY }));
+    }, LINKED_IMPORT_CONCURRENCY));
   }
 
   if (modelApiKey === "article") {
     const items = (await datoListItemsByType("article", { limit, offset: skip }))
       .filter((item) => !completedRootIds.has(item.id));
-    return Effect.runPromise(Effect.forEach(items, (item) => promiseEffect(async () => {
+    return Effect.runPromise(mapConcurrentEffect(items, async (item) => {
       const body = item.attributes.body?.[IMPORT_LOCALE] ?? null;
       await Effect.runPromise(runTasksEffect([
         ...(item.attributes.contributor ? [() => importContributorById(item.attributes.contributor)] : []),
@@ -1108,13 +1138,13 @@ async function listSourceRecords(modelApiKey) {
         questions: localizedIds(item.attributes.questions).map((id) => ({ id })),
         body: body ? await transformStructuredTextRaw(body, `${item.id}__body__${IMPORT_LOCALE}`) : null,
       };
-    }), { concurrency: LINKED_IMPORT_CONCURRENCY }));
+    }, LINKED_IMPORT_CONCURRENCY));
   }
 
   if (modelApiKey === "guide") {
     const items = (await datoListItemsByType("guide", { limit, offset: skip }))
       .filter((item) => !completedRootIds.has(item.id));
-    return Effect.runPromise(Effect.forEach(items, (item) => promiseEffect(async () => {
+    return Effect.runPromise(mapConcurrentEffect(items, async (item) => {
       const body = item.attributes.body?.[IMPORT_LOCALE] ?? null;
       await Effect.runPromise(runTasksEffect([
         ...(item.attributes.location ? [() => importLocationById(item.attributes.location)] : []),
@@ -1134,7 +1164,7 @@ async function listSourceRecords(modelApiKey) {
         location: item.attributes.location ? { id: item.attributes.location } : null,
         body: body ? await transformStructuredTextRaw(body, `${item.id}__body__${IMPORT_LOCALE}`) : null,
       };
-    }), { concurrency: LINKED_IMPORT_CONCURRENCY }));
+    }, LINKED_IMPORT_CONCURRENCY));
   }
 
   const query = queryForModel(modelApiKey);
@@ -1214,7 +1244,8 @@ export function createImportProgram(options = {}) {
     yield* publishTouchedRecordsEffect();
 
     const findingsPath = yield* writeFindingsEffect();
-    const integrityViolations = fatalFindings();
+    const integrityViolations = yield* fatalFindingsEffect();
+    const findingsCount = yield* findingsCountEffect();
 
     if (integrityViolations.length > 0) {
       yield* Effect.fail(
@@ -1228,7 +1259,7 @@ export function createImportProgram(options = {}) {
     }
 
     yield* Effect.logInfo(`Imported ${records.length} ${model} record(s) from locale ${IMPORT_LOCALE}`);
-    yield* Effect.logInfo(`Skipped/accepted findings: ${findings.length}`);
+    yield* Effect.logInfo(`Skipped/accepted findings: ${findingsCount}`);
     yield* Effect.logInfo(`Saved ${findingsPath}`);
 
     const summary = yield* promiseEffect(() =>
