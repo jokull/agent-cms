@@ -3,6 +3,9 @@ import { createTestApp, jsonRequest, gqlQuery } from "./app-helpers.js";
 
 describe("Localization", () => {
   let handler: (req: Request) => Promise<Response>;
+  let firstArticleId: string;
+  let secondArticleId: string;
+  let englishOnlyArticleId: string;
 
   beforeEach(async () => {
     ({ handler } = createTestApp());
@@ -30,7 +33,7 @@ describe("Localization", () => {
     });
 
     // Create record with localized data
-    await jsonRequest(handler, "POST", "/api/records", {
+    firstArticleId = (await (await jsonRequest(handler, "POST", "/api/records", {
       modelApiKey: "article",
       data: {
         title: { en: "Hello World", is: "Halló heimur" },
@@ -39,22 +42,22 @@ describe("Localization", () => {
         },
         views: 42,
       },
-    });
-    await jsonRequest(handler, "POST", "/api/records", {
+    })).json()).id;
+    secondArticleId = (await (await jsonRequest(handler, "POST", "/api/records", {
       modelApiKey: "article",
       data: {
         title: { en: "Second Article", is: "Önnur grein" },
         views: 10,
       },
-    });
+    })).json()).id;
     // Article with only English
-    await jsonRequest(handler, "POST", "/api/records", {
+    englishOnlyArticleId = (await (await jsonRequest(handler, "POST", "/api/records", {
       modelApiKey: "article",
       data: {
         title: { en: "English Only" },
         views: 5,
       },
-    });
+    })).json()).id;
   });
 
   it("returns English locale by default (first locale)", async () => {
@@ -97,20 +100,14 @@ describe("Localization", () => {
   });
 
   it("single record query supports locale", async () => {
-    const all = await gqlQuery(handler, `{ allArticles { id title } }`);
-    const id = all.data.allArticles[0].id;
-
     const result = await gqlQuery(handler, `{
-      article(id: "${id}", locale: is) { title }
+      article(id: "${firstArticleId}", locale: is) { title }
     }`);
     expect(result.data.article.title).toBe("Halló heimur");
   });
 
   it("patch merges localized field maps instead of replacing them", async () => {
-    const all = await gqlQuery(handler, `{ allArticles { id title } }`);
-    const id = all.data.allArticles[0].id;
-
-    const patchRes = await jsonRequest(handler, "PATCH", `/api/records/${id}`, {
+    const patchRes = await jsonRequest(handler, "PATCH", `/api/records/${firstArticleId}`, {
       modelApiKey: "article",
       data: {
         title: { is: "Halló uppfært" },
@@ -119,10 +116,10 @@ describe("Localization", () => {
     expect(patchRes.status).toBe(200);
 
     const english = await gqlQuery(handler, `{
-      article(id: "${id}", locale: en) { title }
+      article(id: "${firstArticleId}", locale: en) { title }
     }`);
     const icelandic = await gqlQuery(handler, `{
-      article(id: "${id}", locale: is) { title }
+      article(id: "${firstArticleId}", locale: is) { title }
     }`);
 
     expect(english.data.article.title).toBe("Hello World");
@@ -130,10 +127,7 @@ describe("Localization", () => {
   });
 
   it("patch ignores stale non-locale keys when merging localized fields", async () => {
-    const all = await gqlQuery(handler, `{ allArticles { id } }`);
-    const id = all.data.allArticles[0].id;
-
-    await jsonRequest(handler, "PATCH", `/api/records/${id}`, {
+    await jsonRequest(handler, "PATCH", `/api/records/${firstArticleId}`, {
       modelApiKey: "article",
       data: {
         title: { title: "stale", description: "stale", is: "Halló hreinsað" },
@@ -141,24 +135,20 @@ describe("Localization", () => {
     });
 
     const english = await gqlQuery(handler, `{
-      article(id: "${id}", locale: en) { title }
+      article(id: "${firstArticleId}", locale: en) { title }
     }`);
     const icelandic = await gqlQuery(handler, `{
-      article(id: "${id}", locale: is) { title }
-      allArticles { _locales }
+      article(id: "${firstArticleId}", locale: is) { title _locales }
     }`);
 
     expect(english.data.article.title).toBe("Hello World");
     expect(icelandic.data.article.title).toBe("Halló hreinsað");
-    expect(icelandic.data.allArticles[0]._locales).not.toContain("title");
-    expect(icelandic.data.allArticles[0]._locales).not.toContain("description");
+    expect(icelandic.data.article._locales).not.toContain("title");
+    expect(icelandic.data.article._locales).not.toContain("description");
   });
 
   it("patch heals stale non-localized seo object into a clean localized map", async () => {
-    const all = await gqlQuery(handler, `{ allArticles { id } }`);
-    const id = all.data.allArticles[0].id;
-
-    await jsonRequest(handler, "PATCH", `/api/records/${id}`, {
+    await jsonRequest(handler, "PATCH", `/api/records/${firstArticleId}`, {
       modelApiKey: "article",
       data: {
         seo_metadata: {
@@ -169,7 +159,7 @@ describe("Localization", () => {
       },
     });
 
-    await jsonRequest(handler, "PATCH", `/api/records/${id}`, {
+    await jsonRequest(handler, "PATCH", `/api/records/${firstArticleId}`, {
       modelApiKey: "article",
       data: {
         seo_metadata: {
@@ -179,7 +169,7 @@ describe("Localization", () => {
     });
 
     const result = await gqlQuery(handler, `{
-      article(id: "${id}", locale: is, fallbackLocales: [en]) {
+      article(id: "${firstArticleId}", locale: is, fallbackLocales: [en]) {
         seoMetadata { title description }
         _allSeoMetadataLocales { locale value { title description } }
       }

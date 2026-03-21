@@ -479,8 +479,11 @@ Keyword mode: phrases ("exact match"), prefix (word*), boolean (AND/OR).
 Semantic mode: finds conceptually related content even when vocabulary differs (requires AI+Vectorize bindings).
 Hybrid mode (default when Vectorize available): combines both for best results.`, SearchContentInput.fields);
 const ReindexSearchTool = cmsTool("reindex_search", "Rebuild FTS5 + Vectorize search indexes. Use after deploying search to a CMS with existing content, or to recover from index drift. Scoped to a single model or all content models.", ReindexSearchInput.fields);
-const GetSiteSettingsTool = cmsTool("get_site_settings", "Get global site settings (site name, title suffix, global SEO, favicon, social accounts)");
-const UpdateSiteSettingsTool = cmsTool("update_site_settings", `Update global site settings. These power the _site GraphQL query (globalSeo, faviconMetaTags).`, UpdateSiteSettingsInput.fields);
+const GetSiteSettingsTool = cmsTool("get_site_settings", "Get global site settings from the built-in site_settings table (site name, title suffix, global SEO, favicon, social accounts). This is separate from any content-model singleton also named site_settings.");
+const UpdateSiteSettingsTool = cmsTool("update_site_settings", `Update global site settings in the built-in site_settings table. These power the _site GraphQL query (globalSeo, faviconMetaTags).
+
+Use this tool for fields like siteName, titleSuffix, fallbackSeoTitle, and fallbackSeoDescription.
+If your schema also has a singleton content model named site_settings with fields like tagline or logo, update that record with query_records + update_record instead of this tool.`, UpdateSiteSettingsInput.fields);
 const CreateEditorTokenTool = cmsTool("create_editor_token", "Create an editor token for restricted write access (no schema mutations). Optional expiresIn in seconds.", CreateEditorTokenMcpInput.fields);
 const ListEditorTokensTool = cmsTool("list_editor_tokens", "List all non-expired editor tokens");
 const RevokeEditorTokenTool = cmsTool("revoke_editor_token", "Revoke an editor token by its ID", TokenIdInput.fields);
@@ -607,6 +610,10 @@ Draft/publish lifecycle:
   Required-field validation for draft-enabled models happens at publish time, not create_record time.
   Edits after publishing create a new draft version — publish again to update.
   GraphQL serves published content by default; use X-Include-Drafts header for previews.
+
+Singletons and site settings:
+  - If a singleton exists as a normal content model in your schema (for example a site_settings record with fields like tagline), treat it like content: find it with query_records and update it with update_record.
+  - get_site_settings/update_site_settings operate on the built-in global site_settings table used by the _site GraphQL query. That surface uses fields like siteName, titleSuffix, fallbackSeoTitle, and fallbackSeoDescription.
 
 Asset upload flow:
   Preferred:
