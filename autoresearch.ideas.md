@@ -1,3 +1,2 @@
-- Add a request-scoped asset loader (`assets WHERE id IN (...)`) and route `media`, `media_gallery`, `SeoField.image`, and `_seoMetaTags` image lookups through it so Yoga fallback avoids repeated asset fetches on image-heavy queries.
-- Push reverse-ref batching further with a SQL-level per-parent top-N strategy (CTE/window-function or parent-id expansion) so multi-parent `_allReferencing*` queries can keep batching while avoiding over-fetching when many parents each request `first: N`.
-- Explore a shared request dependency cache keyed across both `loadLinkedRecords()` and StructuredText link resolution, but only if it can avoid the regression seen from naively wiring the existing caches together.
+- Revisit asset batching only if a future benchmark/query mix is more image-heavy; the broad request-scoped asset loader was correctness-safe but a clear regression on the current yoga-fallback suite.
+- If this benchmark evolves to include many-parent reverse refs with much larger fanout, revisit SQL-level per-parent top-N batching; the first window-function attempt was correctness-safe but slower on the current workload.

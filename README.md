@@ -114,7 +114,7 @@ Field `api_key` values stay snake_case in queries: `cover_image`, `published_at`
 
 #### Performance model
 
-GraphQL nesting is not compiled into one giant SQL join. The server fetches root records, batches linked records and StructuredText work into set-oriented SQL, then assembles the nested shape in memory. See [`docs/architecture/performance.md`](./docs/architecture/performance.md).
+GraphQL nesting is not compiled into one giant SQL join. The server fetches root records, batches linked records and StructuredText work into set-oriented SQL, then assembles the nested shape in memory. See [`PERFORMANCE.md`](./PERFORMANCE.md).
 
 #### MCP resources and prompts
 
