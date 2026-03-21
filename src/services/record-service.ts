@@ -595,6 +595,33 @@ export function getRecord(modelApiKey: string, id: string) {
   });
 }
 
+export function updateSingletonRecord(modelApiKey: string, data: Record<string, unknown>, actor?: RequestActor | null) {
+  return Effect.gen(function* () {
+    const model = yield* getModelByApiKey(modelApiKey);
+    if (!model) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
+    if (!model.singleton) {
+      return yield* new ValidationError({ message: `Model '${modelApiKey}' is not a singleton` });
+    }
+
+    const records = yield* selectAll(`content_${model.api_key}`);
+    if (records.length === 0) {
+      return yield* new NotFoundError({ entity: "Record", id: `${modelApiKey} singleton` });
+    }
+    const record = records[0];
+    if (!isContentRow(record)) {
+      return yield* new ValidationError({ message: `Singleton record for model '${modelApiKey}' is invalid` });
+    }
+
+    return yield* patchRecord(record.id, { modelApiKey, data }, actor);
+  }).pipe(
+    Effect.withSpan("record.update_singleton"),
+    Effect.annotateSpans({
+      modelApiKey,
+      actorType: actor?.type ?? "anonymous",
+    }),
+  );
+}
+
 export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestActor | null) {
   return Effect.gen(function* () {
     const model = yield* getModelByApiKey(body.modelApiKey);

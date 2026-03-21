@@ -127,6 +127,11 @@ const UpdateRecordInput = Schema.Struct({
   data: Schema.optionalWith(JsonRecord, { default: () => ({}) }),
 });
 
+const UpdateSingletonRecordInput = Schema.Struct({
+  modelApiKey: Schema.String,
+  data: Schema.optionalWith(JsonRecord, { default: () => ({}) }),
+});
+
 const PatchBlocksInput = Schema.Struct({
   recordId: Schema.String,
   modelApiKey: Schema.String,
@@ -367,7 +372,8 @@ Field value formats:
 - structured_text: {"value":{"schema":"dast","document":{...}},"blocks":{"<id>":{"_type":"block_api_key",...}}}
 - color: {"red":255,"green":0,"blue":0,"alpha":255}
 - lat_lon: {"latitude":64.13,"longitude":-21.89}`, CreateRecordInput.fields);
-const UpdateRecordTool = cmsTool("update_record", "Update record fields", UpdateRecordInput.fields);
+const UpdateRecordTool = cmsTool("update_record", "Update record fields by record ID", UpdateRecordInput.fields);
+const UpdateSingletonRecordTool = cmsTool("update_singleton_record", "Update a singleton content-model record by modelApiKey without looking up its record ID first. Use this for singleton content models in your schema (for example a site_settings singleton with custom fields like tagline).", UpdateSingletonRecordInput.fields);
 const PatchBlocksTool = cmsTool("patch_blocks", `Partially update blocks in a structured text field without resending the entire content tree.
 
 You can target block IDs from either:
@@ -483,7 +489,8 @@ const GetSiteSettingsTool = cmsTool("get_site_settings", "Get global site settin
 const UpdateSiteSettingsTool = cmsTool("update_site_settings", `Update global site settings in the built-in site_settings table. These power the _site GraphQL query (globalSeo, faviconMetaTags).
 
 Use this tool for fields like siteName, titleSuffix, fallbackSeoTitle, and fallbackSeoDescription.
-If your schema also has a singleton content model named site_settings with fields like tagline or logo, update that record with query_records + update_record instead of this tool.`, UpdateSiteSettingsInput.fields);
+If your schema also has a singleton content model named site_settings with fields like tagline or logo, update that record with query_records + update_record instead of this tool.
+When the task is specifically about the singleton record, avoid mixing both surfaces unless the user explicitly asks for both.`, UpdateSiteSettingsInput.fields);
 const CreateEditorTokenTool = cmsTool("create_editor_token", "Create an editor token for restricted write access (no schema mutations). Optional expiresIn in seconds.", CreateEditorTokenMcpInput.fields);
 const ListEditorTokensTool = cmsTool("list_editor_tokens", "List all non-expired editor tokens");
 const RevokeEditorTokenTool = cmsTool("revoke_editor_token", "Revoke an editor token by its ID", TokenIdInput.fields);
@@ -500,6 +507,7 @@ const AdminTools = [
   SchemaInfoTool,
   CreateRecordTool,
   UpdateRecordTool,
+  UpdateSingletonRecordTool,
   PatchBlocksTool,
   DeleteRecordTool,
   QueryRecordsTool,
@@ -539,6 +547,7 @@ const EditorTools = [
   SchemaInfoTool,
   CreateRecordTool,
   UpdateRecordTool,
+  UpdateSingletonRecordTool,
   PatchBlocksTool,
   DeleteRecordTool,
   QueryRecordsTool,
@@ -612,7 +621,8 @@ Draft/publish lifecycle:
   GraphQL serves published content by default; use X-Include-Drafts header for previews.
 
 Singletons and site settings:
-  - If a singleton exists as a normal content model in your schema (for example a site_settings record with fields like tagline), treat it like content: find it with query_records and update it with update_record.
+  - If a singleton exists as a normal content model in your schema (for example a site_settings record with fields like tagline), treat it like content. Prefer update_singleton_record for direct edits, or query_records + update_record if you need to inspect the record first.
+  - If the task explicitly refers to the singleton record or to fields from that model (for example tagline), prefer update_singleton_record and do NOT reach for update_site_settings unless the task is specifically about the built-in global _site settings surface.
   - get_site_settings/update_site_settings operate on the built-in global site_settings table used by the _site GraphQL query. That surface uses fields like siteName, titleSuffix, fallbackSeoTitle, and fallbackSeoDescription.
 
 Asset upload flow:
@@ -887,6 +897,7 @@ export function createMcpLayer(
       })),
     create_record: withDecoded(CreateRecordInput, (input) => RecordService.createRecord(input, options?.actor)),
     update_record: withDecoded(UpdateRecordInput, ({ recordId, modelApiKey, data }) => RecordService.patchRecord(recordId, { modelApiKey, data }, options?.actor)),
+    update_singleton_record: withDecoded(UpdateSingletonRecordInput, ({ modelApiKey, data }) => RecordService.updateSingletonRecord(modelApiKey, data, options?.actor)),
     patch_blocks: withDecoded(PatchBlocksInput, (input) => RecordService.patchBlocksForField(input, options?.actor)),
     delete_record: withDecoded(DeleteRecordInput, ({ recordId, modelApiKey }) => RecordService.removeRecord(modelApiKey, recordId)),
     query_records: withDecoded(QueryRecordsInput, ({ modelApiKey }) => RecordService.listRecords(modelApiKey)),
