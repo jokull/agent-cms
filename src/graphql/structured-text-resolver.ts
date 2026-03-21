@@ -1,8 +1,9 @@
 import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
 import { extractBlockIds, extractInlineBlockIds, extractLinkIds } from "../dast/index.js";
-import type { DynamicRow, DastDocInput } from "./gql-types.js";
+import type { DynamicRow, DastDocInput, GqlContext } from "./gql-types.js";
 import { deserializeRecord, toTypeName, decodeSnapshot } from "./gql-utils.js";
+import { loadLinkedRecords } from "./linked-record-loader.js";
 import { materializeStructuredTextValue as materializeStructuredTextEnvelope } from "../services/structured-text-service.js";
 
 function parseUnknownJson(value: unknown): unknown {
@@ -174,6 +175,7 @@ export async function resolveStructuredTextValue(params: {
   typeNames: Map<string, string>;
   includeDrafts: boolean;
   linkedRecordCache?: Map<string, Promise<DynamicRow | null>>;
+  context?: GqlContext;
 }): Promise<{ value: unknown; blocks: DynamicRow[]; inlineBlocks: DynamicRow[]; links: DynamicRow[] } | null> {
   let raw = parseUnknownJson(params.rawValue);
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
@@ -204,14 +206,23 @@ export async function resolveStructuredTextValue(params: {
   const linkIds = extractLinkIds(dast);
   const allModelApiKeys = params.models.map((m) => m.api_key);
   const resolvedLinks = linkIds.length > 0
-    ? await batchResolveLinkedRecordsCached({
-      runSql: params.runSql,
-      targetApiKeys: allModelApiKeys,
-      ids: linkIds,
-      typeNames: params.typeNames,
-      includeDrafts: params.includeDrafts,
-      cache: params.linkedRecordCache,
-    })
+    ? params.context
+      ? await loadLinkedRecords({
+        runSql: params.runSql,
+        targetApiKeys: allModelApiKeys,
+        ids: linkIds,
+        typeNames: params.typeNames,
+        includeDrafts: params.includeDrafts,
+        context: params.context,
+      })
+      : await batchResolveLinkedRecordsCached({
+        runSql: params.runSql,
+        targetApiKeys: allModelApiKeys,
+        ids: linkIds,
+        typeNames: params.typeNames,
+        includeDrafts: params.includeDrafts,
+        cache: params.linkedRecordCache,
+      })
     : new Map<string, DynamicRow>();
   const links = linkIds.map((id) => resolvedLinks.get(id) ?? null).filter(Boolean) as DynamicRow[];
 

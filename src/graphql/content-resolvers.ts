@@ -510,6 +510,7 @@ export function buildContentModelResolvers(
             typeNames,
             includeDrafts,
             linkedRecordCache: context.linkedRecordCache,
+            context,
           });
         };
       }

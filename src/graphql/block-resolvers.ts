@@ -139,6 +139,7 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
             typeNames,
             includeDrafts: context.includeDrafts ?? false,
             linkedRecordCache: context.linkedRecordCache,
+            context,
           });
         };
       } else if (f.field_type === "links") {

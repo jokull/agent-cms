@@ -282,6 +282,7 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
           typeNames: ctx.typeNames,
           includeDrafts,
           linkedRecordCache: context.linkedRecordCache,
+          context,
         });
         return { assignment, resolved };
       }));
