@@ -56,7 +56,7 @@ Outputs the full claude dialog plus `METRIC` lines (evaluated by codex).
 
 To redeploy after code changes:
 ```bash
-npm run build
+pnpm run build
 cd examples/blog/cms && npx wrangler deploy
 ```
 
@@ -95,12 +95,12 @@ cd examples/blog/cms && npx wrangler deploy
 
 - Tests must pass: `npx vitest run`
 - TypeScript must compile: `npx tsc --noEmit`
-- Build must succeed: `npm run build`
+- Build must succeed: `pnpm run build`
 - No `as` casts, no `any` types
 - Effect patterns (consult `~/Forks/effect-solutions/`)
 - GraphQL API must return identical responses
 - MCP protocol compatibility must be maintained
-- After code changes, redeploy: `npm run build && cd examples/blog/cms && npx wrangler deploy`
+- After code changes, redeploy: `pnpm run build && cd examples/blog/cms && npx wrangler deploy`
 
 ## Editor MCP Tools (29 tools)
 

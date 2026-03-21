@@ -16,6 +16,7 @@ export class AssetImportContext extends Context.Tag("AssetImportContext")<
 >() {}
 
 const MAX_REMOTE_ASSET_BYTES = 25 * 1024 * 1024;
+const MAX_REMOTE_ASSET_REDIRECTS = 5;
 
 function getAssetBasename(filename: string) {
   const lastDot = filename.lastIndexOf(".");
@@ -88,6 +89,45 @@ function parseContentLength(header: string | null) {
   if (!header) return null;
   const parsed = Number(header);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function isRedirectStatus(status: number) {
+  return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
+}
+
+function fetchRemoteAsset(url: URL, fetchFn: typeof globalThis.fetch) {
+  return Effect.gen(function* () {
+    let currentUrl = url;
+
+    for (let redirectCount = 0; redirectCount <= MAX_REMOTE_ASSET_REDIRECTS; redirectCount += 1) {
+      const response = yield* Effect.tryPromise({
+        try: () => fetchFn(currentUrl, { redirect: "manual" }),
+        catch: () => new ValidationError({ message: `Failed to fetch asset URL: ${currentUrl}` }),
+      });
+
+      if (!isRedirectStatus(response.status)) {
+        return { response, resolvedUrl: currentUrl };
+      }
+
+      const location = response.headers.get("location");
+      if (!location) {
+        return yield* new ValidationError({
+          message: `Asset URL redirect is missing a Location header: ${currentUrl}`,
+        });
+      }
+
+      if (redirectCount === MAX_REMOTE_ASSET_REDIRECTS) {
+        return yield* new ValidationError({
+          message: `Asset URL redirected too many times (>${MAX_REMOTE_ASSET_REDIRECTS}): ${url}`,
+        });
+      }
+
+      const nextUrl = yield* validateRemoteAssetUrl(new URL(location, currentUrl).toString());
+      currentUrl = nextUrl;
+    }
+
+    return yield* new ValidationError({ message: `Failed to resolve asset URL: ${url}` });
+  });
 }
 
 function readResponseBytes(response: Response, url: string) {
@@ -328,25 +368,17 @@ export function importAssetFromUrl(input: ImportAssetFromUrlInput, actor?: Reque
     }
 
     const url = yield* validateRemoteAssetUrl(input.url);
-    const filename = inferFilename(input);
+    const { response, resolvedUrl } = yield* fetchRemoteAsset(url, fetch);
+    const filename = inferFilename({ ...input, url: resolvedUrl.toString() });
     const id = ulid();
-    const response = yield* Effect.tryPromise({
-      try: () => fetch(url, { redirect: "manual" }),
-      catch: () => new ValidationError({ message: `Failed to fetch asset URL: ${input.url}` }),
-    });
-    if (response.status >= 300 && response.status < 400) {
-      return yield* new ValidationError({
-        message: `Redirects are not allowed when importing assets from URL: ${input.url}`,
-      });
-    }
     if (!response.ok) {
       return yield* new ValidationError({
-        message: `Failed to fetch asset URL: ${input.url} (${response.status})`,
+        message: `Failed to fetch asset URL: ${resolvedUrl} (${response.status})`,
       });
     }
 
     const mimeType = input.mimeType ?? response.headers.get("content-type")?.split(";")[0] ?? "application/octet-stream";
-    const bytes = yield* readResponseBytes(response, input.url);
+    const bytes = yield* readResponseBytes(response, resolvedUrl.toString());
     const r2Key = `uploads/${id}/${filename}`;
 
     yield* Effect.tryPromise({

@@ -454,11 +454,10 @@ Use this when you have an image URL and want an agent-friendly path.
 
 Flow:
 1. Provide the source URL
-2. The CMS fetches the file, stores it in R2, and creates the asset record
+2. The CMS fetches the file (following normal public HTTP redirects), stores it in R2, and creates the asset record
 3. Use the returned asset ID in media fields (e.g. {image: "<asset_id>"})
 
-The response includes id, r2Key, url (full public URL), and metadata. The id is what you pass to media fields — the CMS validates that the asset exists when creating/updating records.`, ImportAssetFromUrlInput.fields);
-const ListAssetsTool = cmsTool("list_assets", "List all assets with their IDs, filenames, and R2 keys");
+The response includes id, r2Key, url (full public URL), and metadata. The id is what you pass to media fields — the CMS validates that the asset exists when creating/updating records.`, ImportAssetFromUrlInput.fields);const ListAssetsTool = cmsTool("list_assets", "List all assets with their IDs, filenames, and R2 keys");
 const ReplaceAssetTool = cmsTool("replace_asset", `Replace an asset's file metadata while keeping the same ID and URL. All content references remain stable.
 
 Flow:
@@ -602,7 +601,7 @@ Draft/publish lifecycle:
 
 Asset upload flow:
   Preferred:
-  1. Call import_asset_from_url with a public file URL
+  1. Call import_asset_from_url with a public file URL (normal public redirects are followed automatically)
   2. Use returned asset ID in media/media_gallery fields
 
   Manual fallback:

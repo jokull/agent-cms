@@ -213,7 +213,7 @@ describe("MCP HTTP transport", () => {
     await transport.close();
   });
 
-  it("rejects redirecting asset imports", async () => {
+  it("follows redirecting asset imports", async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "agent-cms-mcp-editor-import-redirect-"));
     const dbPath = join(tmpDir, "test.db");
     const sqlLayer = SqliteClient.layer({ filename: dbPath, disableWAL: true });
@@ -224,15 +224,24 @@ describe("MCP HTTP transport", () => {
       TokenService.createEditorToken({ name: "editor" }).pipe(Effect.provide(sqlLayer))
     );
 
-    const fetchSpy = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const put = vi.fn(async () => undefined);
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       expect(init?.redirect).toBe("manual");
-      return new Response(null, {
-        status: 302,
-        headers: { Location: "https://example.com/final.png" },
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url === "https://example.com/redirect.png") {
+        return new Response(null, {
+          status: 302,
+          headers: { Location: "https://cdn.example.com/final.png" },
+        });
+      }
+      expect(url).toBe("https://cdn.example.com/final.png");
+      return new Response(new Uint8Array([1, 2, 3, 4]), {
+        status: 200,
+        headers: { "Content-Type": "image/png" },
       });
     });
     vi.stubGlobal("fetch", fetchSpy);
-    const fakeBucket = { put: vi.fn(async () => undefined) } as unknown as R2Bucket;
+    const fakeBucket = { put } as unknown as R2Bucket;
     const handler = createWebHandler(sqlLayer, { writeKey: "write-key", r2Bucket: fakeBucket }).fetch;
 
     const transport = new StreamableHTTPClientTransport(new URL("http://localhost/mcp/editor"), {
@@ -258,10 +267,20 @@ describe("MCP HTTP transport", () => {
       },
     });
 
-    expect(result.isError).toBe(true);
-    expect(result.structuredContent).toMatchObject({ message: expect.stringMatching(/redirects are not allowed/i) });
+    const asset = JSON.parse(result.content[0]?.text ?? "{}") as {
+      filename: string;
+      mimeType: string;
+      size: number;
+    };
 
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(result.isError).toBe(false);
+    expect(asset).toMatchObject({
+      filename: "final.png",
+      mimeType: "image/png",
+      size: 4,
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(put).toHaveBeenCalledTimes(1);
     await transport.close();
   });
 

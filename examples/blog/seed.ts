@@ -150,6 +150,11 @@ async function seed() {
     fieldType: "text",
   });
   await api("POST", `/api/models/${post.id}/fields`, {
+    label: "Cover Image",
+    apiKey: "cover_image",
+    fieldType: "media",
+  });
+  await api("POST", `/api/models/${post.id}/fields`, {
     label: "Content",
     apiKey: "content",
     fieldType: "structured_text",
