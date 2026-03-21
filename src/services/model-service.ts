@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
-import { ulid } from "ulidx";
+import { generateId } from "../id.js";
 import {
   NotFoundError,
   ValidationError,
@@ -74,7 +74,7 @@ export function createModel(body: CreateModelInput) {
       return yield* new DuplicateError({ message: `Model with apiKey '${body.apiKey}' already exists` });
 
     const now = new Date().toISOString();
-    const id = ulid();
+    const id = generateId();
 
     yield* sql.unsafe(
       `INSERT INTO models (id, name, api_key, is_block, singleton, sortable, tree, has_draft, all_locales_required, ordering, created_at, updated_at)

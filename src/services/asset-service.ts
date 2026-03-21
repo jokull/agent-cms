@@ -1,6 +1,6 @@
 import { Context, Effect } from "effect";
 import { SqlClient } from "@effect/sql";
-import { ulid } from "ulidx";
+import { generateId } from "../id.js";
 import { NotFoundError, ValidationError } from "../errors.js";
 import type { AssetRow } from "../db/row-types.js";
 import type { CreateAssetInput, ImportAssetFromUrlInput } from "./input-schemas.js";
@@ -190,7 +190,7 @@ export function createAsset(body: CreateAssetInput, actor?: RequestActor | null)
     const sql = yield* SqlClient.SqlClient;
 
     const now = new Date().toISOString();
-    const id = body.id ?? ulid();
+    const id = body.id ?? generateId();
 
     const existing = yield* sql.unsafe<{ id: string }>("SELECT id FROM assets WHERE id = ?", [id]);
     if (existing.length > 0) {
@@ -370,7 +370,7 @@ export function importAssetFromUrl(input: ImportAssetFromUrlInput, actor?: Reque
     const url = yield* validateRemoteAssetUrl(input.url);
     const { response, resolvedUrl } = yield* fetchRemoteAsset(url, fetch);
     const filename = inferFilename({ ...input, url: resolvedUrl.toString() });
-    const id = ulid();
+    const id = generateId();
     if (!response.ok) {
       return yield* new ValidationError({
         message: `Failed to fetch asset URL: ${resolvedUrl} (${response.status})`,

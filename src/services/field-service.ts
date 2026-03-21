@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
-import { ulid } from "ulidx";
+import { generateId } from "../id.js";
 import { FIELD_TYPES, isFieldType } from "../types.js";
 import { NotFoundError, ValidationError, DuplicateError, ReferenceConflictError } from "../errors.js";
 import { migrateContentTable } from "../schema-engine/sql-ddl.js";
@@ -366,7 +366,7 @@ export function createField(modelId: string, body: CreateFieldInput) {
     }
 
     const now = new Date().toISOString();
-    const id = ulid();
+    const id = generateId();
     const validators = encodeJson(body.validators);
 
     yield* sql.unsafe(

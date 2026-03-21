@@ -4,7 +4,7 @@ import { SqliteClient } from "@effect/sql-sqlite-node";
 import { SqlClient } from "@effect/sql";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { runMigrations } from "./migrate.js";
-import { ulid } from "ulidx";
+import { generateId } from "../src/id.js";
 import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -92,7 +92,7 @@ describe("Schema Lifecycle — Advanced Operations", () => {
       const enId = await Effect.runPromise(
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient;
-          const id = ulid();
+          const id = generateId();
           yield* sql.unsafe("INSERT INTO locales (id, code, position) VALUES (?, ?, ?)", [id, "en", 0]);
           return id;
         }).pipe(Effect.provide(sqlLayer))
@@ -100,7 +100,7 @@ describe("Schema Lifecycle — Advanced Operations", () => {
       const isId = await Effect.runPromise(
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient;
-          const id = ulid();
+          const id = generateId();
           yield* sql.unsafe("INSERT INTO locales (id, code, position, fallback_locale_id) VALUES (?, ?, ?, ?)", [id, "is", 1, enId]);
           return id;
         }).pipe(Effect.provide(sqlLayer))

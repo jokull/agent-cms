@@ -142,7 +142,8 @@ function extractFieldText(field: ParsedFieldRow, value: unknown): string[] {
 function extractGenericText(value: unknown): string[] {
   if (typeof value === "string") {
     // Skip values that look like IDs (ULIDs, UUIDs)
-    if (/^[0-9A-HJKMNP-TV-Z]{26}$/i.test(value)) return []; // ULID (Crockford base32)
+    if (/^[0-9a-z]{10}$/.test(value)) return []; // nanoid (lowercase alphanumeric, 10 chars)
+    if (/^[0-9A-HJKMNP-TV-Z]{26}$/i.test(value)) return []; // legacy ULID (Crockford base32)
     if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) return []; // UUID
     return value.length > 0 ? [value] : [];
   }

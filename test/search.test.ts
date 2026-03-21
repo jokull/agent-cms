@@ -245,6 +245,16 @@ describe("extractRecordText", () => {
     const result = extractRecordText(record, fields);
     expect(result.body).toBe("");
   });
+
+  it("skips nanoid-like values in generic extraction", () => {
+    const fields = [
+      makeField({ api_key: "title", field_type: "string" }),
+      makeField({ api_key: "ref", field_type: "link", position: 1 }),
+    ];
+    const record = { title: "Post", ref: "a1b2c3d4e5" };
+    const result = extractRecordText(record, fields);
+    expect(result.body).toBe("");
+  });
 });
 
 // --- Integration tests ---

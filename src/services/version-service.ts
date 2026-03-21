@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
-import { ulid } from "ulidx";
+import { generateId } from "../id.js";
 import { NotFoundError } from "../errors.js";
 import { selectById } from "../schema-engine/sql-records.js";
 import type { ModelRow, FieldRow, VersionRow } from "../db/row-types.js";
@@ -29,7 +29,7 @@ export function createVersion(
     );
     const nextVersion = (maxRows[0]?.max_v ?? 0) + 1;
 
-    const id = ulid();
+    const id = generateId();
     const now = new Date().toISOString();
     const actor = attribution?.actor;
     yield* sql.unsafe(

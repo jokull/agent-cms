@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
-import { ulid } from "ulidx";
+import { generateId } from "../id.js";
 import { DuplicateError } from "../errors.js";
 import type { LocaleRow } from "../db/row-types.js";
 import { removeLocale as removeLocaleWithCleanup } from "./schema-lifecycle.js";
@@ -22,7 +22,7 @@ export function createLocale(body: CreateLocaleInput) {
       return yield* new DuplicateError({ message: `Locale '${body.code}' already exists` });
 
     const allLocales = yield* sql.unsafe<{ id: string }>("SELECT id FROM locales");
-    const id = ulid();
+    const id = generateId();
     const position = body.position ?? allLocales.length;
 
     yield* sql.unsafe(

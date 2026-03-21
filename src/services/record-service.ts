@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect";
 import { SqlClient } from "@effect/sql";
-import { ulid } from "ulidx";
+import { generateId } from "../id.js";
 import { NotFoundError, ValidationError, DuplicateError } from "../errors.js";
 import { generateSlug } from "../slug.js";
 import {
@@ -471,7 +471,7 @@ export function createRecord(body: CreateRecordInput, actor?: RequestActor | nul
 
     const now = new Date().toISOString();
     const requestedId = validateRequestedId(body.id);
-    const id = requestedId ?? ulid();
+    const id = requestedId ?? generateId();
     const sql = yield* SqlClient.SqlClient;
     const duplicateId = yield* sql.unsafe<{ id: string }>(
       `SELECT id FROM "${tableName}" WHERE id = ?`,
@@ -926,7 +926,7 @@ export function bulkCreateRecords({ modelApiKey, records }: BulkCreateRecordsInp
 
       const requestedId = typeof data.id === "string" && data.id.trim().length > 0 ? data.id : undefined;
       if (requestedId) delete data.id;
-      const id = requestedId ?? ulid();
+      const id = requestedId ?? generateId();
       const duplicateId = yield* sql.unsafe<{ id: string }>(
         `SELECT id FROM "${tableName}" WHERE id = ?`,
         [id]
