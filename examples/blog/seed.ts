@@ -175,6 +175,12 @@ async function seed() {
     validators: { item_item_type: ["category"] },
   });
   await api("POST", `/api/models/${post.id}/fields`, {
+    label: "Related Posts",
+    apiKey: "related_posts",
+    fieldType: "links",
+    validators: { items_item_type: ["post"] },
+  });
+  await api("POST", `/api/models/${post.id}/fields`, {
     label: "Published Date",
     apiKey: "published_date",
     fieldType: "date",
@@ -193,6 +199,11 @@ async function seed() {
     label: "SEO",
     apiKey: "seo_field",
     fieldType: "seo",
+  });
+  await api("POST", `/api/models/${post.id}/fields`, {
+    label: "Gallery",
+    apiKey: "gallery",
+    fieldType: "media_gallery",
   });
 
   // hero_section block
