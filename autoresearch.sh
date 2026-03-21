@@ -7,7 +7,7 @@ CMS_URL="http://127.0.0.1:${CMS_PORT}"
 EXTRA_POST_COUNT="${EXTRA_POST_COUNT:-24}"
 BENCH_ITERATIONS="${BENCH_ITERATIONS:-3}"
 BENCH_WARMUP="${BENCH_WARMUP:-1}"
-SUITE="benchmarks/blog-query-suite-published.json"
+SUITE="benchmarks/blog-query-suite-yoga-fallback.json"
 
 # --- Build first (wrangler dev uses built output) ---
 npm run build --silent 2>&1 | tail -3

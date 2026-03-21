@@ -228,6 +228,7 @@ export function createGraphQLHandler(
 
   const publishedFastPath = createPublishedFastPath(sqlLayer, {
     assetBaseUrl: options?.assetBaseUrl,
+    isProduction: options?.isProduction,
   });
 
   const yoga = createYoga({
@@ -333,14 +334,16 @@ export function createGraphQLHandler(
     const supportedSelections: typeof rootSelections = [];
     const unsupportedSelections: typeof rootSelections = [];
     const rootPaths: Record<string, string> = {};
+    const rootReasons: Record<string, string> = {};
 
     for (const selection of rootSelections) {
       const subsetDocument = buildSubsetDocument(document, operation, [selection]);
-      const subsetResult = await publishedFastPath.tryExecute({
+      const subsetRequest = {
         query: print(subsetDocument),
         variables,
         operationName: operation.name?.value ?? null,
-      }, {
+      };
+      const subsetResult = await publishedFastPath.tryExecute(subsetRequest, {
         includeDrafts: context?.includeDrafts ?? false,
         excludeInvalid: context?.excludeInvalid ?? false,
       });
@@ -351,12 +354,19 @@ export function createGraphQLHandler(
       } else {
         unsupportedSelections.push(selection);
         rootPaths[responseKey] = "yoga";
+        const supportAnalysis = await publishedFastPath.analyze(subsetRequest, {
+          includeDrafts: context?.includeDrafts ?? false,
+          excludeInvalid: context?.excludeInvalid ?? false,
+        });
+        if (supportAnalysis.reason) {
+          rootReasons[responseKey] = supportAnalysis.reason;
+        }
       }
     }
 
     if (supportedSelections.length === 0) {
       const yogaResult = await executeDocument(document, variables, context);
-      return { ...yogaResult, _trace: { path: "yoga", rootPaths } };
+      return { ...yogaResult, _trace: { path: "yoga", rootPaths, rootReasons } };
     }
 
     const mergedData: Record<string, unknown> = {};
@@ -410,6 +420,7 @@ export function createGraphQLHandler(
       _trace: {
         path: unsupportedSelections.length > 0 ? "partial" : "fast-path",
         rootPaths,
+        rootReasons,
         fastPathSql: fastPathMetrics,
       },
     };

@@ -1,0 +1,48 @@
+[
+  {
+    "name": "reverse_ref_single",
+    "includeDrafts": false,
+    "variables": { "categoryId": "__CATEGORY_ID__:engineering" },
+    "query": "query BenchReverseRefSingle($categoryId: ItemId!) { category(id: $categoryId) { id name _allReferencingPosts(first: 20, orderBy: [title_ASC]) { id title slug } } }"
+  },
+  {
+    "name": "reverse_ref_wide",
+    "includeDrafts": false,
+    "variables": { "categoryId": "__CATEGORY_ID__:engineering" },
+    "query": "query BenchReverseRefWide($categoryId: ItemId!) { category(id: $categoryId) { id name _allReferencingPosts(first: 80, orderBy: [title_ASC]) { id title slug excerpt publishedDate author { id name } } } }"
+  },
+  {
+    "name": "reverse_ref_all_categories",
+    "includeDrafts": false,
+    "query": "query BenchReverseRefAllCategories { allCategories { id name _allReferencingPosts(first: 10, orderBy: [publishedDate_DESC]) { id title slug } } }"
+  },
+  {
+    "name": "deep_with_links",
+    "includeDrafts": false,
+    "variables": { "first": 12 },
+    "query": "query BenchDeepWithLinks($first: Int) { allPosts(first: $first, orderBy: [publishedDate_DESC]) { id title slug content { value blocks { __typename ... on HeroSectionRecord { id headline subheadline } ... on CodeBlockRecord { id language filename code } ... on FeatureGridRecord { id heading features { value blocks { __typename ... on FeatureCardRecord { id title description details { value blocks { __typename ... on CodeBlockRecord { id language filename code } } } } } } } ... on FeatureCardRecord { id title description details { value blocks { __typename ... on CodeBlockRecord { id language filename code } } } } } } category { id name slug } author { id name bio } } }"
+  },
+  {
+    "name": "page_with_reverse_refs",
+    "includeDrafts": false,
+    "variables": { "categoryId": "__CATEGORY_ID__:engineering", "first": 12 },
+    "query": "query BenchPageWithReverseRefs($categoryId: ItemId!, $first: Int) { siteSettings { siteName tagline } category(id: $categoryId) { id name description _allReferencingPosts(first: $first, orderBy: [publishedDate_DESC]) { id title slug excerpt publishedDate author { name } } } _allPostsMeta { count } }"
+  },
+  {
+    "name": "multi_category_reverse_refs",
+    "includeDrafts": false,
+    "query": "query BenchMultiCategoryReverseRefs { allCategories { id name slug _allReferencingPosts(first: 5) { id title slug author { name } } } }"
+  },
+  {
+    "name": "single_post_deep_yoga",
+    "includeDrafts": false,
+    "variables": { "slug": "beyond-keyword-matching" },
+    "query": "query BenchSinglePostDeep($slug: String!) { post(filter: { slug: { eq: $slug } }) { id title slug excerpt publishedDate readingTime featured content { value blocks { __typename ... on HeroSectionRecord { id headline subheadline } ... on CodeBlockRecord { id language filename code } ... on FeatureGridRecord { id heading features { value blocks { __typename ... on FeatureCardRecord { id title description details { value blocks { __typename ... on CodeBlockRecord { id language filename code } } } } } } } } } category { id name slug } author { id name bio } } }"
+  },
+  {
+    "name": "list_summary_with_meta",
+    "includeDrafts": false,
+    "variables": { "first": 20 },
+    "query": "query BenchListSummaryMeta($first: Int) { allPosts(first: $first, orderBy: [publishedDate_DESC]) { id title slug excerpt publishedDate category { name slug } author { name } } _allPostsMeta { count } }"
+  }
+]

@@ -53,6 +53,8 @@ export interface FilterCompilerOpts {
   jsonArrayFields?: Set<string>;
   /** Set of camelCase field names that store JSON objects with an upload_id-like primary ID */
   jsonObjectIdFields?: Set<string>;
+  /** Optional raw SQL expression map for a field before localization extraction */
+  fieldSqlExprMap?: Record<string, string>;
 }
 
 /**
@@ -90,10 +92,15 @@ function resolveDbKey(key: string, opts?: FilterCompilerOpts): string {
   return META_COLUMN_MAP[key] ?? opts?.fieldNameMap?.[key] ?? key;
 }
 
+function resolveDbExpr(key: string, dbKey: string, opts?: FilterCompilerOpts): string {
+  return opts?.fieldSqlExprMap?.[key] ?? `"${dbKey}"`;
+}
+
 function resolveCol(key: string, dbKey: string, opts?: FilterCompilerOpts): string {
+  const dbExpr = resolveDbExpr(key, dbKey, opts);
   return opts?.fieldIsLocalized?.(key) && opts.locale
-    ? `json_extract("${dbKey}", '$.${opts.locale}')`
-    : `"${dbKey}"`;
+    ? `json_extract(${dbExpr}, '$.${opts.locale}')`
+    : dbExpr;
 }
 
 function buildSqlConditions(
@@ -162,7 +169,7 @@ function buildSqlConditions(
 
     for (const [op, expected] of Object.entries(value as Record<string, unknown>)) {
       if (expected === undefined) continue;
-      const cond = compileOperator(op, expected, col, dbKey, isJsonArray, isJsonObjectId);
+      const cond = compileOperator(op, expected, col, resolveDbExpr(key, dbKey, opts), isJsonArray, isJsonObjectId);
       if (cond) conditions.push(cond);
     }
   }
@@ -179,11 +186,11 @@ function compileOperator(
   op: string,
   expected: unknown,
   col: string,
-  dbKey: string,
+  dbExpr: string,
   isJsonArray: boolean = false,
   isJsonObjectId: boolean = false,
 ): SqlCondition | null {
-  const objectIdExpr = `(CASE WHEN json_valid("${dbKey}") AND json_type("${dbKey}") = 'object' THEN json_extract("${dbKey}", '$.upload_id') ELSE ${col} END)`;
+  const objectIdExpr = `(CASE WHEN json_valid(${dbExpr}) AND json_type(${dbExpr}) = 'object' THEN json_extract(${dbExpr}, '$.upload_id') ELSE ${col} END)`;
   const arrayObjectIdExpr = `CASE WHEN json_valid(value) AND json_type(value) = 'object' THEN json_extract(value, '$.upload_id') ELSE value END`;
   switch (op) {
     // --- Scalar comparison ---
@@ -328,8 +335,8 @@ function compileOperator(
       const lonMax = longitude + lonDelta;
 
       // lat_lon columns are JSON objects: {"latitude": N, "longitude": N}
-      const latExpr = `json_extract("${dbKey}", '$.latitude')`;
-      const lonExpr = `json_extract("${dbKey}", '$.longitude')`;
+      const latExpr = `json_extract(${dbExpr}, '$.latitude')`;
+      const lonExpr = `json_extract(${dbExpr}, '$.longitude')`;
 
       return {
         sql: `(${latExpr} BETWEEN ? AND ? AND ${lonExpr} BETWEEN ? AND ?)`,

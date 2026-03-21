@@ -1,4 +1,0 @@
-- Generic published-read query compiler: walk the GraphQL AST plus CMS metadata and emit one SQL statement that returns nested JSON for singleton/list/meta roots, bypassing Yoga resolver dispatch for published-only requests.
-- Per-query published execution plans: cache a compiled plan keyed by schema version + query string, where the plan contains SQL plus a tiny response assembler for links/StructuredText envelopes.
-- Published-specific GraphQL execution fast path: build a reduced schema/executor for published reads that skips Effect/Yoga request plumbing and resolves simple scalar + link fields from precomputed selection metadata instead of per-field resolver functions.
-- If trying a fast path again, add a very cheap support gate before parsing/compiling so unsupported deep/fragment/SEO queries fall straight to Yoga; the first generic fast-path attempt lost too much time on fallback overhead.

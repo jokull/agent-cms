@@ -15,12 +15,14 @@ import type { AssetRow, FieldRow, ModelRow, ParsedFieldRow } from "../db/row-typ
 import { parseFieldValidators } from "../db/row-types.js";
 import { getLinkTargets, getLinksTargets } from "../db/validators.js";
 import { extractBlockIds, extractInlineBlockIds, extractLinkIds } from "../dast/index.js";
-import { compileOrderBy, type FilterCompilerOpts } from "./filter-compiler.js";
+import { compileFilterToSql, compileOrderBy, type FilterCompilerOpts } from "./filter-compiler.js";
 import { decodeJsonIfString } from "../json.js";
 import { batchResolveLinkedRecordsCached } from "./structured-text-resolver.js";
 import { decodeSnapshot, pluralize, toCamelCase, toContentTypeName, toTypeName } from "./gql-utils.js";
 import { mergeAssetWithMediaReference, parseMediaFieldReference, parseMediaGalleryReferences } from "../media-field.js";
 import type { AssetObject } from "./gql-types.js";
+import { getRegistryDef } from "./gql-utils.js";
+import { buildResponsiveImage } from "./responsive-image.js";
 
 interface GraphqlFastPathRequest {
   readonly query: string;
@@ -33,6 +35,16 @@ interface AssetSelectionPlan {
     readonly responseKey: string;
     readonly fieldName: string;
   }[];
+  readonly responsiveImage:
+    | {
+        readonly responseKey: string;
+        readonly args: Record<string, unknown>;
+        readonly fields: readonly {
+          readonly responseKey: string;
+          readonly fieldName: string;
+        }[];
+      }
+    | null;
 }
 
 interface LatLonSelectionPlan {
@@ -110,26 +122,35 @@ type StringListArgPlan =
   | null
   | undefined;
 
+type StringArgPlan =
+  | { readonly kind: "const"; readonly value: string }
+  | { readonly kind: "var"; readonly name: string }
+  | null
+  | undefined;
+
 type ValueArgPlan =
   | { readonly kind: "const"; readonly value: string | number | boolean | null }
   | { readonly kind: "var"; readonly name: string };
 
-type FilterEqPlan = {
-  readonly fieldKey: string;
-  readonly field: ParsedFieldRow | null;
-  readonly value: ValueArgPlan;
-};
+type FilterValuePlan =
+  | ValueArgPlan
+  | { readonly kind: "list"; readonly items: readonly FilterValuePlan[] }
+  | { readonly kind: "object"; readonly fields: Readonly<Record<string, FilterValuePlan>> };
+
+type FilterPlan = Extract<FilterValuePlan, { readonly kind: "object" }>;
 
 type RootPlan =
-  | { readonly kind: "meta"; readonly responseKey: string; readonly meta: FastPathModelMeta }
+  | { readonly kind: "meta"; readonly responseKey: string; readonly meta: FastPathModelMeta; readonly filter: FilterPlan | null }
   | {
       readonly kind: "singleton" | "list";
       readonly responseKey: string;
       readonly meta: FastPathModelMeta;
       readonly orderBy: StringListArgPlan;
+      readonly locale: StringArgPlan;
+      readonly fallbackLocales: StringListArgPlan;
       readonly first: IntArgPlan;
       readonly skip: IntArgPlan;
-      readonly filter: FilterEqPlan | null;
+      readonly filter: FilterPlan | null;
       readonly selectionPlan: readonly SelectionPlan[];
       readonly objectSql: string | null;
     };
@@ -161,10 +182,17 @@ interface PublishedFastPathMetadata {
   readonly blockModelsByGqlTypeName: Map<string, FastPathModelMeta>;
   readonly contentTypeNames: Map<string, string>;
   readonly contentApiKeys: readonly string[];
+  readonly defaultLocale: string | null;
 }
 
 interface PublishedFastPathOptions {
   readonly assetBaseUrl?: string;
+  readonly isProduction?: boolean;
+}
+
+interface FastPathSupportAnalysis {
+  readonly supported: boolean;
+  readonly reason?: string;
 }
 
 type FastPathSqlCategory = "metadata" | "root" | "meta" | "linked_record" | "asset";
@@ -184,6 +212,8 @@ interface FastPathExecutionContext {
   readonly sqlLayer: Layer.Layer<SqlClient.SqlClient>;
   readonly metadata: PublishedFastPathMetadata;
   readonly assetBaseUrl: string;
+  readonly isProduction: boolean;
+  readonly defaultLocale: string | null;
   readonly assetCache: Map<string, AssetRow | null>;
   readonly linkedRecordCache: Map<string, Promise<Record<string, unknown> | null>>;
   readonly metrics: FastPathSqlMetrics;
@@ -309,6 +339,14 @@ function compileStringListArg(fieldNode: FieldNode, name: string): StringListArg
   return null;
 }
 
+function compileStringArg(fieldNode: FieldNode, name: string): StringArgPlan {
+  const value = getArgumentValueNode(fieldNode, name);
+  if (!value) return undefined;
+  if (value.kind === Kind.STRING || value.kind === Kind.ENUM) return { kind: "const", value: value.value };
+  if (value.kind === Kind.VARIABLE) return { kind: "var", name: value.name.value };
+  return null;
+}
+
 function compileValueArg(value: ValueNode): ValueArgPlan | null {
   switch (value.kind) {
     case Kind.STRING:
@@ -328,6 +366,30 @@ function compileValueArg(value: ValueNode): ValueArgPlan | null {
   }
 }
 
+function compileFilterValuePlan(value: ValueNode): FilterValuePlan | null {
+  const scalar = compileValueArg(value);
+  if (scalar) return scalar;
+  if (value.kind === Kind.LIST) {
+    const items: FilterValuePlan[] = [];
+    for (const item of value.values) {
+      const compiled = compileFilterValuePlan(item);
+      if (!compiled) return null;
+      items.push(compiled);
+    }
+    return { kind: "list", items };
+  }
+  if (value.kind === Kind.OBJECT) {
+    const fields: Record<string, FilterValuePlan> = {};
+    for (const field of value.fields) {
+      const compiled = compileFilterValuePlan(field.value);
+      if (!compiled) return null;
+      fields[field.name.value] = compiled;
+    }
+    return { kind: "object", fields };
+  }
+  return null;
+}
+
 function resolveIntArg(plan: IntArgPlan, variables: Record<string, unknown>): number | null {
   if (!plan) return null;
   if (plan.kind === "const") return plan.value;
@@ -342,8 +404,29 @@ function resolveStringListArg(plan: StringListArgPlan, variables: Record<string,
   return Array.isArray(value) && value.every((entry) => typeof entry === "string") ? value : undefined;
 }
 
+function resolveStringArg(plan: StringArgPlan, variables: Record<string, unknown>): string | undefined {
+  if (plan === undefined || plan === null) return undefined;
+  if (plan.kind === "const") return plan.value;
+  const value = variables[plan.name];
+  return typeof value === "string" ? value : undefined;
+}
+
 function resolveValueArg(plan: ValueArgPlan, variables: Record<string, unknown>): unknown {
   return plan.kind === "const" ? plan.value : variables[plan.name];
+}
+
+function resolveFilterValuePlan(plan: FilterValuePlan, variables: Record<string, unknown>): unknown {
+  if (plan.kind === "const" || plan.kind === "var") {
+    return resolveValueArg(plan, variables);
+  }
+  if (plan.kind === "list") {
+    return plan.items.map((item) => resolveFilterValuePlan(item, variables));
+  }
+  const resolved: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(plan.fields)) {
+    resolved[key] = resolveFilterValuePlan(value, variables);
+  }
+  return resolved;
 }
 
 function buildFilterOpts(meta: FastPathModelMeta): FilterCompilerOpts {
@@ -356,27 +439,114 @@ function buildFilterOpts(meta: FastPathModelMeta): FilterCompilerOpts {
   };
 }
 
-function compileFilterEqArg(fieldNode: FieldNode, meta: FastPathModelMeta): FilterEqPlan | null {
-  const filterValue = getArgumentValueNode(fieldNode, "filter");
-  if (!filterValue) return null;
-  if (filterValue.kind !== Kind.OBJECT || filterValue.fields.length !== 1) return null;
-
-  const filterField = filterValue.fields[0];
-  const filterKey = filterField.name.value;
-  if (filterField.value.kind !== Kind.OBJECT || filterField.value.fields.length !== 1) return null;
-  const operator = filterField.value.fields[0];
-  if (operator.name.value !== "eq") return null;
-  const value = compileValueArg(operator.value);
-  if (!value) return null;
-
-  if (filterKey === "id") {
-    return { fieldKey: filterKey, field: null, value };
+function buildPublishedFilterOpts(meta: FastPathModelMeta): FilterCompilerOpts {
+  const fieldSqlExprMap: Record<string, string> = { id: "row_data.id" };
+  for (const [gqlName, field] of meta.fieldsByGqlName) {
+    fieldSqlExprMap[gqlName] = `json_extract(row_data."_published_snapshot", '$.${field.api_key}')`;
   }
 
-  const field = meta.fieldsByGqlName.get(filterKey);
-  if (!field || field.localized) return null;
-  if (!isSimpleScalarField(field) && field.field_type !== "link") return null;
-  return { fieldKey: filterKey, field, value };
+  return {
+    ...buildFilterOpts(meta),
+    fieldSqlExprMap,
+  };
+}
+
+function pickLocalizedFastPathValue(
+  rawValue: unknown,
+  locale: string | undefined,
+  fallbackLocales: readonly string[] | undefined,
+  defaultLocale: string | null,
+): unknown {
+  if (rawValue === null || rawValue === undefined) return rawValue;
+  const localeMap = parseJsonValue(rawValue);
+  if (!isRecord(localeMap)) return rawValue;
+
+  if (locale) {
+    const localeValue = Reflect.get(localeMap, locale);
+    if (localeValue !== undefined && localeValue !== null && localeValue !== "") return localeValue;
+  }
+  for (const fallback of fallbackLocales ?? []) {
+    const fallbackValue = Reflect.get(localeMap, fallback);
+    if (fallbackValue !== undefined && fallbackValue !== null && fallbackValue !== "") return fallbackValue;
+  }
+  if (defaultLocale) {
+    const defaultValue = Reflect.get(localeMap, defaultLocale);
+    if (defaultValue !== undefined) return defaultValue;
+  }
+  const firstEntry = Object.entries(localeMap)[0];
+  return firstEntry ? firstEntry[1] : null;
+}
+
+function isSupportedPublishedFilterField(field: ParsedFieldRow): boolean {
+  return !field.localized && ![
+    "structured_text",
+    "seo",
+    "video",
+    "color",
+  ].includes(field.field_type);
+}
+
+function validateFilterPlanValue(
+  value: FilterValuePlan,
+  meta: FastPathModelMeta,
+): boolean {
+  if (value.kind === "const" || value.kind === "var") return true;
+  if (value.kind === "list") return value.items.every((item) => validateFilterPlanValue(item, meta));
+
+  for (const [key, nested] of Object.entries(value.fields)) {
+    if (key === "AND" || key === "OR") {
+      if (nested.kind !== "list") return false;
+      if (!nested.items.every((item) => item.kind === "object" && validateFilterPlanValue(item, meta))) return false;
+      continue;
+    }
+
+    if (key === "_locales") return false;
+    if (key === "id") {
+      if (nested.kind !== "object") return false;
+      for (const operator of Object.keys(nested.fields)) {
+        if (!["eq", "neq", "in", "notIn", "exists", "isBlank", "isPresent"].includes(operator)) return false;
+      }
+      continue;
+    }
+
+    const field = meta.fieldsByGqlName.get(key);
+    if (!field || !isSupportedPublishedFilterField(field)) return false;
+    if (nested.kind !== "object") return false;
+    if (field.field_type === "lat_lon") {
+      for (const operator of Object.keys(nested.fields)) {
+        if (operator !== "near" && operator !== "exists") return false;
+      }
+      continue;
+    }
+    for (const operator of Object.keys(nested.fields)) {
+      if (![
+        "eq",
+        "neq",
+        "gt",
+        "lt",
+        "gte",
+        "lte",
+        "in",
+        "notIn",
+        "matches",
+        "notMatches",
+        "isBlank",
+        "isPresent",
+        "exists",
+        "allIn",
+        "anyIn",
+      ].includes(operator)) return false;
+    }
+  }
+
+  return true;
+}
+
+function compileFilterArg(fieldNode: FieldNode): FilterPlan | null {
+  const filterValue = getArgumentValueNode(fieldNode, "filter");
+  if (!filterValue) return null;
+  const plan = compileFilterValuePlan(filterValue);
+  return plan?.kind === "object" ? plan : null;
 }
 
 function collectObjectSelections(
@@ -420,11 +590,50 @@ function buildAssetSelectionPlan(
   const selections = collectObjectSelections(fieldNode.selectionSet, fragments, "Asset");
   if (!selections || selections.length === 0) return null;
   const fields: Array<{ responseKey: string; fieldName: string }> = [];
+  let responsiveImage: AssetSelectionPlan["responsiveImage"] = null;
 
   for (const selection of selections) {
     if (selection.kind !== Kind.FIELD) return null;
+    if (selection.name.value === "responsiveImage") {
+      if (!selection.selectionSet) return null;
+      const nestedSelections = collectObjectSelections(selection.selectionSet, fragments, "ResponsiveImage");
+      if (!nestedSelections || nestedSelections.length === 0) return null;
+      const nestedFields: Array<{ responseKey: string; fieldName: string }> = [];
+      for (const nested of nestedSelections) {
+        if (nested.kind !== Kind.FIELD || nested.selectionSet) return null;
+        if (![
+          "src",
+          "srcSet",
+          "webpSrcSet",
+          "width",
+          "height",
+          "aspectRatio",
+          "alt",
+          "title",
+          "base64",
+          "bgColor",
+          "sizes",
+        ].includes(nested.name.value)) return null;
+        nestedFields.push({
+          responseKey: nested.alias?.value ?? nested.name.value,
+          fieldName: nested.name.value,
+        });
+      }
+      const args: Record<string, unknown> = {};
+      for (const arg of selection.arguments ?? []) {
+        if (!["transforms", "cfImagesParams", "imgixParams"].includes(arg.name.value)) return null;
+        const compiled = resolveFilterValuePlan(compileFilterValuePlan(arg.value) ?? { kind: "const", value: null }, {});
+        if (compiled === null && compileFilterValuePlan(arg.value) === null) return null;
+        args[arg.name.value] = compiled;
+      }
+      responsiveImage = {
+        responseKey: selection.alias?.value ?? selection.name.value,
+        args,
+        fields: nestedFields,
+      };
+      continue;
+    }
     if (selection.selectionSet) return null;
-    if (selection.name.value === "responsiveImage") return null;
     const fieldName = selection.name.value;
     if (![
       "id",
@@ -450,7 +659,7 @@ function buildAssetSelectionPlan(
     });
   }
 
-  return { fields };
+  return { fields, responsiveImage };
 }
 
 function buildLatLonSelectionPlan(
@@ -604,9 +813,11 @@ function buildSelectionPlanFromSelections(
     }
 
     const field = meta.fieldsByGqlName.get(selection.name.value);
-    if (!field || field.localized) return null;
+    if (!field) return null;
 
-    if (isSimpleScalarField(field)) {
+    const registryDef = getRegistryDef(field.field_type);
+
+    if (isSimpleScalarField(field) || (field.localized && registryDef?.localizable && selection.selectionSet == null)) {
       if (selection.selectionSet) return null;
       plan.push({ kind: "scalar", responseKey, field });
       continue;
@@ -706,6 +917,7 @@ function buildJsonObjectSql(
         parts.push(`${sqlQuote(selection.responseKey)}, ${tableAlias}.id`);
         break;
       case "scalar":
+        if (selection.field.localized) return null;
         parts.push(`${sqlQuote(selection.responseKey)}, ${buildSnapshotValueSql(tableAlias, selection.field)}`);
         break;
       case "link": {
@@ -754,7 +966,12 @@ async function loadMetadataWithMetrics(
       if (metrics) {
         recordFastPathSqlMetrics(metrics, "metadata", Number((performance.now() - fieldsStartedAt).toFixed(3)));
       }
-      return { models, fields };
+      const localesStartedAt = performance.now();
+      const locales = yield* sql.unsafe<{ code: string }>("SELECT code FROM locales ORDER BY position");
+      if (metrics) {
+        recordFastPathSqlMetrics(metrics, "metadata", Number((performance.now() - localesStartedAt).toFixed(3)));
+      }
+      return { models, fields, locales };
     }).pipe(Effect.provide(sqlLayer), Effect.orDie),
   );
 
@@ -827,6 +1044,7 @@ async function loadMetadataWithMetrics(
     blockModelsByGqlTypeName,
     contentTypeNames,
     contentApiKeys: [...contentModelsByApiKey.keys()],
+    defaultLocale: loaded.locales[0]?.code ?? null,
   };
 }
 
@@ -843,10 +1061,16 @@ function compilePlan(request: GraphqlFastPathRequest, metadata: PublishedFastPat
     const responseKey = selection.alias?.value ?? selection.name.value;
     const meta = metadata.modelsByRootField.get(selection.name.value);
     if (!meta) return null;
+    const filter = compileFilterArg(selection);
+    if (filter && !validateFilterPlanValue(filter, meta)) return null;
+    const locale = compileStringArg(selection, "locale");
+    const fallbackLocales = compileStringListArg(selection, "fallbackLocales");
+    if (locale === null || fallbackLocales === null) return null;
 
     if (selection.name.value === meta.metaName) {
-      if (selection.arguments && selection.arguments.length > 0) return null;
-      roots.push({ kind: "meta", responseKey, meta });
+      const supportedArgCount = (filter ? 1 : 0);
+      if ((selection.arguments?.length ?? 0) > supportedArgCount) return null;
+      roots.push({ kind: "meta", responseKey, meta, filter });
       continue;
     }
 
@@ -859,28 +1083,40 @@ function compilePlan(request: GraphqlFastPathRequest, metadata: PublishedFastPat
       const skip = compileIntArg(selection, "skip");
       const orderBy = compileStringListArg(selection, "orderBy");
       if (orderBy === null) return null;
+      const supportedArgCount = (filter ? 1 : 0)
+        + (orderBy !== undefined ? 1 : 0)
+        + (first ? 1 : 0)
+        + (skip ? 1 : 0)
+        + (locale !== undefined ? 1 : 0)
+        + (fallbackLocales !== undefined ? 1 : 0);
+      if ((selection.arguments?.length ?? 0) > supportedArgCount) return null;
       roots.push({
         kind: "list",
         responseKey,
         meta,
         orderBy,
+        locale,
+        fallbackLocales,
         first,
         skip,
-        filter: null,
+        filter,
         selectionPlan,
         objectSql,
       });
       continue;
     }
 
-    const filter = compileFilterEqArg(selection, meta);
-    const supportedArgCount = filter ? 1 : 0;
+    const supportedArgCount = (filter ? 1 : 0)
+      + (locale !== undefined ? 1 : 0)
+      + (fallbackLocales !== undefined ? 1 : 0);
     if ((selection.arguments?.length ?? 0) > supportedArgCount && meta.model.singleton !== 1) return null;
     roots.push({
       kind: "singleton",
       responseKey,
       meta,
       orderBy: undefined,
+      locale,
+      fallbackLocales,
       first: null,
       skip: null,
       filter,
@@ -890,6 +1126,93 @@ function compilePlan(request: GraphqlFastPathRequest, metadata: PublishedFastPat
   }
 
   return { roots };
+}
+
+function findFallbackReasonInSelectionSet(selectionSet: SelectionSetNode | undefined): string | undefined {
+  if (!selectionSet) return undefined;
+  for (const selection of selectionSet.selections) {
+    if (selection.kind === Kind.FIELD) {
+      if (selection.name.value === "responsiveImage") return "field_responsiveImage";
+      if (selection.name.value.startsWith("_allReferencing")) return "reverse_ref";
+      if (selection.arguments?.some((argument) => argument.name.value === "locale")) return "localized_arg";
+      const nested = findFallbackReasonInSelectionSet(selection.selectionSet);
+      if (nested) return nested;
+      continue;
+    }
+    if (selection.kind === Kind.INLINE_FRAGMENT || selection.kind === Kind.FRAGMENT_SPREAD) {
+      const nested = selection.kind === Kind.INLINE_FRAGMENT
+        ? findFallbackReasonInSelectionSet(selection.selectionSet)
+        : undefined;
+      if (nested) return nested;
+    }
+  }
+  return undefined;
+}
+
+function analyzeSupport(
+  request: GraphqlFastPathRequest,
+  metadata: PublishedFastPathMetadata,
+  executionOptions: { includeDrafts: boolean; excludeInvalid: boolean },
+): FastPathSupportAnalysis {
+  if (executionOptions.includeDrafts || executionOptions.excludeInvalid) {
+    return { supported: false, reason: "draft_or_invalid_context" };
+  }
+
+  const document = parse(request.query);
+  const operation = getOperation(document, request.operationName);
+  if (!operation) return { supported: false, reason: "operation_not_found" };
+  if (operation.operation !== "query") return { supported: false, reason: "operation_not_query" };
+
+  const fragments = buildFragments(document);
+  for (const selection of operation.selectionSet.selections) {
+    if (selection.kind !== Kind.FIELD) {
+      return { supported: false, reason: "top_level_fragment" };
+    }
+
+    const meta = metadata.modelsByRootField.get(selection.name.value);
+    if (!meta) {
+      return { supported: false, reason: "unknown_root" };
+    }
+
+    const filterValue = getArgumentValueNode(selection, "filter");
+    const filter = compileFilterArg(selection);
+    if (filterValue && (!filter || !validateFilterPlanValue(filter, meta))) {
+      return { supported: false, reason: "unsupported_filter" };
+    }
+
+    if (selection.name.value === meta.metaName) {
+      const supportedArgCount = filter ? 1 : 0;
+      if ((selection.arguments?.length ?? 0) > supportedArgCount) {
+        return { supported: false, reason: "unsupported_meta_args" };
+      }
+      continue;
+    }
+
+    if (selection.name.value === meta.listName) {
+      const orderBy = compileStringListArg(selection, "orderBy");
+      if (orderBy === null) return { supported: false, reason: "unsupported_order_by" };
+    }
+
+    const selectionPlan = buildSelectionPlan(meta, selection, metadata, fragments);
+    if (!selectionPlan) {
+      return {
+        supported: false,
+        reason: findFallbackReasonInSelectionSet(selection.selectionSet) ?? "unsupported_selection",
+      };
+    }
+
+    const supportedArgCount = (filter ? 1 : 0)
+      + (getArgumentValueNode(selection, "locale") ? 1 : 0)
+      + (getArgumentValueNode(selection, "fallbackLocales") ? 1 : 0)
+      + (selection.name.value === meta.listName && getArgumentValueNode(selection, "orderBy") ? 1 : 0)
+      + (selection.name.value === meta.listName && getArgumentValueNode(selection, "first") ? 1 : 0)
+      + (selection.name.value === meta.listName && getArgumentValueNode(selection, "skip") ? 1 : 0);
+    if ((selection.arguments?.length ?? 0) > supportedArgCount && meta.model.singleton !== 1) {
+      return { supported: false, reason: "unsupported_root_args" };
+    }
+  }
+
+  return { supported: true };
 }
 
 async function runSql<A extends object>(
@@ -911,24 +1234,39 @@ async function runSql<A extends object>(
   );
 }
 
-function buildFilterSql(filter: FilterEqPlan | null, variables: Record<string, unknown>) {
+function buildFilterSql(
+  filter: FilterPlan | null,
+  variables: Record<string, unknown>,
+  meta: FastPathModelMeta,
+  locale?: string,
+) {
   if (!filter) return { sql: "", params: [] as unknown[] };
-  const value = resolveValueArg(filter.value, variables);
-  if (filter.fieldKey === "id") {
-    return { sql: " AND row_data.id = ?", params: [value] };
-  }
-  if (!filter.field) return { sql: "", params: [] as unknown[] };
-  const compareValue = filter.field.field_type === "boolean" && typeof value === "boolean"
-    ? (value ? 1 : 0)
-    : value;
+  const resolved = resolveFilterValuePlan(filter, variables);
+  if (!isRecord(resolved)) return { sql: "", params: [] as unknown[] };
+  const compiled = compileFilterToSql(resolved, { ...buildPublishedFilterOpts(meta), locale });
+  if (!compiled) return { sql: "", params: [] as unknown[] };
   return {
-    sql: ` AND json_extract(row_data."_published_snapshot", '$.${filter.field.api_key}') = ?`,
-    params: [compareValue],
+    sql: ` AND ${compiled.where}`,
+    params: compiled.params,
   };
 }
 
 function buildAssetUrl(assetBaseUrl: string, r2Key: string): string {
   return `${assetBaseUrl}/${r2Key}`;
+}
+
+function buildCfImageUrl(
+  assetBaseUrl: string,
+  isProduction: boolean,
+  assetPath: string,
+  params: Record<string, string | number>,
+): string {
+  if (isProduction) {
+    const opts = Object.entries(params).map(([k, v]) => `${k}=${v}`).join(",");
+    return `${assetBaseUrl}/cdn-cgi/image/${opts}${assetPath}`;
+  }
+  const qs = Object.entries(params).map(([k, v]) => `${k}=${v}`).join("&");
+  return `${assetBaseUrl}${assetPath}?${qs}`;
 }
 
 async function fetchAssetMap(ctx: FastPathExecutionContext, ids: readonly string[]) {
@@ -1041,21 +1379,32 @@ function collectModelDependencies(
   source: Record<string, unknown>,
   plan: readonly SelectionPlan[],
   pending: DependencyAccumulator,
+  localeOptions?: { readonly locale?: string; readonly fallbackLocales?: readonly string[]; readonly defaultLocale?: string | null },
 ): void {
   for (const selection of plan) {
+    const rawFieldValue = "field" in selection
+      ? (selection.field.localized
+        ? pickLocalizedFastPathValue(
+          Reflect.get(source, selection.field.api_key),
+          localeOptions?.locale,
+          localeOptions?.fallbackLocales,
+          localeOptions?.defaultLocale ?? metadata.defaultLocale,
+        )
+        : Reflect.get(source, selection.field.api_key))
+      : undefined;
     switch (selection.kind) {
       case "id":
       case "scalar":
         break;
       case "link": {
-        const rawId = Reflect.get(source, selection.field.api_key);
+        const rawId = rawFieldValue;
         if (typeof rawId === "string" && rawId.length > 0) {
           addPendingLinkRequest(pending, selection.targetApiKeys, [rawId], selection.nested);
         }
         break;
       }
       case "links": {
-        const rawValue = parseJsonValue(Reflect.get(source, selection.field.api_key));
+        const rawValue = parseJsonValue(rawFieldValue);
         if (!Array.isArray(rawValue)) break;
         addPendingLinkRequest(
           pending,
@@ -1068,18 +1417,18 @@ function collectModelDependencies(
       case "lat_lon":
         break;
       case "media": {
-        const reference = parseMediaFieldReference(Reflect.get(source, selection.field.api_key));
+        const reference = parseMediaFieldReference(rawFieldValue);
         if (reference) pending.assetIds.add(reference.uploadId);
         break;
       }
       case "media_gallery": {
-        for (const reference of parseMediaGalleryReferences(Reflect.get(source, selection.field.api_key))) {
+        for (const reference of parseMediaGalleryReferences(rawFieldValue)) {
           pending.assetIds.add(reference.uploadId);
         }
         break;
       }
       case "structured_text":
-        collectStructuredTextDependencies(metadata, Reflect.get(source, selection.field.api_key), selection, pending);
+        collectStructuredTextDependencies(metadata, rawFieldValue, selection, pending);
         break;
     }
   }
@@ -1134,6 +1483,16 @@ async function projectAsset(
   for (const field of plan.fields) {
     result[field.responseKey] = pickAssetField(mergedAsset, field.fieldName);
   }
+  if (plan.responsiveImage) {
+    const responsiveImage = buildResponsiveImage(
+      mergedAsset,
+      plan.responsiveImage.args,
+      (assetPath, params) => buildCfImageUrl(ctx.assetBaseUrl, ctx.isProduction, assetPath, params),
+    );
+    result[plan.responsiveImage.responseKey] = responsiveImage
+      ? Object.fromEntries(plan.responsiveImage.fields.map((field) => [field.responseKey, Reflect.get(responsiveImage, field.fieldName) ?? null]))
+      : null;
+  }
   return result;
 }
 
@@ -1154,6 +1513,16 @@ async function projectAssetGallery(
     const projected: Record<string, unknown> = {};
     for (const field of plan.fields) {
       projected[field.responseKey] = pickAssetField(mergedAsset, field.fieldName);
+    }
+    if (plan.responsiveImage) {
+      const responsiveImage = buildResponsiveImage(
+        mergedAsset,
+        plan.responsiveImage.args,
+        (assetPath, params) => buildCfImageUrl(ctx.assetBaseUrl, ctx.isProduction, assetPath, params),
+      );
+      projected[plan.responsiveImage.responseKey] = responsiveImage
+        ? Object.fromEntries(plan.responsiveImage.fields.map((field) => [field.responseKey, Reflect.get(responsiveImage, field.fieldName) ?? null]))
+        : null;
     }
     result.push(projected);
   }
@@ -1187,11 +1556,15 @@ async function preloadDependencies(
   sources: readonly {
     readonly source: Record<string, unknown>;
     readonly plan: readonly SelectionPlan[];
+    readonly localeOptions?: { readonly locale?: string; readonly fallbackLocales?: readonly string[] };
   }[],
 ): Promise<void> {
   const pending = createDependencyAccumulator();
   for (const entry of sources) {
-    collectModelDependencies(ctx.metadata, entry.source, entry.plan, pending);
+    collectModelDependencies(ctx.metadata, entry.source, entry.plan, pending, {
+      ...entry.localeOptions,
+      defaultLocale: ctx.defaultLocale,
+    });
   }
 
   while (true) {
@@ -1211,14 +1584,16 @@ async function preloadDependencies(
     }
 
     for (const request of uncachedLinkRequests) {
-      const fetched = await loadLinkedRecordMap(ctx, request.targetApiKeys, request.ids);
-      if (request.nestedPlans.length === 0) continue;
-      for (const record of fetched.values()) {
-        for (const nestedPlan of request.nestedPlans) {
-          collectModelDependencies(ctx.metadata, record, nestedPlan, pending);
+        const fetched = await loadLinkedRecordMap(ctx, request.targetApiKeys, request.ids);
+        if (request.nestedPlans.length === 0) continue;
+        for (const record of fetched.values()) {
+          for (const nestedPlan of request.nestedPlans) {
+            collectModelDependencies(ctx.metadata, record, nestedPlan, pending, {
+              defaultLocale: ctx.defaultLocale,
+            });
+          }
         }
       }
-    }
   }
 }
 
@@ -1228,6 +1603,7 @@ async function projectModelSelections(
   source: Record<string, unknown>,
   plan: readonly SelectionPlan[],
   explicitId?: string,
+  localeOptions?: { readonly locale?: string; readonly fallbackLocales?: readonly string[] },
 ): Promise<Record<string, unknown>> {
   const result: Record<string, unknown> = {};
 
@@ -1237,10 +1613,19 @@ async function projectModelSelections(
         result[selection.responseKey] = explicitId ?? source.id ?? null;
         break;
       case "scalar":
-        result[selection.responseKey] = parseJsonValue(Reflect.get(source, selection.field.api_key));
+        result[selection.responseKey] = selection.field.localized
+          ? pickLocalizedFastPathValue(
+            Reflect.get(source, selection.field.api_key),
+            localeOptions?.locale,
+            localeOptions?.fallbackLocales,
+            ctx.defaultLocale,
+          )
+          : parseJsonValue(Reflect.get(source, selection.field.api_key));
         break;
       case "link": {
-        const rawId = Reflect.get(source, selection.field.api_key);
+        const rawId = selection.field.localized
+          ? pickLocalizedFastPathValue(Reflect.get(source, selection.field.api_key), localeOptions?.locale, localeOptions?.fallbackLocales, ctx.defaultLocale)
+          : Reflect.get(source, selection.field.api_key);
         if (typeof rawId !== "string" || rawId.length === 0) {
           result[selection.responseKey] = null;
           break;
@@ -1253,12 +1638,15 @@ async function projectModelSelections(
             ctx.metadata.contentModelsByApiKey.get(selection.targetApiKeys[0]) ?? meta,
             linked,
             selection.nested,
+            undefined,
           )
           : null;
         break;
       }
       case "links": {
-        const rawValue = parseJsonValue(Reflect.get(source, selection.field.api_key));
+        const rawValue = selection.field.localized
+          ? pickLocalizedFastPathValue(Reflect.get(source, selection.field.api_key), localeOptions?.locale, localeOptions?.fallbackLocales, ctx.defaultLocale)
+          : parseJsonValue(Reflect.get(source, selection.field.api_key));
         if (!Array.isArray(rawValue)) {
           result[selection.responseKey] = [];
           break;
@@ -1274,22 +1662,45 @@ async function projectModelSelections(
         for (const id of ids) {
           const linked = linkedMap.get(id);
           if (!linked) continue;
-          projected.push(await projectModelSelections(ctx, targetMeta, linked, selection.nested));
+          projected.push(await projectModelSelections(ctx, targetMeta, linked, selection.nested, undefined));
         }
         result[selection.responseKey] = projected;
         break;
       }
       case "lat_lon":
-        result[selection.responseKey] = projectLatLonField(Reflect.get(source, selection.field.api_key), selection.nested);
+        result[selection.responseKey] = projectLatLonField(
+          selection.field.localized
+            ? pickLocalizedFastPathValue(Reflect.get(source, selection.field.api_key), localeOptions?.locale, localeOptions?.fallbackLocales, ctx.defaultLocale)
+            : Reflect.get(source, selection.field.api_key),
+          selection.nested,
+        );
         break;
       case "media":
-        result[selection.responseKey] = await projectAsset(ctx, Reflect.get(source, selection.field.api_key), selection.nested);
+        result[selection.responseKey] = await projectAsset(
+          ctx,
+          selection.field.localized
+            ? pickLocalizedFastPathValue(Reflect.get(source, selection.field.api_key), localeOptions?.locale, localeOptions?.fallbackLocales, ctx.defaultLocale)
+            : Reflect.get(source, selection.field.api_key),
+          selection.nested,
+        );
         break;
       case "media_gallery":
-        result[selection.responseKey] = await projectAssetGallery(ctx, Reflect.get(source, selection.field.api_key), selection.nested);
+        result[selection.responseKey] = await projectAssetGallery(
+          ctx,
+          selection.field.localized
+            ? pickLocalizedFastPathValue(Reflect.get(source, selection.field.api_key), localeOptions?.locale, localeOptions?.fallbackLocales, ctx.defaultLocale)
+            : Reflect.get(source, selection.field.api_key),
+          selection.nested,
+        );
         break;
       case "structured_text":
-        result[selection.responseKey] = await projectStructuredText(ctx, Reflect.get(source, selection.field.api_key), selection);
+        result[selection.responseKey] = await projectStructuredText(
+          ctx,
+          selection.field.localized
+            ? pickLocalizedFastPathValue(Reflect.get(source, selection.field.api_key), localeOptions?.locale, localeOptions?.fallbackLocales, ctx.defaultLocale)
+            : Reflect.get(source, selection.field.api_key),
+          selection,
+        );
         break;
     }
   }
@@ -1389,20 +1800,25 @@ async function projectStructuredText(
 async function projectFetchedContentRoot(
   ctx: FastPathExecutionContext,
   root: Extract<RootPlan, { kind: "list" | "singleton" }>,
+  variables: Record<string, unknown>,
   fetched:
     | { readonly kind: "list"; readonly sources: readonly Record<string, unknown>[] }
     | { readonly kind: "singleton"; readonly sources: readonly Record<string, unknown>[]; readonly source: Record<string, unknown> | null },
 ): Promise<unknown> {
+  const localeOptions = {
+    locale: resolveStringArg(root.locale, variables),
+    fallbackLocales: resolveStringListArg(root.fallbackLocales, variables) ?? [],
+  };
   if (root.kind === "list") {
     const result: Record<string, unknown>[] = [];
     for (const merged of fetched.sources) {
-      result.push(await projectModelSelections(ctx, root.meta, merged, root.selectionPlan));
+      result.push(await projectModelSelections(ctx, root.meta, merged, root.selectionPlan, undefined, localeOptions));
     }
     return result;
   }
 
   if (!("source" in fetched) || !fetched.source) return null;
-  return projectModelSelections(ctx, root.meta, fetched.source, root.selectionPlan);
+  return projectModelSelections(ctx, root.meta, fetched.source, root.selectionPlan, undefined, localeOptions);
 }
 
 function buildRootResultSql(
@@ -1410,9 +1826,10 @@ function buildRootResultSql(
   variables: Record<string, unknown>,
 ): { readonly sql: string; readonly params: readonly unknown[] } | null {
   if (root.kind === "meta") {
+    const filter = buildFilterSql(root.filter, variables, root.meta);
     return {
-      sql: `(SELECT json_object('count', COUNT(*)) FROM "${root.meta.tableName}" WHERE "_status" IN ('published', 'updated'))`,
-      params: [],
+      sql: `(SELECT json_object('count', COUNT(*)) FROM "${root.meta.tableName}" row_data WHERE row_data."_status" IN ('published', 'updated')${filter.sql})`,
+      params: filter.params,
     };
   }
 
@@ -1420,11 +1837,12 @@ function buildRootResultSql(
 
   if (root.kind === "list") {
     const orderBy = resolveStringListArg(root.orderBy, variables);
+    const locale = resolveStringArg(root.locale, variables);
     const compiledOrderBy = compileOrderBy(
       orderBy ?? (typeof root.meta.model.ordering === "string" ? [root.meta.model.ordering] : undefined),
-      buildFilterOpts(root.meta),
+      { ...buildFilterOpts(root.meta), locale },
     );
-    const filter = buildFilterSql(root.filter, variables);
+    const filter = buildFilterSql(root.filter, variables, root.meta, locale);
     let innerSql = `SELECT ${root.objectSql} AS item_json FROM "${root.meta.tableName}" row_data WHERE row_data."_status" IN ('published', 'updated')${filter.sql}`;
     if (compiledOrderBy) {
       innerSql += ` ORDER BY ${compiledOrderBy}`;
@@ -1442,7 +1860,7 @@ function buildRootResultSql(
     };
   }
 
-  const filter = buildFilterSql(root.filter, variables);
+  const filter = buildFilterSql(root.filter, variables, root.meta, resolveStringArg(root.locale, variables));
   return {
     sql: `(SELECT ${root.objectSql} FROM "${root.meta.tableName}" row_data WHERE row_data."_status" IN ('published', 'updated')${filter.sql} LIMIT 1)`,
     params: filter.params,
@@ -1453,13 +1871,14 @@ function buildRecursiveRootFetchSql(
   root: Extract<RootPlan, { kind: "list" | "singleton" }>,
   variables: Record<string, unknown>,
 ): { readonly sql: string; readonly params: readonly unknown[] } {
-  const filter = buildFilterSql(root.filter, variables);
+  const locale = resolveStringArg(root.locale, variables);
+  const filter = buildFilterSql(root.filter, variables, root.meta, locale);
 
   if (root.kind === "list") {
     const orderBy = resolveStringListArg(root.orderBy, variables);
     const compiledOrderBy = compileOrderBy(
       orderBy ?? (typeof root.meta.model.ordering === "string" ? [root.meta.model.ordering] : undefined),
-      buildFilterOpts(root.meta),
+      { ...buildFilterOpts(root.meta), locale },
     );
     let innerSql =
       `SELECT json_object('id', row_data.id, '_published_snapshot', row_data."_published_snapshot") AS item_json ` +
@@ -1500,6 +1919,8 @@ async function executePlan(
     sqlLayer,
     metadata,
     assetBaseUrl: (options?.assetBaseUrl ?? "").replace(/\/$/, ""),
+    isProduction: options?.isProduction ?? false,
+    defaultLocale: metadata.defaultLocale,
     assetCache: new Map(),
     linkedRecordCache: new Map(),
     metrics,
@@ -1586,13 +2007,20 @@ async function executePlan(
     await preloadDependencies(
       ctx,
       fetchedRecursiveRoots.flatMap(({ root, fetched }) =>
-        fetched.sources.map((source) => ({ source, plan: root.selectionPlan })),
+        fetched.sources.map((source) => ({
+          source,
+          plan: root.selectionPlan,
+          localeOptions: {
+            locale: resolveStringArg(root.locale, variables),
+            fallbackLocales: resolveStringListArg(root.fallbackLocales, variables) ?? [],
+          },
+        })),
       ),
     );
   }
 
   for (const entry of fetchedRecursiveRoots) {
-    data[entry.root.responseKey] = await projectFetchedContentRoot(ctx, entry.root, entry.fetched);
+    data[entry.root.responseKey] = await projectFetchedContentRoot(ctx, entry.root, variables, entry.fetched);
   }
 
   return { response: { data }, metrics: ctx.metrics };
@@ -1633,6 +2061,18 @@ export function createPublishedFastPath(sqlLayer: Layer.Layer<SqlClient.SqlClien
   }
 
   return {
+    async analyze(request: GraphqlFastPathRequest, executionOptions: { includeDrafts: boolean; excludeInvalid: boolean }) {
+      const metadata = metadataPromise
+        ? await getMetadata()
+        : await loadMetadata(sqlLayer).then((loaded) => {
+          metadataPromise = Promise.resolve(loaded);
+          return loaded;
+        }).catch((error) => {
+          metadataPromise = null;
+          throw error;
+        });
+      return analyzeSupport(request, metadata, executionOptions);
+    },
     async tryExecute(request: GraphqlFastPathRequest, executionOptions: { includeDrafts: boolean; excludeInvalid: boolean }) {
       if (executionOptions.includeDrafts || executionOptions.excludeInvalid) return null;
       const metrics = createFastPathSqlMetrics();

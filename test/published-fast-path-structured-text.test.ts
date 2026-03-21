@@ -378,6 +378,54 @@ describe("Published fast path StructuredText", () => {
     }
   });
 
+  it("supports published list and meta filters for common scalar operators", async () => {
+    const postModelRes = await jsonRequest(handler, "POST", "/api/models", {
+      name: "Post", apiKey: "post",
+    });
+    const postModel = await postModelRes.json();
+    await jsonRequest(handler, "POST", `/api/models/${postModel.id}/fields`, {
+      label: "title", apiKey: "title", fieldType: "string",
+    });
+    await jsonRequest(handler, "POST", `/api/models/${postModel.id}/fields`, {
+      label: "price", apiKey: "price", fieldType: "integer",
+    });
+
+    for (const data of [
+      { title: "Cheap", price: 10 },
+      { title: "Premium", price: 50 },
+      { title: "Mid", price: 30 },
+    ]) {
+      const recordRes = await jsonRequest(handler, "POST", "/api/records", {
+        modelApiKey: "post",
+        data,
+      });
+      const record = await recordRes.json();
+      await handler(new Request(`http://localhost/api/records/${record.id}/publish?modelApiKey=post`, { method: "POST" }));
+    }
+
+    const query = `query FilteredPosts {
+      _allPostsMeta(filter: { AND: [{ price: { gte: 20 } }, { title: { neq: "Cheap" } }] }) {
+        count
+      }
+      allPosts(
+        filter: { AND: [{ price: { gte: 20 } }, { title: { neq: "Cheap" } }] }
+        orderBy: [price_DESC]
+      ) {
+        title
+        price
+      }
+    }`;
+
+    const fastPath = createPublishedFastPath(sqlLayer, { assetBaseUrl: "" });
+    const fastPathResult = await fastPath.tryExecute({ query }, { includeDrafts: false, excludeInvalid: false });
+    const graphqlResult = await gqlQuery(handler, query, undefined, { includeDrafts: false });
+
+    expect(fastPathResult).not.toBeNull();
+    expect(graphqlResult.errors).toBeUndefined();
+    expect(fastPathResult?.response).toEqual({ data: graphqlResult.data });
+    expect(fastPathResult?.metrics.byCategory.root?.statementCount).toBe(1);
+  });
+
   it("bails out for unsupported StructuredText sub-selections", async () => {
     const imageBlockModelRes = await jsonRequest(handler, "POST", "/api/models", {
       name: "Image Block", apiKey: "image_block", isBlock: true,
@@ -427,7 +475,7 @@ describe("Published fast path StructuredText", () => {
             blocks {
               ... on ImageBlockRecord {
                 image {
-                  responsiveImage { src }
+                  focalPoint { x y }
                 }
               }
             }
@@ -542,7 +590,7 @@ describe("Published fast path StructuredText", () => {
           blocks {
             ... on ImageBlockRecord {
               image {
-                responsiveImage { src }
+                focalPoint { x y }
               }
             }
           }
@@ -558,6 +606,187 @@ describe("Published fast path StructuredText", () => {
       rootPaths: {
         siteSettings: "fast-path",
         allPosts: "yoga",
+      },
+      rootReasons: {
+        allPosts: "unsupported_selection",
+      },
+    });
+  });
+
+  it("fast-paths localized published queries", async () => {
+    const postModelRes = await jsonRequest(handler, "POST", "/api/models", {
+      name: "Post", apiKey: "post",
+    });
+    const postModel = await postModelRes.json();
+    await jsonRequest(handler, "POST", `/api/models/${postModel.id}/fields`, {
+      label: "title", apiKey: "title", fieldType: "string", localized: true,
+    });
+    await jsonRequest(handler, "POST", `/api/models/${postModel.id}/fields`, {
+      label: "price", apiKey: "price", fieldType: "integer",
+    });
+
+    const recordRes = await jsonRequest(handler, "POST", "/api/records", {
+      modelApiKey: "post",
+      data: {
+        title: { en: "Hello", is: "Halló" },
+        price: 10,
+      },
+    });
+    const record = await recordRes.json();
+    await handler(new Request(`http://localhost/api/records/${record.id}/publish?modelApiKey=post`, { method: "POST" }));
+
+    const graphql = createGraphQLHandler(sqlLayer, { assetBaseUrl: "" });
+    const result = await graphql.execute(`query LocalizedPosts {
+      allPosts(locale: en, fallbackLocales: [is], orderBy: [title_ASC]) {
+        title
+        price
+      }
+    }`, undefined, { includeDrafts: false, excludeInvalid: false });
+
+    expect(result.errors).toBeUndefined();
+    expect(result._trace).toMatchObject({
+      path: "fast-path",
+      rootPaths: {
+        allPosts: "fast-path",
+      },
+    });
+    expect(result.data).toEqual({
+      allPosts: [{ title: "Hello", price: 10 }],
+    });
+  });
+
+  it("fast-paths responsiveImage leaf projection", async () => {
+    const assetRes = await jsonRequest(handler, "POST", "/api/assets", {
+      filename: "hero.jpg",
+      mimeType: "image/jpeg",
+      size: 50000,
+      width: 1200,
+      height: 800,
+      alt: "Hero image",
+    });
+    const asset = await assetRes.json();
+
+    const imageBlockModelRes = await jsonRequest(handler, "POST", "/api/models", {
+      name: "Image Block", apiKey: "image_block", isBlock: true,
+    });
+    const imageBlockModel = await imageBlockModelRes.json();
+    await jsonRequest(handler, "POST", `/api/models/${imageBlockModel.id}/fields`, {
+      label: "Image", apiKey: "image", fieldType: "media",
+    });
+
+    const postModelRes = await jsonRequest(handler, "POST", "/api/models", {
+      name: "Post", apiKey: "post",
+    });
+    const postModel = await postModelRes.json();
+    await jsonRequest(handler, "POST", `/api/models/${postModel.id}/fields`, {
+      label: "Content", apiKey: "content", fieldType: "structured_text",
+      validators: { structured_text_blocks: ["image_block"] },
+    });
+
+    const postRes = await jsonRequest(handler, "POST", "/api/records", {
+      modelApiKey: "post",
+      data: {
+        content: {
+          value: {
+            schema: "dast",
+            document: {
+              type: "root",
+              children: [{ type: "block", item: "01FASTPATHIMG03" }],
+            },
+          },
+          blocks: {
+            "01FASTPATHIMG03": {
+              _type: "image_block",
+              image: asset.id,
+            },
+          },
+        },
+      },
+    });
+    const post = await postRes.json();
+    await handler(new Request(`http://localhost/api/records/${post.id}/publish?modelApiKey=post`, { method: "POST" }));
+
+    const graphql = createGraphQLHandler(sqlLayer, { assetBaseUrl: "https://media.example.com", isProduction: false });
+    const result = await graphql.execute(`{
+      allPosts {
+        content {
+          blocks {
+            ... on ImageBlockRecord {
+              image {
+                responsiveImage {
+                  src
+                  width
+                  height
+                }
+              }
+            }
+          }
+        }
+      }
+    }`, undefined, { includeDrafts: false, excludeInvalid: false });
+
+    expect(result.errors).toBeUndefined();
+    expect(result._trace).toMatchObject({
+      path: "fast-path",
+      rootPaths: {
+        allPosts: "fast-path",
+      },
+    });
+    const image = ((result.data as { allPosts: Array<{ content: { blocks: Array<{ image: { responsiveImage: { src: string; width: number; height: number } } }> } }> }).allPosts[0].content.blocks[0] as { image: { responsiveImage: { src: string; width: number; height: number } } }).image.responsiveImage;
+    expect(image.src).toContain("hero.jpg");
+    expect(image.width).toBe(1200);
+    expect(image.height).toBe(800);
+  });
+
+  it("reports unsupported_filter in partial fallback traces", async () => {
+    const settingsModelRes = await jsonRequest(handler, "POST", "/api/models", {
+      name: "Site Settings", apiKey: "site_settings", singleton: true,
+    });
+    const settingsModel = await settingsModelRes.json();
+    await jsonRequest(handler, "POST", `/api/models/${settingsModel.id}/fields`, {
+      label: "Site Name", apiKey: "site_name", fieldType: "string",
+    });
+    const settingsRecordRes = await jsonRequest(handler, "POST", "/api/records", {
+      modelApiKey: "site_settings",
+      data: { site_name: "Agent CMS" },
+    });
+    const settingsRecord = await settingsRecordRes.json();
+    await handler(new Request(`http://localhost/api/records/${settingsRecord.id}/publish?modelApiKey=site_settings`, { method: "POST" }));
+
+    const postModelRes = await jsonRequest(handler, "POST", "/api/models", {
+      name: "Post", apiKey: "post",
+    });
+    const postModel = await postModelRes.json();
+    await jsonRequest(handler, "POST", `/api/models/${postModel.id}/fields`, {
+      label: "title", apiKey: "title", fieldType: "string", localized: true,
+    });
+    const postRes = await jsonRequest(handler, "POST", "/api/records", {
+      modelApiKey: "post",
+      data: { title: { en: "Hello" } },
+    });
+    const post = await postRes.json();
+    await handler(new Request(`http://localhost/api/records/${post.id}/publish?modelApiKey=post`, { method: "POST" }));
+
+    const graphql = createGraphQLHandler(sqlLayer, { assetBaseUrl: "" });
+    const result = await graphql.execute(`{
+      siteSettings { siteName }
+      allPosts(filter: { title: { matches: "Hell" } }) {
+        id
+        title
+      }
+    }`, undefined, { includeDrafts: false, excludeInvalid: false });
+
+    expect(result.errors).toBeUndefined();
+    expect((result.data as { siteSettings: { siteName: string } }).siteSettings.siteName).toBe("Agent CMS");
+    expect((result.data as { allPosts: unknown[] }).allPosts).toHaveLength(1);
+    expect(result._trace).toMatchObject({
+      path: "partial",
+      rootPaths: {
+        siteSettings: "fast-path",
+        allPosts: "yoga",
+      },
+      rootReasons: {
+        allPosts: "unsupported_filter",
       },
     });
   });
