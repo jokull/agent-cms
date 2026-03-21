@@ -29,7 +29,12 @@ The key: always re-run the same prompt after making improvements. The before/aft
 ## Metrics
 
 - **Primary**: `friction_count` (integer, lower is better) — number of friction points in the claude dialog (errors, confusion, unnecessary tool calls, wrong tool choices, unclear field formats, excessive round-trips)
-- **Secondary**: `success` (0 or 1) — whether the claude subprocess completed the task
+- **Secondary**:
+  - `success` (0 or 1) — whether the claude subprocess completed the task
+  - `total_tokens` (integer, lower is better) — total tokens consumed by the editor MCP session (input + output). A well-guided MCP surface means fewer discovery round-trips, less schema exploration, and more direct tool usage.
+  - `output_tokens` (integer, lower is better) — output tokens only; measures how much "thinking" the agent needed
+  - `cost_usd` (float, lower is better) — dollar cost of the session
+  - `num_turns` (integer, lower is better) — number of conversation turns; fewer turns = more efficient tool sequencing
 
 ## How to Run
 
