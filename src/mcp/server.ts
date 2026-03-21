@@ -402,6 +402,7 @@ Optionally provide a new top-level DAST \`value\`. If omitted, the existing DAST
 Example — update one block's description, delete another, keep the rest:
 { blocks: { "block-1": "block-1", "block-2": { "description": "New text" }, "block-3": null } }`, PatchBlocksInput.fields);
 const DeleteRecordTool = cmsTool("delete_record", "Delete a record", DeleteRecordInput.fields);
+const GetRecordTool = cmsTool("get_record", "Get a single record by modelApiKey + recordId. Useful after search_content when you need the full materialized record, including structured_text fields, before patch_blocks or update_record.", PublishRecordInput.fields);
 const QueryRecordsTool = cmsTool("query_records", "List records for a model. Structured_text fields are materialized for inspection, including nested blocks inside parent block fields. Useful for finding record IDs before update_record, patch_blocks, publish_record, or restore_record_version.", QueryRecordsInput.fields);
 const BulkCreateRecordsTool = cmsTool("bulk_create_records", `Create multiple records in one operation (up to 1000). Much faster than calling create_record in a loop.
 
@@ -522,6 +523,7 @@ const AdminTools = [
   UpdateSingletonRecordTool,
   PatchBlocksTool,
   DeleteRecordTool,
+  GetRecordTool,
   QueryRecordsTool,
   BulkCreateRecordsTool,
   PublishRecordTool,
@@ -565,6 +567,7 @@ const EditorTools = [
   UpdateSingletonRecordTool,
   PatchBlocksTool,
   DeleteRecordTool,
+  GetRecordTool,
   QueryRecordsTool,
   BulkCreateRecordsTool,
   PublishRecordTool,
@@ -926,6 +929,7 @@ export function createMcpLayer(
     update_singleton_record: withDecoded(UpdateSingletonRecordInput, ({ modelApiKey, data }) => RecordService.updateSingletonRecord(modelApiKey, data, options?.actor)),
     patch_blocks: withDecoded(PatchBlocksInput, (input) => RecordService.patchBlocksForField(input, options?.actor)),
     delete_record: withDecoded(DeleteRecordInput, ({ recordId, modelApiKey }) => RecordService.removeRecord(modelApiKey, recordId)),
+    get_record: withDecoded(PublishRecordInput, ({ recordId, modelApiKey }) => RecordService.getRecord(modelApiKey, recordId)),
     query_records: withDecoded(QueryRecordsInput, ({ modelApiKey }) => RecordService.listRecords(modelApiKey)),
     bulk_create_records: withDecoded(BulkCreateRecordsInput, ({ modelApiKey, records }) => RecordService.bulkCreateRecords({ modelApiKey, records }, options?.actor)),
     publish_record: withDecoded(PublishRecordInput, ({ recordId, modelApiKey }) => PublishService.publishRecord(modelApiKey, recordId, options?.actor)),

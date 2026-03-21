@@ -86,6 +86,7 @@ describe("MCP HTTP transport", () => {
     expect(tools.tools.some((tool) => tool.name === "bulk_publish_records")).toBe(true);
     expect(tools.tools.some((tool) => tool.name === "bulk_unpublish_records")).toBe(true);
     expect(tools.tools.some((tool) => tool.name === "compare_record_versions")).toBe(true);
+    expect(tools.tools.some((tool) => tool.name === "get_record")).toBe(true);
     expect(tools.tools.some((tool) => tool.name === "update_singleton_record")).toBe(true);
     expect(tools.tools.some((tool) => tool.name === "create_model")).toBe(false);
     expect(tools.tools.some((tool) => tool.name === "create_editor_token")).toBe(false);

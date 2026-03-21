@@ -174,6 +174,22 @@ describe("MCP Server", () => {
       expect(updated.title).toBe("Updated");
     });
 
+    it("gets a single record by id", async () => {
+      const createRes = await client.callTool({
+        name: "create_record",
+        arguments: { modelApiKey: "post", data: { title: "Lookup" } },
+      });
+      const record = getResult(createRes);
+
+      const getRes = await client.callTool({
+        name: "get_record",
+        arguments: { recordId: record.id, modelApiKey: "post" },
+      });
+      const fetched = getResult(getRes);
+      expect(fetched.id).toBe(record.id);
+      expect(fetched.title).toBe("Lookup");
+    });
+
     it("publishes and unpublishes", async () => {
       const createRes = await client.callTool({
         name: "create_record",
