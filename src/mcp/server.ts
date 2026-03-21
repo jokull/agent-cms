@@ -494,7 +494,8 @@ const SearchContentTool = cmsTool("search_content", `Search content records. Sup
 
 Keyword mode: phrases ("exact match"), prefix (word*), boolean (AND/OR).
 Semantic mode: finds conceptually related content even when vocabulary differs (requires AI+Vectorize bindings).
-Hybrid mode (default when Vectorize available): combines both for best results.`, SearchContentInput.fields);
+Hybrid mode (default when Vectorize available): combines both for best results.
+Results include modelApiKey, recordId, title when available, rank, and snippet.`, SearchContentInput.fields);
 const ReindexSearchTool = cmsTool("reindex_search", "Rebuild FTS5 + Vectorize search indexes. Use after deploying search to a CMS with existing content, or to recover from index drift. Scoped to a single model or all content models.", ReindexSearchInput.fields);
 const GetSiteSettingsTool = cmsTool("get_site_settings", "Get global site settings from the built-in site_settings table (site name, title suffix, global SEO, favicon, social accounts). This is separate from any content-model singleton also named site_settings.");
 const UpdateSiteSettingsTool = cmsTool("update_site_settings", `Update global site settings in the built-in site_settings table. These power the _site GraphQL query (globalSeo, faviconMetaTags).

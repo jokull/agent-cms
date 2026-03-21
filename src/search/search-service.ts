@@ -201,6 +201,17 @@ export function reindexAll(modelApiKey?: string) {
 
 export type SearchMode = "keyword" | "semantic" | "hybrid";
 
+function lookupIndexedTitle(modelApiKey: string, recordId: string) {
+  return Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const rows = yield* sql.unsafe<{ title: string }>(
+      `SELECT title FROM "fts_${modelApiKey}" WHERE record_id = ? LIMIT 1`,
+      [recordId]
+    ).pipe(Effect.catchAll(() => Effect.succeed([])));
+    return rows[0]?.title ?? null;
+  });
+}
+
 /**
  * Search content records.
  */
@@ -246,13 +257,14 @@ export function search(params: {
       const merged = reciprocalRankFusion(ftsResults, vectorResults);
       const paged = merged.slice(params.skip ?? 0, (params.skip ?? 0) + limit);
 
-      const ftsSnippetMap = new Map(ftsResults.map((r) => [`${r.modelApiKey}:${r.recordId}`, r.snippet]));
+      const ftsMetaMap = new Map(ftsResults.map((r) => [`${r.modelApiKey}:${r.recordId}`, { title: r.title, snippet: r.snippet }]));
 
       const results = paged.map((r) => ({
         recordId: r.recordId,
         modelApiKey: r.modelApiKey,
         rank: r.score,
-        snippet: ftsSnippetMap.get(`${r.modelApiKey}:${r.recordId}`) ?? "",
+        title: ftsMetaMap.get(`${r.modelApiKey}:${r.recordId}`)?.title ?? null,
+        snippet: ftsMetaMap.get(`${r.modelApiKey}:${r.recordId}`)?.snippet ?? "",
       }));
 
       return { results, meta: { count: results.length, mode: "hybrid" as const } };
@@ -260,12 +272,18 @@ export function search(params: {
 
     if (mode === "semantic" && vectorResults.length > 0) {
       const paged = vectorResults.slice(params.skip ?? 0, (params.skip ?? 0) + limit);
-      const results = paged.map((r) => ({
-        recordId: r.recordId,
-        modelApiKey: r.modelApiKey,
-        rank: r.score,
-        snippet: "",
-      }));
+      const results = yield* Effect.forEach(paged, (r) =>
+        Effect.gen(function* () {
+          const title = yield* lookupIndexedTitle(r.modelApiKey, r.recordId);
+          return {
+            recordId: r.recordId,
+            modelApiKey: r.modelApiKey,
+            rank: r.score,
+            title,
+            snippet: "",
+          };
+        })
+      );
       return { results, meta: { count: results.length, mode: "semantic" as const } };
     }
 

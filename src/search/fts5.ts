@@ -5,6 +5,7 @@ export interface FtsResult {
   recordId: string;
   modelApiKey: string;
   rank: number;
+  title: string;
   snippet: string;
 }
 
@@ -75,10 +76,11 @@ export function ftsSearch(query: string, options: {
       const modelApiKey = options.modelApiKey;
       const rows = yield* sql.unsafe<{
         record_id: string;
+        title: string;
         rank: number;
         snippet: string;
       }>(
-        `SELECT record_id, rank, snippet("fts_${modelApiKey}", 2, '<mark>', '</mark>', '...', 32) as snippet
+        `SELECT record_id, title, rank, snippet("fts_${modelApiKey}", 2, '<mark>', '</mark>', '...', 32) as snippet
          FROM "fts_${modelApiKey}"
          WHERE "fts_${modelApiKey}" MATCH ?
          ORDER BY rank
@@ -89,6 +91,7 @@ export function ftsSearch(query: string, options: {
         recordId: r.record_id,
         modelApiKey,
         rank: r.rank,
+        title: r.title,
         snippet: r.snippet,
       }));
     }
@@ -105,7 +108,7 @@ export function ftsSearch(query: string, options: {
     // Build UNION ALL query
     const unions = tables.map((t) => {
       const apiKey = t.name.replace(/^fts_/, "");
-      return `SELECT record_id, '${apiKey}' as model_api_key, rank, snippet("${t.name}", 2, '<mark>', '</mark>', '...', 32) as snippet FROM "${t.name}" WHERE "${t.name}" MATCH ?`;
+      return `SELECT record_id, title, '${apiKey}' as model_api_key, rank, snippet("${t.name}", 2, '<mark>', '</mark>', '...', 32) as snippet FROM "${t.name}" WHERE "${t.name}" MATCH ?`;
     });
 
     const unionQuery = unions.join(" UNION ALL ") + " ORDER BY rank LIMIT ? OFFSET ?";
@@ -113,6 +116,7 @@ export function ftsSearch(query: string, options: {
 
     const rows = yield* sql.unsafe<{
       record_id: string;
+      title: string;
       model_api_key: string;
       rank: number;
       snippet: string;
@@ -122,6 +126,7 @@ export function ftsSearch(query: string, options: {
       recordId: r.record_id,
       modelApiKey: r.model_api_key,
       rank: r.rank,
+      title: r.title,
       snippet: r.snippet,
     }));
   });

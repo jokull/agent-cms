@@ -10,15 +10,14 @@
 - Multi-record publishing is smoother with `bulk_publish_records`
 - Multi-record unpublishing is smoother with `bulk_unpublish_records`
 - Version diffing is smoother with `compare_record_versions`
+- The numbered benchmark-oriented post titles in the blog seed are intentional fixture data, not accidental duplicate records
 
 ## Next Best Bets
 - Make the guide more explicit about checking `schema_info` / `describe_model` before assuming example fields
 - Probe edge-case error quality for weak spots that still cause extra turns
 - Explore script-writing friction further (auth/bootstrap + nested mount points are better documented, but response parsing is still awkward)
-- Make the blog seed/deploy fixture idempotent or resettable; repeated seeding appears to create duplicate canonical post titles, which adds ambiguity to search/look-up tasks
 
 ## Content CRUD
-- Update specific fields on existing records (`reading_time`, `featured`)
 - Create a record with all currently seeded post field types: string, text, integer, boolean, date, media, link, seo, structured_text
 
 ## Structured Text

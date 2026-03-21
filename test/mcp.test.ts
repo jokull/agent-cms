@@ -309,6 +309,35 @@ describe("MCP Server", () => {
     });
   });
 
+  describe("Search", () => {
+    it("returns titles in search results", async () => {
+      const modelRes = await client.callTool({
+        name: "create_model",
+        arguments: { name: "Post", apiKey: "post" },
+      });
+      const model = getResult(modelRes);
+      await client.callTool({
+        name: "create_field",
+        arguments: { modelId: model.id, label: "Title", apiKey: "title", fieldType: "string" },
+      });
+      await client.callTool({
+        name: "create_field",
+        arguments: { modelId: model.id, label: "Body", apiKey: "body", fieldType: "text" },
+      });
+      await client.callTool({
+        name: "create_record",
+        arguments: { modelApiKey: "post", data: { title: "Delegation and Trust in Automated Systems", body: "governance matters" } },
+      });
+
+      const searchRes = await client.callTool({
+        name: "search_content",
+        arguments: { query: "governance", mode: "keyword" },
+      });
+      const search = getResult(searchRes);
+      expect(search.results[0].title).toBe("Delegation and Trust in Automated Systems");
+    });
+  });
+
   describe("Error handling", () => {
     it("returns error for nonexistent model", async () => {
       const res = await client.callTool({
