@@ -651,7 +651,10 @@ function projectRow(
       continue;
     }
     if (selection.kind === "structured_text") {
-      const value = row[selection.field.api_key];
+      const rawValue = row[selection.field.api_key];
+      const value = selection.field.localized
+        ? pickLocalizedValue(rawValue, localeOptions)
+        : rawValue;
       result[selection.responseKey] = isStructuredTextEnvelope(value)
         ? projectStructuredText(value, selection, linkBuckets, localeOptions)
         : null;
@@ -915,7 +918,10 @@ async function queryRoots(
         query += ` WHERE ${conditions.join(" AND ")}`;
       }
 
-      const orderBy = compileOrderBy(plan.args.orderBy ? [...plan.args.orderBy] : undefined, filterOpts);
+      const effectiveOrderBy = plan.args.orderBy
+        ? [...plan.args.orderBy]
+        : (typeof plan.model.model.ordering === "string" ? [plan.model.model.ordering] : undefined);
+      const orderBy = compileOrderBy(effectiveOrderBy, filterOpts);
       if (orderBy) {
         query += ` ORDER BY ${orderBy}`;
       }
@@ -1009,23 +1015,57 @@ async function materializeRootStructuredText(
     rawValue: unknown;
   }> = [];
 
+  // Track which (field, row, locale) tuples were submitted so we can reassemble locale maps
+  const localizedKeys: Array<{
+    rowId: string;
+    fieldApiKey: string;
+    locale: string;
+    requestKey: string;
+  }> = [];
+
   for (const row of rows) {
     const rowId = row.id;
     if (typeof rowId !== "string" && typeof rowId !== "number") continue;
     for (const selection of structuredTextPlans) {
       const rawValue = row[selection.field.api_key];
       if (!rawValue || isStructuredTextEnvelope(rawValue)) continue;
-      requests.push({
-        requestKey: `${selection.field.api_key}:${String(rowId)}`,
-        allowedBlockApiKeys: undefined,
-        selectedNestedFieldsPlan: buildStructuredTextMaterializePlan(selection),
-        parentContainerModelApiKey: plan.model.model.api_key,
-        parentBlockId: null,
-        parentFieldApiKey: selection.field.api_key,
-        rootRecordId: String(rowId),
-        rootFieldApiKey: selection.field.api_key,
-        rawValue,
-      });
+
+      if (selection.field.localized && isRecord(rawValue) && !isDastDocument(rawValue)) {
+        // Localized field: rawValue is a locale map like { en: { schema, document }, is: { ... } }
+        for (const [locale, localeValue] of Object.entries(rawValue)) {
+          if (!localeValue || isStructuredTextEnvelope(localeValue)) continue;
+          const requestKey = `${selection.field.api_key}:${locale}:${String(rowId)}`;
+          requests.push({
+            requestKey,
+            allowedBlockApiKeys: undefined,
+            selectedNestedFieldsPlan: buildStructuredTextMaterializePlan(selection),
+            parentContainerModelApiKey: plan.model.model.api_key,
+            parentBlockId: null,
+            parentFieldApiKey: selection.field.api_key,
+            rootRecordId: String(rowId),
+            rootFieldApiKey: `${selection.field.api_key}:${locale}`,
+            rawValue: localeValue,
+          });
+          localizedKeys.push({
+            rowId: String(rowId),
+            fieldApiKey: selection.field.api_key,
+            locale,
+            requestKey,
+          });
+        }
+      } else {
+        requests.push({
+          requestKey: `${selection.field.api_key}:${String(rowId)}`,
+          allowedBlockApiKeys: undefined,
+          selectedNestedFieldsPlan: buildStructuredTextMaterializePlan(selection),
+          parentContainerModelApiKey: plan.model.model.api_key,
+          parentBlockId: null,
+          parentFieldApiKey: selection.field.api_key,
+          rootRecordId: String(rowId),
+          rootFieldApiKey: selection.field.api_key,
+          rawValue,
+        });
+      }
     }
   }
 
@@ -1035,14 +1075,41 @@ async function materializeRootStructuredText(
     recordMetrics: false,
     phase: "st_frontier",
   });
+
+  // Reassemble localized envelopes into locale maps
+  const localizedEnvelopes = new Map<string, Record<string, StructuredTextEnvelope | null>>();
+  for (const entry of localizedKeys) {
+    const mapKey = `${entry.fieldApiKey}:${entry.rowId}`;
+    let localeMap = localizedEnvelopes.get(mapKey);
+    if (!localeMap) {
+      localeMap = {};
+      localizedEnvelopes.set(mapKey, localeMap);
+    }
+    localeMap[entry.locale] = materialized.get(entry.requestKey) ?? null;
+  }
+
   for (const row of rows) {
     const rowId = row.id;
     if (typeof rowId !== "string" && typeof rowId !== "number") continue;
     for (const selection of structuredTextPlans) {
-      const key = `${selection.field.api_key}:${String(rowId)}`;
-      const envelope = materialized.get(key);
-      if (envelope) {
-        row[selection.field.api_key] = envelope;
+      if (selection.field.localized) {
+        const mapKey = `${selection.field.api_key}:${String(rowId)}`;
+        const localeMap = localizedEnvelopes.get(mapKey);
+        if (localeMap) {
+          // Merge materialized envelopes back into the locale map, preserving any already-materialized locales
+          const existing = row[selection.field.api_key];
+          const merged: Record<string, unknown> = isRecord(existing) ? { ...existing } : {};
+          for (const [locale, envelope] of Object.entries(localeMap)) {
+            if (envelope) merged[locale] = envelope;
+          }
+          row[selection.field.api_key] = merged;
+        }
+      } else {
+        const key = `${selection.field.api_key}:${String(rowId)}`;
+        const envelope = materialized.get(key);
+        if (envelope) {
+          row[selection.field.api_key] = envelope;
+        }
       }
     }
   }
@@ -1128,9 +1195,17 @@ function buildStructuredTextLinkQueries(
 
   for (const row of rows) {
     for (const selection of collectStructuredTextPlans(plan.selections)) {
-      const value = row[selection.field.api_key];
-      if (!isStructuredTextEnvelope(value)) continue;
-      collectStructuredTextLinkIds(value, selection, idsByBucket, descriptorsByBucket);
+      const rawValue = row[selection.field.api_key];
+      if (isStructuredTextEnvelope(rawValue)) {
+        collectStructuredTextLinkIds(rawValue, selection, idsByBucket, descriptorsByBucket);
+      } else if (selection.field.localized && isRecord(rawValue)) {
+        // Localized field: rawValue is a locale map of envelopes
+        for (const localeValue of Object.values(rawValue)) {
+          if (isStructuredTextEnvelope(localeValue)) {
+            collectStructuredTextLinkIds(localeValue, selection, idsByBucket, descriptorsByBucket);
+          }
+        }
+      }
     }
   }
 

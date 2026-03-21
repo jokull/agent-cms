@@ -1,6 +1,8 @@
 CREATE TABLE IF NOT EXISTS "assets" (
   "id" text PRIMARY KEY,
   "filename" text NOT NULL,
+  "basename" text,
+  "format" text,
   "mime_type" text NOT NULL,
   "size" integer NOT NULL,
   "width" integer,

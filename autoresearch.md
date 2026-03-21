@@ -1,101 +1,90 @@
-# Autoresearch: Yoga Fallback Path — Batched Relation Resolution
+# Autoresearch: Editor MCP Friction Optimization
 
 ## Objective
 
-Make GraphQL queries that miss the published fast path compiler materially faster. The published fast path handles simple scalar/link queries in ~3-5ms. When a query falls back to Yoga (reverse refs, deep StructuredText, unsupported filters), it hits the full resolver tree and becomes 3-10x slower.
+Hill-climb towards the perfect editor MCP experience. The loop explores the edges of what an editor agent should be able to do — add images to posts, reorder content, create rich blog posts, manage publishing schedules, build structured text with blocks, browse version history, revert changes — and optimizes the MCP surface until these flows are smooth and efficient.
 
-The goal is to reduce that gap by batching relation resolution in the Yoga path: reverse refs, linked records, assets, and StructuredText dependencies.
+When a Claude agent connected via MCP has "wheels spinning" on a task (too many tool calls, wrong tool choice, confusion, poor errors), make code changes to reduce that friction. When a new editorial capability is needed, **add it** — new MCP tools, richer tool descriptions, better error messages, expanded guide content, or new features in the CMS services.
 
-See GitHub issue #27 for full context.
+**What gets optimized:**
+- Tool names, descriptions, and input schemas in `src/mcp/server.ts`
+- The `agent-cms://guide` resource (orientation, workflow hints, field format docs)
+- Error messages in services and tools
+- MCP prompt templates
+- New editor MCP tools and features (version history browsing, change reverting, diff viewing, etc.)
+- The blog example schema (new models, fields, block types to support richer editorial flows)
+- The blog seed script and PROMPT.md
+
+**The keep/discard cycle — MCP runs are unit tests:**
+
+Each MCP run is like a test case. When it's RED (friction found):
+1. Run an editorial task through claude with editor MCP → observe friction
+2. Make code changes to fix the friction (better tools, descriptions, errors, new features)
+3. Re-run the **SAME task** to verify friction is reduced → GREEN
+4. **Keep** if the same task now works better, **discard** if not
+5. Move to a harder task
+
+The key: always re-run the same prompt after making improvements. The before/after comparison on the same task is what proves the improvement is real.
 
 ## Metrics
 
-- **Primary**: total_ms (milliseconds, lower is better) — sum of median durations across all queries in the yoga-fallback benchmark suite
-- **Secondary**: sql_statements (total SQL statement count)
+- **Primary**: `friction_count` (integer, lower is better) — number of friction points in the claude dialog (errors, confusion, unnecessary tool calls, wrong tool choices, unclear field formats, excessive round-trips)
+- **Secondary**: `success` (0 or 1) — whether the claude subprocess completed the task
 
 ## How to Run
 
-`./autoresearch.sh` — builds, starts wrangler if needed, seeds, runs yoga-fallback benchmarks, outputs `METRIC` lines.
+```bash
+dotenvx run -f examples/blog/cms/.dev.vars -- ./autoresearch.sh "Read the agent-cms://guide resource, then create a post with title 'Test' and publish it."
+```
 
-## The Benchmark Suite
+The write key lives in `examples/blog/cms/.dev.vars` (`CMS_WRITE_KEY`). Always use `dotenvx run -f examples/blog/cms/.dev.vars --` to wrap commands that need it.
 
-8 queries targeting Yoga fallback patterns:
+Outputs the full claude dialog plus `METRIC` lines (evaluated by codex).
 
-- `reverse_ref_single` — one category's `_allReferencingPosts` (the clearest hotspot, 3x slower than equivalent fast-path query)
-- `reverse_ref_wide` — same but 80 posts with linked author
-- `reverse_ref_all_categories` — all categories each with their referencing posts (N+1 if not batched)
-- `deep_with_links` — 12 posts with full nested StructuredText + author + category
-- `page_with_reverse_refs` — mixed page: fast-path siteSettings + Yoga reverse ref + meta
-- `multi_category_reverse_refs` — all categories with reverse refs + nested author links
-- `single_post_deep_yoga` — single post by slug with deep content (tests single-record resolver path)
-- `list_summary_with_meta` — basic list + meta (partly fast-pathable, tests fallback overhead)
+## Deployment
 
-## The Main Bottleneck: Reverse Reference N+1
+- **CMS URL**: `https://test-cms.solberg.is`
+- **Admin MCP**: `https://test-cms.solberg.is/mcp` (full access)
+- **Editor MCP**: `https://test-cms.solberg.is/mcp/editor` (content ops only)
+- **GraphQL**: `https://test-cms.solberg.is/graphql`
+- **Auth**: `Authorization: Bearer <key>`. Editor tokens (`etk_*`) for `/mcp/editor`, admin writeKey for both.
 
-`src/graphql/reverse-ref-resolvers.ts` — every `_allReferencing*` field runs its own SQL query per parent record. When you query `allCategories { _allReferencingPosts { ... } }` with 3 categories, that's 3 separate SQL queries, one per category.
-
-The resolver at line 102-171:
-- Builds a WHERE clause matching the parent record's ID against link/links fields
-- Runs a full `SELECT * FROM "content_<source>"` per parent
-- No batching, no request-scoped caching, no microtask scheduling
-
-This is the same N+1 pattern that linked-record-loader solved for link fields. The fix is the same: a request-scoped batch loader that collects parent IDs via microtask scheduling, runs one SQL query with `IN (...)`, and buckets results back.
-
-## Other Relation Resolution Hotspots
-
-### Link/links field resolvers (`src/graphql/content-resolvers.ts`)
-
-Link fields already use `linked-record-loader.ts` for microbatch loading. But links fields (multi-link, JSON array of IDs) may still resolve individually. Check if multi-link fields batch properly.
-
-### Asset resolvers (`src/graphql/asset-resolvers.ts`)
-
-Asset fields (images) resolve by fetching from the `assets` table. If multiple records each have an image field, these should batch via `IN (...)`. Check if there's a request-scoped asset loader.
-
-### StructuredText link resolution (`src/graphql/structured-text-resolver.ts`)
-
-StructuredText `links` (inline record references in DAST) are resolved via `batchResolveLinkedRecordsCached()`. This is already batched within one ST field, but across multiple ST fields on different records, each field may trigger its own batch.
-
-## Architecture Reference
-
-### GraphQL Yoga
-
-We use GraphQL Yoga as the execution engine. Yoga calls resolvers in the standard GraphQL.js field-by-field model. Our resolvers are regular async functions — Yoga imposes no constraints on how we fetch data inside them. The batching patterns (microtask-scheduled loaders, request-scoped caches) work naturally within Yoga's execution model. Yoga is not a constraint here.
-
-### Request-scoped batching pattern (already proven)
-
-`src/graphql/linked-record-loader.ts` and `src/graphql/structured-text-loader.ts` both use the same pattern:
-1. Resolver calls loader with a request key
-2. Loader stores a deferred promise + pending params
-3. `queueMicrotask()` schedules a flush
-4. Flush collects all pending requests, runs one SQL, distributes results
-
-This pattern should be applied to:
-- Reverse ref resolution (collect parent IDs, run one query per source model)
-- Asset resolution (collect asset IDs, run one `SELECT * FROM assets WHERE id IN (...)`)
-- StructuredText link resolution across multiple fields
-
-### GqlContext (`src/graphql/gql-types.ts`)
-
-The GraphQL context is request-scoped and available to all resolvers. It already carries `structuredTextEnvelopeLoaders`. New loaders (reverse-ref loader, asset loader) should be added here.
+To redeploy after code changes:
+```bash
+npm run build
+cd examples/blog/cms && npx wrangler deploy
+```
 
 ## Files in Scope
 
-- `src/graphql/reverse-ref-resolvers.ts` — **primary target**, N+1 reverse refs
-- `src/graphql/content-resolvers.ts` — field resolvers, link/asset dispatch
-- `src/graphql/asset-resolvers.ts` — asset field resolution
-- `src/graphql/structured-text-resolver.ts` — ST link resolution
-- `src/graphql/linked-record-loader.ts` — existing batch loader (reference implementation)
-- `src/graphql/structured-text-loader.ts` — existing batch loader (reference implementation)
-- `src/graphql/gql-types.ts` — GqlContext type, loader storage
-- `src/graphql/schema-builder.ts` — wires resolvers, builds context
-- `src/graphql/handler.ts` — GraphQL handler
+### MCP Surface (tool descriptions, guides, errors, NEW FEATURES)
+- `src/mcp/server.ts` — **primary target**: tool definitions, descriptions, input schemas, validation. ADD new editor tools here.
+- `src/mcp/guide.ts` or wherever the `agent-cms://guide` resource content lives — orientation text, workflow hints
+- `src/mcp/prompts/` — MCP prompt templates
+- `src/services/*.ts` — business logic and error messages. ADD new service methods for new features.
+- `src/errors.ts` — error types and messages
+
+### Feature Expansion (new editor capabilities)
+- `src/services/record-service.ts` — record CRUD, version management
+- `src/services/publish-service.ts` — publish/unpublish, scheduling
+- `src/services/asset-service.ts` — asset management
+- `src/services/schema-io-service.ts` — schema import/export
+
+### Schema Evolution (via admin MCP or seed script)
+- `examples/blog/seed.ts` — add new models, fields, block types
+- `examples/blog/PROMPT.md` — project-specific agent lifecycle prompt
+- The live CMS schema — use admin MCP to create_model, create_field, etc.
+
+### Instrumentation
+- `autoresearch.sh` — the tick script itself
+- `autoresearch.ideas.md` — ideas backlog
 
 ## Off Limits
 
-- `src/graphql/published-fast-path.ts` — the compiler is separate, don't modify it
-- `src/graphql/filter-compiler.ts` — filter compilation logic
-- Published snapshot format/semantics
-- `src/mcp/`, `src/dast/`, `src/db/`, `src/errors.ts`
+- `src/graphql/` — GraphQL layer (separate optimization)
+- `src/db/` — database layer
+- `src/schema-engine/` — DDL generation
+- Published fast path, filter compiler
 
 ## Constraints
 
@@ -103,47 +92,55 @@ The GraphQL context is request-scoped and available to all resolvers. It already
 - TypeScript must compile: `npx tsc --noEmit`
 - Build must succeed: `npm run build`
 - No `as` casts, no `any` types
-- Effect patterns (consult `~/Forks/effect-solutions/` before writing Effect code)
-- No new npm dependencies
+- Effect patterns (consult `~/Forks/effect-solutions/`)
 - GraphQL API must return identical responses
+- MCP protocol compatibility must be maintained
+- After code changes, redeploy: `npm run build && cd examples/blog/cms && npx wrangler deploy`
 
-## Optimization Directions (ranked by expected impact)
+## Editor MCP Tools (29 tools)
 
-### 1. Reverse-ref batch loader
+**Read**: list_models, describe_model, schema_info, query_records, list_record_versions, get_record_version, list_assets, search_content, get_site_settings, export_schema
 
-Create a request-scoped loader (same pattern as linked-record-loader) that:
-- Collects `(sourceTableName, refConditions, parentId)` tuples via microtask scheduling
-- Groups by source table + field set + args shape
-- Runs one SQL per group: `SELECT * FROM "content_<source>" WHERE <link_field> IN (?, ?, ...) AND _status IN ('published', 'updated')`
-- Buckets results back to each parent by matching the link field value
-- Store the loader on GqlContext so it's request-scoped
+**Write**: create_record, update_record, patch_blocks, bulk_create_records, publish_record, unpublish_record, schedule_publish, schedule_unpublish, clear_schedule, restore_record_version, reorder_records, build_structured_text, build_structured_text_from_markdown, upload_asset, import_asset_from_url, replace_asset, update_site_settings
 
-### 2. Asset batch loader
+**Delete**: delete_record
 
-Create a request-scoped asset loader that:
-- Collects asset IDs from all media/image field resolvers
-- Runs one `SELECT * FROM assets WHERE id IN (...)` per flush
-- Returns cached results for subsequent lookups
-- Handles `responsiveImage` subfield resolution from the cached asset row
+**Resources**: agent-cms://guide (orientation), agent-cms://schema (current schema JSON)
 
-### 3. Cross-field StructuredText link batching
+**Prompts**: setup-content-model, generate-graphql-queries
 
-The existing `batchResolveLinkedRecordsCached` batches within one ST field. But if 12 posts each have a `content` field with link references, each field's link resolution is independent. A request-scoped linked-record cache (already partially there via `linkedRecordCache` on the resolver) could be shared more broadly.
+### Feature gaps to explore and fill
+- **Diff viewing**: compare two versions of a record side by side
+- **Bulk publish/unpublish**: operate on multiple records at once
+- **Record duplication**: clone an existing record
+- **Content preview**: see what the published version looks like vs draft
+- **Asset metadata enrichment**: auto-fill alt text, detect dimensions from URL
+- **Undo last change**: quick revert to previous state without browsing versions
 
-### 4. Shared request dependency cache
+## Blog Example Schema
 
-Add a general-purpose request-scoped cache to GqlContext:
-- `recordsById: Map<string, DynamicRow>` — any fetched record, reusable across resolvers
-- `assetsById: Map<string, DynamicRow>` — fetched assets
-- `reverseRefBuckets: Map<string, DynamicRow[]>` — reverse ref results
+Models: site_settings (singleton), author (singleton), category, post
+Block types: hero_section, code_block (and possibly feature_card, feature_grid from seed)
+Key post fields: title, slug, excerpt, cover_image (media), content (structured_text), author (link), category (link), related_posts (links), published_date (date), seo_field (seo), gallery (media_gallery), reading_time (integer), featured (boolean)
 
-This prevents sibling resolvers from fetching the same data independently.
+## Task Categories (rotate through these)
+
+- **content_crud**: Create/update/delete records — exercises field format documentation
+- **structured_text**: Build complex content with blocks — exercises build_structured_text tool
+- **publishing**: Publish/unpublish/schedule — exercises lifecycle tools
+- **version_history**: Browse versions, restore, revert changes — exercises version tools
+- **assets**: Import/upload/reference — exercises asset workflow
+- **search**: Full-text search — exercises search_content tool
+- **workflow**: Multi-step editorial tasks — exercises tool sequencing and schema discovery
+- **script**: Write scripts that orchestrate MCP calls — exercises tool composability
+- **edge_case**: Invalid inputs — exercises error message quality
+- **new_features**: Test gaps in editor capabilities, propose and implement new tools
 
 ## What's Been Tried
 
-### Prior sessions
-
-1. Preview resolver optimization (57 experiments): batched materialization, AST-driven prefetch, direct D1 hot paths. 325ms → 198ms.
-2. Published fast path compiler (47 experiments): SQLite JSON compilation bypassing Yoga. 75.6ms → 37.5ms.
-
-This session targets the Yoga fallback path specifically — the code that runs when the fast path compiler can't handle the query.
+### Runs 1-5 (pre-fix)
+- Basic create → publish post: friction-free (run #3)
+- Structured text from markdown with code_block: friction-free (run #4)
+- Asset import with redirecting URLs: friction found but fix was reverted by checks_failed (run #5)
+- All improvements reverted because pre-existing test failures blocked `keep`
+- Tests fixed, ready to iterate for real
