@@ -237,6 +237,36 @@ describe("MCP Server", () => {
       expect(unpublished.every((record: { _status: string }) => record._status === "draft")).toBe(true);
     });
 
+    it("compares a stored version against the current published snapshot", async () => {
+      const created = getResult(await client.callTool({
+        name: "create_record",
+        arguments: { modelApiKey: "post", data: { title: "Diffable", body: "Version one" } },
+      }));
+      await client.callTool({
+        name: "publish_record",
+        arguments: { recordId: created.id, modelApiKey: "post" },
+      });
+      await client.callTool({
+        name: "update_record",
+        arguments: { recordId: created.id, modelApiKey: "post", data: { body: "Version two" } },
+      });
+      await client.callTool({
+        name: "publish_record",
+        arguments: { recordId: created.id, modelApiKey: "post" },
+      });
+
+      const versions = getResult(await client.callTool({
+        name: "list_record_versions",
+        arguments: { recordId: created.id, modelApiKey: "post" },
+      })) as Array<{ id: string }>;
+      const comparison = getResult(await client.callTool({
+        name: "compare_record_versions",
+        arguments: { modelApiKey: "post", recordId: created.id, leftVersionId: versions[0].id },
+      }));
+      expect(comparison.changedFields).toContain("body");
+      expect(comparison.changes).toContainEqual({ field: "body", left: "Version one", right: "Version two" });
+    });
+
     it("schedules publish and clears schedules", async () => {
       const createRes = await client.callTool({
         name: "create_record",

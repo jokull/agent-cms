@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
 import { generateId } from "../id.js";
-import { NotFoundError } from "../errors.js";
+import { NotFoundError, ValidationError } from "../errors.js";
 import { selectById } from "../schema-engine/sql-records.js";
 import type { ModelRow, FieldRow, VersionRow } from "../db/row-types.js";
 import { parseFieldValidators } from "../db/row-types.js";
@@ -209,6 +209,90 @@ export function restoreVersion(modelApiKey: string, recordId: string, versionId:
 /**
  * Delete all versions for a record. Called when the record is deleted.
  */
+export function compareVersions(modelApiKey: string, recordId: string, leftVersionId: string, rightVersionId?: string) {
+  return Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const models = yield* sql.unsafe<ModelRow>(
+      `SELECT * FROM models WHERE api_key = ?`,
+      [modelApiKey]
+    );
+    if (models.length === 0) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
+    const model = models[0];
+    const tableName = `content_${model.api_key}`;
+    const current = yield* selectById(tableName, recordId);
+    if (!current) return yield* new NotFoundError({ entity: "Record", id: recordId });
+
+    const leftRows = yield* sql.unsafe<VersionRow>(
+      `SELECT * FROM record_versions WHERE id = ? AND model_api_key = ? AND record_id = ?`,
+      [leftVersionId, modelApiKey, recordId]
+    );
+    if (leftRows.length === 0) return yield* new NotFoundError({ entity: "Version", id: leftVersionId });
+    const left = leftRows[0];
+    const leftSnapshot = decodeJsonString(left.snapshot);
+    if (typeof leftSnapshot !== "object" || leftSnapshot === null || Array.isArray(leftSnapshot)) {
+      return yield* new ValidationError({ message: `Version '${leftVersionId}' has an invalid snapshot` });
+    }
+
+    let rightMeta: Record<string, unknown>;
+    let rightSnapshot: unknown;
+    if (rightVersionId) {
+      const rightRows = yield* sql.unsafe<VersionRow>(
+        `SELECT * FROM record_versions WHERE id = ? AND model_api_key = ? AND record_id = ?`,
+        [rightVersionId, modelApiKey, recordId]
+      );
+      if (rightRows.length === 0) return yield* new NotFoundError({ entity: "Version", id: rightVersionId });
+      const right = rightRows[0];
+      rightMeta = {
+        source: "version",
+        id: right.id,
+        versionNumber: right.version_number,
+        createdAt: right.created_at,
+        action: right.action,
+      };
+      rightSnapshot = decodeJsonString(right.snapshot);
+      if (typeof rightSnapshot !== "object" || rightSnapshot === null || Array.isArray(rightSnapshot)) {
+        return yield* new ValidationError({ message: `Version '${rightVersionId}' has an invalid snapshot` });
+      }
+    } else {
+      rightMeta = {
+        source: "current_published",
+        recordId,
+        publishedAt: current._published_at ?? null,
+      };
+      rightSnapshot = typeof current._published_snapshot === "string"
+        ? decodeJsonString(current._published_snapshot)
+        : current._published_snapshot;
+      if (typeof rightSnapshot !== "object" || rightSnapshot === null || Array.isArray(rightSnapshot)) {
+        return yield* new ValidationError({ message: `Record '${recordId}' has no current published snapshot to compare` });
+      }
+    }
+
+    const leftRecord = leftSnapshot as Record<string, unknown>;
+    const rightRecord = rightSnapshot as Record<string, unknown>;
+    const allKeys = [...new Set([...Object.keys(leftRecord), ...Object.keys(rightRecord)])].sort();
+    const changes = allKeys.flatMap((key) => {
+      const leftValue = leftRecord[key] ?? null;
+      const rightValue = rightRecord[key] ?? null;
+      return JSON.stringify(leftValue) === JSON.stringify(rightValue)
+        ? []
+        : [{ field: key, left: leftValue, right: rightValue }];
+    });
+
+    return {
+      left: {
+        source: "version",
+        id: left.id,
+        versionNumber: left.version_number,
+        createdAt: left.created_at,
+        action: left.action,
+      },
+      right: rightMeta,
+      changedFields: changes.map((change) => change.field),
+      changes,
+    };
+  });
+}
+
 export function deleteVersionsForRecord(modelApiKey: string, recordId: string) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;

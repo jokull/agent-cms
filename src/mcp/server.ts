@@ -172,6 +172,13 @@ const RestoreVersionInput = Schema.Struct({
   versionId: Schema.String,
 });
 
+const CompareVersionsInput = Schema.Struct({
+  modelApiKey: Schema.String,
+  recordId: Schema.String,
+  leftVersionId: Schema.String,
+  rightVersionId: Schema.optional(Schema.String),
+});
+
 const RemoveBlockTypeInput = Schema.Struct({
   blockApiKey: Schema.String,
 });
@@ -408,6 +415,7 @@ const ScheduleUnpublishTool = cmsTool("schedule_unpublish", "Schedule a record t
 const ClearScheduleTool = cmsTool("clear_schedule", "Clear both publish and unpublish schedules for a record", PublishRecordInput.fields);
 const ListRecordVersionsTool = cmsTool("list_record_versions", "List all version snapshots for a record, newest first. Versions are created on each publish or auto-republish.", PublishRecordInput.fields);
 const GetRecordVersionTool = cmsTool("get_record_version", "Get a specific version snapshot by version ID", VersionIdInput.fields);
+const CompareRecordVersionsTool = cmsTool("compare_record_versions", "Compare one stored version against another stored version, or against the record's current published snapshot if rightVersionId is omitted. Returns changedFields plus side-by-side values for each changed field.", CompareVersionsInput.fields);
 const RestoreRecordVersionTool = cmsTool("restore_record_version", "Restore a record to a previous version. The current state is versioned first, so restore is always reversible. For has_draft models, the record returns to draft status (needs re-publish). For non-draft models, the record is auto-republished.", RestoreVersionInput.fields);
 const ReorderRecordsTool = cmsTool("reorder_records", "Reorder records in a sortable/tree model by providing ordered record IDs", ReorderInput.fields);
 const RemoveBlockTypeTool = cmsTool("remove_block_type", "Remove a block type: cleans DAST trees, deletes blocks, drops table", RemoveBlockTypeInput.fields);
@@ -524,6 +532,7 @@ const AdminTools = [
   ClearScheduleTool,
   ListRecordVersionsTool,
   GetRecordVersionTool,
+  CompareRecordVersionsTool,
   RestoreRecordVersionTool,
   ReorderRecordsTool,
   RemoveBlockTypeTool,
@@ -566,6 +575,7 @@ const EditorTools = [
   ClearScheduleTool,
   ListRecordVersionsTool,
   GetRecordVersionTool,
+  CompareRecordVersionsTool,
   RestoreRecordVersionTool,
   ReorderRecordsTool,
   BuildStructuredTextTool,
@@ -919,6 +929,7 @@ export function createMcpLayer(
     clear_schedule: withDecoded(PublishRecordInput, ({ recordId, modelApiKey }) => ScheduleService.clearSchedule(modelApiKey, recordId, options?.actor)),
     list_record_versions: withDecoded(PublishRecordInput, ({ modelApiKey, recordId }) => VersionService.listVersions(modelApiKey, recordId)),
     get_record_version: withDecoded(VersionIdInput, ({ versionId }) => VersionService.getVersion(versionId)),
+    compare_record_versions: withDecoded(CompareVersionsInput, ({ modelApiKey, recordId, leftVersionId, rightVersionId }) => VersionService.compareVersions(modelApiKey, recordId, leftVersionId, rightVersionId)),
     restore_record_version: withDecoded(RestoreVersionInput, ({ modelApiKey, recordId, versionId }) => VersionService.restoreVersion(modelApiKey, recordId, versionId, options?.actor)),
     reorder_records: withDecoded(ReorderInput, ({ modelApiKey, recordIds }) => RecordService.reorderRecords(modelApiKey, recordIds, options?.actor)),
     remove_block_type: withDecoded(RemoveBlockTypeInput, ({ blockApiKey }) => SchemaLifecycle.removeBlockType(blockApiKey)),

@@ -8,6 +8,7 @@
 - Invalid `link` / `links` references now fail fast with a precise `ValidationError`
 - Singleton content-model editing is smoother with `update_singleton_record`
 - Multi-record publishing is smoother with `bulk_publish_records`
+- Multi-record unpublishing is smoother with `bulk_unpublish_records`
 
 ## Next Best Bets
 - Make the guide more explicit about checking `schema_info` / `describe_model` before assuming example fields
