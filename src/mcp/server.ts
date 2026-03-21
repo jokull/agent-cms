@@ -406,7 +406,7 @@ const GetRecordTool = cmsTool("get_record", "Get a single record by modelApiKey 
 const QueryRecordsTool = cmsTool("query_records", "List records for a model. Structured_text fields are materialized for inspection, including nested blocks inside parent block fields. Useful for finding record IDs before update_record, patch_blocks, publish_record, or restore_record_version.", QueryRecordsInput.fields);
 const BulkCreateRecordsTool = cmsTool("bulk_create_records", `Create multiple records in one operation (up to 1000). Much faster than calling create_record in a loop.
 
-All records must belong to the same model. Slugs are auto-generated. Returns array of created record IDs.`, BulkCreateRecordsInput.fields);
+All records must belong to the same model. Slugs are auto-generated. Returns {created, records}, where records is an array of objects like {id}.`, BulkCreateRecordsInput.fields);
 const PublishRecordTool = cmsTool("publish_record", "Publish a record. This is when required/unique validation is enforced for draft-enabled models; if a draft is incomplete, this tool returns the validation error.", PublishRecordInput.fields);
 const BulkPublishRecordsTool = cmsTool("bulk_publish_records", "Publish multiple records from the same model in one call. Use this instead of looping over publish_record when you already have several record IDs.", BulkRecordOperationInput.fields);
 const UnpublishRecordTool = cmsTool("unpublish_record", "Unpublish a record", PublishRecordInput.fields);
@@ -676,7 +676,7 @@ Raw HTTP / JSON-RPC access:
     .result.content[0].text | fromjson
   - Minimal bulk example for scripts:
     1. bulk_create_records with {"modelApiKey":"post","records":[{"title":"Post 1"}, ...]}
-    2. Extract returned IDs from result.content[0].text
+    2. Parse result.content[0].text and read ids from .records[].id
     3. bulk_publish_records with {"modelApiKey":"post","recordIds":[...ids]}
 
 Slug fields:
