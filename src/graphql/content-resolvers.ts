@@ -483,7 +483,7 @@ export function buildContentModelResolvers(
           const rootFieldApiKey = f.localized
             ? `${f.api_key}:${resolvedLocale ?? defaultLocale ?? ""}`.replace(/:$/, "")
             : f.api_key;
-          if (includeDrafts && !isEnvelope) {
+          if (!isEnvelope) {
             dast = await loadStructuredTextEnvelope({
               runSql,
               context,

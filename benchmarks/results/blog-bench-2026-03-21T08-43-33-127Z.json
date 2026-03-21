@@ -1,0 +1,377 @@
+{
+  "startedAt": "2026-03-21T08:43:33.127Z",
+  "cmsUrl": "http://127.0.0.1:8787",
+  "iterations": 3,
+  "warmupIterations": 1,
+  "suitePath": "/Users/jokull/Code/agent-cms/benchmarks/blog-query-suite-yoga-fallback.json",
+  "benchmarks": [
+    {
+      "name": "reverse_ref_single",
+      "includeDrafts": false,
+      "summary": {
+        "samples": [
+          {
+            "iteration": 1,
+            "status": 200,
+            "ok": true,
+            "durationMs": 9.072,
+            "responseBytes": 1748,
+            "errorCount": 0,
+            "sqlStatementCount": 0,
+            "sqlTotalMs": 0
+          },
+          {
+            "iteration": 2,
+            "status": 200,
+            "ok": true,
+            "durationMs": 19.248,
+            "responseBytes": 1748,
+            "errorCount": 0,
+            "sqlStatementCount": 0,
+            "sqlTotalMs": 0
+          },
+          {
+            "iteration": 3,
+            "status": 200,
+            "ok": true,
+            "durationMs": 6.183,
+            "responseBytes": 1748,
+            "errorCount": 0,
+            "sqlStatementCount": 0,
+            "sqlTotalMs": 0
+          }
+        ],
+        "medianMs": 9.072,
+        "p95Ms": 19.248,
+        "minMs": 6.183,
+        "maxMs": 19.248,
+        "medianBytes": 1748,
+        "medianSqlStatements": 0,
+        "p95SqlStatements": 0,
+        "medianSqlMs": 0
+      }
+    },
+    {
+      "name": "reverse_ref_wide",
+      "includeDrafts": false,
+      "summary": {
+        "samples": [
+          {
+            "iteration": 1,
+            "status": 200,
+            "ok": true,
+            "durationMs": 9.482,
+            "responseBytes": 4882,
+            "errorCount": 0,
+            "sqlStatementCount": 0,
+            "sqlTotalMs": 0
+          },
+          {
+            "iteration": 2,
+            "status": 200,
+            "ok": true,
+            "durationMs": 6.876,
+            "responseBytes": 4882,
+            "errorCount": 0,
+            "sqlStatementCount": 0,
+            "sqlTotalMs": 0
+          },
+          {
+            "iteration": 3,
+            "status": 200,
+            "ok": true,
+            "durationMs": 6.776,
+            "responseBytes": 4882,
+            "errorCount": 0,
+            "sqlStatementCount": 0,
+            "sqlTotalMs": 0
+          }
+        ],
+        "medianMs": 6.876,
+        "p95Ms": 9.482,
+        "minMs": 6.776,
+        "maxMs": 9.482,
+        "medianBytes": 4882,
+        "medianSqlStatements": 0,
+        "p95SqlStatements": 0,
+        "medianSqlMs": 0
+      }
+    },
+    {
+      "name": "reverse_ref_all_categories",
+      "includeDrafts": false,
+      "summary": {
+        "samples": [
+          {
+            "iteration": 1,
+            "status": 200,
+            "ok": true,
+            "durationMs": 7.807,
+            "responseBytes": 3131,
+            "errorCount": 0,
+            "sqlStatementCount": 0,
+            "sqlTotalMs": 0
+          },
+          {
+            "iteration": 2,
+            "status": 200,
+            "ok": true,
+            "durationMs": 5.723,
+            "responseBytes": 3131,
+            "errorCount": 0,
+            "sqlStatementCount": 0,
+            "sqlTotalMs": 0
+          },
+          {
+            "iteration": 3,
+            "status": 200,
+            "ok": true,
+            "durationMs": 6.952,
+            "responseBytes": 3131,
+            "errorCount": 0,
+            "sqlStatementCount": 0,
+            "sqlTotalMs": 0
+          }
+        ],
+        "medianMs": 6.952,
+        "p95Ms": 7.807,
+        "minMs": 5.723,
+        "maxMs": 7.807,
+        "medianBytes": 3131,
+        "medianSqlStatements": 0,
+        "p95SqlStatements": 0,
+        "medianSqlMs": 0
+      }
+    },
+    {
+      "name": "deep_with_links",
+      "includeDrafts": false,
+      "summary": {
+        "samples": [
+          {
+            "iteration": 1,
+            "status": 200,
+            "ok": true,
+            "durationMs": 53.03,
+            "responseBytes": 38273,
+            "errorCount": 0,
+            "sqlStatementCount": 0,
+            "sqlTotalMs": 0
+          },
+          {
+            "iteration": 2,
+            "status": 200,
+            "ok": true,
+            "durationMs": 29.582,
+            "responseBytes": 38273,
+            "errorCount": 0,
+            "sqlStatementCount": 0,
+            "sqlTotalMs": 0
+          },
+          {
+            "iteration": 3,
+            "status": 200,
+            "ok": true,
+            "durationMs": 29.66,
+            "responseBytes": 38273,
+            "errorCount": 0,
+            "sqlStatementCount": 0,
+            "sqlTotalMs": 0
+          }
+        ],
+        "medianMs": 29.66,
+        "p95Ms": 53.03,
+        "minMs": 29.582,
+        "maxMs": 53.03,
+        "medianBytes": 38273,
+        "medianSqlStatements": 0,
+        "p95SqlStatements": 0,
+        "medianSqlMs": 0
+      }
+    },
+    {
+      "name": "page_with_reverse_refs",
+      "includeDrafts": false,
+      "summary": {
+        "samples": [
+          {
+            "iteration": 1,
+            "status": 200,
+            "ok": true,
+            "durationMs": 10.687,
+            "responseBytes": 3748,
+            "errorCount": 0,
+            "sqlStatementCount": 0,
+            "sqlTotalMs": 0
+          },
+          {
+            "iteration": 2,
+            "status": 200,
+            "ok": true,
+            "durationMs": 7.587,
+            "responseBytes": 3748,
+            "errorCount": 0,
+            "sqlStatementCount": 0,
+            "sqlTotalMs": 0
+          },
+          {
+            "iteration": 3,
+            "status": 200,
+            "ok": true,
+            "durationMs": 6.746,
+            "responseBytes": 3748,
+            "errorCount": 0,
+            "sqlStatementCount": 0,
+            "sqlTotalMs": 0
+          }
+        ],
+        "medianMs": 7.587,
+        "p95Ms": 10.687,
+        "minMs": 6.746,
+        "maxMs": 10.687,
+        "medianBytes": 3748,
+        "medianSqlStatements": 0,
+        "p95SqlStatements": 0,
+        "medianSqlMs": 0
+      }
+    },
+    {
+      "name": "multi_category_reverse_refs",
+      "includeDrafts": false,
+      "summary": {
+        "samples": [
+          {
+            "iteration": 1,
+            "status": 200,
+            "ok": true,
+            "durationMs": 7.051,
+            "responseBytes": 2589,
+            "errorCount": 0,
+            "sqlStatementCount": 0,
+            "sqlTotalMs": 0
+          },
+          {
+            "iteration": 2,
+            "status": 200,
+            "ok": true,
+            "durationMs": 7.366,
+            "responseBytes": 2589,
+            "errorCount": 0,
+            "sqlStatementCount": 0,
+            "sqlTotalMs": 0
+          },
+          {
+            "iteration": 3,
+            "status": 200,
+            "ok": true,
+            "durationMs": 11.026,
+            "responseBytes": 2589,
+            "errorCount": 0,
+            "sqlStatementCount": 0,
+            "sqlTotalMs": 0
+          }
+        ],
+        "medianMs": 7.366,
+        "p95Ms": 11.026,
+        "minMs": 7.051,
+        "maxMs": 11.026,
+        "medianBytes": 2589,
+        "medianSqlStatements": 0,
+        "p95SqlStatements": 0,
+        "medianSqlMs": 0
+      }
+    },
+    {
+      "name": "single_post_deep_yoga",
+      "includeDrafts": false,
+      "summary": {
+        "samples": [
+          {
+            "iteration": 1,
+            "status": 200,
+            "ok": true,
+            "durationMs": 6.58,
+            "responseBytes": 5126,
+            "errorCount": 0,
+            "sqlStatementCount": 0,
+            "sqlTotalMs": 0
+          },
+          {
+            "iteration": 2,
+            "status": 200,
+            "ok": true,
+            "durationMs": 6.258,
+            "responseBytes": 5126,
+            "errorCount": 0,
+            "sqlStatementCount": 0,
+            "sqlTotalMs": 0
+          },
+          {
+            "iteration": 3,
+            "status": 200,
+            "ok": true,
+            "durationMs": 6.208,
+            "responseBytes": 5126,
+            "errorCount": 0,
+            "sqlStatementCount": 0,
+            "sqlTotalMs": 0
+          }
+        ],
+        "medianMs": 6.258,
+        "p95Ms": 6.58,
+        "minMs": 6.208,
+        "maxMs": 6.58,
+        "medianBytes": 5126,
+        "medianSqlStatements": 0,
+        "p95SqlStatements": 0,
+        "medianSqlMs": 0
+      }
+    },
+    {
+      "name": "list_summary_with_meta",
+      "includeDrafts": false,
+      "summary": {
+        "samples": [
+          {
+            "iteration": 1,
+            "status": 200,
+            "ok": true,
+            "durationMs": 2.871,
+            "responseBytes": 6882,
+            "errorCount": 0,
+            "sqlStatementCount": 0,
+            "sqlTotalMs": 0
+          },
+          {
+            "iteration": 2,
+            "status": 200,
+            "ok": true,
+            "durationMs": 2.675,
+            "responseBytes": 6882,
+            "errorCount": 0,
+            "sqlStatementCount": 0,
+            "sqlTotalMs": 0
+          },
+          {
+            "iteration": 3,
+            "status": 200,
+            "ok": true,
+            "durationMs": 2.675,
+            "responseBytes": 6882,
+            "errorCount": 0,
+            "sqlStatementCount": 0,
+            "sqlTotalMs": 0
+          }
+        ],
+        "medianMs": 2.675,
+        "p95Ms": 2.871,
+        "minMs": 2.675,
+        "maxMs": 2.871,
+        "medianBytes": 6882,
+        "medianSqlStatements": 0,
+        "p95SqlStatements": 0,
+        "medianSqlMs": 0
+      }
+    }
+  ]
+}
