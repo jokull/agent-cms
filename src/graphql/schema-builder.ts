@@ -66,7 +66,7 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
   function runSql<A>(effect: Effect.Effect<A, unknown, SqlClient.SqlClient>): Promise<A> {
     const startedAt = performance.now();
     return Effect.runPromise(effect.pipe(Effect.provide(sqlLayer), Effect.orDie)).finally(() => {
-      recordSqlMetrics(performance.now() - startedAt);
+      recordSqlMetrics(performance.now() - startedAt, { phase: "resolver" });
     });
   }
 

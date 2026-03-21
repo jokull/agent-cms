@@ -18,6 +18,7 @@ import { buildGraphQLSchema } from "./schema-builder.js";
 import { enforceQueryLimits } from "./query-limits.js";
 import { getSqlMetrics, withSqlMetrics } from "./sql-metrics.js";
 import { createPublishedFastPath } from "./published-fast-path.js";
+import { createCustomQueryExecutor } from "./custom-query-executor.js";
 
 export type CredentialType = "admin" | "editor" | null;
 
@@ -166,6 +167,22 @@ function formatFastPathSqlBreakdown(
     .join(",");
 }
 
+function applySqlMetricHeaders(headers: Headers, metrics: ReturnType<typeof getSqlMetrics>) {
+  if (!metrics) return;
+  headers.set("X-Sql-Statement-Count", String(metrics.statementCount));
+  headers.set("X-Sql-Hop-Count", String(metrics.hopCount));
+  headers.set("X-Sql-Batch-Hop-Count", String(metrics.batchHopCount));
+  headers.set("X-Sql-Batched-Statement-Count", String(metrics.batchedStatementCount));
+  headers.set(
+    "X-Sql-Phase-Breakdown",
+    Object.entries(metrics.byPhase)
+      .map(([phase, value]) => `${phase}:${value.hopCount}/${value.statementCount}/${value.totalDurationMs.toFixed(3)}`)
+      .join(","),
+  );
+  headers.set("X-Sql-Total-Ms", metrics.totalDurationMs.toFixed(3));
+  headers.set("X-Sql-Slowest-Ms", metrics.slowestSamplesMs.map((value) => value.toFixed(3)).join(","));
+}
+
 /**
  * Create a GraphQL Yoga web handler.
  * Reads X-Include-Drafts / X-Exclude-Invalid headers and passes them to resolvers via context.
@@ -232,6 +249,7 @@ export function createGraphQLHandler(
     assetBaseUrl: options?.assetBaseUrl,
     isProduction: options?.isProduction,
   });
+  const customQueryExecutor = createCustomQueryExecutor(sqlLayer);
 
   const yoga = createYoga({
     // Yoga's schema function type expects the full context, but our schema is context-agnostic
@@ -265,6 +283,7 @@ export function createGraphQLHandler(
 
   function invalidateSchema() {
     schemaPromise = null;
+    customQueryExecutor.invalidate();
     return Promise.resolve();
   }
 
@@ -282,12 +301,26 @@ export function createGraphQLHandler(
     document: DocumentNode,
     variables?: Record<string, unknown>,
     context?: { includeDrafts?: boolean; excludeInvalid?: boolean },
-  ): Promise<{ data: unknown; errors?: ReadonlyArray<{ message: string }> }> {
+  ): Promise<{ data: unknown; errors?: ReadonlyArray<{ message: string }>; _trace?: Record<string, unknown> }> {
     const schema = await getSchema();
     const validationErrors = validate(schema, document);
     if (validationErrors.length > 0) {
       return { data: null, errors: validationErrors.map((error) => ({ message: error.message })) };
     }
+
+    const customResult = await customQueryExecutor.tryExecute({
+      document,
+      schema,
+      variables,
+      context: {
+        includeDrafts: context?.includeDrafts ?? false,
+        excludeInvalid: context?.excludeInvalid ?? false,
+      },
+    });
+    if (customResult) {
+      return customResult;
+    }
+
     const result = await gqlExecute({
       schema,
       document,
@@ -373,6 +406,9 @@ export function createGraphQLHandler(
 
     if (supportedSelections.length === 0) {
       const yogaResult = await executeDocument(document, variables, context);
+      if (yogaResult._trace) {
+        return { ...yogaResult, _trace: { ...yogaResult._trace, rootReasons } };
+      }
       return { ...yogaResult, _trace: { path: "yoga", rootPaths, rootReasons } };
     }
 
@@ -449,10 +485,11 @@ export function createGraphQLHandler(
         try {
           const body = await request.clone().json();
           if (isGraphqlRequestBody(body) && typeof body.query === "string") {
+            const query = body.query;
             const errors = enforceQueryLimits(body.query, queryLimits);
             if (errors.length === 0) {
               const fastPathResult = await publishedFastPath.tryExecute({
-                query: body.query,
+                query,
                 variables: body.variables ?? undefined,
                 operationName: body.operationName,
               }, {
@@ -469,6 +506,28 @@ export function createGraphQLHandler(
                   },
                 });
               }
+
+              const { executionResult, metrics } = await withSqlMetrics(async () => {
+                const executionResult = await executeWithRootFallback(query, body.variables ?? undefined, {
+                  includeDrafts,
+                  excludeInvalid,
+                });
+                return {
+                  executionResult,
+                  metrics: getSqlMetrics(),
+                };
+              });
+              const responseHeaders = new Headers();
+              if (executionResult._trace?.path === "custom") {
+                responseHeaders.set("X-GraphQL-Execution", "custom");
+              }
+              applySqlMetricHeaders(responseHeaders, metrics);
+              return Response.json(
+                "errors" in executionResult && executionResult.errors
+                  ? { data: executionResult.data, errors: executionResult.errors }
+                  : { data: executionResult.data },
+                { headers: responseHeaders },
+              );
             }
           }
         } catch {
@@ -501,11 +560,7 @@ export function createGraphQLHandler(
       const metrics = getSqlMetrics();
       const headers = new Headers(response.headers);
       headers.set("X-Trace-Id", traceId);
-      if (metrics) {
-        headers.set("X-Sql-Statement-Count", String(metrics.statementCount));
-        headers.set("X-Sql-Total-Ms", metrics.totalDurationMs.toFixed(3));
-        headers.set("X-Sql-Slowest-Ms", metrics.slowestSamplesMs.map((value) => value.toFixed(3)).join(","));
-      }
+      applySqlMetricHeaders(headers, metrics);
 
       headers.set("X-Cms-Request-Ms", requestMs.toFixed(3));
       headers.set("X-Cms-Yoga-Ms", yogaMs.toFixed(3));

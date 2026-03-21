@@ -1,9 +1,9 @@
-import { Effect, Option, ParseResult, Schema } from "effect";
+import { Effect, ParseResult, Schema } from "effect";
 import { SqlClient, SqlError } from "@effect/sql";
-import { D1Client as D1 } from "@effect/sql-d1";
 import { validateBlocksOnly, extractAllBlockIds } from "../dast/index.js";
 import { ValidationError } from "../errors.js";
 import { DastDocumentInput, DastDocumentSchema, StructuredTextWriteInput } from "../dast/schema.js";
+import { runBatchedQueries, type BatchedQuery } from "../db/run-batched-queries.js";
 import type { FieldRow, ParsedFieldRow } from "../db/row-types.js";
 import { parseFieldValidators } from "../db/row-types.js";
 import { getBlockWhitelist, getBlocksOnly } from "../db/validators.js";
@@ -160,22 +160,8 @@ function getCandidateBlockModelsCached(
   return candidateBlockModels;
 }
 
-function runHotBlockQuery<T extends object>(query: { sql: string; params: ReadonlyArray<unknown> }) {
-  return Effect.gen(function* () {
-    const d1Client = yield* Effect.serviceOption(D1.D1Client);
-    if (Option.isSome(d1Client)) {
-      return yield* Effect.tryPromise({
-        try: async () => {
-          const result = await d1Client.value.config.db.prepare(query.sql).bind(...query.params).all<T>();
-          return result.results;
-        },
-        catch: (cause) => new SqlError.SqlError({ cause, message: "Failed to execute D1 query" }),
-      });
-    }
-
-    const sql = yield* SqlClient.SqlClient;
-    return yield* sql.unsafe<T>(query.sql, query.params);
-  });
+function runHotBlockQueries<T extends object>(queries: ReadonlyArray<BatchedQuery>) {
+  return runBatchedQueries<T>(queries, { phase: "st_frontier" });
 }
 
 function formatDastParseErrors(error: ParseResult.ParseError): string {
@@ -485,12 +471,17 @@ export function deleteBlockSubtrees(params: {
 interface MaterializeStructuredTextParams {
   materializeContext?: MaterializeContext;
   allowedBlockApiKeys?: readonly string[];
+  selectedNestedFieldsPlan?: StructuredTextMaterializePlan;
   parentContainerModelApiKey: string;
   parentBlockId: string | null;
   parentFieldApiKey: string;
   rootRecordId: string;
   rootFieldApiKey: string;
   rawValue: unknown;
+}
+
+export interface StructuredTextMaterializePlan {
+  fieldsByBlockApiKey: ReadonlyMap<string, ReadonlyMap<string, StructuredTextMaterializePlan>>;
 }
 
 interface MaterializeStructuredTextRequest extends MaterializeStructuredTextParams {
@@ -525,13 +516,64 @@ function parseMaterializeStructuredTextRequest(request: MaterializeStructuredTex
 
 function getMaterializeBatchGroupKey(params: MaterializeStructuredTextParams) {
   const allowed = params.allowedBlockApiKeys?.join(",") ?? "*";
+  const planKey = serializeMaterializePlan(params.selectedNestedFieldsPlan);
   return [
     params.parentContainerModelApiKey,
-    params.parentBlockId ?? "root",
     params.parentFieldApiKey,
     params.rootFieldApiKey,
+    params.parentBlockId === null ? "root" : "nested",
     allowed,
+    planKey,
   ].join(":");
+}
+
+function serializeMaterializePlan(plan: StructuredTextMaterializePlan | undefined): string {
+  if (!plan) return "*";
+  const blockEntries = [...plan.fieldsByBlockApiKey.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([blockApiKey, fieldPlans]) => [
+      blockApiKey,
+      [...fieldPlans.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([fieldApiKey, nestedPlan]) => `${fieldApiKey}(${serializeMaterializePlan(nestedPlan)})`)
+        .join(","),
+    ]);
+  return blockEntries.map(([blockApiKey, nested]) => `${blockApiKey}[${nested}]`).join("|");
+}
+
+function buildMaterializeQueries(params: {
+  blockModels: readonly BlockModelSchema[];
+  rootRecordIds: readonly string[];
+  rootFieldApiKey: string;
+  parentContainerModelApiKey: string;
+  parentFieldApiKey: string;
+  parentBlockIds: readonly string[];
+  blockIds: readonly string[];
+}) {
+  const rootRecordPlaceholders = params.rootRecordIds.map(() => "?").join(", ");
+  const blockPlaceholders = params.blockIds.map(() => "?").join(", ");
+  const parentBlockPlaceholders = params.parentBlockIds.map(() => "?").join(", ");
+  return params.blockModels.map((model) => {
+    const payloadParts = model.fields.map((field) => `'${field.api_key}', "${field.api_key}"`).join(", ");
+    return {
+      sql: `SELECT id, _root_record_id, _root_field_api_key, _parent_block_id, '${model.apiKey}' AS __block_api_key, json_object(${payloadParts}) AS __payload
+       FROM "block_${model.apiKey}"
+       WHERE _root_record_id IN (${rootRecordPlaceholders})
+         AND _root_field_api_key = ?
+         AND _parent_container_model_api_key = ?
+         AND _parent_field_api_key = ?
+         AND ${params.parentBlockIds.length === 0 ? "_parent_block_id IS NULL" : `_parent_block_id IN (${parentBlockPlaceholders})`}
+         AND id IN (${blockPlaceholders})`,
+      params: [
+      ...params.rootRecordIds,
+      params.rootFieldApiKey,
+      params.parentContainerModelApiKey,
+      params.parentFieldApiKey,
+      ...(params.parentBlockIds.length === 0 ? [] : params.parentBlockIds),
+      ...params.blockIds,
+      ],
+    };
+  });
 }
 
 export function materializeStructuredTextValues(params: {
@@ -582,13 +624,20 @@ export function materializeStructuredTextValues(params: {
       const sample = requests[0];
       if (!sample) continue;
 
-      const requestByRootRecordId = new Map<string, ParsedMaterializeStructuredTextRequest>();
+      const requestByParentKey = new Map<string, ParsedMaterializeStructuredTextRequest>();
       const requestBlockIds = new Map<string, ReadonlySet<string>>();
       const allBlockIds = new Set<string>();
+      const rootRecordIds = new Set<string>();
+      const parentBlockIds = new Set<string>();
 
       for (const request of requests) {
-        requestByRootRecordId.set(request.params.rootRecordId, request);
+        const parentKey = `${request.params.rootRecordId}:${request.params.parentBlockId ?? "root"}`;
+        requestByParentKey.set(parentKey, request);
         requestBlockIds.set(request.requestKey, request.blockIdSet);
+        rootRecordIds.add(request.params.rootRecordId);
+        if (request.params.parentBlockId !== null) {
+          parentBlockIds.add(request.params.parentBlockId);
+        }
         for (const blockId of request.blockIds) {
           allBlockIds.add(blockId);
         }
@@ -599,64 +648,75 @@ export function materializeStructuredTextValues(params: {
         blockModels,
         sample.params.allowedBlockApiKeys
       );
-      const rootRecordIds = [...requestByRootRecordId.keys()];
-      const rootRecordPlaceholders = rootRecordIds.map(() => "?").join(", ");
+      const blockModelSchemas = yield* Effect.all(
+        candidateBlockModels.map((model) => getBlockModelSchemaCached(materializeContext, sql, model.api_key)),
+        { concurrency: "unbounded" },
+      );
+      const blockModelByApiKey = new Map(blockModelSchemas.map((model) => [model.apiKey, model] as const));
+      const rootRecordIdList = [...rootRecordIds];
       const blockIds = [...allBlockIds];
-      const blockPlaceholders = blockIds.map(() => "?").join(", ");
+      const parentBlockIdList = [...parentBlockIds];
+      const rowGroups = yield* runHotBlockQueries<DynamicRow>(buildMaterializeQueries({
+        blockModels: blockModelSchemas,
+        rootRecordIds: rootRecordIdList,
+        rootFieldApiKey: sample.params.rootFieldApiKey,
+        parentContainerModelApiKey: sample.params.parentContainerModelApiKey,
+        parentFieldApiKey: sample.params.parentFieldApiKey,
+        parentBlockIds: parentBlockIdList,
+        blockIds,
+      }));
+      const rows = rowGroups.flat();
+      if (rows.length === 0) continue;
 
-      for (const model of candidateBlockModels) {
-        const rows = yield* runHotBlockQuery<DynamicRow>({
-          sql: `SELECT * FROM "block_${model.api_key}"
-           WHERE _root_record_id IN (${rootRecordPlaceholders})
-             AND _root_field_api_key = ?
-             AND _parent_container_model_api_key = ?
-             AND _parent_field_api_key = ?
-             AND ${sample.params.parentBlockId === null ? "_parent_block_id IS NULL" : "_parent_block_id = ?"}
-             AND id IN (${blockPlaceholders})`,
-          params: sample.params.parentBlockId === null
-            ? [...rootRecordIds, sample.params.rootFieldApiKey, sample.params.parentContainerModelApiKey, sample.params.parentFieldApiKey, ...blockIds]
-            : [...rootRecordIds, sample.params.rootFieldApiKey, sample.params.parentContainerModelApiKey, sample.params.parentFieldApiKey, sample.params.parentBlockId, ...blockIds],
-        });
-        if (rows.length === 0) continue;
+      for (const row of rows) {
+        const rootRecordId = String(row._root_record_id);
+        const parentBlockId = typeof row._parent_block_id === "string" ? row._parent_block_id : "root";
+        const request = requestByParentKey.get(`${rootRecordId}:${parentBlockId}`);
+        if (!request) continue;
 
-        const blockModel = yield* getBlockModelSchemaCached(materializeContext, sql, model.api_key);
+        const allowedBlockIds = requestBlockIds.get(request.requestKey);
+        const rowId = String(row.id);
+        if (!allowedBlockIds?.has(rowId)) continue;
 
-        for (const row of rows) {
-          const rootRecordId = String(row._root_record_id);
-          const request = requestByRootRecordId.get(rootRecordId);
-          if (!request) continue;
+        const blockApiKey = typeof row.__block_api_key === "string" ? row.__block_api_key : null;
+        if (!blockApiKey) continue;
+        const blockModel = blockModelByApiKey.get(blockApiKey);
+        if (!blockModel) continue;
+        const rawPayload = decodeJsonIfString(row.__payload);
+        if (typeof rawPayload !== "object" || rawPayload === null || Array.isArray(rawPayload)) continue;
 
-          const allowedBlockIds = requestBlockIds.get(request.requestKey);
-          const rowId = String(row.id);
-          if (!allowedBlockIds?.has(rowId)) continue;
-
-          const payload: DynamicRow = { _type: model.api_key };
-          for (const field of blockModel.fields) {
-            const rawValue = deserializeValue(row[field.api_key]);
-            if (rawValue === undefined) continue;
-            if (field.field_type === "structured_text" && rawValue !== null) {
-              const requestKey = `nested:${nestedAssignments.length}`;
-              nestedRequests.push({
-                requestKey,
-                materializeContext,
-                allowedBlockApiKeys: blockModel.structuredTextAllowedBlockApiKeysByField.get(field.api_key) ?? [],
-                parentContainerModelApiKey: model.api_key,
-                parentBlockId: rowId,
-                parentFieldApiKey: field.api_key,
-                rootRecordId,
-                rootFieldApiKey: String(row._root_field_api_key),
-                rawValue,
-              });
-              nestedAssignments.push({ requestKey, target: payload, fieldApiKey: field.api_key });
+        const payload: DynamicRow = { _type: blockApiKey };
+        const selectedFieldPlans = request.params.selectedNestedFieldsPlan?.fieldsByBlockApiKey.get(blockApiKey);
+        for (const field of blockModel.fields) {
+          const rawValue = deserializeValue(Reflect.get(rawPayload, field.api_key));
+          if (rawValue === undefined) continue;
+          if (field.field_type === "structured_text" && rawValue !== null) {
+            const nestedPlan = selectedFieldPlans?.get(field.api_key);
+            if (request.params.selectedNestedFieldsPlan && !nestedPlan) {
               continue;
             }
-            payload[field.api_key] = rawValue;
+            const requestKey = `nested:${nestedAssignments.length}`;
+            nestedRequests.push({
+              requestKey,
+              materializeContext,
+              allowedBlockApiKeys: blockModel.structuredTextAllowedBlockApiKeysByField.get(field.api_key) ?? [],
+              selectedNestedFieldsPlan: nestedPlan,
+              parentContainerModelApiKey: blockApiKey,
+              parentBlockId: rowId,
+              parentFieldApiKey: field.api_key,
+              rootRecordId,
+              rootFieldApiKey: String(row._root_field_api_key),
+              rawValue,
+            });
+            nestedAssignments.push({ requestKey, target: payload, fieldApiKey: field.api_key });
+            continue;
           }
+          payload[field.api_key] = rawValue;
+        }
 
-          const envelope = results.get(request.requestKey);
-          if (envelope) {
-            envelope.blocks[rowId] = payload;
-          }
+        const envelope = results.get(request.requestKey);
+        if (envelope) {
+          envelope.blocks[rowId] = payload;
         }
       }
     }
