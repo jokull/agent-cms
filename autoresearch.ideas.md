@@ -11,6 +11,7 @@
 - Multi-record unpublishing is smoother with `bulk_unpublish_records`
 - Version diffing is smoother with `compare_record_versions`
 - Search result reporting is smoother now that `search_content` includes titles in results
+- Inspecting a searched record is smoother with `get_record`
 - The numbered benchmark-oriented post titles in the blog seed are intentional fixture data, not accidental duplicate records
 
 ## Next Best Bets

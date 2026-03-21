@@ -444,6 +444,11 @@ For nested blocks (e.g. sections containing venues), compose bottom-up:
 2. Use that result as a field value in a parent block's data
 3. Build outer structured text (sections) referencing the parent blocks
 
+Concrete nested example from the blog seed:
+- feature_grid.features allows only feature_card blocks
+- feature_card.details is its own structured_text field and allows inline markdown plus code_block blocks
+- So: build each feature_card.details value first (if needed), put that under the feature_card's data, then build the feature_grid.features document referencing those feature_card blocks, then place the feature_grid block in the post.content field
+
 IMPORTANT: Call describe_model first to verify which block types are allowed on the target structured_text field (check the structured_text_blocks validator).
 
 If your MCP client supports code execution (e.g. Claude Desktop Analysis tool), consider constructing the StructuredText JSON directly in a script for maximum control. Otherwise, this tool or build_structured_text_from_markdown are the way to go.`, BuildStructuredTextInput.fields);
@@ -460,6 +465,7 @@ Place blocks with sentinels: <!-- cms:block:BLOCK_ID -->
 Every block in the blocks array MUST have a matching sentinel in the markdown. Unused blocks cause the tool to fail.
 
 For nested blocks, compose bottom-up — same as build_structured_text.
+For the blog seed specifically: feature_grid.features allows only feature_card blocks, and feature_card.details can contain inline markdown and code_block blocks.
 
 IMPORTANT: Call describe_model first to verify which block types are allowed on the target structured_text field (check the structured_text_blocks validator).
 
@@ -633,6 +639,7 @@ Field value formats (composite types):
 Structured text editing notes:
   - patch_blocks can target both top-level blocks and nested blocks inside structured_text sub-fields.
   - If the same nested block ID exists in multiple locations, patch_blocks will ask you to patch the parent block explicitly.
+  - get_record is the fastest way to inspect one known record's full materialized structured_text after search_content returns its id.
   - query_records materializes structured_text fields for inspection; on published records, _published_snapshot remains useful as a raw snapshot of what is live.
 
 Draft/publish lifecycle:
