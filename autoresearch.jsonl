@@ -1,1 +1,4 @@
 {"type":"config","name":"Yoga fallback path batched relation resolution","metricName":"total_ms","metricUnit":"ms","bestDirection":"lower"}
+{"run":1,"commit":"f391e04","metric":97.587,"metrics":{},"status":"keep","description":"Baseline for yoga-fallback benchmark suite before batching changes","timestamp":1774082019926,"segment":0,"confidence":null}
+{"run":2,"commit":"f391e04","metric":105.996,"metrics":{},"status":"checks_failed","description":"Attempted request-scoped reverse-ref batching loader; failed TypeScript checks and regressed benchmark","timestamp":1774082148327,"segment":0,"confidence":null}
+{"run":3,"commit":"f391e04","metric":89.788,"metrics":{},"status":"checks_failed","description":"Request-scoped reverse-ref batching improved benchmark materially but failed TypeScript on nullable orderBy","timestamp":1774082315099,"segment":0,"confidence":null}

@@ -27,6 +27,18 @@ export interface GqlContext {
     }>;
     scheduled: boolean;
   }>;
+  reverseRefLoaders?: Map<string, {
+    cache: Map<string, Promise<DynamicRow[]>>;
+    pending: Map<string, {
+      deferred: {
+        promise: Promise<DynamicRow[]>;
+        resolve: (value: DynamicRow[]) => void;
+        reject: (error: unknown) => void;
+      };
+      parentId: string;
+    }>;
+    scheduled: boolean;
+  }>;
   structuredTextEnvelopeLoaders?: Map<string, {
     cache: Map<string, Promise<unknown>>;
     pending: Map<string, {

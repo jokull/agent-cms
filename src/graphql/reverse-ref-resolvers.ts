@@ -2,13 +2,12 @@
  * Build reverse reference fields and resolvers.
  * For each target model with incoming link/links references, add _allReferencing<Source>s fields.
  */
-import { Effect } from "effect";
-import { SqlClient } from "@effect/sql";
 import { getLinkTargets, getLinksTargets } from "../db/validators.js";
 import { compileFilterToSql, compileOrderBy, type FilterCompilerOpts } from "./filter-compiler.js";
 import type { ModelRow, ParsedFieldRow } from "../db/row-types.js";
 import type { SchemaBuilderContext, ReverseRef, DynamicRow, GqlContext } from "./gql-types.js";
-import { toTypeName, toCamelCase, deserializeRecord, decodeSnapshot } from "./gql-utils.js";
+import { toTypeName, toCamelCase } from "./gql-utils.js";
+import { loadReverseRefs } from "./reverse-ref-loader.js";
 
 /**
  * Build the reverse reference map: target model api_key -> array of incoming link/links refs.
@@ -52,6 +51,10 @@ export function buildReverseRefs(
 /**
  * Build reverse reference resolvers and extend target type SDL.
  */
+function isFilterObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export function buildReverseRefResolvers(
   ctx: SchemaBuilderContext,
   reverseRefs: Map<string, ReverseRef[]>
@@ -100,74 +103,59 @@ export function buildReverseRefResolvers(
       if (!resolvers[targetTypeName]) resolvers[targetTypeName] = {};
 
       (resolvers[targetTypeName])[fieldName] = async (parent: DynamicRow, args: DynamicRow, context: GqlContext) => {
-        // Propagate locale/fallbackLocales from args to context for nested resolvers
         if (typeof args.locale === "string") context.locale = args.locale;
-        if (Array.isArray(args.fallbackLocales)) context.fallbackLocales = args.fallbackLocales;
+        if (Array.isArray(args.fallbackLocales)) {
+          context.fallbackLocales = args.fallbackLocales.filter((value): value is string => typeof value === "string");
+        }
 
-        return runSql(
-          Effect.gen(function* () {
-            const s = yield* SqlClient.SqlClient;
+        const includeDrafts = context.includeDrafts ?? false;
+        const filterLocale = typeof args.locale === "string"
+          ? args.locale
+          : (context.locale ?? defaultLocale ?? undefined);
+        const filterOpts: FilterCompilerOpts = {
+          fieldIsLocalized: (fName) => sourceLocalizedCamelKeys.has(fName),
+          fieldNameMap: Object.fromEntries(sourceCamelToSnake),
+          localizedDbColumns: sourceFields.filter((sf) => sf.localized).map((sf) => sf.api_key),
+          jsonArrayFields: sourceJsonArrayFields,
+          locale: filterLocale ?? undefined,
+        };
+        const filterArg = isFilterObject(args.filter) ? args.filter : undefined;
+        const orderByArg = Array.isArray(args.orderBy)
+          ? args.orderBy.filter((value): value is string => typeof value === "string")
+          : undefined;
+        const compiled = compileFilterToSql(filterArg, filterOpts);
+        const orderBy = compileOrderBy(orderByArg, filterOpts);
+        const normalizedOrderBy = orderBy ?? undefined;
+        const first = Math.min(typeof args.first === "number" ? args.first : 20, 500);
+        const skip = typeof args.skip === "number" && args.skip > 0 ? args.skip : 0;
+        const parentId = typeof parent.id === "string" ? parent.id : String(parent.id);
+        const loaderKey = JSON.stringify({
+          sourceTableName,
+          targetApiKey,
+          sourceApiKey,
+          includeDrafts,
+          locale: filterLocale ?? null,
+          filterWhere: compiled?.where ?? null,
+          filterParams: compiled?.params ?? [],
+          orderBy: normalizedOrderBy ?? null,
+          first,
+          skip,
+        });
 
-            // Build WHERE clause: any link/links field pointing at this record
-            const refConditions: string[] = [];
-            const refParams: unknown[] = [];
-
-            for (const ref of sourceRefs) {
-              if (ref.fieldType === "link") {
-                refConditions.push(`"${ref.fieldApiKey}" = ?`);
-                refParams.push(parent.id);
-              } else {
-                // links: JSON array - use json_each to check membership
-                refConditions.push(`EXISTS (SELECT 1 FROM json_each("${ref.fieldApiKey}") WHERE value = ?)`);
-                refParams.push(parent.id);
-              }
-            }
-
-            let query = `SELECT * FROM "${sourceTableName}" WHERE (${refConditions.join(" OR ")})`;
-            let params = [...refParams];
-
-            // Draft filtering
-            const includeDrafts = context.includeDrafts ?? false;
-            if (!includeDrafts) {
-              query += ` AND "_status" IN ('published', 'updated')`;
-            }
-
-            // Apply user filter
-            const filterLocale = typeof args.locale === "string"
-              ? args.locale
-              : (context.locale ?? defaultLocale ?? undefined);
-            const filterOpts: FilterCompilerOpts = {
-              fieldIsLocalized: (fName) => sourceLocalizedCamelKeys.has(fName),
-              fieldNameMap: Object.fromEntries(sourceCamelToSnake),
-              localizedDbColumns: sourceFields.filter((sf) => sf.localized).map((sf) => sf.api_key),
-              jsonArrayFields: sourceJsonArrayFields,
-              locale: filterLocale,
-            };
-
-            const compiled = compileFilterToSql(args.filter as DynamicRow | undefined, filterOpts);
-            if (compiled) {
-              query += ` AND ${compiled.where}`;
-              params.push(...compiled.params);
-            }
-
-            const orderBy = compileOrderBy(args.orderBy as string[] | undefined, filterOpts);
-            if (orderBy) {
-              query += ` ORDER BY ${orderBy}`;
-            }
-
-            const limit = Math.min(typeof args.first === "number" ? args.first : 20, 500);
-            query += ` LIMIT ?`;
-            params.push(limit);
-
-            if (args.skip) {
-              query += ` OFFSET ?`;
-              params.push(args.skip);
-            }
-
-            const rows = yield* s.unsafe<DynamicRow>(query, params);
-            return rows.map((row) => decodeSnapshot(deserializeRecord(row), includeDrafts));
-          })
-        );
+        return loadReverseRefs({
+          runSql,
+          context,
+          loaderKey,
+          parentId,
+          sourceTableName,
+          sourceRefs,
+          includeDrafts,
+          filterWhere: compiled?.where,
+          filterParams: compiled?.params ?? [],
+          orderBy: normalizedOrderBy,
+          first,
+          skip,
+        });
       };
     }
 
