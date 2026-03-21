@@ -74,6 +74,7 @@ export interface AssetObject {
   blurhash: string | null;
   focalPoint: { x: number; y: number } | null;
   customData: Record<string, unknown> | null;
+  tags: string[];
   url: string;
   _createdAt: string;
   _updatedAt: string;

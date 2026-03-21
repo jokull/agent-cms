@@ -11,6 +11,7 @@ import type { SchemaBuilderContext, DynamicRow, AssetObject } from "./gql-types.
 import { decodeJsonIfString } from "../json.js";
 import { mergeAssetWithMediaReference } from "../media-field.js";
 import { buildResponsiveImage } from "./responsive-image.js";
+import { normalizeImgixParams } from "./responsive-image.js";
 
 type RunSqlFn = SchemaBuilderContext["runSql"];
 
@@ -64,9 +65,50 @@ async function buildFaviconMetaTags(runSql: RunSqlFn, faviconId: string) {
 
 /** Upload field name map for filter/order compilation */
 const uploadFieldMap: Record<string, string> = {
+  basename: "basename",
+  format: "format",
   mimeType: "mime_type",
   _createdAt: "created_at",
 };
+
+function getAssetBasename(filename: string) {
+  const lastDot = filename.lastIndexOf(".");
+  return lastDot > 0 ? filename.slice(0, lastDot) : filename;
+}
+
+function getAssetFormat(asset: AssetObject) {
+  const lastDot = asset.filename.lastIndexOf(".");
+  if (lastDot > 0 && lastDot < asset.filename.length - 1) {
+    return asset.filename.slice(lastDot + 1).toLowerCase();
+  }
+  const mimeSubtype = asset.mimeType.split("/")[1];
+  return mimeSubtype?.toLowerCase() ?? "bin";
+}
+
+function buildAssetUrl(
+  asset: AssetObject,
+  args: DynamicRow,
+  cfImageUrl: (assetPath: string, params: Record<string, string | number>) => string,
+) {
+  const rawParams = (args.transforms ?? args.cfImagesParams ?? args.imgixParams) as Record<string, unknown> | undefined;
+  if (!rawParams || Object.keys(rawParams).length === 0) return asset.url;
+
+  const params = args.imgixParams ? normalizeImgixParams(rawParams) : rawParams;
+  const queryParams = Object.fromEntries(
+    Object.entries(params)
+      .filter(([, value]) => typeof value === "string" || typeof value === "number")
+      .map(([key, value]) => [key, value as string | number]),
+  );
+
+  let assetPath: string;
+  try {
+    assetPath = new URL(asset.url).pathname;
+  } catch {
+    assetPath = asset.url.startsWith("/") ? asset.url : `/${asset.url}`;
+  }
+
+  return cfImageUrl(assetPath, queryParams);
+}
 
 /**
  * Build asset-related type defs, queries, and resolvers.
@@ -170,6 +212,11 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
 
   // Asset.responsiveImage resolver
   resolvers.Asset = {
+    basename: (asset: AssetObject) => getAssetBasename(asset.filename),
+    format: (asset: AssetObject) => getAssetFormat(asset),
+    url: (asset: AssetObject, args: DynamicRow) => buildAssetUrl(asset, args, cfImageUrl),
+    tags: (asset: AssetObject) => asset.tags,
+    smartTags: (asset: AssetObject) => asset.tags,
     responsiveImage: (asset: AssetObject, args: DynamicRow) => buildResponsiveImage(asset, args, cfImageUrl),
   };
 

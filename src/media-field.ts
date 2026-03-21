@@ -60,6 +60,9 @@ export function mergeAssetWithMediaReference(
     customData: isJsonRecord(reference?.customData)
       ? reference.customData
       : (isJsonRecord(defaultCustomData) ? defaultCustomData : null),
+    tags: Array.isArray(decodeJsonStringOr(asset.tags, []))
+      ? (decodeJsonStringOr(asset.tags, []) as unknown[]).filter((value): value is string => typeof value === "string")
+      : [],
     url: assetUrl(asset.r2_key),
     _createdAt: asset.created_at,
     _updatedAt: asset.updated_at,

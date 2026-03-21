@@ -65,16 +65,20 @@ enum ImgixAutoValueShim {
 type Asset {
   id: ID!
   filename: String!
+  basename: String!
+  format: String!
   mimeType: String!
   size: Int!
   width: Int
   height: Int
   alt: String
   title: String
-  url: String!
+  url(transforms: ImageTransformParams, cfImagesParams: ImageTransformParams, imgixParams: ImgixParamsShim): String!
   blurhash: String
   focalPoint: FocalPoint
   customData: JSON
+  tags: [String!]!
+  smartTags: [String!]!
   _createdAt: String!
   _updatedAt: String!
   _createdBy: String
@@ -185,6 +189,8 @@ input PositionFilter { eq: Int, neq: Int, gt: Int, lt: Int, gte: Int, lte: Int }
 export const UPLOAD_TYPE_DEFS = `input UploadFilter {
   id: StringFilter
   filename: StringFilter
+  basename: StringFilter
+  format: StringFilter
   mimeType: StringFilter
   width: IntFilter
   height: IntFilter
@@ -197,6 +203,8 @@ export const UPLOAD_TYPE_DEFS = `input UploadFilter {
 }
 enum UploadOrderBy {
   filename_ASC filename_DESC
+  basename_ASC basename_DESC
+  format_ASC format_DESC
   size_ASC size_DESC
   _createdAt_ASC _createdAt_DESC
 }

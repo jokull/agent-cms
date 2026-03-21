@@ -553,6 +553,19 @@ describe("Filter compiler — comprehensive", () => {
       expect(r.data.allUploads).toHaveLength(1);
     });
 
+    it("filters uploads by basename", async () => {
+      const r = await q(`{ allUploads(filter: { basename: { eq: "hero" } }) { filename basename format } }`);
+      expect(r.errors).toBeUndefined();
+      expect(r.data.allUploads).toEqual([{ filename: "hero.jpg", basename: "hero", format: "jpg" }]);
+    });
+
+    it("orders uploads by basename", async () => {
+      const r = await q(`{ allUploads(orderBy: [basename_ASC]) { filename basename } }`);
+      expect(r.errors).toBeUndefined();
+      expect(r.data.allUploads[0].basename).toBe("hero");
+      expect(r.data.allUploads[1].basename).toBe("thumb");
+    });
+
     it("orders uploads by size", async () => {
       const r = await q(`{ allUploads(orderBy: [size_ASC]) { filename size } }`);
       expect(r.data.allUploads[0].filename).toBe("thumb.png");
@@ -566,6 +579,12 @@ describe("Filter compiler — comprehensive", () => {
 
     it("_allUploadsMeta with filter", async () => {
       const r = await q(`{ _allUploadsMeta(filter: { mimeType: { eq: "image/jpeg" } }) { count } }`);
+      expect(r.data._allUploadsMeta.count).toBe(1);
+    });
+
+    it("_allUploadsMeta supports basename filters", async () => {
+      const r = await q(`{ _allUploadsMeta(filter: { basename: { eq: "hero" } }) { count } }`);
+      expect(r.errors).toBeUndefined();
       expect(r.data._allUploadsMeta.count).toBe(1);
     });
   });

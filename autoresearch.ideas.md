@@ -1,2 +1,0 @@
-- Revisit asset batching only if a future benchmark/query mix is more image-heavy; the broad request-scoped asset loader was correctness-safe but a clear regression on the current yoga-fallback suite.
-- If this benchmark evolves to include many-parent reverse refs with much larger fanout, revisit SQL-level per-parent top-N batching; the first window-function attempt was correctness-safe but slower on the current workload.

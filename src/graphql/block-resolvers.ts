@@ -35,6 +35,19 @@ function pickLocalizedEntry(rawValue: unknown, context: GqlContext) {
   return { locale: firstLocale, value: firstValue };
 }
 
+function withFieldLocaleArgs(context: GqlContext, args: unknown): GqlContext {
+  if (typeof args !== "object" || args === null || Array.isArray(args)) return context;
+  const locale = typeof Reflect.get(args, "locale") === "string" ? Reflect.get(args, "locale") as string : context.locale;
+  const fallbackLocales = Array.isArray(Reflect.get(args, "fallbackLocales"))
+    ? (Reflect.get(args, "fallbackLocales") as unknown[]).filter((value): value is string => typeof value === "string")
+    : context.fallbackLocales;
+  return {
+    ...context,
+    locale,
+    fallbackLocales,
+  };
+}
+
 /**
  * Build block model resolvers, compute structured text union types,
  * and emit deferred block SDL. Returns the structuredTextFieldTypes map.
@@ -164,8 +177,11 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
         bmResolvers[gqlName] = (parent: DynamicRow) => resolveVideoField(parent[f.api_key]);
       } else {
         // Default camelCase -> snake_case resolver
-        bmResolvers[gqlName] = (parent: DynamicRow) => {
+        bmResolvers[gqlName] = (parent: DynamicRow, args: unknown, context: GqlContext) => {
           const rawVal = parent[f.api_key];
+          if (f.localized && getRegistryDef(f.field_type)?.localizable) {
+            return pickLocalizedEntry(rawVal, withFieldLocaleArgs(context, args)).value;
+          }
           // Parse JSON-stored fields
           const def = getRegistryDef(f.field_type);
           if (def?.graphqlType === "JSON" && typeof rawVal === "string") {
@@ -227,7 +243,11 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
       const stKey = `${bmApiKey}.${f.api_key}`;
       const stFieldType = structuredTextFieldTypes.get(stKey);
       const gqlType = stFieldType ?? fieldToSDL(f.field_type, f.validators, typeNames);
-      bmFieldDefs.push(`${toCamelCase(f.api_key)}: ${gqlType}`);
+      if (f.localized && getRegistryDef(f.field_type)?.localizable) {
+        bmFieldDefs.push(`${toCamelCase(f.api_key)}(locale: SiteLocale, fallbackLocales: [SiteLocale!]): ${gqlType}`);
+      } else {
+        bmFieldDefs.push(`${toCamelCase(f.api_key)}: ${gqlType}`);
+      }
     }
     typeDefs.push(`type ${bmTypeName} {\n  ${bmFieldDefs.join("\n  ")}\n}`);
   }

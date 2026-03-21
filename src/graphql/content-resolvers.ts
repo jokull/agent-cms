@@ -49,6 +49,19 @@ function pickLocalizedValue(rawValue: unknown, context: GqlContext, defaultLocal
   return pickLocalizedEntry(rawValue, context, defaultLocale).value;
 }
 
+function withFieldLocaleArgs(context: GqlContext, args: unknown): GqlContext {
+  if (typeof args !== "object" || args === null || Array.isArray(args)) return context;
+  const locale = typeof Reflect.get(args, "locale") === "string" ? Reflect.get(args, "locale") as string : context.locale;
+  const fallbackLocales = Array.isArray(Reflect.get(args, "fallbackLocales"))
+    ? (Reflect.get(args, "fallbackLocales") as unknown[]).filter((value): value is string => typeof value === "string")
+    : context.fallbackLocales;
+  return {
+    ...context,
+    locale,
+    fallbackLocales,
+  };
+}
+
 /**
  * Build content model types and field resolvers.
  * Returns per-model metadata needed by query and reverse-ref resolvers.
@@ -81,7 +94,7 @@ export function buildContentModelResolvers(
       "id: ID!", "_modelApiKey: String!", "_status: ItemStatus", "_isValid: Boolean!", "_createdAt: String", "_updatedAt: String",
       "_createdBy: String", "_updatedBy: String", "_publishedBy: String",
       "_publicationScheduledAt: String", "_unpublishingScheduledAt: String",
-      "_publishedAt: String", "_firstPublishedAt: String", "_seoMetaTags: [Tag!]!",
+      "_publishedAt: String", "_firstPublishedAt: String", "_editingUrl: String!", "_seoMetaTags: [Tag!]!",
     ];
     if (model.sortable || model.tree) {
       fieldDefs.push("_position: Int");
@@ -96,7 +109,12 @@ export function buildContentModelResolvers(
       const stKey = `${model.api_key}.${f.api_key}`;
       const stFieldType = structuredTextFieldTypes.get(stKey);
       const gqlType = stFieldType ?? fieldToSDL(f.field_type, f.validators, typeNames);
-      fieldDefs.push(`${toCamelCase(f.api_key)}: ${gqlType}`);
+      const locDef = getRegistryDef(f.field_type);
+      if (f.localized && locDef?.localizable) {
+        fieldDefs.push(`${toCamelCase(f.api_key)}(locale: SiteLocale, fallbackLocales: [SiteLocale!]): ${gqlType}`);
+      } else {
+        fieldDefs.push(`${toCamelCase(f.api_key)}: ${gqlType}`);
+      }
     }
 
     // Track localized fields by camelCase name (for filter compilation)
@@ -132,6 +150,7 @@ export function buildContentModelResolvers(
     typeResolvers._unpublishingScheduledAt = (p: DynamicRow) => typeof p._scheduled_unpublish_at === "string" ? p._scheduled_unpublish_at : null;
     typeResolvers._publishedAt = (p: DynamicRow) => p._published_at;
     typeResolvers._firstPublishedAt = (p: DynamicRow) => p._first_published_at;
+    typeResolvers._editingUrl = (p: DynamicRow) => `/api/records/${String(p.id)}?modelApiKey=${model.api_key}`;
     typeResolvers._isValid = async (parent: DynamicRow) => {
       const allLocales = model.all_locales_required && ctx.locales.length > 0
         ? ctx.locales.map((l) => l.code)
@@ -310,8 +329,8 @@ export function buildContentModelResolvers(
     for (const f of fields) {
       const locDef = getRegistryDef(f.field_type);
       if (f.localized && locDef?.localizable) {
-        typeResolvers[toCamelCase(f.api_key)] = (parent: DynamicRow, _args: unknown, context: GqlContext) => {
-          return pickLocalizedValue(parent[f.api_key], context, defaultLocale);
+        typeResolvers[toCamelCase(f.api_key)] = (parent: DynamicRow, args: unknown, context: GqlContext) => {
+          return pickLocalizedValue(parent[f.api_key], withFieldLocaleArgs(context, args), defaultLocale);
         };
       }
     }

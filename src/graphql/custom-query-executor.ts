@@ -32,6 +32,11 @@ interface CustomQueryContext {
   readonly excludeInvalid: boolean;
 }
 
+interface LocaleProjectionOptions {
+  readonly locale?: string;
+  readonly fallbackLocales?: readonly string[];
+}
+
 interface CustomExecutionResult {
   readonly data: unknown;
   readonly _trace: {
@@ -79,6 +84,8 @@ type RootPlan =
         readonly orderBy?: readonly string[];
         readonly first?: number;
         readonly skip?: number;
+        readonly locale?: string;
+        readonly fallbackLocales?: readonly string[];
       };
       readonly selections: readonly FieldPlan[];
     }
@@ -89,6 +96,8 @@ type RootPlan =
       readonly args: {
         readonly id?: string | number;
         readonly filter?: DynamicRow;
+        readonly locale?: string;
+        readonly fallbackLocales?: readonly string[];
       };
       readonly selections: readonly FieldPlan[];
     };
@@ -96,7 +105,12 @@ type RootPlan =
 type FieldPlan =
   | { readonly kind: "id"; readonly responseKey: string }
   | { readonly kind: "typename"; readonly responseKey: string; readonly typeName: string }
-  | { readonly kind: "scalar"; readonly responseKey: string; readonly field: ParsedFieldRow }
+  | {
+      readonly kind: "scalar";
+      readonly responseKey: string;
+      readonly field: ParsedFieldRow;
+      readonly localeOptions?: LocaleProjectionOptions;
+    }
   | {
       readonly kind: "link";
       readonly responseKey: string;
@@ -192,6 +206,27 @@ function parseBooleanValue(value: unknown): boolean | null {
   return null;
 }
 
+function pickLocalizedValue(
+  rawValue: unknown,
+  localeOptions: LocaleProjectionOptions,
+): unknown {
+  if (!isRecord(rawValue)) return rawValue ?? null;
+
+  const locale = localeOptions.locale;
+  if (locale) {
+    const localized = Reflect.get(rawValue, locale);
+    if (localized !== undefined && localized !== null) return localized;
+  }
+
+  for (const fallback of localeOptions.fallbackLocales ?? []) {
+    const localized = Reflect.get(rawValue, fallback);
+    if (localized !== undefined && localized !== null) return localized;
+  }
+
+  const firstDefined = Object.values(rawValue).find((value) => value !== undefined && value !== null);
+  return firstDefined ?? null;
+}
+
 function buildFieldNameMap(fields: readonly ParsedFieldRow[]) {
   return Object.fromEntries(fields.map((field) => [toCamelCase(field.api_key), field.api_key]));
 }
@@ -272,6 +307,7 @@ function buildStructuredTextBlocksPlan(
   selection: FieldNode,
   metadata: ExecutorMetadata,
   fragments: ReadonlyMap<string, FragmentDefinitionNode>,
+  variables: Record<string, unknown> | undefined,
 ): StructuredTextBlocksPlan | null {
   const selections = collectSelections(selection.selectionSet, fragments);
   if (!selections) return null;
@@ -290,7 +326,7 @@ function buildStructuredTextBlocksPlan(
     if (entry.kind !== Kind.INLINE_FRAGMENT || !entry.typeCondition) return null;
     const blockMeta = metadata.blockByTypeName.get(entry.typeCondition.name.value);
     if (!blockMeta) return null;
-    const nestedSelections = buildFieldPlans(blockMeta, entry.selectionSet, metadata, fragments);
+    const nestedSelections = buildFieldPlans(blockMeta, entry.selectionSet, metadata, fragments, variables);
     if (!nestedSelections) return null;
     selectionsByBlockApiKey.set(blockMeta.model.api_key, nestedSelections);
   }
@@ -306,6 +342,7 @@ function buildFieldPlans(
   selectionSet: SelectionSetNode | undefined,
   metadata: ExecutorMetadata,
   fragments: ReadonlyMap<string, FragmentDefinitionNode>,
+  variables: Record<string, unknown> | undefined,
 ): readonly FieldPlan[] | null {
   const selections = collectSelections(selectionSet, fragments);
   if (!selections) return null;
@@ -335,7 +372,19 @@ function buildFieldPlans(
 
     if (isScalarField(field)) {
       if (selection.selectionSet) return null;
-      plans.push({ kind: "scalar", responseKey, field });
+      const locale = getArgumentValue(selection.arguments, "locale", variables);
+      const fallbackLocales = getArgumentValue(selection.arguments, "fallbackLocales", variables);
+      plans.push({
+        kind: "scalar",
+        responseKey,
+        field,
+        localeOptions: typeof locale === "string" || isStringArray(fallbackLocales)
+          ? {
+              locale: typeof locale === "string" ? locale : undefined,
+              fallbackLocales: isStringArray(fallbackLocales) ? fallbackLocales : undefined,
+            }
+          : undefined,
+      });
       continue;
     }
 
@@ -344,7 +393,7 @@ function buildFieldPlans(
       if (!targets || targets.length !== 1 || !selection.selectionSet) return null;
       const target = metadata.contentByApiKey.get(targets[0]);
       if (!target) return null;
-      const nestedSelections = buildFieldPlans(target, selection.selectionSet, metadata, fragments);
+      const nestedSelections = buildFieldPlans(target, selection.selectionSet, metadata, fragments, variables);
       if (!nestedSelections) return null;
       plans.push({
         kind: "link",
@@ -369,12 +418,12 @@ function buildFieldPlans(
           continue;
         }
         if (nestedSelection.name.value === "blocks") {
-          blocksPlan = buildStructuredTextBlocksPlan(nestedSelection, metadata, fragments);
+          blocksPlan = buildStructuredTextBlocksPlan(nestedSelection, metadata, fragments, variables);
           if (!blocksPlan) return null;
           continue;
         }
         if (nestedSelection.name.value === "inlineBlocks") {
-          inlineBlocksPlan = buildStructuredTextBlocksPlan(nestedSelection, metadata, fragments);
+          inlineBlocksPlan = buildStructuredTextBlocksPlan(nestedSelection, metadata, fragments, variables);
           if (!inlineBlocksPlan) return null;
           continue;
         }
@@ -411,7 +460,7 @@ function buildRootPlan(
   if (!model) return null;
 
   const fragments = buildFragmentMap(document);
-  const selections = buildFieldPlans(model, rootSelection.selectionSet, metadata, fragments);
+  const selections = buildFieldPlans(model, rootSelection.selectionSet, metadata, fragments, variables);
   if (!selections) return null;
 
   const responseKey = rootSelection.alias?.value ?? rootSelection.name.value;
@@ -420,6 +469,8 @@ function buildRootPlan(
     const skip = getArgumentValue(rootSelection.arguments, "skip", variables);
     const orderBy = getArgumentValue(rootSelection.arguments, "orderBy", variables);
     const filter = getArgumentValue(rootSelection.arguments, "filter", variables);
+    const locale = getArgumentValue(rootSelection.arguments, "locale", variables);
+    const fallbackLocales = getArgumentValue(rootSelection.arguments, "fallbackLocales", variables);
     return {
       responseKey,
       kind: "list",
@@ -429,6 +480,8 @@ function buildRootPlan(
         orderBy: isStringArray(orderBy) ? orderBy : undefined,
         first: typeof first === "number" ? first : undefined,
         skip: typeof skip === "number" ? skip : undefined,
+        locale: typeof locale === "string" ? locale : undefined,
+        fallbackLocales: isStringArray(fallbackLocales) ? fallbackLocales : undefined,
       },
       selections,
     };
@@ -436,6 +489,8 @@ function buildRootPlan(
 
   const filter = getArgumentValue(rootSelection.arguments, "filter", variables);
   const id = getArgumentValue(rootSelection.arguments, "id", variables);
+  const locale = getArgumentValue(rootSelection.arguments, "locale", variables);
+  const fallbackLocales = getArgumentValue(rootSelection.arguments, "fallbackLocales", variables);
   return {
     responseKey,
     kind: "single",
@@ -443,21 +498,36 @@ function buildRootPlan(
     args: {
       filter: isRecord(filter) ? filter : undefined,
       id: typeof id === "string" || typeof id === "number" ? id : undefined,
+      locale: typeof locale === "string" ? locale : undefined,
+      fallbackLocales: isStringArray(fallbackLocales) ? fallbackLocales : undefined,
     },
     selections,
   };
 }
 
-function scalarValue(field: ParsedFieldRow, row: DynamicRow): unknown {
+function scalarValue(field: ParsedFieldRow, row: DynamicRow, localeOptions: LocaleProjectionOptions): unknown {
   const value = row[field.api_key];
   if (field.field_type === "boolean") return parseBooleanValue(value);
+  if (field.localized) return pickLocalizedValue(value, localeOptions);
   return value ?? null;
+}
+
+function mergeLocaleOptions(
+  base: LocaleProjectionOptions,
+  override: LocaleProjectionOptions | undefined,
+): LocaleProjectionOptions {
+  if (!override) return base;
+  return {
+    locale: override.locale ?? base.locale,
+    fallbackLocales: override.fallbackLocales ?? base.fallbackLocales,
+  };
 }
 
 function projectStructuredText(
   value: StructuredTextEnvelope,
   plan: Extract<FieldPlan, { kind: "structured_text" }>,
   linkBuckets: ReadonlyMap<string, ReadonlyMap<string, DynamicRow>>,
+  localeOptions: LocaleProjectionOptions,
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   if (plan.valueSelected) {
@@ -467,14 +537,14 @@ function projectStructuredText(
   if (plan.blocksPlan) {
     const { blockIds } = getStructuredTextBlockIds(value);
     result.blocks = blockIds
-      .map((blockId) => projectBlock(blockId, value.blocks[blockId], plan.blocksPlan!, linkBuckets))
+      .map((blockId) => projectBlock(blockId, value.blocks[blockId], plan.blocksPlan!, linkBuckets, localeOptions))
       .filter((entry) => entry !== null);
   }
 
   if (plan.inlineBlocksPlan) {
     const { inlineBlockIds } = getStructuredTextBlockIds(value);
     result.inlineBlocks = inlineBlockIds
-      .map((blockId) => projectBlock(blockId, value.blocks[blockId], plan.inlineBlocksPlan!, linkBuckets))
+      .map((blockId) => projectBlock(blockId, value.blocks[blockId], plan.inlineBlocksPlan!, linkBuckets, localeOptions))
       .filter((entry) => entry !== null);
   }
 
@@ -486,6 +556,7 @@ function projectBlock(
   rawBlock: unknown,
   plan: StructuredTextBlocksPlan,
   linkBuckets: ReadonlyMap<string, ReadonlyMap<string, DynamicRow>>,
+  localeOptions: LocaleProjectionOptions,
 ): Record<string, unknown> | null {
   if (!isRecord(rawBlock)) return null;
   const blockType = Reflect.get(rawBlock, "_type");
@@ -507,13 +578,13 @@ function projectBlock(
       continue;
     }
     if (selection.kind === "scalar") {
-      result[selection.responseKey] = scalarValue(selection.field, rawBlock);
+      result[selection.responseKey] = scalarValue(selection.field, rawBlock, mergeLocaleOptions(localeOptions, selection.localeOptions));
       continue;
     }
     if (selection.kind === "structured_text") {
       const nestedValue = Reflect.get(rawBlock, selection.field.api_key);
       if (!isStructuredTextEnvelope(nestedValue)) return null;
-      result[selection.responseKey] = projectStructuredText(nestedValue, selection, linkBuckets);
+      result[selection.responseKey] = projectStructuredText(nestedValue, selection, linkBuckets, localeOptions);
       continue;
     }
     if (selection.kind === "link") {
@@ -525,7 +596,7 @@ function projectBlock(
       const bucket = linkBuckets.get(getLinkBucketKey(selection.field.api_key, selection.target.model.api_key));
       const linkedRecord = bucket?.get(linkedId);
       result[selection.responseKey] = linkedRecord
-        ? projectRow(linkedRecord, selection.target, selection.selections, linkBuckets)
+        ? projectRow(linkedRecord, selection.target, selection.selections, linkBuckets, localeOptions)
         : null;
       continue;
     }
@@ -539,6 +610,7 @@ function projectRow(
   model: RootModelMeta,
   selections: readonly FieldPlan[],
   linkBuckets: ReadonlyMap<string, ReadonlyMap<string, DynamicRow>>,
+  localeOptions: LocaleProjectionOptions,
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const selection of selections) {
@@ -551,7 +623,7 @@ function projectRow(
       continue;
     }
     if (selection.kind === "scalar") {
-      result[selection.responseKey] = scalarValue(selection.field, row);
+      result[selection.responseKey] = scalarValue(selection.field, row, mergeLocaleOptions(localeOptions, selection.localeOptions));
       continue;
     }
     if (selection.kind === "link") {
@@ -562,6 +634,7 @@ function projectRow(
           selection.target,
           selection.selections,
           linkBuckets,
+          localeOptions,
         );
         continue;
       }
@@ -573,14 +646,14 @@ function projectRow(
       const bucket = linkBuckets.get(getLinkBucketKey(selection.field.api_key, selection.target.model.api_key));
       const linkedRecord = bucket?.get(linkedId);
       result[selection.responseKey] = linkedRecord
-        ? projectRow(linkedRecord, selection.target, selection.selections, linkBuckets)
+        ? projectRow(linkedRecord, selection.target, selection.selections, linkBuckets, localeOptions)
         : null;
       continue;
     }
     if (selection.kind === "structured_text") {
       const value = row[selection.field.api_key];
       result[selection.responseKey] = isStructuredTextEnvelope(value)
-        ? projectStructuredText(value, selection, linkBuckets)
+        ? projectStructuredText(value, selection, linkBuckets, localeOptions)
         : null;
     }
   }
@@ -1166,9 +1239,15 @@ export function createCustomQueryExecutor(sqlLayer: Layer.Layer<SqlClient.SqlCli
     );
 
     const data = plan.kind === "list"
-      ? rows.map((row) => projectRow(row, plan.model, plan.selections, linkBuckets))
+      ? rows.map((row) => projectRow(row, plan.model, plan.selections, linkBuckets, {
+        locale: plan.args.locale,
+        fallbackLocales: plan.args.fallbackLocales,
+      }))
       : rootPayload && !Array.isArray(rootPayload)
-        ? projectRow(rootPayload, plan.model, plan.selections, linkBuckets)
+        ? projectRow(rootPayload, plan.model, plan.selections, linkBuckets, {
+          locale: plan.args.locale,
+          fallbackLocales: plan.args.fallbackLocales,
+        })
         : null;
 
     return {

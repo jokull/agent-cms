@@ -122,6 +122,26 @@ const MIGRATIONS: readonly Migration[] = [
       `CREATE UNIQUE INDEX IF NOT EXISTS "idx_editor_tokens_secret_hash" ON "editor_tokens" ("secret_hash")`,
     ],
   },
+  {
+    version: 2,
+    statements: [
+      `ALTER TABLE "assets" ADD COLUMN "basename" text`,
+      `ALTER TABLE "assets" ADD COLUMN "format" text`,
+      `UPDATE "assets"
+       SET "basename" = CASE
+         WHEN instr("filename", '.') > 0 THEN substr("filename", 1, length("filename") - length(substr("filename", instr("filename", '.') + 1)) - 1)
+         ELSE "filename"
+       END`,
+      `UPDATE "assets"
+       SET "format" = lower(CASE
+         WHEN instr("filename", '.') > 0 THEN substr("filename", instr("filename", '.') + 1)
+         WHEN instr("mime_type", '/') > 0 THEN substr("mime_type", instr("mime_type", '/') + 1)
+         ELSE 'bin'
+       END)`,
+      `CREATE INDEX IF NOT EXISTS "idx_assets_basename" ON "assets" ("basename")`,
+      `CREATE INDEX IF NOT EXISTS "idx_assets_format" ON "assets" ("format")`,
+    ],
+  },
 ];
 
 /**

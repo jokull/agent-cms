@@ -50,6 +50,8 @@ export interface LocaleRow {
 export interface AssetRow {
   readonly id: string;
   readonly filename: string;
+  readonly basename: string | null;
+  readonly format: string | null;
   readonly mime_type: string;
   readonly size: number;
   readonly width: number | null;

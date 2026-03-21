@@ -17,6 +17,20 @@ export class AssetImportContext extends Context.Tag("AssetImportContext")<
 
 const MAX_REMOTE_ASSET_BYTES = 25 * 1024 * 1024;
 
+function getAssetBasename(filename: string) {
+  const lastDot = filename.lastIndexOf(".");
+  return lastDot > 0 ? filename.slice(0, lastDot) : filename;
+}
+
+function getAssetFormat(filename: string, mimeType: string) {
+  const lastDot = filename.lastIndexOf(".");
+  if (lastDot > 0 && lastDot < filename.length - 1) {
+    return filename.slice(lastDot + 1).toLowerCase();
+  }
+  const mimeSubtype = mimeType.split("/")[1];
+  return mimeSubtype?.toLowerCase() ?? "bin";
+}
+
 function normalizeHostname(hostname: string) {
   return hostname.replace(/^\[|\]$/g, "").toLowerCase();
 }
@@ -144,10 +158,10 @@ export function createAsset(body: CreateAssetInput, actor?: RequestActor | null)
     }
 
     yield* sql.unsafe(
-      `INSERT INTO assets (id, filename, mime_type, size, width, height, alt, title, r2_key, blurhash, colors, focal_point, tags, created_at, updated_at, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO assets (id, filename, basename, format, mime_type, size, width, height, alt, title, r2_key, blurhash, colors, focal_point, tags, created_at, updated_at, created_by, updated_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        id, body.filename, body.mimeType,
+        id, body.filename, getAssetBasename(body.filename), getAssetFormat(body.filename, body.mimeType), body.mimeType,
         body.size, body.width ?? null, body.height ?? null,
         body.alt ?? null, body.title ?? null,
         body.r2Key ?? `uploads/${id}/${body.filename}`,
@@ -219,11 +233,11 @@ export function replaceAsset(id: string, body: CreateAssetInput, actor?: Request
 
     const now = new Date().toISOString();
     yield* sql.unsafe(
-      `UPDATE assets SET filename = ?, mime_type = ?, size = ?, width = ?, height = ?,
+      `UPDATE assets SET filename = ?, basename = ?, format = ?, mime_type = ?, size = ?, width = ?, height = ?,
        alt = ?, title = ?, r2_key = ?, blurhash = ?, colors = ?, focal_point = ?, tags = ?, updated_at = ?, updated_by = ?
        WHERE id = ?`,
       [
-        body.filename, body.mimeType, body.size,
+        body.filename, getAssetBasename(body.filename), getAssetFormat(body.filename, body.mimeType), body.mimeType, body.size,
         body.width ?? null, body.height ?? null,
         body.alt ?? rows[0].alt, body.title ?? rows[0].title,
         r2Key,

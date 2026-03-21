@@ -2,6 +2,8 @@
  * Build reverse reference fields and resolvers.
  * For each target model with incoming link/links references, add _allReferencing<Source>s fields.
  */
+import { Effect } from "effect";
+import { SqlClient } from "@effect/sql";
 import { getLinkTargets, getLinksTargets } from "../db/validators.js";
 import { compileFilterToSql, compileOrderBy, type FilterCompilerOpts } from "./filter-compiler.js";
 import type { ModelRow, ParsedFieldRow } from "../db/row-types.js";
@@ -55,6 +57,13 @@ function isFilterObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function getThroughFieldApiKeys(through: unknown): readonly string[] | undefined {
+  if (typeof through !== "object" || through === null || Array.isArray(through)) return undefined;
+  const fields = Reflect.get(through, "fields");
+  if (!Array.isArray(fields)) return undefined;
+  return fields.filter((value): value is string => typeof value === "string");
+}
+
 export function buildReverseRefResolvers(
   ctx: SchemaBuilderContext,
   reverseRefs: Map<string, ReverseRef[]>
@@ -77,9 +86,18 @@ export function buildReverseRefResolvers(
     for (const [sourceApiKey, sourceRefs] of bySource) {
       const sourceTypeName = toTypeName(sourceApiKey);
       const fieldName = `_allReferencing${sourceTypeName}s`;
+      const metaFieldName = `${fieldName}Meta`;
       const sourceRecordTypeName = ctx.typeNames.get(sourceApiKey) ?? sourceTypeName;
+      const throughEnumName = `InverseRelationshipFieldsBetween${sourceTypeName}And${targetTypeName}`;
+      const throughInputName = `InverseRelationshipFilterBetween${sourceTypeName}And${targetTypeName}`;
+      const throughEnumValues = [...new Set(sourceRefs.map((ref) => toCamelCase(ref.fieldApiKey)))];
+      typeDefs.push(`enum ${throughEnumName} {\n  ${throughEnumValues.join("\n  ")}\n}`);
+      typeDefs.push(`input ${throughInputName} {\n  fields: [${throughEnumName}!]\n}`);
       extendFields.push(
-        `${fieldName}(locale: SiteLocale, fallbackLocales: [SiteLocale!], filter: ${sourceTypeName}Filter, orderBy: [${sourceTypeName}OrderBy!], first: Int, skip: Int): [${sourceRecordTypeName}!]!`
+        `${fieldName}(locale: SiteLocale, fallbackLocales: [SiteLocale!], filter: ${sourceTypeName}Filter, orderBy: [${sourceTypeName}OrderBy!], first: Int, skip: Int, through: ${throughInputName}): [${sourceRecordTypeName}!]!`
+      );
+      extendFields.push(
+        `${metaFieldName}(locale: SiteLocale, fallbackLocales: [SiteLocale!], filter: ${sourceTypeName}Filter, through: ${throughInputName}): ${sourceTypeName}Meta!`
       );
 
       const sourceTableName = sourceRefs[0].sourceTableName;
@@ -107,6 +125,11 @@ export function buildReverseRefResolvers(
         if (Array.isArray(args.fallbackLocales)) {
           context.fallbackLocales = args.fallbackLocales.filter((value): value is string => typeof value === "string");
         }
+        const throughFieldNames = getThroughFieldApiKeys(args.through);
+        const filteredSourceRefs = throughFieldNames && throughFieldNames.length > 0
+          ? sourceRefs.filter((ref) => throughFieldNames.includes(toCamelCase(ref.fieldApiKey)))
+          : sourceRefs;
+        if (filteredSourceRefs.length === 0) return [];
 
         const includeDrafts = context.includeDrafts ?? false;
         const filterLocale = typeof args.locale === "string"
@@ -133,6 +156,7 @@ export function buildReverseRefResolvers(
           sourceTableName,
           targetApiKey,
           sourceApiKey,
+          throughFieldNames: throughFieldNames ?? null,
           includeDrafts,
           locale: filterLocale ?? null,
           filterWhere: compiled?.where ?? null,
@@ -148,7 +172,7 @@ export function buildReverseRefResolvers(
           loaderKey,
           parentId,
           sourceTableName,
-          sourceRefs,
+          sourceRefs: filteredSourceRefs,
           includeDrafts,
           filterWhere: compiled?.where,
           filterParams: compiled?.params ?? [],
@@ -156,6 +180,65 @@ export function buildReverseRefResolvers(
           first,
           skip,
         });
+      };
+
+      (resolvers[targetTypeName])[metaFieldName] = async (parent: DynamicRow, args: DynamicRow, context: GqlContext) => {
+        if (typeof args.locale === "string") context.locale = args.locale;
+        if (Array.isArray(args.fallbackLocales)) {
+          context.fallbackLocales = args.fallbackLocales.filter((value): value is string => typeof value === "string");
+        }
+        const throughFieldNames = getThroughFieldApiKeys(args.through);
+        const filteredSourceRefs = throughFieldNames && throughFieldNames.length > 0
+          ? sourceRefs.filter((ref) => throughFieldNames.includes(toCamelCase(ref.fieldApiKey)))
+          : sourceRefs;
+        if (filteredSourceRefs.length === 0) return { count: 0 };
+
+        const includeDrafts = context.includeDrafts ?? false;
+        const filterLocale = typeof args.locale === "string"
+          ? args.locale
+          : (context.locale ?? defaultLocale ?? undefined);
+        const filterOpts: FilterCompilerOpts = {
+          fieldIsLocalized: (fName) => sourceLocalizedCamelKeys.has(fName),
+          fieldNameMap: Object.fromEntries(sourceCamelToSnake),
+          localizedDbColumns: sourceFields.filter((sf) => sf.localized).map((sf) => sf.api_key),
+          jsonArrayFields: sourceJsonArrayFields,
+          locale: filterLocale ?? undefined,
+        };
+        const filterArg = isFilterObject(args.filter) ? args.filter : undefined;
+        const compiled = compileFilterToSql(filterArg, filterOpts);
+        const parentId = typeof parent.id === "string" ? parent.id : String(parent.id);
+
+        const refConditions: string[] = [];
+        const queryParams: unknown[] = [];
+        for (const ref of filteredSourceRefs) {
+          if (ref.fieldType === "link") {
+            refConditions.push(`"${ref.fieldApiKey}" = ?`);
+            queryParams.push(parentId);
+            continue;
+          }
+          refConditions.push(`EXISTS (SELECT 1 FROM json_each("${ref.fieldApiKey}") WHERE value = ?)`);
+          queryParams.push(parentId);
+        }
+
+        if (refConditions.length === 0) return { count: 0 };
+
+        let query = `SELECT COUNT(DISTINCT id) AS count FROM "${sourceTableName}" WHERE (${refConditions.join(" OR ")})`;
+        if (!includeDrafts) {
+          query += ` AND "_status" IN ('published', 'updated')`;
+        }
+        if (compiled?.where) {
+          query += ` AND ${compiled.where}`;
+          queryParams.push(...compiled.params);
+        }
+
+        const rows = await runSql(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient;
+            return yield* sql.unsafe<{ count: number | string }>(query, queryParams);
+          })
+        );
+        const rawCount = rows[0]?.count;
+        return { count: typeof rawCount === "number" ? rawCount : Number(rawCount ?? 0) };
       };
     }
 
