@@ -195,6 +195,25 @@ describe("MCP Server", () => {
       expect(getResult(unpubRes)._status).toBe("draft");
     });
 
+    it("bulk publishes records", async () => {
+      const createOne = getResult(await client.callTool({
+        name: "create_record",
+        arguments: { modelApiKey: "post", data: { title: "Draft A" } },
+      }));
+      const createTwo = getResult(await client.callTool({
+        name: "create_record",
+        arguments: { modelApiKey: "post", data: { title: "Draft B" } },
+      }));
+
+      const bulkPubRes = await client.callTool({
+        name: "bulk_publish_records",
+        arguments: { modelApiKey: "post", recordIds: [createOne.id, createTwo.id] },
+      });
+      const published = getResult(bulkPubRes);
+      expect(published).toHaveLength(2);
+      expect(published.every((record: { _status: string }) => record._status === "published")).toBe(true);
+    });
+
     it("schedules publish and clears schedules", async () => {
       const createRes = await client.callTool({
         name: "create_record",

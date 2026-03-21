@@ -26,6 +26,7 @@ import {
   CreateFieldInput,
   CreateModelInput,
   CreateRecordInput,
+  BulkRecordOperationInput,
   ImportAssetFromUrlInput,
   ImportSchemaInput,
   ReindexSearchInput,
@@ -399,6 +400,7 @@ const BulkCreateRecordsTool = cmsTool("bulk_create_records", `Create multiple re
 
 All records must belong to the same model. Slugs are auto-generated. Returns array of created record IDs.`, BulkCreateRecordsInput.fields);
 const PublishRecordTool = cmsTool("publish_record", "Publish a record. This is when required/unique validation is enforced for draft-enabled models; if a draft is incomplete, this tool returns the validation error.", PublishRecordInput.fields);
+const BulkPublishRecordsTool = cmsTool("bulk_publish_records", "Publish multiple records from the same model in one call. Use this instead of looping over publish_record when you already have several record IDs.", BulkRecordOperationInput.fields);
 const UnpublishRecordTool = cmsTool("unpublish_record", "Unpublish a record", PublishRecordInput.fields);
 const SchedulePublishTool = cmsTool("schedule_publish", "Schedule a record to publish at a future ISO datetime. Set at:null to clear.", ScheduleToolInput.fields);
 const ScheduleUnpublishTool = cmsTool("schedule_unpublish", "Schedule a record to unpublish at a future ISO datetime. Set at:null to clear.", ScheduleToolInput.fields);
@@ -513,6 +515,7 @@ const AdminTools = [
   QueryRecordsTool,
   BulkCreateRecordsTool,
   PublishRecordTool,
+  BulkPublishRecordsTool,
   UnpublishRecordTool,
   SchedulePublishTool,
   ScheduleUnpublishTool,
@@ -553,6 +556,7 @@ const EditorTools = [
   QueryRecordsTool,
   BulkCreateRecordsTool,
   PublishRecordTool,
+  BulkPublishRecordsTool,
   UnpublishRecordTool,
   SchedulePublishTool,
   ScheduleUnpublishTool,
@@ -616,6 +620,7 @@ Structured text editing notes:
 
 Draft/publish lifecycle:
   Records on draft-enabled models start as drafts. Call publish_record to make them visible in GraphQL.
+  If you already have several record IDs from the same model, use bulk_publish_records instead of looping over publish_record.
   Required-field validation for draft-enabled models happens at publish time, not create_record time.
   Edits after publishing create a new draft version — publish again to update.
   GraphQL serves published content by default; use X-Include-Drafts header for previews.
@@ -903,6 +908,7 @@ export function createMcpLayer(
     query_records: withDecoded(QueryRecordsInput, ({ modelApiKey }) => RecordService.listRecords(modelApiKey)),
     bulk_create_records: withDecoded(BulkCreateRecordsInput, ({ modelApiKey, records }) => RecordService.bulkCreateRecords({ modelApiKey, records }, options?.actor)),
     publish_record: withDecoded(PublishRecordInput, ({ recordId, modelApiKey }) => PublishService.publishRecord(modelApiKey, recordId, options?.actor)),
+    bulk_publish_records: withDecoded(BulkRecordOperationInput, ({ recordIds, modelApiKey }) => PublishService.bulkPublishRecords(modelApiKey, recordIds, options?.actor)),
     unpublish_record: withDecoded(PublishRecordInput, ({ recordId, modelApiKey }) => PublishService.unpublishRecord(modelApiKey, recordId, options?.actor)),
     schedule_publish: withDecoded(ScheduleToolInput, ({ recordId, modelApiKey, at }) => ScheduleService.schedulePublish(modelApiKey, recordId, at, options?.actor)),
     schedule_unpublish: withDecoded(ScheduleToolInput, ({ recordId, modelApiKey, at }) => ScheduleService.scheduleUnpublish(modelApiKey, recordId, at, options?.actor)),

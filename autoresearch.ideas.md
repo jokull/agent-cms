@@ -9,7 +9,7 @@
 ## Next Best Bets
 - Make the guide more explicit about checking `schema_info` / `describe_model` before assuming example fields
 - Probe edge-case error quality for weak spots that still cause extra turns
-- Test publishing/scheduling workflows for status/validation confusion
+- Explore script-writing friction further (auth/bootstrap + nested mount points are better documented, but response parsing is still awkward)
 
 ## Content CRUD
 - Update specific fields on existing records (`reading_time`, `featured`)
@@ -25,13 +25,9 @@
 
 ## Publishing Lifecycle
 - Publish and unpublish a record, verify status changes via `query_records`
-- Schedule a future publish date
 - Edit a published post (should create updated/draft state), verify draft vs published views
-- List version history, restore a previous version
 
 ## Assets
-- Import an asset from a redirecting public URL and attach it as `cover_image`
-- Import an asset from a direct public URL and set alt/title metadata
 - Replace an asset's metadata
 
 ## Search
@@ -47,5 +43,4 @@
 - Have Claude write a Node.js script that imports assets from URLs and creates records referencing them
 
 ## Edge Cases
-- Reference a non-existent record ID in a link field
 - Try to use admin-only tools with an editor token — verify clear error

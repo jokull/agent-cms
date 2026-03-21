@@ -167,6 +167,15 @@ export const ReorderInput = Schema.Struct({
 });
 export type ReorderInput = typeof ReorderInput.Type;
 
+export const BulkRecordOperationInput = Schema.Struct({
+  modelApiKey: Schema.NonEmptyString,
+  recordIds: Schema.Array(Schema.String).pipe(
+    Schema.filter((value) => value.length >= 1, { message: () => "recordIds must contain at least 1 entry" }),
+    Schema.filter((value) => value.length <= 1000, { message: () => "recordIds must contain at most 1000 entries" }),
+  ),
+});
+export type BulkRecordOperationInput = typeof BulkRecordOperationInput.Type;
+
 export const ScheduleRecordInput = Schema.Struct({
   modelApiKey: Schema.NonEmptyString,
   at: Schema.NullOr(Schema.String.pipe(
