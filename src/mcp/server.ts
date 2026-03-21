@@ -654,12 +654,19 @@ Asset upload flow:
   3. Use returned asset ID in media/media_gallery fields
 
 Raw HTTP / JSON-RPC access:
-  - Endpoint: POST /mcp for admin, POST /mcp/editor for editor
+  - Endpoint: POST <mount>/mcp for admin, POST <mount>/mcp/editor for editor
+  - The mount point may be nested (for example /cms/mcp), so scripts should reuse the exact MCP URL already configured in the client instead of assuming root-level /mcp
   - Auth: Authorization: Bearer <token>
-  - Initialize first if your MCP client expects it, then send tools/call requests
+  - For standalone curl/HTTP scripts, you can call tools/call directly; do not assume an initialize round-trip is required unless your specific client library expects it
   - Typical tool call body:
     {"jsonrpc":"2.0","method":"tools/call","params":{"name":"create_record","arguments":{...}},"id":1}
   - Tool results usually come back in result.content[0].text as a JSON string payload
+  - jq extraction example:
+    .result.content[0].text | fromjson
+  - Minimal bulk example for scripts:
+    1. bulk_create_records with {"modelApiKey":"post","records":[{"title":"Post 1"}, ...]}
+    2. Extract returned IDs from result.content[0].text
+    3. bulk_publish_records with {"modelApiKey":"post","recordIds":[...ids]}
 
 Slug fields:
   Set validator {"slug_source": "title"} to auto-generate from a source field.
