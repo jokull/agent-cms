@@ -51,6 +51,22 @@ describe("Date, DateTime, Color, and LatLon field types", () => {
       expect(result.data.allEvents[0].title).toBe("Early");
       expect(result.data.allEvents[1].title).toBe("Late");
     });
+
+    it("rejects invalid date and datetime values", async () => {
+      const badDate = await jsonRequest(handler, "POST", "/api/records", {
+        modelApiKey: "event",
+        data: { title: "Broken", event_date: "not-a-date" },
+      });
+      expect(badDate.status).toBe(400);
+      expect(await badDate.text()).toContain("Invalid date for field 'event_date'");
+
+      const badDateTime = await jsonRequest(handler, "POST", "/api/records", {
+        modelApiKey: "event",
+        data: { title: "Broken Time", start_time: "yesterday maybe" },
+      });
+      expect(badDateTime.status).toBe(400);
+      expect(await badDateTime.text()).toContain("Invalid date_time for field 'start_time'");
+    });
   });
 
   describe("color field", () => {

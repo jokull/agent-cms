@@ -19,28 +19,14 @@
 - Probe edge-case error quality for weak spots that still cause extra turns
 - Explore script-writing friction further (auth/bootstrap + nested mount points are better documented, but response parsing is still awkward)
 
-## Content CRUD
-- Create a record with all currently seeded post field types: string, text, integer, boolean, date, media, link, seo, structured_text
-
 ## Structured Text
-- Patch specific blocks in existing structured text without replacing the whole field
-- Create deeply nested structured text with inline links
-- Convert long markdown (1000+ words) to structured text
-- Create structured text referencing a block type not whitelisted on the field
+- Create deeply nested structured text with inline links in other nested block combinations
 
 ## Publishing Lifecycle
 - Publish and unpublish a record, verify status changes via `query_records`
-- Edit a published post (should create updated/draft state), verify draft vs published views
-
-## Assets
-- Replace an asset's metadata
 
 ## Search
 - Full-text search for content across models
-
-## Multi-Step Workflows
-- "Write a blog post about Effect TypeScript" — full workflow from schema discovery to published post
-- Reorganize: create new categories, reassign posts to them
 
 ## Script Writing
 - Have Claude write a bash script that uses curl to batch-create 5 posts via MCP

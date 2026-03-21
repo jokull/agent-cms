@@ -48,6 +48,25 @@ export const MediaFieldObjectSchema = Schema.Struct({
 export const MediaFieldSchema = Schema.Union(Schema.String, MediaFieldObjectSchema);
 export const MediaGalleryFieldSchema = Schema.Array(MediaFieldSchema);
 
+function isValidIsoDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+function isValidIsoDateTime(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}T/.test(value)) return false;
+  return !Number.isNaN(Date.parse(value));
+}
+
+const DateSchema = Schema.String.pipe(
+  Schema.filter(isValidIsoDate, { message: () => "expected ISO date string YYYY-MM-DD" })
+);
+
+const DateTimeSchema = Schema.String.pipe(
+  Schema.filter(isValidIsoDateTime, { message: () => "expected ISO datetime string" })
+);
+
 /** Static definition for a field type — everything known at compile time */
 export interface FieldTypeDefinition {
   /** SQLite column type */
@@ -150,7 +169,7 @@ export const FIELD_TYPE_REGISTRY: Record<FieldType, FieldTypeDefinition> = {
     filterType: "StringFilter",
     localizable: true,
     multiLocaleType: "StringMultiLocaleField",
-    inputSchema: null,
+    inputSchema: DateSchema,
     jsonStored: false,
     hasCustomResolver: false,
   },
@@ -160,7 +179,7 @@ export const FIELD_TYPE_REGISTRY: Record<FieldType, FieldTypeDefinition> = {
     filterType: "StringFilter",
     localizable: true,
     multiLocaleType: "StringMultiLocaleField",
-    inputSchema: null,
+    inputSchema: DateTimeSchema,
     jsonStored: false,
     hasCustomResolver: false,
   },
