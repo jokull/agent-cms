@@ -1,5 +1,6 @@
 import { createYoga, type YogaSchemaDefinition } from "graphql-yoga";
 import { Effect, Layer, Logger } from "effect";
+import type { DynamicRow } from "./gql-types.js";
 import {
   Kind,
   type DocumentNode,
@@ -23,6 +24,7 @@ export type CredentialType = "admin" | "editor" | null;
 export interface GraphQLContext {
   includeDrafts: boolean;
   excludeInvalid: boolean;
+  linkedRecordCache: Map<string, Promise<DynamicRow | null>>;
 }
 
 export interface GraphQLHandlerOptions {
@@ -253,7 +255,11 @@ export function createGraphQLHandler(
         : credentialType === "admin" ? headerDrafts
         : false;
       const excludeInvalid = request.headers.get("X-Exclude-Invalid") === "true";
-      return { includeDrafts, excludeInvalid } satisfies GraphQLContext;
+      return {
+        includeDrafts,
+        excludeInvalid,
+        linkedRecordCache: new Map(),
+      } satisfies GraphQLContext;
     },
   });
 
@@ -289,6 +295,7 @@ export function createGraphQLHandler(
       contextValue: {
         includeDrafts: context?.includeDrafts ?? false,
         excludeInvalid: context?.excludeInvalid ?? false,
+        linkedRecordCache: new Map(),
       },
     });
     return result as { data: unknown; errors?: ReadonlyArray<{ message: string }> };
