@@ -352,7 +352,11 @@ const UpdateFieldTool = cmsTool("update_field", "Update field properties (label,
 const DeleteModelTool = cmsTool("delete_model", "Delete a model (fails if referenced)", ModelIdInput.fields);
 const DeleteFieldTool = cmsTool("delete_field", "Delete a field and drop column", FieldIdInput.fields);
 const SchemaInfoTool = cmsTool("schema_info", "Get the complete CMS schema in one call — models, block types, fields, relations. The primary tool for understanding the content model.", SchemaInfoInput.fields);
-const CreateRecordTool = cmsTool("create_record", `Create a content record. Records start as draft — call publish_record to make them visible in GraphQL.
+const CreateRecordTool = cmsTool("create_record", `Create a content record. Records on draft-enabled models start as draft — call publish_record to make them visible in GraphQL.
+
+Validation note:
+- For models with drafts (has_draft=true), required-field validation is deferred until publish_record.
+- For models without drafts (has_draft=false), required fields are enforced during create_record.
 
 Field value formats:
 - media: asset ID string, or {"upload_id":"<asset_id>","alt":"...","title":"...","focal_point":{"x":0.5,"y":0.2},"custom_data":{...}}
@@ -388,7 +392,7 @@ const QueryRecordsTool = cmsTool("query_records", "List records for a model. Str
 const BulkCreateRecordsTool = cmsTool("bulk_create_records", `Create multiple records in one operation (up to 1000). Much faster than calling create_record in a loop.
 
 All records must belong to the same model. Slugs are auto-generated. Returns array of created record IDs.`, BulkCreateRecordsInput.fields);
-const PublishRecordTool = cmsTool("publish_record", "Publish a record", PublishRecordInput.fields);
+const PublishRecordTool = cmsTool("publish_record", "Publish a record. This is when required/unique validation is enforced for draft-enabled models; if a draft is incomplete, this tool returns the validation error.", PublishRecordInput.fields);
 const UnpublishRecordTool = cmsTool("unpublish_record", "Unpublish a record", PublishRecordInput.fields);
 const SchedulePublishTool = cmsTool("schedule_publish", "Schedule a record to publish at a future ISO datetime. Set at:null to clear.", ScheduleToolInput.fields);
 const ScheduleUnpublishTool = cmsTool("schedule_unpublish", "Schedule a record to unpublish at a future ISO datetime. Set at:null to clear.", ScheduleToolInput.fields);
@@ -595,7 +599,8 @@ Structured text editing notes:
   - query_records materializes structured_text fields for inspection; on published records, _published_snapshot remains useful as a raw snapshot of what is live.
 
 Draft/publish lifecycle:
-  Records start as drafts. Call publish_record to make them visible in GraphQL.
+  Records on draft-enabled models start as drafts. Call publish_record to make them visible in GraphQL.
+  Required-field validation for draft-enabled models happens at publish time, not create_record time.
   Edits after publishing create a new draft version — publish again to update.
   GraphQL serves published content by default; use X-Include-Drafts header for previews.
 

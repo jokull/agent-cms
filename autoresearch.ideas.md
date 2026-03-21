@@ -3,12 +3,13 @@
 ## Confirmed / Learned
 - Basic guide → create → publish post flow is already friction-free
 - Structured text authoring with `build_structured_text_from_markdown` is already friction-free for simple code-block posts
-- Asset workflow friction was exposed by redirecting image URLs and schema drift around `post.cover_image`
+- `import_asset_from_url` now follows normal public redirects successfully
+- Seeded blog schema now includes `post.cover_image`, `post.related_posts`, and `post.gallery`, avoiding schema-mutation detours in common editorial tasks
 
 ## Next Best Bets
-- Re-apply and keep redirect-friendly `import_asset_from_url` behavior once checks are unblocked
-- Align blog example docs/seed/live schema so editor agents can trust `post.cover_image` and current block types
 - Make the guide more explicit about checking `schema_info` / `describe_model` before assuming example fields
+- Test nested structured text authoring with the current seeded block types (`feature_grid` + nested `feature_card`)
+- Probe search UX and edge-case error quality for weak spots that still cause extra turns
 
 ## Content CRUD
 - Update specific fields on existing records (`reading_time`, `featured`)
