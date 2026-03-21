@@ -71,10 +71,10 @@ describe("Schema Lifecycle — Advanced Operations", () => {
       // DAST should have hero block removed, paragraph + cta preserved
       const records = parse(await agent.callTool({ name: "query_records", arguments: { modelApiKey: "page" } }));
       const content = typeof records[0].content === "string" ? JSON.parse(records[0].content) : records[0].content;
-      expect(content.document.children).toHaveLength(2);
-      expect(content.document.children[0].type).toBe("paragraph");
-      expect(content.document.children[1].type).toBe("block"); // CTA still there
-      expect(content.document.children[1].item).toBe(ctaId);
+      expect(content.value.document.children).toHaveLength(2);
+      expect(content.value.document.children[0].type).toBe("paragraph");
+      expect(content.value.document.children[1].type).toBe("block"); // CTA still there
+      expect(content.value.document.children[1].item).toBe(ctaId);
 
       // Whitelist should only have "cta" now
       const pageDetail = parse(await agent.callTool({ name: "describe_model", arguments: { apiKey: "page" } }));
@@ -269,11 +269,11 @@ describe("Schema Lifecycle — Advanced Operations", () => {
       const records = parse(await agent.callTool({ name: "query_records", arguments: { modelApiKey: "page" } }));
       const content = typeof records[0].content === "string" ? JSON.parse(records[0].content) : records[0].content;
 
-      expect(content.schema).toBe("dast");
-      expect(content.document.children).toHaveLength(3);
-      expect(content.document.children[0].type).toBe("paragraph");
-      expect(content.document.children[1]).toEqual({ type: "block", item: "hero-1" });
-      expect(content.document.children[2].type).toBe("paragraph");
+      expect(content.value.schema).toBe("dast");
+      expect(content.value.document.children).toHaveLength(3);
+      expect(content.value.document.children[0].type).toBe("paragraph");
+      expect(content.value.document.children[1]).toEqual({ type: "block", item: "hero-1" });
+      expect(content.value.document.children[2].type).toBe("paragraph");
 
       const blocks = await Effect.runPromise(
         Effect.gen(function* () {

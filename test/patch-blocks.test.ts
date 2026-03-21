@@ -125,9 +125,9 @@ describe("patch_blocks — partial block updates", () => {
 
     // DAST should be pruned — only 2 block nodes remaining
     const updated = await patchRes.json();
-    const dast = typeof updated.content === "string" ? JSON.parse(updated.content) : updated.content;
-    expect(dast.document.children).toHaveLength(2);
-    const blockItems = dast.document.children.map((c: any) => c.item);
+    const content = typeof updated.content === "string" ? JSON.parse(updated.content) : updated.content;
+    expect(content.value.document.children).toHaveLength(2);
+    const blockItems = content.value.document.children.map((c: any) => c.item);
     expect(blockItems).toContain("v1");
     expect(blockItems).toContain("v3");
     expect(blockItems).not.toContain("v2");
@@ -186,6 +186,8 @@ describe("patch_blocks — partial block updates", () => {
       },
     });
     expect(patchRes.status).toBe(400);
+    const body = await patchRes.json();
+    expect(body.error).toContain("does not exist in field 'content'");
   });
 
   it("rejects patch for non-structured_text field", async () => {
@@ -250,10 +252,10 @@ describe("patch_blocks — partial block updates", () => {
     expect(blocks).toHaveLength(2);
 
     const updated = await patchRes.json();
-    const dast = typeof updated.content === "string" ? JSON.parse(updated.content) : updated.content;
-    expect(dast.document.children).toHaveLength(3);
-    expect(dast.document.children[0].item).toBe("v3");
-    expect(dast.document.children[1].type).toBe("paragraph");
-    expect(dast.document.children[2].item).toBe("v1");
+    const content = typeof updated.content === "string" ? JSON.parse(updated.content) : updated.content;
+    expect(content.value.document.children).toHaveLength(3);
+    expect(content.value.document.children[0].item).toBe("v3");
+    expect(content.value.document.children[1].type).toBe("paragraph");
+    expect(content.value.document.children[2].item).toBe("v1");
   });
 });

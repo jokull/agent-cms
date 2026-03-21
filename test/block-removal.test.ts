@@ -108,9 +108,9 @@ describe("P4.4: Block type removal", () => {
     expect(records).toHaveLength(1);
     const content = typeof records[0].content === "string" ? JSON.parse(records[0].content) : records[0].content;
     // Should have 2 children (both paragraphs), not 3 (block node removed)
-    expect(content.document.children).toHaveLength(2);
-    expect(content.document.children[0].type).toBe("paragraph");
-    expect(content.document.children[1].type).toBe("paragraph");
+    expect(content.value.document.children).toHaveLength(2);
+    expect(content.value.document.children[0].type).toBe("paragraph");
+    expect(content.value.document.children[1].type).toBe("paragraph");
 
     // Whitelist should be updated
     const pageDetail = parse(await agent.callTool({ name: "describe_model", arguments: { apiKey: "page" } }));

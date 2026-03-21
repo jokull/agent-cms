@@ -10,7 +10,7 @@ import {
   updateRecord as sqlUpdateRecord,
   deleteRecord as sqlDeleteRecord,
 } from "../schema-engine/sql-records.js";
-import { writeStructuredText, deleteBlocksForField, getStructuredTextStorageKey, materializeStructuredTextValue } from "./structured-text-service.js";
+import { writeStructuredText, deleteBlocksForField, getStructuredTextStorageKey, materializeRecordStructuredTextFields, materializeStructuredTextValue } from "./structured-text-service.js";
 import type { ModelRow, FieldRow, ParsedFieldRow } from "../db/row-types.js";
 import { parseFieldValidators, isContentRow } from "../db/row-types.js";
 import { getSlugSource, getBlockWhitelist, getBlocksOnly, isRequired, findUniqueConstraintViolations, isUnique } from "../db/validators.js";
@@ -487,7 +487,16 @@ export function listRecords(modelApiKey: string) {
       return yield* new ValidationError({ message: "modelApiKey query parameter is required" });
     const model = yield* getModelByApiKey(modelApiKey);
     if (!model) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
-    return yield* selectAll(`content_${model.api_key}`);
+    const records = yield* selectAll(`content_${model.api_key}`);
+    const fields = yield* getModelFields(model.id);
+    return yield* Effect.all(
+      records.map((record) => materializeRecordStructuredTextFields({
+        modelApiKey: model.api_key,
+        record,
+        fields,
+      })),
+      { concurrency: "unbounded" }
+    );
   });
 }
 
@@ -880,6 +889,68 @@ export function bulkCreateRecords({ modelApiKey, records }: BulkCreateRecordsInp
   });
 }
 
+function isStructuredTextEnvelopeLike(value: unknown): value is { value: unknown; blocks: Record<string, unknown> } {
+  return isJsonRecord(value) && "value" in value && isJsonRecord(value.blocks);
+}
+
+function getPrunableDast(value: unknown): { schema: string; document: { type: string; children: readonly unknown[] } } | null {
+  if (!isJsonRecord(value)) return null;
+  if (typeof value.schema !== "string") return null;
+  if (!isJsonRecord(value.document)) return null;
+  if (typeof value.document.type !== "string") return null;
+  if (!Array.isArray(value.document.children)) return null;
+  return {
+    schema: value.schema,
+    document: {
+      type: value.document.type,
+      children: value.document.children,
+    },
+  };
+}
+
+function applyPatchToNestedStructuredText(
+  target: Record<string, unknown>,
+  blockId: string,
+  patchValue: unknown,
+): { applied: boolean; ambiguous: boolean } {
+  let matches = 0;
+
+  const visitObject = (value: Record<string, unknown>) => {
+    for (const nestedValue of Object.values(value)) {
+      if (isStructuredTextEnvelopeLike(nestedValue)) {
+        const blocks = nestedValue.blocks;
+        if (Object.hasOwn(blocks, blockId)) {
+          matches++;
+          if (patchValue === null) {
+            delete blocks[blockId];
+            const dast = getPrunableDast(nestedValue.value);
+            if (dast) {
+              nestedValue.value = pruneBlockNodes(dast, new Set([blockId]));
+            }
+          } else if (typeof patchValue === "string") {
+            // keep unchanged
+          } else if (isJsonRecord(patchValue)) {
+            const existingBlock = blocks[blockId];
+            if (isJsonRecord(existingBlock)) {
+              blocks[blockId] = { ...existingBlock, ...patchValue };
+            }
+          }
+        }
+
+        for (const childBlock of Object.values(blocks)) {
+          if (isJsonRecord(childBlock)) visitObject(childBlock);
+        }
+        continue;
+      }
+
+      if (isJsonRecord(nestedValue)) visitObject(nestedValue);
+    }
+  };
+
+  visitObject(target);
+  return { applied: matches > 0, ambiguous: matches > 1 };
+}
+
 /**
  * Partial block update for a structured text field.
  *
@@ -942,31 +1013,83 @@ export function patchBlocksForField(body: PatchBlocksInput, actor?: RequestActor
     // Apply patch
     for (const [blockId, patchValue] of Object.entries(body.blocks)) {
       if (patchValue === null) {
-        // Delete this block
-        blockIdsToDelete.add(blockId);
-        delete mergedBlocks[blockId];
+        if (Object.hasOwn(existingBlocks, blockId)) {
+          blockIdsToDelete.add(blockId);
+          delete mergedBlocks[blockId];
+          continue;
+        }
+
+        let nestedMatched = false;
+        for (const topLevelBlock of Object.values(mergedBlocks)) {
+          const result = applyPatchToNestedStructuredText(topLevelBlock, blockId, patchValue);
+          if (result.ambiguous) {
+            return yield* new ValidationError({
+              message: `Block '${blockId}' matched multiple nested structured_text locations in field '${body.fieldApiKey}'. Patch the parent block explicitly instead.`,
+              field: body.fieldApiKey,
+            });
+          }
+          nestedMatched = nestedMatched || result.applied;
+        }
+        if (!nestedMatched) {
+          return yield* new ValidationError({
+            message: `Block '${blockId}' does not exist in field '${body.fieldApiKey}'.`,
+            field: body.fieldApiKey,
+          });
+        }
       } else if (typeof patchValue === "string") {
         // Keep unchanged — verify it exists
         if (!Object.hasOwn(existingBlocks, blockId)) {
-          return yield* new ValidationError({
-            message: `Block '${blockId}' referenced in patch does not exist`,
-            field: body.fieldApiKey,
-          });
+          let nestedMatched = false;
+          for (const topLevelBlock of Object.values(mergedBlocks)) {
+            const result = applyPatchToNestedStructuredText(topLevelBlock, blockId, patchValue);
+            if (result.ambiguous) {
+              return yield* new ValidationError({
+                message: `Block '${blockId}' matched multiple nested structured_text locations in field '${body.fieldApiKey}'. Patch the parent block explicitly instead.`,
+                field: body.fieldApiKey,
+              });
+            }
+            nestedMatched = nestedMatched || result.applied;
+          }
+          if (!nestedMatched) {
+            return yield* new ValidationError({
+              message: `Block '${blockId}' does not exist in field '${body.fieldApiKey}'.`,
+              field: body.fieldApiKey,
+            });
+          }
         }
       } else if (typeof patchValue === "object" && !Array.isArray(patchValue)) {
         // Partial merge
-        const patchObj = patchValue as Record<string, unknown>;
         if (!Object.hasOwn(existingBlocks, blockId)) {
+          let nestedMatched = false;
+          for (const topLevelBlock of Object.values(mergedBlocks)) {
+            const result = applyPatchToNestedStructuredText(topLevelBlock, blockId, patchValue);
+            if (result.ambiguous) {
+              return yield* new ValidationError({
+                message: `Block '${blockId}' matched multiple nested structured_text locations in field '${body.fieldApiKey}'. Patch the parent block explicitly instead.`,
+                field: body.fieldApiKey,
+              });
+            }
+            nestedMatched = nestedMatched || result.applied;
+          }
+          if (!nestedMatched) {
+            return yield* new ValidationError({
+              message: `Block '${blockId}' does not exist in field '${body.fieldApiKey}'.`,
+              field: body.fieldApiKey,
+            });
+          }
+          continue;
+        }
+        const existingBlock = existingBlocks[blockId];
+        if (!isJsonRecord(existingBlock)) {
           return yield* new ValidationError({
-            message: `Block '${blockId}' referenced in patch does not exist`,
+            message: `Block '${blockId}' has invalid stored data and cannot be patched.`,
             field: body.fieldApiKey,
           });
         }
-        const existingBlock = existingBlocks[blockId];
         // Merge: existing block data + patch (patch wins)
         mergedBlocks[blockId] = {
-          ...(existingBlock as Record<string, unknown>),
-          ...patchObj,
+          ...existingBlock,
+          ...patchValue,
         };
       } else {
         return yield* new ValidationError({
@@ -1050,7 +1173,13 @@ export function patchBlocksForField(body: PatchBlocksInput, actor?: RequestActor
     yield* SearchService.reindexRecord(body.modelApiKey, body.recordId, modelFields).pipe(Effect.ignore);
     yield* fireHook("onRecordUpdate", { modelApiKey: body.modelApiKey, recordId: body.recordId });
 
-    return yield* selectById(tableName, body.recordId);
+    const updatedRecord = yield* selectById(tableName, body.recordId);
+    if (!updatedRecord) return null;
+    return yield* materializeRecordStructuredTextFields({
+      modelApiKey: model.api_key,
+      record: updatedRecord,
+      fields: modelFields,
+    });
   });
 }
 

@@ -366,19 +366,25 @@ Field value formats:
 const UpdateRecordTool = cmsTool("update_record", "Update record fields", UpdateRecordInput.fields);
 const PatchBlocksTool = cmsTool("patch_blocks", `Partially update blocks in a structured text field without resending the entire content tree.
 
+You can target block IDs from either:
+- the field's top-level \`blocks\` map, or
+- nested structured_text sub-fields stored inside those blocks
+
 Patch map semantics for each block ID:
 - string value (the block ID) → keep block unchanged
 - object with field overrides → merge into existing block (only specified fields updated)
-- null → delete block and auto-prune from DAST
+- null → delete block and auto-prune from the relevant DAST tree
 
 Block IDs not in the patch map are kept unchanged.
 
-Optionally provide a new DAST \`value\`. If omitted, the existing DAST is preserved (with deleted blocks auto-pruned).
+If a nested block ID appears in multiple nested structured_text locations, the tool will fail and ask you to patch the parent block explicitly.
+
+Optionally provide a new top-level DAST \`value\`. If omitted, the existing DAST is preserved (with deleted top-level blocks auto-pruned).
 
 Example — update one block's description, delete another, keep the rest:
 { blocks: { "block-1": "block-1", "block-2": { "description": "New text" }, "block-3": null } }`, PatchBlocksInput.fields);
 const DeleteRecordTool = cmsTool("delete_record", "Delete a record", DeleteRecordInput.fields);
-const QueryRecordsTool = cmsTool("query_records", "List records for a model", QueryRecordsInput.fields);
+const QueryRecordsTool = cmsTool("query_records", "List records for a model. Structured_text fields are materialized for inspection, including nested blocks inside parent block fields. Useful for finding record IDs before update_record, patch_blocks, publish_record, or restore_record_version.", QueryRecordsInput.fields);
 const BulkCreateRecordsTool = cmsTool("bulk_create_records", `Create multiple records in one operation (up to 1000). Much faster than calling create_record in a loop.
 
 All records must belong to the same model. Slugs are auto-generated. Returns array of created record IDs.`, BulkCreateRecordsInput.fields);
@@ -583,6 +589,11 @@ Field value formats (composite types):
   - structured_text: {"value":{"schema":"dast","document":{...}},"blocks":{"<id>":{"_type":"block_api_key",...}}}
   - color: {"red":255,"green":0,"blue":0,"alpha":255}
   - lat_lon: {"latitude":64.13,"longitude":-21.89}
+
+Structured text editing notes:
+  - patch_blocks can target both top-level blocks and nested blocks inside structured_text sub-fields.
+  - If the same nested block ID exists in multiple locations, patch_blocks will ask you to patch the parent block explicitly.
+  - query_records materializes structured_text fields for inspection; on published records, _published_snapshot remains useful as a raw snapshot of what is live.
 
 Draft/publish lifecycle:
   Records start as drafts. Call publish_record to make them visible in GraphQL.
