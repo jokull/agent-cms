@@ -214,6 +214,29 @@ describe("MCP Server", () => {
       expect(published.every((record: { _status: string }) => record._status === "published")).toBe(true);
     });
 
+    it("bulk unpublishes records", async () => {
+      const createOne = getResult(await client.callTool({
+        name: "create_record",
+        arguments: { modelApiKey: "post", data: { title: "Published A" } },
+      }));
+      const createTwo = getResult(await client.callTool({
+        name: "create_record",
+        arguments: { modelApiKey: "post", data: { title: "Published B" } },
+      }));
+      await client.callTool({
+        name: "bulk_publish_records",
+        arguments: { modelApiKey: "post", recordIds: [createOne.id, createTwo.id] },
+      });
+
+      const bulkUnpubRes = await client.callTool({
+        name: "bulk_unpublish_records",
+        arguments: { modelApiKey: "post", recordIds: [createOne.id, createTwo.id] },
+      });
+      const unpublished = getResult(bulkUnpubRes);
+      expect(unpublished).toHaveLength(2);
+      expect(unpublished.every((record: { _status: string }) => record._status === "draft")).toBe(true);
+    });
+
     it("schedules publish and clears schedules", async () => {
       const createRes = await client.callTool({
         name: "create_record",

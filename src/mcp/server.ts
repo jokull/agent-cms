@@ -402,6 +402,7 @@ All records must belong to the same model. Slugs are auto-generated. Returns arr
 const PublishRecordTool = cmsTool("publish_record", "Publish a record. This is when required/unique validation is enforced for draft-enabled models; if a draft is incomplete, this tool returns the validation error.", PublishRecordInput.fields);
 const BulkPublishRecordsTool = cmsTool("bulk_publish_records", "Publish multiple records from the same model in one call. Use this instead of looping over publish_record when you already have several record IDs.", BulkRecordOperationInput.fields);
 const UnpublishRecordTool = cmsTool("unpublish_record", "Unpublish a record", PublishRecordInput.fields);
+const BulkUnpublishRecordsTool = cmsTool("bulk_unpublish_records", "Unpublish multiple records from the same model in one call. Use this instead of looping over unpublish_record when you already have several record IDs.", BulkRecordOperationInput.fields);
 const SchedulePublishTool = cmsTool("schedule_publish", "Schedule a record to publish at a future ISO datetime. Set at:null to clear.", ScheduleToolInput.fields);
 const ScheduleUnpublishTool = cmsTool("schedule_unpublish", "Schedule a record to unpublish at a future ISO datetime. Set at:null to clear.", ScheduleToolInput.fields);
 const ClearScheduleTool = cmsTool("clear_schedule", "Clear both publish and unpublish schedules for a record", PublishRecordInput.fields);
@@ -517,6 +518,7 @@ const AdminTools = [
   PublishRecordTool,
   BulkPublishRecordsTool,
   UnpublishRecordTool,
+  BulkUnpublishRecordsTool,
   SchedulePublishTool,
   ScheduleUnpublishTool,
   ClearScheduleTool,
@@ -558,6 +560,7 @@ const EditorTools = [
   PublishRecordTool,
   BulkPublishRecordsTool,
   UnpublishRecordTool,
+  BulkUnpublishRecordsTool,
   SchedulePublishTool,
   ScheduleUnpublishTool,
   ClearScheduleTool,
@@ -620,7 +623,7 @@ Structured text editing notes:
 
 Draft/publish lifecycle:
   Records on draft-enabled models start as drafts. Call publish_record to make them visible in GraphQL.
-  If you already have several record IDs from the same model, use bulk_publish_records instead of looping over publish_record.
+  If you already have several record IDs from the same model, use bulk_publish_records or bulk_unpublish_records instead of looping over single-record lifecycle tools.
   Required-field validation for draft-enabled models happens at publish time, not create_record time.
   Edits after publishing create a new draft version — publish again to update.
   GraphQL serves published content by default; use X-Include-Drafts header for previews.
@@ -910,6 +913,7 @@ export function createMcpLayer(
     publish_record: withDecoded(PublishRecordInput, ({ recordId, modelApiKey }) => PublishService.publishRecord(modelApiKey, recordId, options?.actor)),
     bulk_publish_records: withDecoded(BulkRecordOperationInput, ({ recordIds, modelApiKey }) => PublishService.bulkPublishRecords(modelApiKey, recordIds, options?.actor)),
     unpublish_record: withDecoded(PublishRecordInput, ({ recordId, modelApiKey }) => PublishService.unpublishRecord(modelApiKey, recordId, options?.actor)),
+    bulk_unpublish_records: withDecoded(BulkRecordOperationInput, ({ recordIds, modelApiKey }) => PublishService.bulkUnpublishRecords(modelApiKey, recordIds, options?.actor)),
     schedule_publish: withDecoded(ScheduleToolInput, ({ recordId, modelApiKey, at }) => ScheduleService.schedulePublish(modelApiKey, recordId, at, options?.actor)),
     schedule_unpublish: withDecoded(ScheduleToolInput, ({ recordId, modelApiKey, at }) => ScheduleService.scheduleUnpublish(modelApiKey, recordId, at, options?.actor)),
     clear_schedule: withDecoded(PublishRecordInput, ({ recordId, modelApiKey }) => ScheduleService.clearSchedule(modelApiKey, recordId, options?.actor)),

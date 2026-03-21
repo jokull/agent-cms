@@ -113,6 +113,20 @@ export function bulkPublishRecords(modelApiKey: string, recordIds: readonly stri
   );
 }
 
+export function bulkUnpublishRecords(modelApiKey: string, recordIds: readonly string[], actor?: RequestActor | null) {
+  return Effect.all(
+    recordIds.map((recordId) => unpublishRecord(modelApiKey, recordId, actor)),
+    { concurrency: "unbounded" },
+  ).pipe(
+    Effect.withSpan("record.bulk_unpublish"),
+    Effect.annotateSpans({
+      modelApiKey,
+      recordCount: String(recordIds.length),
+      actorType: actor?.type ?? "anonymous",
+    }),
+  );
+}
+
 export function unpublishRecord(modelApiKey: string, recordId: string, actor?: RequestActor | null) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
