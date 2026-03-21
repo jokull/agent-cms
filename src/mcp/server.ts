@@ -572,6 +572,10 @@ function createGuideResource() {
     mimeType: "text/plain",
     content: Effect.succeed(`agent-cms — Agent Orientation Guide
 
+Server boundary:
+  - Admin MCP: /mcp — includes schema mutation tools like create_model, create_field, delete_model, delete_field, import_schema, and token management.
+  - Editor MCP: /mcp/editor — content/publishing/assets/search only. If a schema-mutation tool is missing, you are probably on the editor MCP and should switch surfaces instead of retrying.
+
 Workflow order:
   schema_info -> create_model -> create_field -> create_record -> publish_record
 
@@ -613,6 +617,14 @@ Asset upload flow:
   1. Upload file to R2 out of band
   2. Register with upload_asset tool (pass r2Key, filename, mimeType, dimensions)
   3. Use returned asset ID in media/media_gallery fields
+
+Raw HTTP / JSON-RPC access:
+  - Endpoint: POST /mcp for admin, POST /mcp/editor for editor
+  - Auth: Authorization: Bearer <token>
+  - Initialize first if your MCP client expects it, then send tools/call requests
+  - Typical tool call body:
+    {"jsonrpc":"2.0","method":"tools/call","params":{"name":"create_record","arguments":{...}},"id":1}
+  - Tool results usually come back in result.content[0].text as a JSON string payload
 
 Slug fields:
   Set validator {"slug_source": "title"} to auto-generate from a source field.
