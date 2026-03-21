@@ -78,6 +78,24 @@ describe("Records REST API", () => {
       const res2 = await jsonRequest(handler, "POST", "/api/records", { modelApiKey: "homepage", data: { title: "Another" } });
       expect(res2.status).toBe(409);
     });
+
+    it("rejects non-existent link references on create", async () => {
+      const authorRes = await jsonRequest(handler, "POST", "/api/models", { name: "Author", apiKey: "author" });
+      const author = await authorRes.json();
+      await jsonRequest(handler, "POST", `/api/models/${author.id}/fields`, { label: "Name", apiKey: "name", fieldType: "string" });
+      await jsonRequest(handler, "POST", `/api/models/${modelId}/fields`, {
+        label: "Author", apiKey: "author", fieldType: "link", validators: { item_item_type: ["author"] },
+      });
+
+      const res = await jsonRequest(handler, "POST", "/api/records", {
+        modelApiKey: "post",
+        data: { title: "Broken", author: "01NONEXISTENTAUTHOR0000000000" },
+      });
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toMatchObject({
+        error: expect.stringContaining("Linked record(s) not found for field 'author'"),
+      });
+    });
   });
 
   describe("GET /api/records", () => {

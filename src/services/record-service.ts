@@ -13,7 +13,7 @@ import {
 import { writeStructuredText, deleteBlocksForField, getStructuredTextStorageKey, materializeRecordStructuredTextFields, materializeStructuredTextValue } from "./structured-text-service.js";
 import type { ModelRow, FieldRow, ParsedFieldRow } from "../db/row-types.js";
 import { parseFieldValidators, isContentRow } from "../db/row-types.js";
-import { getSlugSource, getBlockWhitelist, getBlocksOnly, isRequired, findUniqueConstraintViolations, isUnique } from "../db/validators.js";
+import { getSlugSource, getBlockWhitelist, getBlocksOnly, isRequired, findUniqueConstraintViolations, isUnique, getLinkTargets, getLinksTargets } from "../db/validators.js";
 import * as SearchService from "../search/search-service.js";
 import type { CreateRecordInput, PatchRecordInput, BulkCreateRecordsInput, PatchBlocksInput } from "./input-schemas.js";
 import { getFieldTypeDef } from "../field-types.js";
@@ -184,6 +184,67 @@ function createFieldErrorMessage(prefix: string | undefined, message: string) {
   return prefix ? `${prefix}: ${message}` : message;
 }
 
+function getReferenceIds(fieldType: string, value: unknown): string[] {
+  if (fieldType === "link") {
+    return typeof value === "string" && value.length > 0 ? [value] : [];
+  }
+  if (fieldType === "links") {
+    return Array.isArray(value)
+      ? value.filter((entry): entry is string => typeof entry === "string" && entry.length > 0)
+      : [];
+  }
+  return [];
+}
+
+function validateReferenceFieldValue(
+  sql: SqlClient.SqlClient,
+  field: ParsedFieldRow,
+  value: unknown,
+  errorPrefix?: string,
+) {
+  return Effect.gen(function* () {
+    const targetModelApiKeys = field.field_type === "link"
+      ? getLinkTargets(field.validators)
+      : field.field_type === "links"
+        ? getLinksTargets(field.validators)
+        : undefined;
+    const referenceIds = getReferenceIds(field.field_type, value);
+
+    if (!targetModelApiKeys || referenceIds.length === 0) {
+      return;
+    }
+
+    const placeholders = targetModelApiKeys.map(() => "?").join(", ");
+    const targetModels = yield* sql.unsafe<ModelRow>(
+      `SELECT * FROM models WHERE api_key IN (${placeholders})`,
+      targetModelApiKeys,
+    );
+
+    const foundIds = new Set<string>();
+    for (const model of targetModels) {
+      const idPlaceholders = referenceIds.map(() => "?").join(", ");
+      const rows = yield* sql.unsafe<{ id: string }>(
+        `SELECT id FROM "content_${model.api_key}" WHERE id IN (${idPlaceholders})`,
+        referenceIds,
+      );
+      for (const row of rows) {
+        foundIds.add(row.id);
+      }
+    }
+
+    const missingIds = referenceIds.filter((id) => !foundIds.has(id));
+    if (missingIds.length > 0) {
+      return yield* new ValidationError({
+        message: createFieldErrorMessage(
+          errorPrefix,
+          `Linked record(s) not found for field '${field.api_key}': ${missingIds.join(", ")}`,
+        ),
+        field: field.api_key,
+      });
+    }
+  });
+}
+
 function processCreateLikeRecordFields({
   modelApiKey,
   tableName,
@@ -317,6 +378,28 @@ function processCreateLikeRecordFields({
               }))
             );
           }
+        }
+      }
+
+      // Validate linked-record existence for link/links fields
+      if (
+        (field.field_type === "link" || field.field_type === "links")
+        && data[field.api_key] !== undefined
+        && data[field.api_key] !== null
+      ) {
+        if (field.localized) {
+          const localeMap = yield* decodeLocalizedFieldMap(field, data[field.api_key]).pipe(
+            Effect.mapError((error) => new ValidationError({
+              message: createFieldErrorMessage(errorPrefix, error.message),
+              field: error.field,
+            }))
+          );
+          for (const localeValue of Object.values(localeMap)) {
+            if (localeValue === null) continue;
+            yield* validateReferenceFieldValue(sql, field, localeValue, errorPrefix);
+          }
+        } else {
+          yield* validateReferenceFieldValue(sql, field, data[field.api_key], errorPrefix);
         }
       }
 

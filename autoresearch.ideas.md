@@ -8,8 +8,8 @@
 
 ## Next Best Bets
 - Make the guide more explicit about checking `schema_info` / `describe_model` before assuming example fields
-- Test nested structured text authoring with the current seeded block types (`feature_grid` + nested `feature_card`)
-- Probe search UX and edge-case error quality for weak spots that still cause extra turns
+- Probe edge-case error quality for weak spots that still cause extra turns
+- Test publishing/scheduling workflows for status/validation confusion
 
 ## Content CRUD
 - Update specific fields on existing records (`reading_time`, `featured`)
@@ -18,7 +18,6 @@
 - Create a record with all currently seeded post field types: string, text, integer, boolean, date, media, link, seo, structured_text
 
 ## Structured Text
-- Build content using the current seeded block types: `hero_section`, `code_block`, `feature_grid`, and nested `feature_card`
 - Patch specific blocks in existing structured text without replacing the whole field
 - Create deeply nested structured text with inline links
 - Convert long markdown (1000+ words) to structured text
@@ -37,7 +36,6 @@
 
 ## Search
 - Full-text search for content across models
-- Search for specific terms that should match seeded post content
 
 ## Multi-Step Workflows
 - "Write a blog post about Effect TypeScript" — full workflow from schema discovery to published post
@@ -49,6 +47,5 @@
 - Have Claude write a Node.js script that imports assets from URLs and creates records referencing them
 
 ## Edge Cases
-- Create a record with missing required fields — check error message quality
 - Reference a non-existent record ID in a link field
 - Try to use admin-only tools with an editor token — verify clear error

@@ -103,17 +103,15 @@ describe("Multi-target link resolution", () => {
     expect(tag.label).toBe("TypeScript");
   });
 
-  it("returns null for link to non-existent record", async () => {
-    await jsonRequest(handler, "POST", "/api/records", {
+  it("rejects link to non-existent record on create", async () => {
+    const res = await jsonRequest(handler, "POST", "/api/records", {
       modelApiKey: "post",
       data: { title: "Broken Link", related: "nonexistent-id" },
     });
 
-    const result = await gqlQuery(handler, `{
-      allPosts { related }
-    }`, { includeDrafts: true });
-
-    expect(result.errors).toBeUndefined();
-    expect(result.data.allPosts[0].related).toBeNull();
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      error: expect.stringContaining("Linked record(s) not found for field 'related'"),
+    });
   });
 });
