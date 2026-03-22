@@ -1,10 +1,10 @@
 {
   "mcpServers": {
-    "blog-cms": {
+    "cms": {
       "type": "http",
-      "url": "https://test-cms.solberg.is/mcp/editor",
+      "url": "https://test-cms.solberg.is/mcp",
       "headers": {
-        "Authorization": "Bearer etk_60020d5s1v47451o0f392v236w1i416g4626334i4z1c0w23"
+        "Authorization": "Bearer WVp53ojuZESleQjfajSNUWVIL1b1NZHqGzbPJhcthRw"
       }
     }
   }

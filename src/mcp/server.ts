@@ -429,6 +429,8 @@ Markdown mode: write standard markdown. Place blocks with sentinels: <!-- cms:bl
 
 Inline markdown in text fields: **bold**, *italic*, \`code\`, [links](url), ~~strikethrough~~.
 
+Encoding note: MCP tool arguments are XML-encoded by some clients. If any literal string in your structured text includes angle brackets (for example TypeScript generics like <T>, JSX, or HTML snippets), escape them as Unicode in the JSON string: \u003C and \u003E.
+
 For nested blocks (e.g. sections containing venues), compose bottom-up:
 1. Build inner structured text (venues) → get {value, blocks} result
 2. Use that result as a field value in a parent block's data
@@ -608,6 +610,11 @@ Asset upload flow:
   1. Upload file to R2 out of band
   2. Register with upload_asset tool (pass r2Key, filename, mimeType, dimensions)
   3. Use returned asset ID in media/media_gallery fields
+
+Tool argument encoding:
+  - Some MCP clients XML-encode tool arguments before they reach the server.
+  - If a literal string value contains angle brackets (for example TypeScript generics like <T>, JSX, or inline HTML), escape them inside the JSON string as \u003C and \u003E.
+  - This matters most for build_structured_text code nodes and any create_record/update_record payload carrying code snippets.
 
 Raw HTTP / JSON-RPC access:
   - Endpoint: POST <mount>/mcp for admin, POST <mount>/mcp/editor for editor
