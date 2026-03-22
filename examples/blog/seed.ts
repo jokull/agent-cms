@@ -232,6 +232,21 @@ async function seed() {
     apiKey: "subheadline",
     fieldType: "text",
   });
+  await api("POST", `/api/models/${heroSection.id}/fields`, {
+    label: "Background Image",
+    apiKey: "background_image",
+    fieldType: "media",
+  });
+  await api("POST", `/api/models/${heroSection.id}/fields`, {
+    label: "CTA Text",
+    apiKey: "cta_text",
+    fieldType: "string",
+  });
+  await api("POST", `/api/models/${heroSection.id}/fields`, {
+    label: "CTA URL",
+    apiKey: "cta_url",
+    fieldType: "string",
+  });
 
   // code_block block
   await api("POST", `/api/models/${codeBlock.id}/fields`, {
