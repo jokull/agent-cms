@@ -14,8 +14,8 @@ Canonical record of all settled decisions for agent-cms. This file is the comple
 | D6 | StructuredText is the only block-containing field type | No separate `rich_text` / `modular_content` type | Major simplification. "Modular content" (page builder) = StructuredText with a block-only validator whitelist (no prose nodes). One storage model, one resolution path, one set of GraphQL types. |
 | D7 | Draft storage | `_published_snapshot` JSON column on each content row | Single row per record. Real columns = draft state. Snapshot = published state. `includeDrafts` toggles which the GraphQL resolver reads. Simpler than dual-row/shadow table. On field add, snapshot doesn't need updating (new field absent = null). On field remove, snapshots lazily cleaned. |
 | D8 | Localization | JSON columns for localized fields | A localized field `title` stores `{"en": "Hello", "is": "Halló"}`. Non-localized fields store plain values. No column explosion, no DDL changes on locale add/remove, works with SQLite `json_extract()`. |
-| D9 | All IDs | ULID via `ulidx` | Time-sortable = sequential B-tree inserts = no page fragmentation on SQLite. 26 chars (vs UUID's 36). Works in Workers/browser/Node. |
-| D10 | Block IDs | Client-generated ULIDs | Agent provides ULIDs in DAST `block`/`inlineBlock` nodes + block payloads. Server validates all IDs in DAST match provided block data. No server-side ID rewriting needed. |
+| D9 | All IDs | nanoid (21-char, time-prefixed) | Time-sortable = sequential B-tree inserts = no page fragmentation on SQLite. 21 chars (vs UUID's 36). Works in Workers/browser/Node. |
+| D10 | Block IDs | Client-generated IDs | Agent provides IDs in DAST `block`/`inlineBlock` nodes + block payloads. Server validates all IDs in DAST match provided block data. No server-side ID rewriting needed. |
 
 ## API Design
 

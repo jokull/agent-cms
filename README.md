@@ -53,7 +53,7 @@ pnpm run deploy
 
 ### Guided setup
 
-For more control — standalone vs. service binding vs. mounting in an existing Worker — copy the prompt from [`PROMPT.md`](./PROMPT.md) into Claude Code. It assesses your repo, asks how you want to integrate, and wires everything up.
+For more control — standalone vs. service binding vs. mounting in an existing Worker — copy the prompt from [`AGENT.md`](./AGENT.md) into Claude Code. It assesses your repo, asks how you want to integrate, and wires everything up.
 
 ## Interfaces
 
@@ -140,7 +140,7 @@ FTS5 keyword search with BM25 ranking and snippets, scoped to all models or a si
 
 ## Editor tokens
 
-Editor tokens are the credential for non-admin editing flows. Create them via `POST /api/tokens` or the `create_editor_token` MCP tool. The raw token is shown once; the server stores a hash.
+Editor tokens are the credential for non-admin editing flows. Create them via `POST /api/tokens` or the `editor_tokens` MCP tool (with `action: "create"`). The raw token is shown once; the server stores a hash.
 
 Editor tokens can access `/mcp/editor`, REST content/asset operations, and draft GraphQL previews. They cannot mutate schema, manage tokens, or run admin operations.
 

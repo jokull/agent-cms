@@ -34,7 +34,7 @@ describe("P1: Published snapshots cleaned on block removal", () => {
     agent = await createMcpAgent(sqlLayer);
   });
 
-  it("remove_block_type cleans published snapshots", async () => {
+  it("remove_block cleans published snapshots", async () => {
     // Setup: block type + content model + record with block
     const hero = parse(await agent.callTool({
       name: "create_model", arguments: { name: "Hero", apiKey: "hero", isBlock: true },
@@ -122,7 +122,7 @@ describe("P1: Published snapshots cleaned on block removal", () => {
     expect(afterRemoval.body.value.document.children.every((c: any) => c.type === "paragraph")).toBe(true);
   });
 
-  it("remove_block_from_whitelist cleans published snapshots", async () => {
+  it("remove_block (with fieldId) cleans published snapshots", async () => {
     // Setup: two block types, one gets removed from whitelist
     const callout = parse(await agent.callTool({
       name: "create_model", arguments: { name: "Callout", apiKey: "callout", isBlock: true },

@@ -170,7 +170,7 @@ describe("Schema import/export", () => {
     expect(res2.status).toBe(409); // DuplicateError
   });
 
-  it("MCP export_schema and import_schema tools work", async () => {
+  it("MCP schema_io export and import actions work", async () => {
     const { createTestMcpClient } = await import("./mcp-helpers.js");
 
     // Build schema via MCP on CMS 1

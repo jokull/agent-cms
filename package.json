@@ -73,8 +73,8 @@
     "remark-gfm": "^4.0.1",
     "remark-parse": "^11.0.0",
     "remark-stringify": "^11.0.0",
+    "nanoid": "^5.1.7",
     "slugify": "^1.6.8",
-    "ulidx": "^2.4.1",
     "unified": "^11.0.5"
   },
   "devDependencies": {

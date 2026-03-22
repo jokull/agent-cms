@@ -2,22 +2,23 @@
 
 ## Phase 2 — Schema Design + Content (from empty CMS)
 
-### High priority
+### Already probed cleanly
 - Blog with posts, authors, categories, structured text with blocks
 - Recipe site with ingredients (links), steps (structured text), difficulty
 - Portfolio with projects, technologies, cover images
 - Schema ordering: slug after source field, block types before structured text fields
-- Validator UX: required fields, enum constraints, date ranges, slug_source
+- Validator UX: required fields, date ranges, slug_source
+- Singleton setup (daily special / site settings style flows)
+- Error recovery: dangling links
+- Complex nested blocks: structured text containing blocks with nested structured text
 
-### Medium priority
-- Singleton setup (site settings with custom fields)
-- Schema import/export round-trip
-- Error recovery: wrong field order, missing validators, dangling links
-
-### Lower priority
-- Complex block nesting: sections containing cards containing structured text
-- Bulk content creation after schema design
-- Search after content creation
+### Still promising
+- Schema import/export round-trip on an empty CMS, then create/publish content against the imported schema
+- Bulk content creation after schema design (larger batches, then bulk publish)
+- Search after content creation from an empty CMS (verify indexing/reindex guidance in a schema+content workflow)
+- Enum validator UX from empty CMS (author a constrained field, trigger a bad value, recover cleanly)
+- Missing-dependency recovery from empty CMS (attempt structured_text before block whitelist / create slug before source field, then recover)
+- Localization setup from empty CMS (create locales, localized fields, publish translated content)
 
 ## Anti-patterns
 - Do NOT modify seed.ts — the CMS starts empty each run

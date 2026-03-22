@@ -29,7 +29,7 @@ CMS_WRITE_KEY=... pnpm run setup -- https://<your-cms-url>
 
 ### 2. Create the Schema and Content
 
-Connect Claude to the MCP server, then give it the [PROMPT.md](./PROMPT.md):
+Connect Claude to the MCP server, then give it the [AGENT.md](./AGENT.md):
 
 ```json
 {
