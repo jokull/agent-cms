@@ -26,7 +26,6 @@ import {
   CreateFieldInput,
   CreateModelInput,
   CreateRecordInput,
-  BulkRecordOperationInput,
   ImportAssetFromUrlInput,
   ImportSchemaInput,
   ReindexSearchInput,
@@ -50,8 +49,9 @@ const BlockEntry = Schema.Struct({
 });
 
 const BuildStructuredTextInput = Schema.Struct({
+  markdown: Schema.optional(Schema.String),
   blocks: Schema.optional(Schema.Array(BlockEntry)),
-  nodes: Schema.Array(
+  nodes: Schema.optional(Schema.Array(
     Schema.Union(
       Schema.Struct({
         type: Schema.Literal("paragraph"),
@@ -84,12 +84,7 @@ const BuildStructuredTextInput = Schema.Struct({
         ref: Schema.String,
       }),
     )
-  ),
-});
-
-const BuildStructuredTextFromMarkdownInput = Schema.Struct({
-  markdown: Schema.String,
-  blocks: Schema.optional(Schema.Array(BlockEntry)),
+  )),
 });
 
 const UpdateModelInput = Schema.Struct({
@@ -112,9 +107,7 @@ const UpdateFieldInput = Schema.Struct({
 
 const ModelIdInput = Schema.Struct({ modelId: Schema.String });
 const FieldIdInput = Schema.Struct({ fieldId: Schema.String });
-const ApiKeyInput = Schema.Struct({ apiKey: Schema.String });
 const LocaleIdInput = Schema.Struct({ localeId: Schema.String });
-const VersionIdInput = Schema.Struct({ versionId: Schema.String });
 
 const SchemaInfoInput = Schema.Struct({
   filterByName: Schema.optional(Schema.String),
@@ -123,12 +116,7 @@ const SchemaInfoInput = Schema.Struct({
 });
 
 const UpdateRecordInput = Schema.Struct({
-  recordId: Schema.String,
-  modelApiKey: Schema.String,
-  data: Schema.optionalWith(JsonRecord, { default: () => ({}) }),
-});
-
-const UpdateSingletonRecordInput = Schema.Struct({
+  recordId: Schema.optional(Schema.String),
   modelApiKey: Schema.String,
   data: Schema.optionalWith(JsonRecord, { default: () => ({}) }),
 });
@@ -155,37 +143,31 @@ const BulkCreateRecordsInput = Schema.Struct({
   records: Schema.Array(JsonRecord),
 });
 
-const PublishRecordInput = Schema.Struct({
-  recordId: Schema.String,
+const PublishRecordsInput = Schema.Struct({
   modelApiKey: Schema.String,
+  recordIds: Schema.Array(Schema.String).pipe(
+    Schema.filter((value) => value.length >= 1, { message: () => "recordIds must contain at least 1 entry" }),
+    Schema.filter((value) => value.length <= 1000, { message: () => "recordIds must contain at most 1000 entries" }),
+  ),
 });
 
-const ScheduleToolInput = Schema.Struct({
+const ScheduleInput = Schema.Struct({
   recordId: Schema.String,
   modelApiKey: Schema.String,
-  at: Schema.NullOr(Schema.String),
+  action: Schema.Literal("publish", "unpublish", "clear"),
+  at: Schema.optional(Schema.NullOr(Schema.String)),
 });
 
-const RestoreVersionInput = Schema.Struct({
+const RecordVersionsInput = Schema.Struct({
+  action: Schema.Literal("list", "get", "restore"),
   modelApiKey: Schema.String,
   recordId: Schema.String,
-  versionId: Schema.String,
+  versionId: Schema.optional(Schema.String),
 });
 
-const CompareVersionsInput = Schema.Struct({
-  modelApiKey: Schema.String,
-  recordId: Schema.String,
-  leftVersionId: Schema.String,
-  rightVersionId: Schema.optional(Schema.String),
-});
-
-const RemoveBlockTypeInput = Schema.Struct({
+const RemoveBlockInput = Schema.Struct({
   blockApiKey: Schema.String,
-});
-
-const RemoveBlockFromWhitelistInput = Schema.Struct({
-  fieldId: Schema.String,
-  blockApiKey: Schema.String,
+  fieldId: Schema.optional(Schema.String),
 });
 
 const ReplaceAssetInput = Schema.Struct({
@@ -193,8 +175,9 @@ const ReplaceAssetInput = Schema.Struct({
   ...AssetInput.fields,
 });
 
-const ImportSchemaToolInput = Schema.Struct({
-  schema: ImportSchemaInput,
+const SchemaIOInput = Schema.Struct({
+  action: Schema.Literal("export", "import"),
+  schema: Schema.optional(ImportSchemaInput),
 });
 
 const UpdateSiteSettingsInput = Schema.Struct({
@@ -210,12 +193,17 @@ const UpdateSiteSettingsInput = Schema.Struct({
   fallbackSeoTwitterCard: Schema.optional(Schema.String),
 });
 
-const CreateEditorTokenMcpInput = Schema.Struct({
-  name: Schema.String,
+const EditorTokensInput = Schema.Struct({
+  action: Schema.Literal("create", "list", "revoke"),
+  name: Schema.optional(Schema.String),
   expiresIn: Schema.optional(Schema.Number.pipe(Schema.int(), Schema.positive())),
+  tokenId: Schema.optional(Schema.String),
 });
 
-const TokenIdInput = Schema.Struct({ tokenId: Schema.String });
+const GetRecordInput = Schema.Struct({
+  recordId: Schema.String,
+  modelApiKey: Schema.String,
+});
 
 const SetupContentModelPromptInput = Schema.Struct({
   description: Schema.String,
@@ -237,18 +225,14 @@ function cmsTool<Name extends string>(
     failure: Schema.Unknown,
     dependencies: CommonDependencies,
   });
-  const isReadonly = name.startsWith("list_")
-    || name.startsWith("describe_")
-    || name.startsWith("query_")
+  const isReadonly = name.startsWith("query_")
     || name.startsWith("get_")
     || name === "schema_info"
     || name === "build_structured_text"
-    || name === "build_structured_text_from_markdown"
-    || name === "search_content"
-    || name === "export_schema";
+    || name === "search_content";
   tool = tool.annotate(AiTool.Readonly, isReadonly);
   tool = tool.annotate(AiTool.Idempotent, isReadonly || name.startsWith("update_") || name.startsWith("replace_"));
-  tool = tool.annotate(AiTool.Destructive, name.startsWith("delete_") || name.startsWith("remove_"));
+  tool = tool.annotate(AiTool.Destructive, name.startsWith("delete_") || name === "remove_block");
   tool = tool.annotate(AiTool.OpenWorld, name === "search_content");
   return tool;
 }
@@ -341,8 +325,9 @@ function pickToolkitHandlers(
   return filtered;
 }
 
-const ListModelsTool = cmsTool("list_models", "List all content models and block types with their fields");
-const DescribeModelTool = cmsTool("describe_model", "Get detailed info about a model", ApiKeyInput.fields);
+// --- Tool definitions ---
+
+const SchemaInfoTool = cmsTool("schema_info", "Get the complete CMS schema in one call — models, block types, fields, relations. The primary tool for understanding the content model. Use filterByName to find a specific model.", SchemaInfoInput.fields);
 const CreateModelTool = cmsTool("create_model", "Create a content model or block type. Use isBlock:true for block types (embeddable in StructuredText). Use singleton:true for models with exactly one record (e.g. site settings). After creating a model, add fields with create_field.", CreateModelInput.fields);
 const UpdateModelTool = cmsTool("update_model", "Update model properties (name, apiKey, singleton, sortable, hasDraft, allLocalesRequired, ordering). Set ordering to a default sort like 'title_ASC', '_createdAt_DESC', '_position_ASC', or null to clear.", UpdateModelInput.fields);
 const CreateFieldTool = cmsTool("create_field", `Add a field to a model. Auto-migrates the database table (adds column).
@@ -364,11 +349,10 @@ Key validators by field type:
 const UpdateFieldTool = cmsTool("update_field", "Update field properties (label, apiKey, validators, hint)", UpdateFieldInput.fields);
 const DeleteModelTool = cmsTool("delete_model", "Delete a model (fails if referenced)", ModelIdInput.fields);
 const DeleteFieldTool = cmsTool("delete_field", "Delete a field and drop column", FieldIdInput.fields);
-const SchemaInfoTool = cmsTool("schema_info", "Get the complete CMS schema in one call — models, block types, fields, relations. The primary tool for understanding the content model.", SchemaInfoInput.fields);
-const CreateRecordTool = cmsTool("create_record", `Create a content record. Records on draft-enabled models start as draft — call publish_record to make them visible in GraphQL.
+const CreateRecordTool = cmsTool("create_record", `Create a content record. Records on draft-enabled models start as draft — call publish_records to make them visible in GraphQL.
 
 Validation note:
-- For models with drafts (has_draft=true), required-field validation is deferred until publish_record.
+- For models with drafts (has_draft=true), required-field validation is deferred until publish_records.
 - For models without drafts (has_draft=false), required fields are enforced during create_record.
 
 Field value formats:
@@ -380,8 +364,7 @@ Field value formats:
 - structured_text: {"value":{"schema":"dast","document":{...}},"blocks":{"<id>":{"_type":"block_api_key",...}}}
 - color: {"red":255,"green":0,"blue":0,"alpha":255}
 - lat_lon: {"latitude":64.13,"longitude":-21.89}`, CreateRecordInput.fields);
-const UpdateRecordTool = cmsTool("update_record", "Update record fields by record ID", UpdateRecordInput.fields);
-const UpdateSingletonRecordTool = cmsTool("update_singleton_record", "Update a singleton content-model record by modelApiKey without looking up its record ID first. Use this for singleton content models in your schema (for example a site_settings singleton with custom fields like tagline).", UpdateSingletonRecordInput.fields);
+const UpdateRecordTool = cmsTool("update_record", "Update record fields. For singletons, recordId can be omitted — the single record is found automatically.", UpdateRecordInput.fields);
 const PatchBlocksTool = cmsTool("patch_blocks", `Partially update blocks in a structured text field without resending the entire content tree.
 
 You can target block IDs from either:
@@ -402,33 +385,38 @@ Optionally provide a new top-level DAST \`value\`. If omitted, the existing DAST
 Example — update one block's description, delete another, keep the rest:
 { blocks: { "block-1": "block-1", "block-2": { "description": "New text" }, "block-3": null } }`, PatchBlocksInput.fields);
 const DeleteRecordTool = cmsTool("delete_record", "Delete a record", DeleteRecordInput.fields);
-const GetRecordTool = cmsTool("get_record", "Get a single record by modelApiKey + recordId. Useful after search_content when you need the full materialized record, including structured_text fields, before patch_blocks or update_record.", PublishRecordInput.fields);
-const QueryRecordsTool = cmsTool("query_records", "List records for a model. Structured_text fields are materialized for inspection, including nested blocks inside parent block fields. Useful for finding record IDs before update_record, patch_blocks, publish_record, or restore_record_version.", QueryRecordsInput.fields);
+const GetRecordTool = cmsTool("get_record", "Get a single record by modelApiKey + recordId. Useful after search_content when you need the full materialized record, including structured_text fields, before patch_blocks or update_record.", GetRecordInput.fields);
+const QueryRecordsTool = cmsTool("query_records", "List records for a model. Structured_text fields are materialized for inspection, including nested blocks inside parent block fields. Useful for finding record IDs before update_record, patch_blocks, publish_records, or record_versions.", QueryRecordsInput.fields);
 const BulkCreateRecordsTool = cmsTool("bulk_create_records", `Create multiple records in one operation (up to 1000). Much faster than calling create_record in a loop.
 
 All records must belong to the same model. Slugs are auto-generated. Returns {created, records}, where records is an array of objects like {id}.`, BulkCreateRecordsInput.fields);
-const PublishRecordTool = cmsTool("publish_record", "Publish a record. This is when required/unique validation is enforced for draft-enabled models; if a draft is incomplete, this tool returns the validation error.", PublishRecordInput.fields);
-const BulkPublishRecordsTool = cmsTool("bulk_publish_records", "Publish multiple records from the same model in one call. Use this instead of looping over publish_record when you already have several record IDs.", BulkRecordOperationInput.fields);
-const UnpublishRecordTool = cmsTool("unpublish_record", "Unpublish a record", PublishRecordInput.fields);
-const BulkUnpublishRecordsTool = cmsTool("bulk_unpublish_records", "Unpublish multiple records from the same model in one call. Use this instead of looping over unpublish_record when you already have several record IDs.", BulkRecordOperationInput.fields);
-const SchedulePublishTool = cmsTool("schedule_publish", "Schedule a record to publish at a future ISO datetime. Set at:null to clear.", ScheduleToolInput.fields);
-const ScheduleUnpublishTool = cmsTool("schedule_unpublish", "Schedule a record to unpublish at a future ISO datetime. Set at:null to clear.", ScheduleToolInput.fields);
-const ClearScheduleTool = cmsTool("clear_schedule", "Clear both publish and unpublish schedules for a record", PublishRecordInput.fields);
-const ListRecordVersionsTool = cmsTool("list_record_versions", "List all version snapshots for a record, newest first. Versions are created on each publish or auto-republish.", PublishRecordInput.fields);
-const GetRecordVersionTool = cmsTool("get_record_version", "Get a specific version snapshot by version ID", VersionIdInput.fields);
-const CompareRecordVersionsTool = cmsTool("compare_record_versions", "Compare one stored version against another stored version, or against the record's current published snapshot if rightVersionId is omitted. Returns changedFields plus side-by-side values for each changed field.", CompareVersionsInput.fields);
-const RestoreRecordVersionTool = cmsTool("restore_record_version", "Restore a record to a previous version. The current state is versioned first, so restore is always reversible. For has_draft models, the record returns to draft status (needs re-publish). For non-draft models, the record is auto-republished.", RestoreVersionInput.fields);
-const ReorderRecordsTool = cmsTool("reorder_records", "Reorder records in a sortable/tree model by providing ordered record IDs", ReorderInput.fields);
-const RemoveBlockTypeTool = cmsTool("remove_block_type", "Remove a block type: cleans DAST trees, deletes blocks, drops table", RemoveBlockTypeInput.fields);
-const RemoveBlockFromWhitelistTool = cmsTool("remove_block_from_whitelist", "Remove a block type from a field's whitelist and clean affected DAST trees", RemoveBlockFromWhitelistInput.fields);
-const RemoveLocaleTool = cmsTool("remove_locale", "Remove a locale and strip it from all localized field values", LocaleIdInput.fields);
-const BuildStructuredTextTool = cmsTool("build_structured_text", `Build a StructuredText value from typed nodes and block definitions. Preferred for precise control over document structure.
+const PublishRecordsTool = cmsTool("publish_records", "Publish one or more records. Required/unique validation is enforced at publish time for draft-enabled models. Pass recordIds as an array, even for a single record.", PublishRecordsInput.fields);
+const UnpublishRecordsTool = cmsTool("unpublish_records", "Unpublish one or more records.", PublishRecordsInput.fields);
+const ScheduleTool = cmsTool("schedule", `Schedule a record to publish or unpublish at a future ISO datetime, or clear both schedules.
 
-Workflow: prepare blocks first, then reference them in the node array.
+action: "publish" | "unpublish" | "clear"
+- publish/unpublish: provide at (ISO datetime string)
+- clear: at is ignored`, ScheduleInput.fields);
+const RecordVersionsTool = cmsTool("record_versions", `Manage record versions: list all versions, get a snapshot, or restore a previous version.
+
+action: "list" | "get" | "restore"
+- list: returns all version snapshots for a record, newest first
+- get: returns a specific version snapshot (provide versionId)
+- restore: restores a previous version (provide versionId). Current state is versioned first, so restore is always reversible.`, RecordVersionsInput.fields);
+const ReorderRecordsTool = cmsTool("reorder_records", "Reorder records in a sortable/tree model by providing ordered record IDs", ReorderInput.fields);
+const RemoveBlockTool = cmsTool("remove_block", "Remove a block type entirely (cleans DAST trees, deletes blocks, drops table), or remove it from a specific field's whitelist (provide fieldId).", RemoveBlockInput.fields);
+const RemoveLocaleTool = cmsTool("remove_locale", "Remove a locale and strip it from all localized field values", LocaleIdInput.fields);
+const BuildStructuredTextTool = cmsTool("build_structured_text", `Build a StructuredText value from typed nodes or markdown, plus optional block definitions.
+
+Two modes:
+1. Typed nodes (provide "nodes"): precise control over document structure
+2. Markdown (provide "markdown"): natural formatting for prose-heavy content
+
+Workflow: prepare blocks first, then reference them in nodes or markdown.
 
 blocks: [{id: "v1", type: "venue", data: {name: "Chickpea", image: "asset_id"}}]
 
-nodes (text structure referencing blocks by ID):
+Typed nodes (text structure referencing blocks by ID):
 - paragraph: {type:"paragraph", text:"Inline **markdown** and [links](url) supported"}
 - heading: {type:"heading", level:2, text:"Section Title"}
 - code: {type:"code", code:"const x = 1", language:"typescript"}
@@ -437,6 +425,8 @@ nodes (text structure referencing blocks by ID):
 - thematicBreak: {type:"thematicBreak"}
 - block: {type:"block", ref:"v1"} — places a block defined in the blocks array
 
+Markdown mode: write standard markdown. Place blocks with sentinels: <!-- cms:block:BLOCK_ID -->
+
 Inline markdown in text fields: **bold**, *italic*, \`code\`, [links](url), ~~strikethrough~~.
 
 For nested blocks (e.g. sections containing venues), compose bottom-up:
@@ -444,32 +434,8 @@ For nested blocks (e.g. sections containing venues), compose bottom-up:
 2. Use that result as a field value in a parent block's data
 3. Build outer structured text (sections) referencing the parent blocks
 
-Concrete nested example from the blog seed:
-- feature_grid.features allows only feature_card blocks
-- feature_card.details is its own structured_text field and allows inline markdown plus code_block blocks
-- So: build each feature_card.details value first (if needed), put that under the feature_card's data, then build the feature_grid.features document referencing those feature_card blocks, then place the feature_grid block in the post.content field
+IMPORTANT: Call schema_info first to verify which block types are allowed on the target structured_text field (check the structured_text_blocks validator).`, BuildStructuredTextInput.fields);
 
-IMPORTANT: Call describe_model first to verify which block types are allowed on the target structured_text field (check the structured_text_blocks validator).
-
-If your MCP client supports code execution (e.g. Claude Desktop Analysis tool), consider constructing the StructuredText JSON directly in a script for maximum control. Otherwise, this tool or build_structured_text_from_markdown are the way to go.`, BuildStructuredTextInput.fields);
-
-const BuildStructuredTextFromMarkdownTool = cmsTool("build_structured_text_from_markdown", `Build a StructuredText value from markdown and block definitions. Best for prose-heavy content where you want natural formatting.
-
-Workflow: prepare blocks first, then reference them in the markdown with sentinels.
-
-blocks: [{id: "hero1", type: "hero_banner", data: {title: "Welcome"}}]
-
-Write standard markdown (headings, bold, italic, links, lists, code blocks, tables, blockquotes).
-Place blocks with sentinels: <!-- cms:block:BLOCK_ID -->
-
-Every block in the blocks array MUST have a matching sentinel in the markdown. Unused blocks cause the tool to fail.
-
-For nested blocks, compose bottom-up — same as build_structured_text.
-For the blog seed specifically: feature_grid.features allows only feature_card blocks, and feature_card.details can contain inline markdown and code_block blocks.
-
-IMPORTANT: Call describe_model first to verify which block types are allowed on the target structured_text field (check the structured_text_blocks validator).
-
-If your MCP client supports code execution (e.g. Claude Desktop Analysis tool), consider constructing the StructuredText JSON directly in a script for maximum control. Otherwise, this tool or build_structured_text are the way to go.`, BuildStructuredTextFromMarkdownInput.fields);
 const UploadAssetTool = cmsTool("upload_asset", `Register an asset after uploading the original file to R2 out of band.
 
 Upload flow:
@@ -485,18 +451,20 @@ Flow:
 2. The CMS fetches the file (following normal public HTTP redirects), stores it in R2, and creates the asset record
 3. Use the returned asset ID in media fields (e.g. {image: "<asset_id>"})
 
-The response includes id, r2Key, url (full public URL), and metadata. The id is what you pass to media fields — the CMS validates that the asset exists when creating/updating records.`, ImportAssetFromUrlInput.fields);const ListAssetsTool = cmsTool("list_assets", "List all assets with their IDs, filenames, and R2 keys");
+The response includes id, r2Key, url (full public URL), and metadata. The id is what you pass to media fields — the CMS validates that the asset exists when creating/updating records.`, ImportAssetFromUrlInput.fields);
+const ListAssetsTool = cmsTool("list_assets", "List all assets with their IDs, filenames, and R2 keys");
 const ReplaceAssetTool = cmsTool("replace_asset", `Replace an asset's file metadata while keeping the same ID and URL. All content references remain stable.
 
 Flow:
 1. Upload the new original file to R2
 2. Call this tool with the asset ID and new file metadata
 3. The asset URL stays the same — no broken links in content`, ReplaceAssetInput.fields);
-const ExportSchemaTool = cmsTool("export_schema", "Export the full CMS schema (models, fields, locales) as portable JSON. No IDs — references use api_keys. Use import_schema to restore on a fresh CMS.");
-const ImportSchemaTool = cmsTool("import_schema", `Import a CMS schema from JSON. Creates all locales, models, and fields in dependency order. Use on a fresh/empty CMS.
+const SchemaIOTool = cmsTool("schema_io", `Export or import the full CMS schema as portable JSON.
 
-The schema format matches export_schema output:
-{ "version": 1, "locales": [...], "models": [{ "name", "apiKey", "fields": [...] }] }`, ImportSchemaToolInput.fields);
+action: "export" | "import"
+- export: returns schema JSON (models, fields, locales). No IDs — references use api_keys.
+- import: creates all locales, models, and fields in dependency order from provided schema. Use on a fresh/empty CMS.
+  Schema format: { "version": 1, "locales": [...], "models": [{ "name", "apiKey", "fields": [...] }] }`, SchemaIOInput.fields);
 const SearchContentTool = cmsTool("search_content", `Search content records. Supports keyword search (FTS5), semantic search (Vectorize), or hybrid (both combined with rank fusion).
 
 Keyword mode: phrases ("exact match"), prefix (word*), boolean (AND/OR).
@@ -510,91 +478,68 @@ const UpdateSiteSettingsTool = cmsTool("update_site_settings", `Update global si
 Use this tool for fields like siteName, titleSuffix, fallbackSeoTitle, and fallbackSeoDescription.
 If your schema also has a singleton content model named site_settings with fields like tagline or logo, update that record with query_records + update_record instead of this tool.
 When the task is specifically about the singleton record, avoid mixing both surfaces unless the user explicitly asks for both.`, UpdateSiteSettingsInput.fields);
-const CreateEditorTokenTool = cmsTool("create_editor_token", "Create an editor token for restricted write access (no schema mutations). Optional expiresIn in seconds.", CreateEditorTokenMcpInput.fields);
-const ListEditorTokensTool = cmsTool("list_editor_tokens", "List all non-expired editor tokens");
-const RevokeEditorTokenTool = cmsTool("revoke_editor_token", "Revoke an editor token by its ID", TokenIdInput.fields);
+const EditorTokensTool = cmsTool("editor_tokens", `Manage editor tokens: create, list, or revoke.
+
+action: "create" | "list" | "revoke"
+- create: provide name, optional expiresIn (seconds). Returns token for restricted write access (no schema mutations).
+- list: returns all non-expired editor tokens.
+- revoke: provide tokenId to revoke.`, EditorTokensInput.fields);
 
 const AdminTools = [
-  ListModelsTool,
-  DescribeModelTool,
+  SchemaInfoTool,
   CreateModelTool,
   UpdateModelTool,
   CreateFieldTool,
   UpdateFieldTool,
   DeleteModelTool,
   DeleteFieldTool,
-  SchemaInfoTool,
   CreateRecordTool,
   UpdateRecordTool,
-  UpdateSingletonRecordTool,
   PatchBlocksTool,
   DeleteRecordTool,
   GetRecordTool,
   QueryRecordsTool,
   BulkCreateRecordsTool,
-  PublishRecordTool,
-  BulkPublishRecordsTool,
-  UnpublishRecordTool,
-  BulkUnpublishRecordsTool,
-  SchedulePublishTool,
-  ScheduleUnpublishTool,
-  ClearScheduleTool,
-  ListRecordVersionsTool,
-  GetRecordVersionTool,
-  CompareRecordVersionsTool,
-  RestoreRecordVersionTool,
+  PublishRecordsTool,
+  UnpublishRecordsTool,
+  ScheduleTool,
+  RecordVersionsTool,
   ReorderRecordsTool,
-  RemoveBlockTypeTool,
-  RemoveBlockFromWhitelistTool,
+  RemoveBlockTool,
   RemoveLocaleTool,
   BuildStructuredTextTool,
-  BuildStructuredTextFromMarkdownTool,
   UploadAssetTool,
   ImportAssetFromUrlTool,
   ListAssetsTool,
   ReplaceAssetTool,
-  ExportSchemaTool,
-  ImportSchemaTool,
+  SchemaIOTool,
   SearchContentTool,
   ReindexSearchTool,
   GetSiteSettingsTool,
   UpdateSiteSettingsTool,
-  CreateEditorTokenTool,
-  ListEditorTokensTool,
-  RevokeEditorTokenTool,
+  EditorTokensTool,
 ];
 
 const EditorTools = [
-  ListModelsTool,
-  DescribeModelTool,
   SchemaInfoTool,
   CreateRecordTool,
   UpdateRecordTool,
-  UpdateSingletonRecordTool,
   PatchBlocksTool,
   DeleteRecordTool,
   GetRecordTool,
   QueryRecordsTool,
   BulkCreateRecordsTool,
-  PublishRecordTool,
-  BulkPublishRecordsTool,
-  UnpublishRecordTool,
-  BulkUnpublishRecordsTool,
-  SchedulePublishTool,
-  ScheduleUnpublishTool,
-  ClearScheduleTool,
-  ListRecordVersionsTool,
-  GetRecordVersionTool,
-  CompareRecordVersionsTool,
-  RestoreRecordVersionTool,
+  PublishRecordsTool,
+  UnpublishRecordsTool,
+  ScheduleTool,
+  RecordVersionsTool,
   ReorderRecordsTool,
   BuildStructuredTextTool,
-  BuildStructuredTextFromMarkdownTool,
   UploadAssetTool,
   ImportAssetFromUrlTool,
   ListAssetsTool,
   ReplaceAssetTool,
-  ExportSchemaTool,
+  SchemaIOTool,
   SearchContentTool,
   GetSiteSettingsTool,
   UpdateSiteSettingsTool,
@@ -612,11 +557,11 @@ function createGuideResource() {
     content: Effect.succeed(`agent-cms — Agent Orientation Guide
 
 Server boundary:
-  - Admin MCP: /mcp — includes schema mutation tools like create_model, create_field, delete_model, delete_field, import_schema, and token management.
+  - Admin MCP: /mcp — includes schema mutation tools like create_model, create_field, delete_model, delete_field, schema_io, and token management.
   - Editor MCP: /mcp/editor — content/publishing/assets/search only. If a schema-mutation tool is missing, you are probably on the editor MCP and should switch surfaces instead of retrying.
 
 Workflow order:
-  schema_info -> create_model -> create_field -> create_record -> publish_record
+  schema_info -> create_model -> create_field -> create_record -> publish_records
 
 Naming conventions:
   - api_key: snake_case (e.g. blog_post, cover_image)
@@ -643,15 +588,14 @@ Structured text editing notes:
   - query_records materializes structured_text fields for inspection; on published records, _published_snapshot remains useful as a raw snapshot of what is live.
 
 Draft/publish lifecycle:
-  Records on draft-enabled models start as drafts. create_record returns the created draft record object, including its top-level id. Call publish_record with that recordId to make it visible in GraphQL.
-  If you already have several record IDs from the same model, use bulk_publish_records or bulk_unpublish_records instead of looping over single-record lifecycle tools.
+  Records on draft-enabled models start as drafts. create_record returns the created draft record object, including its top-level id. Call publish_records with that recordId to make it visible in GraphQL.
+  Use publish_records and unpublish_records for both single and bulk operations — just pass an array of recordIds.
   Required-field validation for draft-enabled models happens at publish time, not create_record time.
   Edits after publishing create a new draft version — publish again to update.
   GraphQL serves published content by default; use X-Include-Drafts header for previews.
 
 Singletons and site settings:
-  - If a singleton exists as a normal content model in your schema (for example a site_settings record with fields like tagline), treat it like content. Prefer update_singleton_record for direct edits, or query_records + update_record if you need to inspect the record first.
-  - If the task explicitly refers to the singleton record or to fields from that model (for example tagline), prefer update_singleton_record and do NOT reach for update_site_settings unless the task is specifically about the built-in global _site settings surface.
+  - If a singleton exists as a normal content model in your schema (for example a site_settings record with fields like tagline), treat it like content. Use update_record without recordId for direct singleton edits, or query_records + update_record if you need to inspect first.
   - get_site_settings/update_site_settings operate on the built-in global site_settings table used by the _site GraphQL query. That surface uses fields like siteName, titleSuffix, fallbackSeoTitle, and fallbackSeoDescription.
 
 Asset upload flow:
@@ -675,16 +619,7 @@ Raw HTTP / JSON-RPC access:
   - Tool results usually come back in result.content[0].text as a JSON string payload
   - jq extraction example:
     .result.content[0].text | fromjson
-  - For single-record tools like import_asset_from_url, create_record, publish_record, and get_record, that parsed payload is the object itself, so use payload.id directly rather than looking for nested arrays
-  - Minimal bulk example for scripts:
-    1. bulk_create_records with {"modelApiKey":"post","records":[{"title":"Post 1"}, ...]}
-    2. Parse result.content[0].text and read ids from .records[].id
-    3. bulk_publish_records with {"modelApiKey":"post","recordIds":[...ids]}
-  - Minimal Node.js single-record flow:
-    1. import_asset_from_url -> parse payload.id as the asset id
-    2. create_record with {"modelApiKey":"post","data":{"title":"Hello","cover_image":"<asset_id>"}}
-    3. parse the returned draft record's id
-    4. publish_record with {"modelApiKey":"post","recordId":"<record_id>"}
+  - For single-record tools like import_asset_from_url, create_record, and get_record, that parsed payload is the object itself, so use payload.id directly rather than looking for nested arrays
 
 Slug fields:
   Set validator {"slug_source": "title"} to auto-generate from a source field.
@@ -753,7 +688,7 @@ Follow these steps:
 3. Present your plan before executing — list models, fields, and relationships.
 4. Create models first, then fields in order (slug fields after their source).
 5. Create a few sample records to verify the schema works.
-6. Publish the sample records.
+6. Publish the sample records with publish_records.
 7. Show the GraphQL query that a frontend would use to fetch this content.
    Remember: api_key snake_case -> GraphQL camelCase fields, PascalCase types.`),
   });
@@ -768,7 +703,7 @@ function createGenerateGraphqlQueriesPrompt() {
       Effect.succeed(`Generate GraphQL queries for the "${modelApiKey}" model.
 
 Steps:
-1. Call describe_model with apiKey "${modelApiKey}" to get the full field list.
+1. Call schema_info with filterByName "${modelApiKey}" to get the full field list.
 2. Map field names from snake_case (api_key) to camelCase (GraphQL).
 3. Generate these queries:
    a. List query: all_<pluralized> with pagination, filtering, and ordering
@@ -830,56 +765,6 @@ export function createMcpLayer(
   }
 
   const toolHandlers = {
-    list_models: () =>
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        const models = yield* sql.unsafe<ModelRow>("SELECT * FROM models ORDER BY is_block, created_at");
-        const fields = yield* sql.unsafe<FieldRow>("SELECT * FROM fields ORDER BY model_id, position");
-        const fieldsByModel = new Map<string, Array<{ apiKey: string; label: string; type: string; localized: boolean }>>();
-        for (const f of fields) {
-          const list = fieldsByModel.get(f.model_id) ?? [];
-          list.push({ apiKey: f.api_key, label: f.label, type: f.field_type, localized: !!f.localized });
-          fieldsByModel.set(f.model_id, list);
-        }
-        return models.map((m) => ({
-          id: m.id,
-          name: m.name,
-          apiKey: m.api_key,
-          isBlock: !!m.is_block,
-          singleton: !!m.singleton,
-          fields: fieldsByModel.get(m.id) ?? [],
-        }));
-      }),
-    describe_model: withDecoded(ApiKeyInput, ({ apiKey }) =>
-      Effect.gen(function* () {
-        const model = yield* ModelService.getModelByApiKey(apiKey);
-        return {
-          id: model.id,
-          name: model.name,
-          apiKey: model.api_key,
-          isBlock: !!model.is_block,
-          singleton: !!model.singleton,
-          hasDraft: !!model.has_draft,
-          fields: model.fields.map((f) => ({
-            id: f.id,
-            apiKey: f.api_key,
-            label: f.label,
-            type: f.field_type,
-            localized: !!f.localized,
-            validators: parseValidators(f.validators),
-            hint: f.hint,
-          })),
-        };
-      })),
-    create_model: withDecoded(CreateModelInput, ModelService.createModel),
-    update_model: withDecoded(UpdateModelInput, ({ modelId, ...rest }) => ModelService.updateModel(modelId, rest)),
-    create_field: withDecoded(
-      Schema.Struct({ modelId: Schema.String, ...CreateFieldInput.fields }),
-      ({ modelId, ...rest }) => FieldService.createField(modelId, rest),
-    ),
-    update_field: withDecoded(UpdateFieldInput, ({ fieldId, ...rest }) => FieldService.updateField(fieldId, rest)),
-    delete_model: withDecoded(ModelIdInput, ({ modelId }) => ModelService.deleteModel(modelId)),
-    delete_field: withDecoded(FieldIdInput, ({ fieldId }) => FieldService.deleteField(fieldId)),
     schema_info: withDecoded(SchemaInfoInput, ({ filterByName, filterByType, includeFieldDetails }) =>
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
@@ -938,38 +823,76 @@ export function createMcpLayer(
           }),
         };
       })),
+    create_model: withDecoded(CreateModelInput, ModelService.createModel),
+    update_model: withDecoded(UpdateModelInput, ({ modelId, ...rest }) => ModelService.updateModel(modelId, rest)),
+    create_field: withDecoded(
+      Schema.Struct({ modelId: Schema.String, ...CreateFieldInput.fields }),
+      ({ modelId, ...rest }) => FieldService.createField(modelId, rest),
+    ),
+    update_field: withDecoded(UpdateFieldInput, ({ fieldId, ...rest }) => FieldService.updateField(fieldId, rest)),
+    delete_model: withDecoded(ModelIdInput, ({ modelId }) => ModelService.deleteModel(modelId)),
+    delete_field: withDecoded(FieldIdInput, ({ fieldId }) => FieldService.deleteField(fieldId)),
     create_record: withDecoded(CreateRecordInput, (input) => RecordService.createRecord(input, options?.actor)),
-    update_record: withDecoded(UpdateRecordInput, ({ recordId, modelApiKey, data }) => RecordService.patchRecord(recordId, { modelApiKey, data }, options?.actor)),
-    update_singleton_record: withDecoded(UpdateSingletonRecordInput, ({ modelApiKey, data }) => RecordService.updateSingletonRecord(modelApiKey, data, options?.actor)),
+    update_record: withDecoded(UpdateRecordInput, ({ recordId, modelApiKey, data }) => {
+      if (recordId) {
+        return RecordService.patchRecord(recordId, { modelApiKey, data }, options?.actor);
+      }
+      return RecordService.updateSingletonRecord(modelApiKey, data, options?.actor);
+    }),
     patch_blocks: withDecoded(PatchBlocksInput, (input) => RecordService.patchBlocksForField(input, options?.actor)),
     delete_record: withDecoded(DeleteRecordInput, ({ recordId, modelApiKey }) => RecordService.removeRecord(modelApiKey, recordId)),
-    get_record: withDecoded(PublishRecordInput, ({ recordId, modelApiKey }) => RecordService.getRecord(modelApiKey, recordId)),
+    get_record: withDecoded(GetRecordInput, ({ recordId, modelApiKey }) => RecordService.getRecord(modelApiKey, recordId)),
     query_records: withDecoded(QueryRecordsInput, ({ modelApiKey }) => RecordService.listRecords(modelApiKey)),
     bulk_create_records: withDecoded(BulkCreateRecordsInput, ({ modelApiKey, records }) => RecordService.bulkCreateRecords({ modelApiKey, records }, options?.actor)),
-    publish_record: withDecoded(PublishRecordInput, ({ recordId, modelApiKey }) => PublishService.publishRecord(modelApiKey, recordId, options?.actor)),
-    bulk_publish_records: withDecoded(BulkRecordOperationInput, ({ recordIds, modelApiKey }) => PublishService.bulkPublishRecords(modelApiKey, recordIds, options?.actor)),
-    unpublish_record: withDecoded(PublishRecordInput, ({ recordId, modelApiKey }) => PublishService.unpublishRecord(modelApiKey, recordId, options?.actor)),
-    bulk_unpublish_records: withDecoded(BulkRecordOperationInput, ({ recordIds, modelApiKey }) => PublishService.bulkUnpublishRecords(modelApiKey, recordIds, options?.actor)),
-    schedule_publish: withDecoded(ScheduleToolInput, ({ recordId, modelApiKey, at }) => ScheduleService.schedulePublish(modelApiKey, recordId, at, options?.actor)),
-    schedule_unpublish: withDecoded(ScheduleToolInput, ({ recordId, modelApiKey, at }) => ScheduleService.scheduleUnpublish(modelApiKey, recordId, at, options?.actor)),
-    clear_schedule: withDecoded(PublishRecordInput, ({ recordId, modelApiKey }) => ScheduleService.clearSchedule(modelApiKey, recordId, options?.actor)),
-    list_record_versions: withDecoded(PublishRecordInput, ({ modelApiKey, recordId }) => VersionService.listVersions(modelApiKey, recordId)),
-    get_record_version: withDecoded(VersionIdInput, ({ versionId }) => VersionService.getVersion(versionId)),
-    compare_record_versions: withDecoded(CompareVersionsInput, ({ modelApiKey, recordId, leftVersionId, rightVersionId }) => VersionService.compareVersions(modelApiKey, recordId, leftVersionId, rightVersionId)),
-    restore_record_version: withDecoded(RestoreVersionInput, ({ modelApiKey, recordId, versionId }) => VersionService.restoreVersion(modelApiKey, recordId, versionId, options?.actor)),
+    publish_records: withDecoded(PublishRecordsInput, ({ recordIds, modelApiKey }) =>
+      recordIds.length === 1
+        ? PublishService.publishRecord(modelApiKey, recordIds[0], options?.actor)
+        : PublishService.bulkPublishRecords(modelApiKey, recordIds, options?.actor),
+    ),
+    unpublish_records: withDecoded(PublishRecordsInput, ({ recordIds, modelApiKey }) =>
+      recordIds.length === 1
+        ? PublishService.unpublishRecord(modelApiKey, recordIds[0], options?.actor)
+        : PublishService.bulkUnpublishRecords(modelApiKey, recordIds, options?.actor),
+    ),
+    schedule: withDecoded(ScheduleInput, ({ recordId, modelApiKey, action, at }) => {
+      if (action === "clear") return ScheduleService.clearSchedule(modelApiKey, recordId, options?.actor);
+      if (action === "publish") return ScheduleService.schedulePublish(modelApiKey, recordId, at ?? null, options?.actor);
+      return ScheduleService.scheduleUnpublish(modelApiKey, recordId, at ?? null, options?.actor);
+    }),
+    record_versions: withDecoded(RecordVersionsInput, ({ action, modelApiKey, recordId, versionId }) => {
+      if (action === "list") return VersionService.listVersions(modelApiKey, recordId);
+      if (action === "get") {
+        if (!versionId) return Effect.fail({ _tag: "ValidationError", message: "versionId is required for get action" });
+        return VersionService.getVersion(versionId);
+      }
+      if (!versionId) return Effect.fail({ _tag: "ValidationError", message: "versionId is required for restore action" });
+      return VersionService.restoreVersion(modelApiKey, recordId, versionId, options?.actor);
+    }),
     reorder_records: withDecoded(ReorderInput, ({ modelApiKey, recordIds }) => RecordService.reorderRecords(modelApiKey, recordIds, options?.actor)),
-    remove_block_type: withDecoded(RemoveBlockTypeInput, ({ blockApiKey }) => SchemaLifecycle.removeBlockType(blockApiKey)),
-    remove_block_from_whitelist: withDecoded(RemoveBlockFromWhitelistInput, ({ fieldId, blockApiKey }) => SchemaLifecycle.removeBlockFromWhitelist({ fieldId, blockApiKey })),
+    remove_block: withDecoded(RemoveBlockInput, ({ blockApiKey, fieldId }) => {
+      if (fieldId) return SchemaLifecycle.removeBlockFromWhitelist({ fieldId, blockApiKey });
+      return SchemaLifecycle.removeBlockType(blockApiKey);
+    }),
     remove_locale: withDecoded(LocaleIdInput, ({ localeId }) => SchemaLifecycle.removeLocale(localeId)),
-    build_structured_text: withDecoded(BuildStructuredTextInput, ({ blocks, nodes }) =>
+    build_structured_text: withDecoded(BuildStructuredTextInput, ({ markdown, blocks, nodes }) =>
       Effect.sync(() => {
         const blockMap: Record<string, unknown> = {};
         for (const b of blocks ?? []) {
           blockMap[b.id] = { _type: b.type, ...b.data };
         }
 
+        if (markdown != null) {
+          // Markdown mode
+          const doc = markdownToDast(markdown);
+          const refs = collectBlockRefs(doc.document);
+          assertKnownBlockRefs(blockMap, refs);
+          assertNoUnusedBlocks(blockMap, refs);
+          return { value: doc, blocks: blockMap };
+        }
+
+        // Typed nodes mode
         const children: unknown[] = [];
-        for (const node of nodes) {
+        for (const node of nodes ?? []) {
           switch (node.type) {
             case "paragraph":
               children.push({
@@ -1023,21 +946,6 @@ export function createMcpLayer(
           blocks: blockMap,
         };
       })),
-    build_structured_text_from_markdown: withDecoded(BuildStructuredTextFromMarkdownInput, ({ markdown, blocks }) =>
-      Effect.sync(() => {
-        const doc = markdownToDast(markdown);
-        const blockMap: Record<string, unknown> = {};
-        for (const b of blocks ?? []) {
-          blockMap[b.id] = { _type: b.type, ...b.data };
-        }
-        const refs = collectBlockRefs(doc.document);
-        assertKnownBlockRefs(blockMap, refs);
-        assertNoUnusedBlocks(blockMap, refs);
-        return {
-          value: doc,
-          blocks: blockMap,
-        };
-      })),
     upload_asset: withDecoded(AssetInput, (input) =>
       AssetService.createAsset(input, options?.actor).pipe(Effect.map(withAssetUrl))),
     import_asset_from_url: withDecoded(ImportAssetFromUrlInput, (input) =>
@@ -1049,15 +957,24 @@ export function createMcpLayer(
       }))),
     replace_asset: withDecoded(ReplaceAssetInput, ({ assetId, ...rest }) =>
       AssetService.replaceAsset(assetId, rest, options?.actor).pipe(Effect.map(withAssetUrl))),
-    export_schema: () => SchemaIO.exportSchema(),
-    import_schema: withDecoded(ImportSchemaToolInput, ({ schema }) => SchemaIO.importSchema(schema)),
+    schema_io: withDecoded(SchemaIOInput, ({ action, schema }) => {
+      if (action === "export") return SchemaIO.exportSchema();
+      if (!schema) return Effect.fail({ _tag: "ValidationError", message: "schema is required for import action" });
+      return SchemaIO.importSchema(schema);
+    }),
     search_content: withDecoded(SearchContentInput, SearchService.search),
     reindex_search: withDecoded(ReindexSearchInput, ({ modelApiKey }) => SearchService.reindexAll(modelApiKey)),
     get_site_settings: () => SiteSettingsService.getSiteSettings(),
     update_site_settings: withDecoded(UpdateSiteSettingsInput, SiteSettingsService.updateSiteSettings),
-    create_editor_token: withDecoded(CreateEditorTokenMcpInput, TokenService.createEditorToken),
-    list_editor_tokens: () => TokenService.listEditorTokens(),
-    revoke_editor_token: withDecoded(TokenIdInput, ({ tokenId }) => TokenService.revokeEditorToken(tokenId)),
+    editor_tokens: withDecoded(EditorTokensInput, ({ action, name, expiresIn, tokenId }) => {
+      if (action === "list") return TokenService.listEditorTokens();
+      if (action === "create") {
+        if (!name) return Effect.fail({ _tag: "ValidationError", message: "name is required for create action" });
+        return TokenService.createEditorToken({ name, expiresIn });
+      }
+      if (!tokenId) return Effect.fail({ _tag: "ValidationError", message: "tokenId is required for revoke action" });
+      return TokenService.revokeEditorToken(tokenId);
+    }),
   } as const;
 
   const toolkitHandlers = toolkitAny.toLayer(pickToolkitHandlers(toolkitAny, toolHandlers) as never);

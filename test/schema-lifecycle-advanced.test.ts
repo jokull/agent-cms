@@ -63,8 +63,8 @@ describe("Schema Lifecycle — Advanced Operations", () => {
 
       // Remove "hero" from whitelist (keep the type itself)
       const result = parse(await agent.callTool({
-        name: "remove_block_from_whitelist",
-        arguments: { fieldId: stField.id, blockApiKey: "hero" },
+        name: "remove_block",
+        arguments: { blockApiKey: "hero", fieldId: stField.id },
       }));
       expect(result.removed).toBe("hero");
 
@@ -77,12 +77,12 @@ describe("Schema Lifecycle — Advanced Operations", () => {
       expect(content.value.document.children[1].item).toBe(ctaId);
 
       // Whitelist should only have "cta" now
-      const pageDetail = parse(await agent.callTool({ name: "describe_model", arguments: { apiKey: "page" } }));
+      const pageDetail = parse(await agent.callTool({ name: "schema_info", arguments: { filterByName: "page" } })).models[0];
       expect(pageDetail.fields[0].validators.structured_text_blocks).toEqual(["cta"]);
 
       // Hero block type still exists as a model
-      const models = parse(await agent.callTool({ name: "list_models", arguments: {} }));
-      expect(models.find((m: any) => m.apiKey === "hero")).toBeDefined();
+      const schemaResult = parse(await agent.callTool({ name: "schema_info", arguments: {} }));
+      expect(schemaResult.models.find((m: any) => m.apiKey === "hero")).toBeDefined();
     });
   });
 
@@ -207,7 +207,7 @@ describe("Schema Lifecycle — Advanced Operations", () => {
 
     it("fails when markdown builder receives unused blocks", async () => {
       await expect(agent.callTool({
-        name: "build_structured_text_from_markdown",
+        name: "build_structured_text",
         arguments: {
           markdown: "# Hello",
           blocks: [

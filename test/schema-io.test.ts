@@ -178,11 +178,11 @@ describe("Schema import/export", () => {
     const { client: client1 } = await createTestMcpClient(sqlLayer1);
 
     await client1.callTool({ name: "create_model", arguments: { name: "Item", apiKey: "item" } });
-    const models = JSON.parse((await client1.callTool({ name: "list_models", arguments: {} })).content[0].text as string);
-    await client1.callTool({ name: "create_field", arguments: { modelId: models[0].id, label: "Name", apiKey: "name", fieldType: "string" } });
+    const schemaResult = JSON.parse((await client1.callTool({ name: "schema_info", arguments: {} })).content[0].text as string);
+    await client1.callTool({ name: "create_field", arguments: { modelId: schemaResult.models[0].id, label: "Name", apiKey: "name", fieldType: "string" } });
 
     // Export via MCP
-    const exportResult = await client1.callTool({ name: "export_schema", arguments: {} });
+    const exportResult = await client1.callTool({ name: "schema_io", arguments: { action: "export" } });
     const exported = JSON.parse(exportResult.content[0].text as string);
     expect(exported.version).toBe(1);
     expect(exported.models).toHaveLength(1);
@@ -191,7 +191,7 @@ describe("Schema import/export", () => {
     const { sqlLayer: sqlLayer2 } = createTestApp();
     const { client: client2 } = await createTestMcpClient(sqlLayer2);
 
-    const importResult = await client2.callTool({ name: "import_schema", arguments: { schema: exported } });
+    const importResult = await client2.callTool({ name: "schema_io", arguments: { action: "import", schema: exported } });
     const stats = JSON.parse(importResult.content[0].text as string);
     expect(stats.models).toBe(1);
     expect(stats.fields).toBe(1);

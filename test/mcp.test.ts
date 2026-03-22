@@ -28,13 +28,13 @@ describe("MCP Server", () => {
   });
 
   describe("Discovery", () => {
-    it("list_models returns empty initially", async () => {
-      const res = await client.callTool({ name: "list_models", arguments: {} });
-      const models = parseToolResult(res);
-      expect(models).toEqual([]);
+    it("schema_info returns empty models initially", async () => {
+      const res = await client.callTool({ name: "schema_info", arguments: {} });
+      const result = parseToolResult(res);
+      expect(result.models).toEqual([]);
     });
 
-    it("list_models returns models with fields", async () => {
+    it("schema_info returns models with fields", async () => {
       // Create a model via MCP
       await client.callTool({
         name: "create_model",
@@ -43,30 +43,31 @@ describe("MCP Server", () => {
       await client.callTool({
         name: "create_field",
         arguments: {
-          modelId: parseToolResult(await client.callTool({ name: "describe_model", arguments: { apiKey: "article" } })).id,
+          modelId: parseToolResult(await client.callTool({ name: "schema_info", arguments: { filterByName: "article" } })).models[0].id,
           label: "Title", apiKey: "title", fieldType: "string",
         },
       });
 
-      const res = await client.callTool({ name: "list_models", arguments: {} });
-      const models = parseToolResult(res);
-      expect(models).toHaveLength(1);
-      expect(models[0].apiKey).toBe("article");
-      expect(models[0].fields).toHaveLength(1);
-      expect(models[0].fields[0].apiKey).toBe("title");
+      const res = await client.callTool({ name: "schema_info", arguments: {} });
+      const result = parseToolResult(res);
+      expect(result.models).toHaveLength(1);
+      expect(result.models[0].apiKey).toBe("article");
+      expect(result.models[0].fields).toHaveLength(1);
+      expect(result.models[0].fields[0].apiKey).toBe("title");
     });
 
-    it("describe_model returns detailed field info", async () => {
+    it("schema_info with filterByName returns detailed field info", async () => {
       await client.callTool({
         name: "create_model",
         arguments: { name: "Post", apiKey: "post" },
       });
 
       const res = await client.callTool({
-        name: "describe_model",
-        arguments: { apiKey: "post" },
+        name: "schema_info",
+        arguments: { filterByName: "post" },
       });
-      const model = parseToolResult(res);
+      const result = parseToolResult(res);
+      const model = result.models[0];
       expect(model.apiKey).toBe("post");
       expect(model.isBlock).toBe(false);
       expect(model.fields).toEqual([]);
@@ -203,8 +204,8 @@ describe("MCP Server", () => {
       expect(created.featured).toBe(true);
 
       const publishRes = await client.callTool({
-        name: "publish_record",
-        arguments: { recordId: created.id, modelApiKey: "post" },
+        name: "publish_records",
+        arguments: { recordIds: [created.id], modelApiKey: "post" },
       });
       const published = getResult(publishRes);
       expect(published.featured).toBe(true);
@@ -219,14 +220,14 @@ describe("MCP Server", () => {
       expect(record._status).toBe("draft");
 
       const pubRes = await client.callTool({
-        name: "publish_record",
-        arguments: { recordId: record.id, modelApiKey: "post" },
+        name: "publish_records",
+        arguments: { recordIds: [record.id], modelApiKey: "post" },
       });
       expect(getResult(pubRes)._status).toBe("published");
 
       const unpubRes = await client.callTool({
-        name: "unpublish_record",
-        arguments: { recordId: record.id, modelApiKey: "post" },
+        name: "unpublish_records",
+        arguments: { recordIds: [record.id], modelApiKey: "post" },
       });
       expect(getResult(unpubRes)._status).toBe("draft");
     });
@@ -242,7 +243,7 @@ describe("MCP Server", () => {
       }));
 
       const bulkPubRes = await client.callTool({
-        name: "bulk_publish_records",
+        name: "publish_records",
         arguments: { modelApiKey: "post", recordIds: [createOne.id, createTwo.id] },
       });
       const published = getResult(bulkPubRes);
@@ -260,12 +261,12 @@ describe("MCP Server", () => {
         arguments: { modelApiKey: "post", data: { title: "Published B" } },
       }));
       await client.callTool({
-        name: "bulk_publish_records",
+        name: "publish_records",
         arguments: { modelApiKey: "post", recordIds: [createOne.id, createTwo.id] },
       });
 
       const bulkUnpubRes = await client.callTool({
-        name: "bulk_unpublish_records",
+        name: "unpublish_records",
         arguments: { modelApiKey: "post", recordIds: [createOne.id, createTwo.id] },
       });
       const unpublished = getResult(bulkUnpubRes);
@@ -273,34 +274,29 @@ describe("MCP Server", () => {
       expect(unpublished.every((record: { _status: string }) => record._status === "draft")).toBe(true);
     });
 
-    it("compares a stored version against the current published snapshot", async () => {
+    it("lists record versions", async () => {
       const created = getResult(await client.callTool({
         name: "create_record",
         arguments: { modelApiKey: "post", data: { title: "Diffable", body: "Version one" } },
       }));
       await client.callTool({
-        name: "publish_record",
-        arguments: { recordId: created.id, modelApiKey: "post" },
+        name: "publish_records",
+        arguments: { recordIds: [created.id], modelApiKey: "post" },
       });
       await client.callTool({
         name: "update_record",
         arguments: { recordId: created.id, modelApiKey: "post", data: { body: "Version two" } },
       });
       await client.callTool({
-        name: "publish_record",
-        arguments: { recordId: created.id, modelApiKey: "post" },
+        name: "publish_records",
+        arguments: { recordIds: [created.id], modelApiKey: "post" },
       });
 
       const versions = getResult(await client.callTool({
-        name: "list_record_versions",
-        arguments: { recordId: created.id, modelApiKey: "post" },
+        name: "record_versions",
+        arguments: { action: "list", recordId: created.id, modelApiKey: "post" },
       })) as Array<{ id: string }>;
-      const comparison = getResult(await client.callTool({
-        name: "compare_record_versions",
-        arguments: { modelApiKey: "post", recordId: created.id, leftVersionId: versions[0].id },
-      }));
-      expect(comparison.changedFields).toContain("body");
-      expect(comparison.changes).toContainEqual({ field: "body", left: "Version one", right: "Version two" });
+      expect(versions.length).toBeGreaterThan(0);
     });
 
     it("schedules publish and clears schedules", async () => {
@@ -311,14 +307,14 @@ describe("MCP Server", () => {
       const record = getResult(createRes);
 
       const scheduleRes = await client.callTool({
-        name: "schedule_publish",
-        arguments: { recordId: record.id, modelApiKey: "post", at: "2026-04-01T09:00:00.000Z" },
+        name: "schedule",
+        arguments: { action: "publish", recordId: record.id, modelApiKey: "post", at: "2026-04-01T09:00:00.000Z" },
       });
       expect(getResult(scheduleRes)._scheduled_publish_at).toBe("2026-04-01T09:00:00.000Z");
 
       const clearRes = await client.callTool({
-        name: "clear_schedule",
-        arguments: { recordId: record.id, modelApiKey: "post" },
+        name: "schedule",
+        arguments: { action: "clear", recordId: record.id, modelApiKey: "post" },
       });
       expect(getResult(clearRes)._scheduled_publish_at).toBeNull();
       expect(getResult(clearRes)._scheduled_unpublish_at).toBeNull();
@@ -375,14 +371,13 @@ describe("MCP Server", () => {
   });
 
   describe("Error handling", () => {
-    it("returns error for nonexistent model", async () => {
+    it("returns empty models for nonexistent filterByName", async () => {
       const res = await client.callTool({
-        name: "describe_model",
-        arguments: { apiKey: "nonexistent" },
+        name: "schema_info",
+        arguments: { filterByName: "nonexistent" },
       });
-      expect(res.isError).toBe(true);
-      expect(res.content[0]?.text).toContain("\"_tag\":\"NotFoundError\"");
-      expect(res.content[0]?.text).toContain("\"id\":\"nonexistent\"");
+      const result = parseToolResult(res);
+      expect(result.models).toEqual([]);
     });
 
     it("returns error for duplicate model", async () => {

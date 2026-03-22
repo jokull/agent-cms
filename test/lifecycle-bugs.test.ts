@@ -86,8 +86,8 @@ describe("P1: Published snapshots cleaned on block removal", () => {
 
     // Publish the record
     parse(await agent.callTool({
-      name: "publish_record",
-      arguments: { modelApiKey: "page", recordId: record.id },
+      name: "publish_records",
+      arguments: { modelApiKey: "page", recordIds: [record.id] },
     }));
 
     // Verify published snapshot has the block
@@ -105,7 +105,7 @@ describe("P1: Published snapshots cleaned on block removal", () => {
 
     // Remove the block type
     parse(await agent.callTool({
-      name: "remove_block_type", arguments: { blockApiKey: "hero" },
+      name: "remove_block", arguments: { blockApiKey: "hero" },
     }));
 
     // Published snapshot should be cleaned too
@@ -186,14 +186,14 @@ describe("P1: Published snapshots cleaned on block removal", () => {
 
     // Publish
     parse(await agent.callTool({
-      name: "publish_record",
-      arguments: { modelApiKey: "page", recordId: record.id },
+      name: "publish_records",
+      arguments: { modelApiKey: "page", recordIds: [record.id] },
     }));
 
     // Remove callout from whitelist (keep code_block)
     parse(await agent.callTool({
-      name: "remove_block_from_whitelist",
-      arguments: { fieldId: bodyField.id, blockApiKey: "callout" },
+      name: "remove_block",
+      arguments: { blockApiKey: "callout", fieldId: bodyField.id },
     }));
 
     // Published snapshot should have callout block removed

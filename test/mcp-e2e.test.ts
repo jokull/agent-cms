@@ -49,8 +49,8 @@ describe("P5.6: End-to-end MCP → GraphQL", () => {
 
   it("agent builds a blog, creates content, and consumers query via GraphQL", async () => {
     // === Step 1: Agent discovers current state ===
-    const initialModels = parse(await agent.callTool({ name: "list_models", arguments: {} }));
-    expect(initialModels).toEqual([]);
+    const initialResult = parse(await agent.callTool({ name: "schema_info", arguments: {} }));
+    expect(initialResult.models).toEqual([]);
 
     // === Step 2: Agent creates the blog schema ===
 
@@ -110,10 +110,10 @@ describe("P5.6: End-to-end MCP → GraphQL", () => {
     }));
 
     // Verify schema via discovery
-    const models = parse(await agent.callTool({ name: "list_models", arguments: {} }));
-    expect(models).toHaveLength(3);
-    const postDetail = parse(await agent.callTool({ name: "describe_model", arguments: { apiKey: "blog_post" } }));
-    expect(postDetail.fields).toHaveLength(4);
+    const schemaResult = parse(await agent.callTool({ name: "schema_info", arguments: {} }));
+    expect(schemaResult.models).toHaveLength(3);
+    const postDetail = parse(await agent.callTool({ name: "schema_info", arguments: { filterByName: "blog_post" } }));
+    expect(postDetail.models[0].fields).toHaveLength(4);
 
     // === Step 3: Agent creates content ===
 
@@ -160,14 +160,14 @@ describe("P5.6: End-to-end MCP → GraphQL", () => {
     // === Step 4: Agent publishes ===
 
     const published = parse(await agent.callTool({
-      name: "publish_record",
-      arguments: { recordId: authorRecord.id, modelApiKey: "author" },
+      name: "publish_records",
+      arguments: { recordIds: [authorRecord.id], modelApiKey: "author" },
     }));
     expect(published._status).toBe("published");
 
     parse(await agent.callTool({
-      name: "publish_record",
-      arguments: { recordId: postRecord.id, modelApiKey: "blog_post" },
+      name: "publish_records",
+      arguments: { recordIds: [postRecord.id], modelApiKey: "blog_post" },
     }));
 
     // === Step 5: Consumer queries via GraphQL ===

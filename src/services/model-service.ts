@@ -255,7 +255,7 @@ export function deleteModel(id: string) {
           refs.push(`${refModels[0]?.api_key ?? "unknown"}.${f.api_key}`);
         }
         return yield* new ReferenceConflictError({
-          message: `Cannot delete block type '${model.api_key}': referenced by structured_text fields: ${refs.join(", ")}. Use remove_block_type to clean up DAST references first.`,
+          message: `Cannot delete block type '${model.api_key}': referenced by structured_text fields: ${refs.join(", ")}. Use remove_block to clean up DAST references first.`,
           references: refs,
         });
       }

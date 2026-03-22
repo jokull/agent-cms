@@ -39,8 +39,8 @@ async function main() {
     await timed("readResource(guide)", () => client.readResource({ uri: "agent-cms://guide" })),
     await timed("getPrompt(setup-content-model)", () => client.getPrompt({ name: "setup-content-model", arguments: { description: "blog with posts and categories" } })),
     await timed("callTool(schema_info)", () => client.callTool({ name: "schema_info", arguments: {} })),
-    await timed("callTool(list_models)", () => client.callTool({ name: "list_models", arguments: {} })),
-    await timed("callTool(describe_model:post)", () => client.callTool({ name: "describe_model", arguments: { apiKey: "post" } })),
+    await timed("callTool(schema_info:all)", () => client.callTool({ name: "schema_info", arguments: {} })),
+    await timed("callTool(schema_info:post)", () => client.callTool({ name: "schema_info", arguments: { filterByName: "post" } })),
     await timed("callTool(query_records:post)", () => client.callTool({ name: "query_records", arguments: { modelApiKey: "post" } })),
     await timed("callTool(get_site_settings)", () => client.callTool({ name: "get_site_settings", arguments: {} })),
   ];
@@ -52,8 +52,10 @@ async function main() {
   const guide = checks[4].result.contents[0].text;
   const prompt = checks[5].result.messages[0]?.content?.text ?? "";
   const schemaInfo = parseToolResult(checks[6].result);
-  const models = parseToolResult(checks[7].result);
-  const postModel = parseToolResult(checks[8].result);
+  const schemaInfoAll = parseToolResult(checks[7].result);
+  const models = schemaInfoAll.models;
+  const schemaInfoPost = parseToolResult(checks[8].result);
+  const postModel = schemaInfoPost.models[0];
   const posts = parseToolResult(checks[9].result);
   const siteSettings = parseToolResult(checks[10].result);
 

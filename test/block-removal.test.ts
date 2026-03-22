@@ -82,7 +82,7 @@ describe("P4.4: Block type removal", () => {
 
     // Remove the block type
     const result = parse(await agent.callTool({
-      name: "remove_block_type", arguments: { blockApiKey: "hero" },
+      name: "remove_block", arguments: { blockApiKey: "hero" },
     }));
     expect(result.deleted).toBe(true);
     expect(result.affectedFields).toBe(1);
@@ -99,9 +99,9 @@ describe("P4.4: Block type removal", () => {
     expect(tables).toHaveLength(0);
 
     // Model should be gone
-    const models = parse(await agent.callTool({ name: "list_models", arguments: {} }));
-    expect(models.find((m: any) => m.apiKey === "hero")).toBeUndefined();
-    expect(models.find((m: any) => m.apiKey === "page")).toBeDefined();
+    const schemaResult = parse(await agent.callTool({ name: "schema_info", arguments: {} }));
+    expect(schemaResult.models.find((m: any) => m.apiKey === "hero")).toBeUndefined();
+    expect(schemaResult.models.find((m: any) => m.apiKey === "page")).toBeDefined();
 
     // DAST should be cleaned — block node removed, paragraphs preserved
     const records = parse(await agent.callTool({ name: "query_records", arguments: { modelApiKey: "page" } }));
@@ -113,7 +113,7 @@ describe("P4.4: Block type removal", () => {
     expect(content.value.document.children[1].type).toBe("paragraph");
 
     // Whitelist should be updated
-    const pageDetail = parse(await agent.callTool({ name: "describe_model", arguments: { apiKey: "page" } }));
+    const pageDetail = parse(await agent.callTool({ name: "schema_info", arguments: { filterByName: "page" } })).models[0];
     const stField = pageDetail.fields.find((f: any) => f.apiKey === "content");
     expect(stField.validators.structured_text_blocks).toEqual([]);
   });

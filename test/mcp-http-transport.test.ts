@@ -82,14 +82,12 @@ describe("MCP HTTP transport", () => {
 
     const tools = await client.listTools();
     expect(tools.tools.some((tool) => tool.name === "schema_info")).toBe(true);
-    expect(tools.tools.some((tool) => tool.name === "publish_record")).toBe(true);
-    expect(tools.tools.some((tool) => tool.name === "bulk_publish_records")).toBe(true);
-    expect(tools.tools.some((tool) => tool.name === "bulk_unpublish_records")).toBe(true);
-    expect(tools.tools.some((tool) => tool.name === "compare_record_versions")).toBe(true);
+    expect(tools.tools.some((tool) => tool.name === "publish_records")).toBe(true);
+    expect(tools.tools.some((tool) => tool.name === "unpublish_records")).toBe(true);
     expect(tools.tools.some((tool) => tool.name === "get_record")).toBe(true);
-    expect(tools.tools.some((tool) => tool.name === "update_singleton_record")).toBe(true);
+    expect(tools.tools.some((tool) => tool.name === "update_record")).toBe(true);
     expect(tools.tools.some((tool) => tool.name === "create_model")).toBe(false);
-    expect(tools.tools.some((tool) => tool.name === "create_editor_token")).toBe(false);
+    expect(tools.tools.some((tool) => tool.name === "editor_tokens")).toBe(false);
     expect(tools.tools.some((tool) => tool.name === "reindex_search")).toBe(false);
     expect(tools.tools.some((tool) => tool.name === "import_asset_from_url")).toBe(true);
 
@@ -402,8 +400,8 @@ describe("MCP HTTP transport", () => {
     });
 
     const versions = await client.callTool({
-      name: "list_record_versions",
-      arguments: { recordId: record.id, modelApiKey: "note" },
+      name: "record_versions",
+      arguments: { action: "list", recordId: record.id, modelApiKey: "note" },
     });
     const parsedVersions = JSON.parse(versions.content[0]?.text ?? "[]") as Array<Record<string, unknown>>;
 
