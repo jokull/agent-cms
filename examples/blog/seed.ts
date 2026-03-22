@@ -83,6 +83,11 @@ async function seed() {
     fieldType: "text",
   });
   await api("POST", `/api/models/${siteSettings.id}/fields`, {
+    label: "Logo",
+    apiKey: "logo",
+    fieldType: "media",
+  });
+  await api("POST", `/api/models/${siteSettings.id}/fields`, {
     label: "Default SEO",
     apiKey: "default_seo",
     fieldType: "seo",
