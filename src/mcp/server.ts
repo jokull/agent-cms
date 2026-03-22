@@ -643,7 +643,7 @@ Structured text editing notes:
   - query_records materializes structured_text fields for inspection; on published records, _published_snapshot remains useful as a raw snapshot of what is live.
 
 Draft/publish lifecycle:
-  Records on draft-enabled models start as drafts. Call publish_record to make them visible in GraphQL.
+  Records on draft-enabled models start as drafts. create_record returns the created draft record object, including its top-level id. Call publish_record with that recordId to make it visible in GraphQL.
   If you already have several record IDs from the same model, use bulk_publish_records or bulk_unpublish_records instead of looping over single-record lifecycle tools.
   Required-field validation for draft-enabled models happens at publish time, not create_record time.
   Edits after publishing create a new draft version — publish again to update.
@@ -657,7 +657,8 @@ Singletons and site settings:
 Asset upload flow:
   Preferred:
   1. Call import_asset_from_url with a public file URL (normal public redirects are followed automatically)
-  2. Use returned asset ID in media/media_gallery fields
+  2. The parsed tool payload is the asset object itself; read its top-level id field
+  3. Use that returned asset ID in media/media_gallery fields
 
   Manual fallback:
   1. Upload file to R2 out of band
@@ -674,6 +675,7 @@ Raw HTTP / JSON-RPC access:
   - Tool results usually come back in result.content[0].text as a JSON string payload
   - jq extraction example:
     .result.content[0].text | fromjson
+  - For single-record tools like import_asset_from_url, create_record, publish_record, and get_record, that parsed payload is the object itself, so use payload.id directly rather than looking for nested arrays
   - Minimal bulk example for scripts:
     1. bulk_create_records with {"modelApiKey":"post","records":[{"title":"Post 1"}, ...]}
     2. Parse result.content[0].text and read ids from .records[].id

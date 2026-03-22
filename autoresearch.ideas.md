@@ -20,6 +20,7 @@
 - Probe edge-case error quality for weak spots that still cause extra turns
 - Explore script-writing friction further (auth/bootstrap + nested mount points are better documented, but response parsing is still awkward)
 - Add write-time validation for other scalar field types (`integer`, `float`, `boolean`) — invalid scalar strings currently appear to pass through silently
+- Validate `seo.image` asset references the same way `media` fields validate upload IDs
 
 ## Structured Text
 - Create deeply nested structured text with inline links in other nested block combinations

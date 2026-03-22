@@ -69,6 +69,41 @@ describe("Date, DateTime, Color, and LatLon field types", () => {
     });
   });
 
+  describe("scalar numeric/boolean validation", () => {
+    beforeEach(async () => {
+      ({ handler } = createTestApp());
+      const modelRes = await jsonRequest(handler, "POST", "/api/models", { name: "Stats", apiKey: "stats" });
+      const model = await modelRes.json();
+      await jsonRequest(handler, "POST", `/api/models/${model.id}/fields`, { label: "Title", apiKey: "title", fieldType: "string" });
+      await jsonRequest(handler, "POST", `/api/models/${model.id}/fields`, { label: "Count", apiKey: "count", fieldType: "integer" });
+      await jsonRequest(handler, "POST", `/api/models/${model.id}/fields`, { label: "Score", apiKey: "score", fieldType: "float" });
+      await jsonRequest(handler, "POST", `/api/models/${model.id}/fields`, { label: "Featured", apiKey: "featured", fieldType: "boolean" });
+    });
+
+    it("rejects invalid integer, float, and boolean values", async () => {
+      const badInteger = await jsonRequest(handler, "POST", "/api/records", {
+        modelApiKey: "stats",
+        data: { title: "Broken integer", count: "abc" },
+      });
+      expect(badInteger.status).toBe(400);
+      expect(await badInteger.text()).toContain("Invalid integer for field 'count'");
+
+      const badFloat = await jsonRequest(handler, "POST", "/api/records", {
+        modelApiKey: "stats",
+        data: { title: "Broken float", score: "abc" },
+      });
+      expect(badFloat.status).toBe(400);
+      expect(await badFloat.text()).toContain("Invalid float for field 'score'");
+
+      const badBoolean = await jsonRequest(handler, "POST", "/api/records", {
+        modelApiKey: "stats",
+        data: { title: "Broken boolean", featured: "maybe" },
+      });
+      expect(badBoolean.status).toBe(400);
+      expect(await badBoolean.text()).toContain("Invalid boolean for field 'featured'");
+    });
+  });
+
   describe("color field", () => {
     beforeEach(async () => {
       ({ handler } = createTestApp());
