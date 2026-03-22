@@ -131,6 +131,31 @@ function toSlugSourceString(value: unknown): string | null {
   return null;
 }
 
+function normalizeBooleanValue(field: ParsedFieldRow, value: unknown): unknown {
+  if (field.field_type !== "boolean") return value;
+  if (value === 1) return true;
+  if (value === 0) return false;
+  if (field.localized && isJsonRecord(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map(([locale, localeValue]) => [
+        locale,
+        localeValue === 1 ? true : localeValue === 0 ? false : localeValue,
+      ])
+    );
+  }
+  return value;
+}
+
+function normalizeBooleanFields(record: Record<string, unknown>, fields: ReadonlyArray<ParsedFieldRow>) {
+  const normalized: Record<string, unknown> = { ...record };
+  for (const field of fields) {
+    if (field.api_key in normalized) {
+      normalized[field.api_key] = normalizeBooleanValue(field, normalized[field.api_key]);
+    }
+  }
+  return normalized;
+}
+
 function scopeStructuredTextIds<T>(value: T, scope: string): T {
   if (!value || typeof value !== "object") return value;
 
@@ -554,7 +579,7 @@ export function createRecord(body: CreateRecordInput, actor?: RequestActor | nul
     yield* SearchService.indexRecord(body.modelApiKey, id, record, modelFields).pipe(Effect.ignore);
     yield* fireHook("onRecordCreate", { modelApiKey: body.modelApiKey, recordId: id });
 
-    return { id, ...record };
+    return normalizeBooleanFields({ id, ...record }, modelFields);
   }).pipe(
     Effect.withSpan("record.create"),
     Effect.annotateSpans({
@@ -575,7 +600,7 @@ export function listRecords(modelApiKey: string) {
     return yield* Effect.all(
       records.map((record) => materializeRecordStructuredTextFields({
         modelApiKey: model.api_key,
-        record,
+        record: normalizeBooleanFields(record, fields),
         fields,
       })),
       { concurrency: "unbounded" }
@@ -591,7 +616,8 @@ export function getRecord(modelApiKey: string, id: string) {
     if (!model) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
     const record = yield* selectById(`content_${model.api_key}`, id);
     if (!record) return yield* new NotFoundError({ entity: "Record", id });
-    return record;
+    const fields = yield* getModelFields(model.id);
+    return normalizeBooleanFields(record, fields);
   });
 }
 
@@ -863,7 +889,8 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
 
     yield* SearchService.reindexRecord(body.modelApiKey, id, modelFields).pipe(Effect.ignore);
     yield* fireHook("onRecordUpdate", { modelApiKey: body.modelApiKey, recordId: id });
-    return yield* selectById(tableName, id);
+    const updated = yield* selectById(tableName, id);
+    return updated ? normalizeBooleanFields(updated, modelFields) : null;
   }).pipe(
     Effect.withSpan("record.patch"),
     Effect.annotateSpans({
@@ -1287,7 +1314,7 @@ export function patchBlocksForField(body: PatchBlocksInput, actor?: RequestActor
     if (!updatedRecord) return null;
     return yield* materializeRecordStructuredTextFields({
       modelApiKey: model.api_key,
-      record: updatedRecord,
+      record: normalizeBooleanFields(updatedRecord, modelFields),
       fields: modelFields,
     });
   });

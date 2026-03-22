@@ -19,7 +19,7 @@
 ## Next Best Bets
 - Make the guide more explicit about checking `schema_info` / `describe_model` before assuming example fields
 - Probe edge-case error quality for weak spots that still cause extra turns
-- Explore script-writing friction further (auth/bootstrap + nested mount points are better documented, but response parsing is still awkward)
+- Explore script-writing friction further (auth/bootstrap + nested mount points are better documented, and the raw HTTP shapes are clearer now, but standalone script prompts still have some residual friction)
 - Validate `seo.image` asset references the same way `media` fields validate upload IDs
 
 ## Structured Text

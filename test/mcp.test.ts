@@ -139,6 +139,10 @@ describe("MCP Server", () => {
         name: "create_field",
         arguments: { modelId, label: "Body", apiKey: "body", fieldType: "text" },
       });
+      await client.callTool({
+        name: "create_field",
+        arguments: { modelId, label: "Featured", apiKey: "featured", fieldType: "boolean" },
+      });
     });
 
     it("creates and queries records", async () => {
@@ -188,6 +192,22 @@ describe("MCP Server", () => {
       const fetched = getResult(getRes);
       expect(fetched.id).toBe(record.id);
       expect(fetched.title).toBe("Lookup");
+    });
+
+    it("returns booleans as booleans in MCP record responses", async () => {
+      const createRes = await client.callTool({
+        name: "create_record",
+        arguments: { modelApiKey: "post", data: { title: "Featured", featured: true } },
+      });
+      const created = getResult(createRes);
+      expect(created.featured).toBe(true);
+
+      const publishRes = await client.callTool({
+        name: "publish_record",
+        arguments: { recordId: created.id, modelApiKey: "post" },
+      });
+      const published = getResult(publishRes);
+      expect(published.featured).toBe(true);
     });
 
     it("publishes and unpublishes", async () => {

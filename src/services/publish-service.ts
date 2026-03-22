@@ -9,6 +9,7 @@ import { materializeRecordStructuredTextFields } from "./structured-text-service
 import { fireHook } from "../hooks.js";
 import * as VersionService from "./version-service.js";
 import { encodeJson } from "../json.js";
+import { getRecord } from "./record-service.js";
 import type { RequestActor } from "../attribution.js";
 
 export function publishRecord(modelApiKey: string, recordId: string, actor?: RequestActor | null) {
@@ -88,7 +89,7 @@ export function publishRecord(modelApiKey: string, recordId: string, actor?: Req
     );
 
     yield* fireHook("onPublish", { modelApiKey, recordId });
-    return yield* selectById(tableName, recordId);
+    return yield* getRecord(modelApiKey, recordId);
   }).pipe(
     Effect.withSpan("record.publish"),
     Effect.annotateSpans({
@@ -148,7 +149,7 @@ export function unpublishRecord(modelApiKey: string, recordId: string, actor?: R
     );
 
     yield* fireHook("onUnpublish", { modelApiKey, recordId });
-    return yield* selectById(tableName, recordId);
+    return yield* getRecord(modelApiKey, recordId);
   }).pipe(
     Effect.withSpan("record.unpublish"),
     Effect.annotateSpans({
