@@ -55,6 +55,11 @@ async function seed() {
     apiKey: "code_block",
     isBlock: true,
   });
+  const imageGallery = await api("POST", "/api/models", {
+    name: "Image Gallery",
+    apiKey: "image_gallery",
+    isBlock: true,
+  });
   const featureCard = await api("POST", "/api/models", {
     name: "Feature Card",
     apiKey: "feature_card",
@@ -168,7 +173,7 @@ async function seed() {
     apiKey: "content",
     fieldType: "structured_text",
     validators: {
-      structured_text_blocks: ["hero_section", "code_block", "feature_grid", "feature_card"],
+      structured_text_blocks: ["hero_section", "code_block", "image_gallery", "feature_grid", "feature_card"],
     },
   });
   await api("POST", `/api/models/${post.id}/fields`, {
@@ -243,6 +248,23 @@ async function seed() {
   await api("POST", `/api/models/${codeBlock.id}/fields`, {
     label: "Filename",
     apiKey: "filename",
+    fieldType: "string",
+  });
+
+  // image_gallery block
+  await api("POST", `/api/models/${imageGallery.id}/fields`, {
+    label: "Images",
+    apiKey: "images",
+    fieldType: "media_gallery",
+  });
+  await api("POST", `/api/models/${imageGallery.id}/fields`, {
+    label: "Caption",
+    apiKey: "caption",
+    fieldType: "text",
+  });
+  await api("POST", `/api/models/${imageGallery.id}/fields`, {
+    label: "Layout",
+    apiKey: "layout",
     fieldType: "string",
   });
 
