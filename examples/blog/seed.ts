@@ -34,7 +34,6 @@ async function seed() {
   const author = await api("POST", "/api/models", {
     name: "Author",
     apiKey: "author",
-    singleton: true,
   });
   const category = await api("POST", "/api/models", {
     name: "Category",
@@ -100,6 +99,11 @@ async function seed() {
     label: "Bio",
     apiKey: "bio",
     fieldType: "text",
+  });
+  await api("POST", `/api/models/${author.id}/fields`, {
+    label: "Headshot",
+    apiKey: "headshot",
+    fieldType: "media",
   });
 
   // category

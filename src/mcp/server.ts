@@ -295,9 +295,9 @@ function parseValidators(value: unknown): Record<string, unknown> {
   return {};
 }
 
-function withDecoded<A, I, R, B, E, R2>(
+function withDecoded<A, I, R, E, R2>(
   schema: Schema.Schema<A, I, R>,
-  handler: (params: A) => Effect.Effect<B, E, R2>,
+  handler: (params: A) => Effect.Effect<unknown, E, R2>,
 ) {
   return (params: unknown) => Schema.decodeUnknown(schema)(params).pipe(Effect.flatMap(handler));
 }
@@ -764,7 +764,7 @@ export function createMcpLayer(
     return url ? { ...asset, url } : asset;
   }
 
-  const toolHandlers = {
+  const toolHandlers: Record<string, (params: unknown) => Effect.Effect<unknown, unknown, unknown>> = {
     schema_info: withDecoded(SchemaInfoInput, ({ filterByName, filterByType, includeFieldDetails }) =>
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;

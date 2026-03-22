@@ -56,7 +56,7 @@ Create these content models using `create_model`:
 | Name | api_key | singleton | Notes |
 |---|---|---|---|
 | Site Settings | site_settings | true | Global site configuration |
-| Author | author | true | Blog author profile |
+| Author | author | false | Blog author profiles |
 | Category | category | false | Post categories |
 | Post | post | false | Blog posts |
 
@@ -89,7 +89,7 @@ Add fields to each model using `create_field`. Use the model's `id` from step 1.
 |---|---|---|---|
 | Name | name | string | `{"required": true}` |
 | Bio | bio | text | |
-| Photo | photo | media | |
+| Headshot | headshot | media | |
 
 **category:**
 
@@ -160,7 +160,7 @@ Before creating content, upload sample images to R2 and register them.
 Use the `upload_asset` MCP tool to register these assets (the agent should guide the user through `wrangler r2 object put` for the actual file upload, or use placeholder r2Keys):
 
 1. **Site logo** — `r2Key: "uploads/logo.svg"`, filename: "logo.svg", mimeType: "image/svg+xml"
-2. **Author photo** — `r2Key: "uploads/author.jpg"`, filename: "author.jpg", mimeType: "image/jpeg", width: 400, height: 400
+2. **Author headshot** — `r2Key: "uploads/author.jpg"`, filename: "author.jpg", mimeType: "image/jpeg", width: 400, height: 400
 3. **Post cover 1** — `r2Key: "uploads/cover-agents.jpg"`, filename: "cover-agents.jpg", mimeType: "image/jpeg", width: 1200, height: 630
 4. **Post cover 2** — `r2Key: "uploads/cover-workers.jpg"`, filename: "cover-workers.jpg", mimeType: "image/jpeg", width: 1200, height: 630
 5. **Post cover 3** — `r2Key: "uploads/cover-graphql.jpg"`, filename: "cover-graphql.jpg", mimeType: "image/jpeg", width: 1200, height: 630
@@ -185,12 +185,12 @@ Create the singleton record:
 
 ### 2.3 Author
 
-Create the singleton:
+Create an author record:
 ```json
 {
   "name": "Demo Author",
   "bio": "Building the future of content management. This blog is managed entirely through AI agents — no admin UI needed.",
-  "photo": "<author photo asset id>"
+  "headshot": "<author headshot asset id>"
 }
 ```
 

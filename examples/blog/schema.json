@@ -55,7 +55,7 @@
             "name": "Author",
             "apiKey": "author",
             "isBlock": false,
-            "singleton": true,
+            "singleton": false,
             "sortable": false,
             "tree": false,
             "hasDraft": true,
@@ -81,8 +81,8 @@
                     "hint": null
                 },
                 {
-                    "label": "Photo",
-                    "apiKey": "photo",
+                    "label": "Headshot",
+                    "apiKey": "headshot",
                     "fieldType": "media",
                     "position": 2,
                     "localized": false,
