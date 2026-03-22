@@ -245,7 +245,6 @@ Focal points, blurhash, and color palette are stored per-asset. Cloudflare Image
 
 - [`examples/blog/`](./examples/blog/) — CMS Worker + Astro SSR site with typed GraphQL (gql.tada), structured text rendering, responsive images, service bindings
 - [`examples/editor-mcp/`](./examples/editor-mcp/) — editor onboarding: app-land OAuth gateway, scoped editor tokens, separate MCP URLs for developers and editors
-- [`examples/visual-edit/`](./examples/visual-edit/) — inline visual editing: field tweaks and image replacement without a chat surface
 
 ## License
 

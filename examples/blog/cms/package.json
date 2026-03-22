@@ -10,7 +10,7 @@
     "mcp:test": "node test-mcp.mjs"
   },
   "dependencies": {
-    "agent-cms": "file:../../..",
+    "agent-cms": "workspace:*",
     "wrangler": "^4.73.0"
   }
 }
