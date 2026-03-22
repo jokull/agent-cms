@@ -96,6 +96,24 @@ describe("Records REST API", () => {
         error: expect.stringContaining("Linked record(s) not found for field 'author'"),
       });
     });
+
+    it("rejects link objects that use id instead of a record ID string with a clear error", async () => {
+      const categoryRes = await jsonRequest(handler, "POST", "/api/models", { name: "Category", apiKey: "category" });
+      const category = await categoryRes.json();
+      await jsonRequest(handler, "POST", `/api/models/${category.id}/fields`, { label: "Name", apiKey: "name", fieldType: "string" });
+      await jsonRequest(handler, "POST", `/api/models/${modelId}/fields`, {
+        label: "Category", apiKey: "category", fieldType: "link", validators: { item_item_type: ["category"] },
+      });
+
+      const res = await jsonRequest(handler, "POST", "/api/records", {
+        modelApiKey: "post",
+        data: { title: "Broken link shape", category: { id: "01NONEXISTENTCATEGORY00000000" } },
+      });
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toMatchObject({
+        error: expect.stringContaining("Invalid link for field 'category': use a record ID string, not {\"id\":\"...\"}"),
+      });
+    });
   });
 
   describe("GET /api/records", () => {

@@ -133,6 +133,14 @@ function isMistakenMediaObject(value: unknown): value is Record<string, unknown>
   return isJsonRecord(value) && typeof value.id === "string" && value.id.length > 0 && value.upload_id === undefined;
 }
 
+function isMistakenLinkObject(value: unknown): value is Record<string, unknown> {
+  return isJsonRecord(value) && typeof value.id === "string" && value.id.length > 0;
+}
+
+function hasMistakenLinkObject(value: unknown): boolean {
+  return Array.isArray(value) && value.some((entry) => isMistakenLinkObject(entry));
+}
+
 function toSlugSourceString(value: unknown): string | null {
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") return String(value);
@@ -431,6 +439,18 @@ function processCreateLikeRecordFields({
         if (field.field_type === "media" && isMistakenMediaObject(data[field.api_key])) {
           return yield* new ValidationError({
             message: createFieldErrorMessage(errorPrefix, `Invalid media for field '${field.api_key}': use an asset ID string or {"upload_id":"<asset_id>"}, not {"id":"..."}`),
+            field: field.api_key,
+          });
+        }
+        if (field.field_type === "link" && isMistakenLinkObject(data[field.api_key])) {
+          return yield* new ValidationError({
+            message: createFieldErrorMessage(errorPrefix, `Invalid link for field '${field.api_key}': use a record ID string, not {"id":"..."}`),
+            field: field.api_key,
+          });
+        }
+        if (field.field_type === "links" && hasMistakenLinkObject(data[field.api_key])) {
+          return yield* new ValidationError({
+            message: createFieldErrorMessage(errorPrefix, `Invalid links for field '${field.api_key}': use an array of record ID strings, not objects like {"id":"..."}`),
             field: field.api_key,
           });
         }
@@ -864,6 +884,18 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
         if (field.field_type === "media" && isMistakenMediaObject(data[field.api_key])) {
           return yield* new ValidationError({
             message: `Invalid media for field '${field.api_key}': use an asset ID string or {"upload_id":"<asset_id>"}, not {"id":"..."}`,
+            field: field.api_key,
+          });
+        }
+        if (field.field_type === "link" && isMistakenLinkObject(data[field.api_key])) {
+          return yield* new ValidationError({
+            message: `Invalid link for field '${field.api_key}': use a record ID string, not {"id":"..."}`,
+            field: field.api_key,
+          });
+        }
+        if (field.field_type === "links" && hasMistakenLinkObject(data[field.api_key])) {
+          return yield* new ValidationError({
+            message: `Invalid links for field '${field.api_key}': use an array of record ID strings, not objects like {"id":"..."}`,
             field: field.api_key,
           });
         }
