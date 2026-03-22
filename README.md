@@ -53,7 +53,7 @@ pnpm run deploy
 
 ### Guided setup
 
-For more control — standalone vs. service binding vs. mounting in an existing Worker — copy the prompt from [`AGENT.md`](./AGENT.md) into Claude Code. It assesses your repo, asks how you want to integrate, and wires everything up.
+For more control — standalone vs. service binding vs. mounting in an existing Worker — copy the prompt from [`PROMPT.md`](./PROMPT.md) into Claude Code. It assesses your repo, asks how you want to integrate, and wires everything up.
 
 ## Interfaces
 

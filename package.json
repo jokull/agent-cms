@@ -13,11 +13,17 @@
     }
   },
   "files": [
-    "dist",
+    "dist/*.mjs",
+    "dist/*.mts",
     "migrations",
     "README.md",
-    "LICENSE"
+    "PROMPT.md",
+    "LICENSE",
+    "bin"
   ],
+  "bin": {
+    "agent-cms": "./bin/cli.mjs"
+  },
   "scripts": {
     "build": "tsdown",
     "dev": "wrangler dev",
