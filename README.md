@@ -22,38 +22,7 @@ Agent-first headless CMS. Runs as a Cloudflare Worker backed by D1 and R2 in you
 
 ## Quick start
 
-```bash
-pnpm create agent-cms my-cms
-cd my-cms
-pnpm dev
-pnpm run setup -- http://127.0.0.1:8787
-```
-
-Connect an agent to the MCP server:
-
-```json
-{
-  "mcpServers": {
-    "my-cms": { "url": "http://localhost:8787/mcp" }
-  }
-}
-```
-
-Or with Claude Code:
-
-```bash
-claude mcp add --transport http my-cms http://127.0.0.1:8787/mcp
-```
-
-Deploy to production:
-
-```bash
-pnpm run deploy
-```
-
-### Guided setup
-
-For more control — standalone vs. service binding vs. mounting in an existing Worker — copy the prompt from [`PROMPT.md`](./PROMPT.md) into Claude Code. It assesses your repo, asks how you want to integrate, and wires everything up.
+Copy the prompt from [`PROMPT.md`](./PROMPT.md) into Claude Code. It assesses your project, asks how you want to integrate (standalone Worker, service binding, or mounted in an existing Worker), and wires everything up — including D1 database, wrangler config, and MCP server connection.
 
 ## Interfaces
 

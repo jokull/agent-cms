@@ -18,12 +18,8 @@
     "migrations",
     "README.md",
     "PROMPT.md",
-    "LICENSE",
-    "bin"
+    "LICENSE"
   ],
-  "bin": {
-    "agent-cms": "./bin/cli.mjs"
-  },
   "scripts": {
     "build": "tsdown",
     "dev": "wrangler dev",
