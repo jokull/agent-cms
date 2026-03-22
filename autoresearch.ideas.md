@@ -7,6 +7,7 @@
 - Seeded blog schema now includes `post.cover_image`, `post.related_posts`, and `post.gallery`, avoiding schema-mutation detours in common editorial tasks
 - Invalid `link` / `links` references now fail fast with a precise `ValidationError`
 - Invalid `date` / `date_time` values now fail fast with a precise `ValidationError`
+- Invalid `boolean` / `integer` / `float` values now fail fast with a precise `ValidationError`
 - Singleton content-model editing is smoother with `update_singleton_record`
 - Multi-record publishing is smoother with `bulk_publish_records`
 - Multi-record unpublishing is smoother with `bulk_unpublish_records`
@@ -19,7 +20,6 @@
 - Make the guide more explicit about checking `schema_info` / `describe_model` before assuming example fields
 - Probe edge-case error quality for weak spots that still cause extra turns
 - Explore script-writing friction further (auth/bootstrap + nested mount points are better documented, but response parsing is still awkward)
-- Add write-time validation for other scalar field types (`integer`, `float`, `boolean`) — invalid scalar strings currently appear to pass through silently
 - Validate `seo.image` asset references the same way `media` fields validate upload IDs
 
 ## Structured Text

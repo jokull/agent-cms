@@ -680,6 +680,11 @@ Raw HTTP / JSON-RPC access:
     1. bulk_create_records with {"modelApiKey":"post","records":[{"title":"Post 1"}, ...]}
     2. Parse result.content[0].text and read ids from .records[].id
     3. bulk_publish_records with {"modelApiKey":"post","recordIds":[...ids]}
+  - Minimal Node.js single-record flow:
+    1. import_asset_from_url -> parse payload.id as the asset id
+    2. create_record with {"modelApiKey":"post","data":{"title":"Hello","cover_image":"<asset_id>"}}
+    3. parse the returned draft record's id
+    4. publish_record with {"modelApiKey":"post","recordId":"<record_id>"}
 
 Slug fields:
   Set validator {"slug_source": "title"} to auto-generate from a source field.
