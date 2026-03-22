@@ -225,6 +225,48 @@ function getReferenceIds(fieldType: string, value: unknown): string[] {
   return [];
 }
 
+function getAssetIds(fieldType: string, value: unknown): string[] {
+  if (fieldType === "media") {
+    const ref = parseMediaFieldReference(value);
+    return ref ? [ref.uploadId] : [];
+  }
+  if (fieldType === "media_gallery") {
+    return parseMediaGalleryReferences(value).map((ref) => ref.uploadId);
+  }
+  if (fieldType === "seo" && isJsonRecord(value) && typeof value.image === "string" && value.image.length > 0) {
+    return [value.image];
+  }
+  return [];
+}
+
+function validateAssetFieldValue(
+  sql: SqlClient.SqlClient,
+  field: ParsedFieldRow,
+  value: unknown,
+  errorPrefix?: string,
+) {
+  return Effect.gen(function* () {
+    const assetIds = getAssetIds(field.field_type, value);
+    if (assetIds.length === 0) {
+      return;
+    }
+
+    const placeholders = assetIds.map(() => "?").join(", ");
+    const found = yield* sql.unsafe<{ id: string }>(
+      `SELECT id FROM assets WHERE id IN (${placeholders})`,
+      assetIds,
+    );
+    const foundIds = new Set(found.map((row) => row.id));
+    const missing = assetIds.filter((id) => !foundIds.has(id));
+    if (missing.length > 0) {
+      return yield* new ValidationError({
+        message: createFieldErrorMessage(errorPrefix, `Asset(s) not found for field '${field.api_key}': ${missing.join(", ")}`),
+        field: field.api_key,
+      });
+    }
+  });
+}
+
 function validateReferenceFieldValue(
   sql: SqlClient.SqlClient,
   field: ParsedFieldRow,
@@ -438,33 +480,25 @@ function processCreateLikeRecordFields({
         }
       }
 
-      // Validate asset existence for media fields
+      // Validate asset existence for asset-backed fields
       if (
-        (field.field_type === "media" || field.field_type === "media_gallery")
+        (field.field_type === "media" || field.field_type === "media_gallery" || field.field_type === "seo")
         && data[field.api_key] !== undefined
         && data[field.api_key] !== null
       ) {
-        const assetIds: string[] = [];
-        if (field.field_type === "media") {
-          const ref = parseMediaFieldReference(data[field.api_key]);
-          if (ref) assetIds.push(ref.uploadId);
-        } else {
-          const refs = parseMediaGalleryReferences(data[field.api_key]);
-          assetIds.push(...refs.map((r) => r.uploadId));
-        }
-        if (assetIds.length > 0) {
-          const placeholders = assetIds.map(() => "?").join(", ");
-          const found = yield* sql.unsafe<{ id: string }>(
-            `SELECT id FROM assets WHERE id IN (${placeholders})`, assetIds,
+        if (field.localized) {
+          const localeMap = yield* decodeLocalizedFieldMap(field, data[field.api_key]).pipe(
+            Effect.mapError((error) => new ValidationError({
+              message: createFieldErrorMessage(errorPrefix, error.message),
+              field: error.field,
+            }))
           );
-          const foundIds = new Set(found.map((r) => r.id));
-          const missing = assetIds.filter((id) => !foundIds.has(id));
-          if (missing.length > 0) {
-            return yield* new ValidationError({
-              message: createFieldErrorMessage(errorPrefix, `Asset(s) not found for field '${field.api_key}': ${missing.join(", ")}`),
-              field: field.api_key,
-            });
+          for (const localeValue of Object.values(localeMap)) {
+            if (localeValue === null) continue;
+            yield* validateAssetFieldValue(sql, field, localeValue, errorPrefix);
           }
+        } else {
+          yield* validateAssetFieldValue(sql, field, data[field.api_key], errorPrefix);
         }
       }
 
@@ -846,6 +880,22 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
               }))
             );
           }
+        }
+      }
+
+      if (
+        (field.field_type === "media" || field.field_type === "media_gallery" || field.field_type === "seo")
+        && data[field.api_key] !== undefined
+        && data[field.api_key] !== null
+      ) {
+        if (field.localized) {
+          const localeMap = yield* decodeLocalizedFieldMap(field, data[field.api_key]);
+          for (const localeValue of Object.values(localeMap)) {
+            if (localeValue === null) continue;
+            yield* validateAssetFieldValue(sql, field, localeValue);
+          }
+        } else {
+          yield* validateAssetFieldValue(sql, field, data[field.api_key]);
         }
       }
 

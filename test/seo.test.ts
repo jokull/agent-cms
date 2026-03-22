@@ -126,6 +126,22 @@ describe("SEO field type", () => {
     expect(result.data.allPages[0].seo).toBeNull();
   });
 
+  it("rejects SEO image references to missing assets on create", async () => {
+    const createRes = await jsonRequest(handler, "POST", "/api/records", {
+      modelApiKey: "page",
+      data: {
+        title: "Broken SEO",
+        seo: {
+          title: "Broken SEO | Example",
+          image: "01NONEXISTENTASSET0000000000",
+        },
+      },
+    });
+
+    expect(createRes.status).toBe(400);
+    expect(await createRes.text()).toContain("Asset(s) not found for field 'seo': 01NONEXISTENTASSET0000000000");
+  });
+
   it("updates SEO field on existing record", async () => {
     const createRes = await jsonRequest(handler, "POST", "/api/records", {
       modelApiKey: "page",
@@ -146,5 +162,29 @@ describe("SEO field type", () => {
     const updated = await patchRes.json();
     expect(updated.seo.title).toBe("Contact Us | Updated");
     expect(updated.seo.twitterCard).toBe("summary");
+  });
+
+  it("rejects SEO image references to missing assets on update", async () => {
+    const createRes = await jsonRequest(handler, "POST", "/api/records", {
+      modelApiKey: "page",
+      data: {
+        title: "Needs Update",
+        seo: { title: "Needs Update | Example" },
+      },
+    });
+    const record = await createRes.json();
+
+    const patchRes = await jsonRequest(handler, "PATCH", `/api/records/${record.id}`, {
+      modelApiKey: "page",
+      data: {
+        seo: {
+          title: "Needs Update | Example",
+          image: "01NONEXISTENTASSET0000000000",
+        },
+      },
+    });
+
+    expect(patchRes.status).toBe(400);
+    expect(await patchRes.text()).toContain("Asset(s) not found for field 'seo': 01NONEXISTENTASSET0000000000");
   });
 });

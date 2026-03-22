@@ -9,6 +9,8 @@
 - Invalid `date` / `date_time` values now fail fast with a precise `ValidationError`
 - Invalid `boolean` / `integer` / `float` values now fail fast with a precise `ValidationError`
 - Boolean fields now come back as true/false in MCP record responses instead of raw SQLite 1/0 values
+- Locale-keyed values on non-localized fields now fail fast with a precise `ValidationError`
+- `seo.image` asset references now fail fast with a precise `ValidationError` when the asset ID does not exist
 - Singleton content-model editing is smoother with `update_singleton_record`
 - Multi-record publishing is smoother with `bulk_publish_records`
 - Multi-record unpublishing is smoother with `bulk_unpublish_records`
@@ -21,20 +23,10 @@
 - Make the guide more explicit about checking `schema_info` / `describe_model` before assuming example fields
 - Probe edge-case error quality for weak spots that still cause extra turns
 - Explore script-writing friction further (auth/bootstrap + nested mount points are better documented, and the raw HTTP shapes are clearer now, but standalone script prompts still have some residual friction)
-- Validate `seo.image` asset references the same way `media` fields validate upload IDs
-
-## Structured Text
-- Create deeply nested structured text with inline links in other nested block combinations
-
-## Publishing Lifecycle
-- Publish and unpublish a record, verify status changes via `query_records`
-
-## Search
-- Full-text search for content across models
 
 ## Script Writing
 - Have Claude write a bash script that uses curl to batch-create 5 posts via MCP
 - Have Claude write a Node.js script that imports assets from URLs and creates records referencing them
 
 ## Edge Cases
-- Try to use admin-only tools with an editor token — verify clear error
+- Probe invalid nested/composite payloads that still produce generic type errors instead of schema-aware guidance
