@@ -137,4 +137,20 @@ describe("Media fields", () => {
     expect(post.gallery[0].title).toBe("Default hero title");
     expect(post.gallery[1].title).toBe("Gallery override title");
   });
+
+  it("rejects media objects that use id instead of upload_id with a clear error", async () => {
+    const createRes = await jsonRequest(handler, "POST", "/api/records", {
+      modelApiKey: "post",
+      data: {
+        title: "Wrong Media Shape",
+        cover: { id: "01NONEXISTENTASSET0000000000" },
+      },
+    });
+
+    expect(createRes.status).toBe(400);
+    const body = await createRes.text();
+    expect(body).toContain("Invalid media for field 'cover'");
+    expect(body).toContain("upload_id");
+    expect(body).toContain("{\\\"id\\\":\\\"...\\\"}");
+  });
 });

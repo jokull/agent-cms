@@ -11,6 +11,7 @@
 - Boolean fields now come back as true/false in MCP record responses instead of raw SQLite 1/0 values
 - Locale-keyed values on non-localized fields now fail fast with a precise `ValidationError`
 - `seo.image` asset references now fail fast with a precise `ValidationError` when the asset ID does not exist
+- Media objects that incorrectly use `{id: ...}` instead of `{upload_id: ...}` now fail fast with a schema-aware `ValidationError`
 - Singleton content-model editing is smoother with `update_singleton_record`
 - Multi-record publishing is smoother with `bulk_publish_records`
 - Multi-record unpublishing is smoother with `bulk_unpublish_records`

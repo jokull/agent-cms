@@ -129,6 +129,10 @@ function isJsonRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isMistakenMediaObject(value: unknown): value is Record<string, unknown> {
+  return isJsonRecord(value) && typeof value.id === "string" && value.id.length > 0 && value.upload_id === undefined;
+}
+
 function toSlugSourceString(value: unknown): string | null {
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") return String(value);
@@ -424,6 +428,12 @@ function processCreateLikeRecordFields({
 
       if (isFieldType(field.field_type) && data[field.api_key] !== undefined && data[field.api_key] !== null) {
         const fieldDef = getFieldTypeDef(field.field_type);
+        if (field.field_type === "media" && isMistakenMediaObject(data[field.api_key])) {
+          return yield* new ValidationError({
+            message: createFieldErrorMessage(errorPrefix, `Invalid media for field '${field.api_key}': use an asset ID string or {"upload_id":"<asset_id>"}, not {"id":"..."}`),
+            field: field.api_key,
+          });
+        }
         if (!field.localized && isLocalizedValueMap(data[field.api_key])) {
           return yield* new ValidationError({
             message: createFieldErrorMessage(errorPrefix, `Field '${field.api_key}' is not localized and cannot accept locale-keyed values`),
@@ -851,6 +861,12 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
       // Validate composite field types using registry schemas
       if (isFieldType(field.field_type) && data[field.api_key] !== undefined && data[field.api_key] !== null) {
         const fieldDef = getFieldTypeDef(field.field_type);
+        if (field.field_type === "media" && isMistakenMediaObject(data[field.api_key])) {
+          return yield* new ValidationError({
+            message: `Invalid media for field '${field.api_key}': use an asset ID string or {"upload_id":"<asset_id>"}, not {"id":"..."}`,
+            field: field.api_key,
+          });
+        }
         if (!field.localized && isLocalizedValueMap(data[field.api_key])) {
           return yield* new ValidationError({
             message: `Field '${field.api_key}' is not localized and cannot accept locale-keyed values`,
