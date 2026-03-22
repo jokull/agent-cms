@@ -121,6 +121,10 @@ function isLocaleKey(key: string): boolean {
   return /^[a-z]{2,3}(?:[_-][A-Za-z0-9]{2,8})*$/.test(key);
 }
 
+function isLocalizedValueMap(value: unknown): value is Record<string, unknown> {
+  return isJsonRecord(value) && Object.keys(value).length > 0 && Object.keys(value).every(isLocaleKey);
+}
+
 function isJsonRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -378,6 +382,12 @@ function processCreateLikeRecordFields({
 
       if (isFieldType(field.field_type) && data[field.api_key] !== undefined && data[field.api_key] !== null) {
         const fieldDef = getFieldTypeDef(field.field_type);
+        if (!field.localized && isLocalizedValueMap(data[field.api_key])) {
+          return yield* new ValidationError({
+            message: createFieldErrorMessage(errorPrefix, `Field '${field.api_key}' is not localized and cannot accept locale-keyed values`),
+            field: field.api_key,
+          });
+        }
         if (fieldDef.inputSchema) {
           if (field.localized) {
             const localeMap = yield* decodeLocalizedFieldMap(field, data[field.api_key]).pipe(
@@ -807,6 +817,12 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
       // Validate composite field types using registry schemas
       if (isFieldType(field.field_type) && data[field.api_key] !== undefined && data[field.api_key] !== null) {
         const fieldDef = getFieldTypeDef(field.field_type);
+        if (!field.localized && isLocalizedValueMap(data[field.api_key])) {
+          return yield* new ValidationError({
+            message: `Field '${field.api_key}' is not localized and cannot accept locale-keyed values`,
+            field: field.api_key,
+          });
+        }
         if (fieldDef.inputSchema) {
           if (field.localized) {
             const localeMap = yield* decodeLocalizedFieldMap(field, data[field.api_key]);

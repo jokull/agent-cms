@@ -102,6 +102,15 @@ describe("Date, DateTime, Color, and LatLon field types", () => {
       expect(badBoolean.status).toBe(400);
       expect(await badBoolean.text()).toContain("Invalid boolean for field 'featured'");
     });
+
+    it("rejects locale-keyed values on non-localized fields with a clear error", async () => {
+      const badLocalizedBoolean = await jsonRequest(handler, "POST", "/api/records", {
+        modelApiKey: "stats",
+        data: { title: "Broken locale", featured: { en: true, is: "maybe" } },
+      });
+      expect(badLocalizedBoolean.status).toBe(400);
+      expect(await badLocalizedBoolean.text()).toContain("Field 'featured' is not localized and cannot accept locale-keyed values");
+    });
   });
 
   describe("color field", () => {

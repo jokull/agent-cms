@@ -8,6 +8,7 @@
 - Invalid `link` / `links` references now fail fast with a precise `ValidationError`
 - Invalid `date` / `date_time` values now fail fast with a precise `ValidationError`
 - Invalid `boolean` / `integer` / `float` values now fail fast with a precise `ValidationError`
+- Boolean fields now come back as true/false in MCP record responses instead of raw SQLite 1/0 values
 - Singleton content-model editing is smoother with `update_singleton_record`
 - Multi-record publishing is smoother with `bulk_publish_records`
 - Multi-record unpublishing is smoother with `bulk_unpublish_records`
