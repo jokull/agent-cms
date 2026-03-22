@@ -14,8 +14,6 @@ if [ -z "${CMS_WRITE_KEY:-}" ] && [ -f "$DEV_VARS_FILE" ]; then
 fi
 CMS_WRITE_KEY="${CMS_WRITE_KEY:?Set CMS_WRITE_KEY env var}"
 MCP_CONFIG="${BLOG_DIR}/.mcp-autoresearch.json"
-ADMIN_MCP_CONFIG="${BLOG_DIR}/.mcp-autoresearch-admin.json"
-TOKEN_FILE="${SCRIPT_DIR}/.autoresearch-editor-token"
 CLAUDE_MAX_BUDGET_USD="${CLAUDE_MAX_BUDGET_USD:-2.00}"
 
 # --- Verify CMS is reachable ---
@@ -26,29 +24,9 @@ if ! curl -sf "${CMS_URL}/health" >/dev/null 2>&1; then
   exit 1
 fi
 
-# --- Reset database to known state (scientific method: same starting conditions) ---
-# Drop all content/block/fts tables, re-setup, re-seed
+# --- Reset database to empty state ---
 echo "Resetting CMS database..." >&2
-TABLES=$(curl -sf "${CMS_URL}/mcp" \
-  -X POST \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -H "Authorization: Bearer ${CMS_WRITE_KEY}" \
-  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"schema_info","arguments":{}},"id":1}' 2>/dev/null || echo "")
-
-# Wipe via D1 — drop content tables, block tables, FTS tables, system metadata
 cd "$SCRIPT_DIR/examples/blog/cms"
-npx wrangler d1 execute test-blog-cms-db --remote --command "$(cat <<'SQLEOF'
-DELETE FROM fields;
-DELETE FROM fieldsets;
-DELETE FROM models;
-DELETE FROM assets;
-DELETE FROM site_settings;
-DELETE FROM record_versions;
-DELETE FROM editor_tokens;
-DELETE FROM _cms_migrations;
-SQLEOF
-)" 2>/dev/null
 
 # Drop dynamic tables (content_*, block_*, fts_*)
 DYNAMIC_TABLES=$(npx wrangler d1 execute test-blog-cms-db --remote \
@@ -66,74 +44,30 @@ if [ -n "$DYNAMIC_TABLES" ]; then
   npx wrangler d1 execute test-blog-cms-db --remote --command "$DYNAMIC_TABLES" 2>/dev/null
 fi
 
+# Wipe metadata tables
+npx wrangler d1 execute test-blog-cms-db --remote --command "$(cat <<'SQLEOF'
+DELETE FROM fields;
+DELETE FROM fieldsets;
+DELETE FROM models;
+DELETE FROM assets;
+DELETE FROM site_settings;
+DELETE FROM record_versions;
+DELETE FROM editor_tokens;
+DELETE FROM _cms_migrations;
+SQLEOF
+)" 2>/dev/null
+
 cd "$SCRIPT_DIR"
 
-# Re-initialize and re-seed
+# Re-initialize (runs migrations on empty DB)
 curl -sf "${CMS_URL}/api/setup" -X POST -H "Content-Type: application/json" -H "Authorization: Bearer ${CMS_WRITE_KEY}" >/dev/null 2>&1 || true
-CMS_URL="${CMS_URL}" npx tsx examples/blog/seed.ts >/dev/null 2>&1
-echo "CMS reset complete." >&2
+echo "CMS reset to empty state." >&2
 
-# --- Invalidate stale editor token (DB was wiped) ---
-rm -f "$TOKEN_FILE"
-
-# --- Get or create editor token ---
-EDITOR_TOKEN=""
-if [ -f "$TOKEN_FILE" ]; then
-  EDITOR_TOKEN=$(cat "$TOKEN_FILE")
-  VERIFY=$(curl -sf "${CMS_URL}/mcp/editor" \
-    -X POST \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -H "Authorization: Bearer ${EDITOR_TOKEN}" \
-    -d '{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"verify","version":"0.1"}},"id":1}' 2>/dev/null || echo "")
-  if ! echo "$VERIFY" | grep -q "agent-cms"; then
-    EDITOR_TOKEN=""
-  fi
-fi
-
-if [ -z "$EDITOR_TOKEN" ]; then
-  RESP=$(curl -sf "${CMS_URL}/mcp" \
-    -X POST \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -H "Authorization: Bearer ${CMS_WRITE_KEY}" \
-    -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"editor_tokens","arguments":{"action":"create","name":"autoresearch","expiresIn":86400}},"id":1}')
-
-  EDITOR_TOKEN=$(echo "$RESP" | python3 -c "
-import json, sys
-data = json.loads(sys.stdin.read())
-if isinstance(data, list): data = data[0]
-text = data.get('result', {}).get('content', [{}])[0].get('text', '')
-try: print(json.loads(text).get('token', ''))
-except: print('')
-" 2>/dev/null)
-
-  if [ -n "$EDITOR_TOKEN" ] && [[ "$EDITOR_TOKEN" == etk_* ]]; then
-    echo "$EDITOR_TOKEN" > "$TOKEN_FILE"
-  else
-    EDITOR_TOKEN="$CMS_WRITE_KEY"
-  fi
-fi
-
-# --- Write MCP configs ---
+# --- Write MCP config (admin — full access including schema mutation) ---
 cat > "$MCP_CONFIG" <<EOF
 {
   "mcpServers": {
-    "blog-cms": {
-      "type": "http",
-      "url": "${CMS_URL}/mcp/editor",
-      "headers": {
-        "Authorization": "Bearer ${EDITOR_TOKEN}"
-      }
-    }
-  }
-}
-EOF
-
-cat > "$ADMIN_MCP_CONFIG" <<EOF
-{
-  "mcpServers": {
-    "blog-cms": {
+    "cms": {
       "type": "http",
       "url": "${CMS_URL}/mcp",
       "headers": {
@@ -144,7 +78,7 @@ cat > "$ADMIN_MCP_CONFIG" <<EOF
 }
 EOF
 
-# --- Run claude with editor MCP ---
+# --- Run claude with admin MCP ---
 TASK_PROMPT="${1:?Pass the task prompt as argument}"
 CLAUDE_JSON=$(mktemp)
 
@@ -196,8 +130,12 @@ EVAL_PROMPT=$(mktemp)
 EVAL_OUTPUT=$(mktemp)
 
 cat > "$EVAL_PROMPT" <<'HEADER'
-You are evaluating the output of a Claude agent that was given an editorial task
-to perform via the agent-cms Editor MCP interface.
+You are evaluating the output of a Claude agent that was given a CMS task
+to perform via the agent-cms Admin MCP interface (full access: schema design,
+content creation, publishing, assets).
+
+The CMS starts empty each run — the agent must create models and fields
+before creating content. This is by design.
 
 HEADER
 
@@ -225,7 +163,12 @@ LEARNING: <one key learning about the MCP experience>
 Friction points include: errors from MCP tools, confusing tool interfaces, unnecessary
 tool calls, poor error messages, missing capabilities, wrong tool choices, excessive
 round-trips, unclear field formats, schema discovery difficulties, wheels spinning
-(retrying the same thing), not knowing which tool to use.
+(retrying the same thing), not knowing which tool to use, wrong sequencing of
+schema creation steps.
+
+Schema design from scratch is expected — do NOT count "had to create models first"
+as friction. DO count things like: creating fields in wrong order, needing to retry
+because of missing validators, confusion about field types, etc.
 
 Be honest and specific. If the task succeeded cleanly with no issues, friction_count=0.
 FOOTER
