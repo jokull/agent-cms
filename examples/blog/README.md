@@ -29,23 +29,13 @@ CMS_WRITE_KEY=... pnpm run setup -- https://<your-cms-url>
 
 ### 2. Create the Schema and Content
 
-Connect Claude to the MCP server, then give it the [PROMPT.md](./PROMPT.md):
-
-```json
-{
-  "mcpServers": {
-    "blog-cms": { "url": "http://localhost:8787/mcp" }
-  }
-}
-```
-
-Or with Claude Code:
+Connect Claude to the MCP server:
 
 ```bash
 claude mcp add --transport http blog-cms http://127.0.0.1:8787/mcp
 ```
 
-The prompt walks through 4 stages:
+Then give it the [PROMPT.md](./PROMPT.md) — it walks through 4 stages:
 1. **Create schema** — models, block types, fields
 2. **Create content** — assets, records, StructuredText with blocks, publish
 3. **Schema evolution** — add fields to existing models (tests auto-migration)
