@@ -1,34 +1,40 @@
 # MCP Editor Friction Testing — Ideas Backlog
 
-## Confirmed / Learned
-- Basic guide → create → publish post flow is already friction-free
-- Structured text authoring with `build_structured_text_from_markdown` is already friction-free for simple code-block posts
-- `import_asset_from_url` now follows normal public redirects successfully
-- Seeded blog schema now includes `post.cover_image`, `post.related_posts`, and `post.gallery`, avoiding schema-mutation detours in common editorial tasks
-- Invalid `link` / `links` references now fail fast with a precise `ValidationError`
-- Invalid `date` / `date_time` values now fail fast with a precise `ValidationError`
-- Invalid `boolean` / `integer` / `float` values now fail fast with a precise `ValidationError`
-- Boolean fields now come back as true/false in MCP record responses instead of raw SQLite 1/0 values
-- Locale-keyed values on non-localized fields now fail fast with a precise `ValidationError`
-- `seo.image` asset references now fail fast with a precise `ValidationError` when the asset ID does not exist
-- Media objects that incorrectly use `{id: ...}` instead of `{upload_id: ...}` now fail fast with a schema-aware `ValidationError`
-- Link objects that incorrectly use `{id: ...}` instead of a bare record ID string now fail fast with a schema-aware `ValidationError`
-- Singleton content-model editing is smoother with `update_singleton_record`
-- Multi-record publishing is smoother with `bulk_publish_records`
-- Multi-record unpublishing is smoother with `bulk_unpublish_records`
-- Version diffing is smoother with `compare_record_versions`
-- Search result reporting is smoother now that `search_content` includes titles in results
-- Inspecting a searched record is smoother with `get_record`
-- The numbered benchmark-oriented post titles in the blog seed are intentional fixture data, not accidental duplicate records
+## Phase 1 Complete (single-task editorial surface)
 
-## Next Best Bets
-- Make the guide more explicit about checking `schema_info` / `describe_model` before assuming example fields
-- Probe edge-case error quality for weak spots that still cause extra turns
-- Explore script-writing friction further (auth/bootstrap + nested mount points are better documented, and the raw HTTP shapes are clearer now, but standalone script prompts still have some residual friction)
+All single-task editorial flows are friction-free. Validation and error quality are strong. Tool surface consolidated from 43 to 32.
 
-## Script Writing
-- Have Claude write a bash script that uses curl to batch-create 5 posts via MCP
-- Have Claude write a Node.js script that imports assets from URLs and creates records referencing them
+## Phase 2 — Multi-Step Workflow Prompts
 
-## Edge Cases
-- Probe invalid nested/composite payloads that still produce generic type errors instead of schema-aware guidance
+### High priority (most likely to find friction)
+
+- Multi-step content creation: "Create an author, import headshot, create 3 posts with cover images and structured text, link to category, publish all"
+- Correction flow: "Post X has wrong cover image, typo in excerpt — fix both and republish"
+- Bulk recovery: "3 posts were accidentally published — unpublish, prefix titles with [DRAFT], leave as drafts"
+- Schema design: "Design a recipe blog with ingredients, steps, categories, difficulty levels — create schema and seed 2 recipes"
+- Version rollback + edit: "Revert post X to previous version, then change the title before republishing"
+
+### Medium priority
+
+- Add a new block type to an existing structured text field and use it in a post
+- Create a testimonials block type with author, quote, avatar — embed it in post content
+- Search for posts by a keyword, update all matching posts to add a tag/category
+- Batch import: "Here are 5 post titles and excerpts — create them all with auto-generated slugs and publish"
+
+### Lower priority (likely already friction-free)
+
+- Singleton record editing (already optimized)
+- Simple asset import and attachment (already optimized)
+- Schedule/unschedule publish (already optimized)
+- Basic search and report (already optimized)
+
+## Residual Known Friction
+
+- **Script writing** (curl/Node.js) is stuck at friction_count ~2 — remaining friction is auth/bootstrap inference outside the MCP surface. Diminishing returns on guide wording.
+- **Editor/admin boundary** — editor MCP intentionally lacks schema tools. When a task requires schema mutation, the agent can only report the limitation, not fix it. This is by design.
+
+## Anti-patterns to avoid
+
+- Do NOT add new tools to reduce friction on a single prompt. Improve errors/docs/validation first.
+- Do NOT bloat tool descriptions with edge-case wording that confuses the common case.
+- Do NOT over-tune the guide for one specific prompt — it should be general-purpose orientation.

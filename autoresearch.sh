@@ -97,7 +97,7 @@ if [ -z "$EDITOR_TOKEN" ]; then
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
     -H "Authorization: Bearer ${CMS_WRITE_KEY}" \
-    -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"create_editor_token","arguments":{"name":"autoresearch","expiresIn":86400}},"id":1}')
+    -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"editor_tokens","arguments":{"action":"create","name":"autoresearch","expiresIn":86400}},"id":1}')
 
   EDITOR_TOKEN=$(echo "$RESP" | python3 -c "
 import json, sys
