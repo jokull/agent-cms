@@ -1,26 +1,32 @@
 # MCP Full-Stack Friction Testing — Ideas Backlog
 
-## Phase 2 — Schema Design + Content (from empty CMS)
+## Phase 3 — Preview + Verification (from empty CMS)
 
-### Already probed cleanly
-- Blog with posts, authors, categories, structured text with blocks
-- Recipe site with ingredients (links), steps (structured text), difficulty
-- Portfolio with projects, technologies, cover images
-- Schema ordering: slug after source field, block types before structured text fields
-- Validator UX: required fields, date ranges, slug_source
-- Singleton setup (daily special / site settings style flows)
-- Error recovery: dangling links
-- Complex nested blocks: structured text containing blocks with nested structured text
+### High priority (preview workflow)
+- Draft → get_preview_url → verify via GraphQL with X-Preview-Token → publish → verify without token
+- Multiple drafts → preview URLs for each → bulk publish → verify all visible
+- Update draft title → get fresh preview URL → verify updated content → publish
+- canonicalPathTemplate with nested paths: /docs/{category}/{slug}
 
-### Still promising
-- Schema import/export round-trip on an empty CMS, then create/publish content against the imported schema
-- Bulk content creation after schema design (larger batches, then bulk publish)
-- Search after content creation from an empty CMS (verify indexing/reindex guidance in a schema+content workflow)
-- Enum validator UX from empty CMS (author a constrained field, trigger a bad value, recover cleanly)
-- Missing-dependency recovery from empty CMS (attempt structured_text before block whitelist / create slug before source field, then recover)
-- Localization setup from empty CMS (create locales, localized fields, publish translated content)
+### High priority (live site verification)
+- Create schema + content → query GraphQL to confirm published records appear
+- Publish → query allPosts → confirm title, slug, status match what was created
+- Unpublish → query again → confirm record disappeared from public GraphQL
+- Draft with preview token → query GraphQL with X-Preview-Token → confirm draft visible
+
+### Medium priority
+- Preview token expiry: create token with short TTL, wait, verify it's rejected
+- canonicalPathTemplate on multiple models (posts, categories) → verify each resolves correctly
+- Structured text content → publish → query GraphQL → verify content.value is valid DAST
+
+### Already probed cleanly (phase 2)
+- Blog, recipe, portfolio, restaurant, docs, events schema design from empty
+- Nested blocks, slug ordering, validator UX
+- Localization setup and drift QA
+- Schema import/export round-trip
 
 ## Anti-patterns
 - Do NOT modify seed.ts — the CMS starts empty each run
 - Do NOT add new tools without proving existing tools can't handle it
 - Do NOT over-tune guide text for one specific prompt
+- DO encourage the agent to verify its work by querying GraphQL after publishing
