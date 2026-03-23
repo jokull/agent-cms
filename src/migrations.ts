@@ -17,6 +17,8 @@ const MIGRATIONS: readonly Migration[] = [
       `CREATE TABLE IF NOT EXISTS "assets" (
         "id" text PRIMARY KEY,
         "filename" text NOT NULL,
+        "basename" text,
+        "format" text,
         "mime_type" text NOT NULL,
         "size" integer NOT NULL,
         "width" integer,
@@ -45,6 +47,7 @@ const MIGRATIONS: readonly Migration[] = [
         "has_draft" integer DEFAULT true NOT NULL,
         "all_locales_required" integer DEFAULT 0 NOT NULL,
         "ordering" text,
+        "canonical_path_template" text,
         "created_at" text NOT NULL,
         "updated_at" text NOT NULL
       )`,
@@ -120,24 +123,13 @@ const MIGRATIONS: readonly Migration[] = [
         "expires_at" TEXT
       )`,
       `CREATE UNIQUE INDEX IF NOT EXISTS "idx_editor_tokens_secret_hash" ON "editor_tokens" ("secret_hash")`,
-    ],
-  },
-  {
-    version: 2,
-    statements: [
-      `ALTER TABLE "assets" ADD COLUMN "basename" text`,
-      `ALTER TABLE "assets" ADD COLUMN "format" text`,
-      `UPDATE "assets"
-       SET "basename" = CASE
-         WHEN instr("filename", '.') > 0 THEN substr("filename", 1, length("filename") - length(substr("filename", instr("filename", '.') + 1)) - 1)
-         ELSE "filename"
-       END`,
-      `UPDATE "assets"
-       SET "format" = lower(CASE
-         WHEN instr("filename", '.') > 0 THEN substr("filename", instr("filename", '.') + 1)
-         WHEN instr("mime_type", '/') > 0 THEN substr("mime_type", instr("mime_type", '/') + 1)
-         ELSE 'bin'
-       END)`,
+      `CREATE TABLE IF NOT EXISTS "preview_tokens" (
+        "id" text PRIMARY KEY,
+        "token_hash" text NOT NULL UNIQUE,
+        "expires_at" text NOT NULL,
+        "created_at" text NOT NULL DEFAULT (datetime('now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS "idx_preview_tokens_hash" ON "preview_tokens" ("token_hash")`,
       `CREATE INDEX IF NOT EXISTS "idx_assets_basename" ON "assets" ("basename")`,
       `CREATE INDEX IF NOT EXISTS "idx_assets_format" ON "assets" ("format")`,
     ],

@@ -35,6 +35,7 @@ import { UnauthorizedError, ValidationError } from "../errors.js";
 import * as SchemaIO from "../services/schema-io.js";
 import * as VersionService from "../services/version-service.js";
 import * as TokenService from "../services/token-service.js";
+import * as PreviewService from "../services/preview-service.js";
 import * as SearchService from "../search/search-service.js";
 import type { AiBinding, VectorizeBinding } from "../search/vectorize.js";
 import { VectorizeContext } from "../search/vectorize-context.js";
@@ -534,6 +535,28 @@ const tokensRouter = HttpRouter.empty.pipe(
   )
 );
 
+// --- Preview Tokens ---
+const previewTokensRouter = HttpRouter.empty.pipe(
+  HttpRouter.post(
+    "/",
+    Effect.gen(function* () {
+      const body = yield* readJsonBody();
+      const expiresIn = typeof body === "object" && body !== null && "expiresIn" in body
+        ? (body as Record<string, unknown>).expiresIn as number | undefined
+        : undefined;
+      return yield* handle(PreviewService.createPreviewToken(expiresIn), 201);
+    })
+  ),
+
+  HttpRouter.get(
+    "/validate",
+    Effect.gen(function* () {
+      const token = yield* queryParam("token");
+      return yield* handle(PreviewService.validatePreviewToken(token));
+    })
+  ),
+);
+
 // --- Setup / bootstrap ---
 const setupRouter = HttpRouter.empty.pipe(
   HttpRouter.post(
@@ -558,6 +581,7 @@ export const appRouter = HttpRouter.empty.pipe(
   HttpRouter.concat(schemaRouter.pipe(HttpRouter.prefixAll("/api/schema"))),
   HttpRouter.concat(searchRouter.pipe(HttpRouter.prefixAll("/api/search"))),
   HttpRouter.concat(tokensRouter.pipe(HttpRouter.prefixAll("/api/tokens"))),
+  HttpRouter.concat(previewTokensRouter.pipe(HttpRouter.prefixAll("/api/preview-tokens"))),
   HttpRouter.concat(setupRouter.pipe(HttpRouter.prefixAll("/api"))),
 );
 
@@ -586,6 +610,8 @@ export interface WebHandlerOptions {
     bucketName: string;
     accountId: string;
   };
+  /** Public URL of the frontend site — used for assembling preview URLs */
+  siteUrl?: string;
 }
 
 export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, options?: WebHandlerOptions) {
@@ -696,7 +722,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
     const headers = new Headers(response.headers);
     headers.set("Access-Control-Allow-Origin", origin);
     headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
-    headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Include-Drafts, X-Exclude-Invalid, X-Filename, X-Requested-With, Accept, User-Agent");
+    headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Include-Drafts, X-Exclude-Invalid, X-Filename, X-Requested-With, Accept, User-Agent, X-Preview-Token");
     headers.set("Access-Control-Max-Age", "600");
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   }
@@ -862,6 +888,20 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
         } else {
           h.delete("X-Credential-Type");
         }
+        // Check for X-Preview-Token header — if valid, enable draft mode
+        const previewToken = instrumentedRequest.headers.get("X-Preview-Token");
+        if (previewToken) {
+          try {
+            const result = await Effect.runPromise(
+              PreviewService.validatePreviewToken(previewToken).pipe(Effect.provide(fullLayer))
+            );
+            if (result.valid) {
+              h.set("X-Include-Drafts", "true");
+            }
+          } catch {
+            // Invalid preview token — ignore, don't grant draft access
+          }
+        }
         instrumentedRequest = new Request(instrumentedRequest, { headers: h });
         // Fall through to graphql handler below
       }
@@ -895,6 +935,10 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
           }));
         }
       }
+      // /api/preview-tokens/validate — no auth required (public validation endpoint)
+      else if (url.pathname === "/api/preview-tokens/validate") {
+        // Fall through to router — no auth needed
+      }
       // /api/* — write auth (schema mutations and token management require admin)
       else if (url.pathname.startsWith("/api/")) {
         const adminOnly = isSchemaMutationRequest(url, instrumentedRequest.method)
@@ -925,6 +969,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
               path: "/mcp",
               r2Bucket: options?.r2Bucket,
               assetBaseUrl: options?.assetBaseUrl,
+              siteUrl: options?.siteUrl,
               actor,
             }))
           : createMcpHttpHandler(fullLayer, {
@@ -932,6 +977,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
               path: "/mcp",
               r2Bucket: options?.r2Bucket,
               assetBaseUrl: options?.assetBaseUrl,
+              siteUrl: options?.siteUrl,
               actor,
             });
         return finish(await handler(instrumentedRequest));
@@ -946,6 +992,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
               path: "/mcp/editor",
               r2Bucket: options?.r2Bucket,
               assetBaseUrl: options?.assetBaseUrl,
+              siteUrl: options?.siteUrl,
               actor,
             })
           : (mcpEditorHandler ??= createMcpHttpHandler(fullLayer, {
@@ -953,6 +1000,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
               path: "/mcp/editor",
               r2Bucket: options?.r2Bucket,
               assetBaseUrl: options?.assetBaseUrl,
+              siteUrl: options?.siteUrl,
               actor,
             }));
         return finish(await handler(instrumentedRequest));

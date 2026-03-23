@@ -37,6 +37,7 @@ export interface SchemaExportModel {
   tree: boolean;
   hasDraft: boolean;
   ordering: string | null;
+  canonicalPathTemplate: string | null;
   fields: SchemaExportField[];
 }
 
@@ -99,6 +100,7 @@ export function exportSchema() {
       tree: !!m.tree,
       hasDraft: !!m.has_draft,
       ordering: m.ordering,
+      canonicalPathTemplate: m.canonical_path_template ?? null,
       fields: (fieldsByModelId.get(m.id) ?? []).map((f) => ({
         label: f.label,
         apiKey: f.api_key,
@@ -167,6 +169,7 @@ export function importSchema(s: ImportSchemaInput) {
         hasDraft: model.hasDraft,
         allLocalesRequired: false,
         ordering: model.ordering ?? undefined,
+        canonicalPathTemplate: model.canonicalPathTemplate ?? undefined,
       });
       modelApiKeyToId.set(model.apiKey, result.id);
       stats.models++;

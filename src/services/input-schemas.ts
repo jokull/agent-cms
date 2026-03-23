@@ -53,6 +53,7 @@ export const CreateModelInput = Schema.Struct({
   hasDraft: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   allLocalesRequired: Schema.optionalWith(Schema.Boolean, { default: () => false }),
   ordering: Schema.optional(Schema.String),
+  canonicalPathTemplate: Schema.optional(Schema.NullOr(Schema.String)),
 });
 export type CreateModelInput = typeof CreateModelInput.Type;
 
@@ -221,6 +222,7 @@ export const UpdateModelInput = Schema.Struct({
   hasDraft: Schema.optional(Schema.Boolean),
   allLocalesRequired: Schema.optional(Schema.Boolean),
   ordering: Schema.optional(Schema.NullOr(Schema.String)),
+  canonicalPathTemplate: Schema.optional(Schema.NullOr(Schema.String)),
 });
 export type UpdateModelInput = typeof UpdateModelInput.Type;
 
@@ -267,6 +269,7 @@ const SchemaExportModelSchema = Schema.Struct({
   tree: Schema.Boolean,
   hasDraft: Schema.Boolean,
   ordering: Schema.optionalWith(Schema.NullOr(Schema.String), { default: () => null }),
+  canonicalPathTemplate: Schema.optionalWith(Schema.NullOr(Schema.String), { default: () => null }),
   fields: Schema.Array(SchemaExportFieldSchema),
 });
 

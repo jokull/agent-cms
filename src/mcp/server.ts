@@ -21,6 +21,7 @@ import * as SchemaIO from "../services/schema-io.js";
 import * as SearchService from "../search/search-service.js";
 import * as SiteSettingsService from "../services/site-settings-service.js";
 import * as TokenService from "../services/token-service.js";
+import * as PreviewService from "../services/preview-service.js";
 import {
   CreateAssetInput as AssetInput,
   CreateFieldInput,
@@ -95,6 +96,7 @@ const UpdateModelInput = Schema.Struct({
   sortable: Schema.optional(Schema.Boolean),
   hasDraft: Schema.optional(Schema.Boolean),
   allLocalesRequired: Schema.optional(Schema.Boolean),
+  canonicalPathTemplate: Schema.optional(Schema.NullOr(Schema.String)),
 });
 
 const UpdateFieldInput = Schema.Struct({
@@ -201,6 +203,11 @@ const EditorTokensInput = Schema.Struct({
 });
 
 const GetRecordInput = Schema.Struct({
+  recordId: Schema.String,
+  modelApiKey: Schema.String,
+});
+
+const GetPreviewUrlInput = Schema.Struct({
   recordId: Schema.String,
   modelApiKey: Schema.String,
 });
@@ -487,6 +494,10 @@ action: "create" | "list" | "revoke"
 - list: returns all non-expired editor tokens.
 - revoke: provide tokenId to revoke.`, EditorTokensInput.fields);
 
+const GetPreviewUrlTool = cmsTool("get_preview_url", `Generate a preview URL for a draft record. The model must have a canonicalPathTemplate set (e.g. /posts/{slug}).
+
+Returns a fully assembled URL with a short-lived preview token when siteUrl is configured, or the previewPath and token separately otherwise.`, GetPreviewUrlInput.fields);
+
 const AdminTools = [
   SchemaInfoTool,
   CreateModelTool,
@@ -520,6 +531,7 @@ const AdminTools = [
   GetSiteSettingsTool,
   UpdateSiteSettingsTool,
   EditorTokensTool,
+  GetPreviewUrlTool,
 ];
 
 const EditorTools = [
@@ -545,6 +557,7 @@ const EditorTools = [
   SearchContentTool,
   GetSiteSettingsTool,
   UpdateSiteSettingsTool,
+  GetPreviewUrlTool,
 ] as const;
 
 const CmsToolkit = Toolkit.make(...AdminTools);
@@ -627,6 +640,11 @@ Raw HTTP / JSON-RPC access:
   - jq extraction example:
     .result.content[0].text | fromjson
   - For single-record tools like import_asset_from_url, create_record, and get_record, that parsed payload is the object itself, so use payload.id directly rather than looking for nested arrays
+
+Draft preview:
+  Models can have a canonicalPathTemplate (e.g. /posts/{slug}) for preview URLs.
+  Tool responses include _previewPath when a template is set.
+  Use get_preview_url to generate a fully assembled preview link with a short-lived token.
 
 Slug fields:
   Set validator {"slug_source": "title"} to auto-generate from a source field.
@@ -735,6 +753,7 @@ export interface CreateMcpLayerOptions {
   readonly fetch?: typeof globalThis.fetch;
   readonly actor?: RequestActor | null;
   readonly assetBaseUrl?: string;
+  readonly siteUrl?: string;
 }
 
 export function createMcpLayer(
@@ -769,6 +788,40 @@ export function createMcpLayer(
   function withAssetUrl<T extends { r2Key: string }>(asset: T) {
     const url = assetUrl(asset.r2Key);
     return url ? { ...asset, url } : asset;
+  }
+
+  /** Look up canonical_path_template for a model and resolve _previewPath if set */
+  function addPreviewPath(modelApiKey: string, record: unknown) {
+    return Effect.gen(function* () {
+      if (typeof record !== "object" || record === null) return record;
+      const sql = yield* SqlClient.SqlClient;
+      const models = yield* sql.unsafe<{ canonical_path_template: string | null }>(
+        "SELECT canonical_path_template FROM models WHERE api_key = ?",
+        [modelApiKey]
+      );
+      const template = models[0]?.canonical_path_template;
+      if (!template) return record;
+      const previewPath = PreviewService.resolvePreviewPath(template, record as Record<string, unknown>);
+      return { ...record, _previewPath: previewPath };
+    });
+  }
+
+  function addPreviewPathToList(modelApiKey: string, records: unknown) {
+    return Effect.gen(function* () {
+      if (!Array.isArray(records)) return records;
+      const sql = yield* SqlClient.SqlClient;
+      const models = yield* sql.unsafe<{ canonical_path_template: string | null }>(
+        "SELECT canonical_path_template FROM models WHERE api_key = ?",
+        [modelApiKey]
+      );
+      const template = models[0]?.canonical_path_template;
+      if (!template) return records;
+      return records.map((r: unknown) => {
+        if (typeof r !== "object" || r === null) return r;
+        const previewPath = PreviewService.resolvePreviewPath(template, r as Record<string, unknown>);
+        return { ...r, _previewPath: previewPath };
+      });
+    });
   }
 
   const toolHandlers: Record<string, (params: unknown) => Effect.Effect<unknown, unknown, unknown>> = {
@@ -810,6 +863,7 @@ export function createMcpLayer(
               sortable: !!m.sortable,
               tree: !!m.tree,
               allLocalesRequired: !!m.all_locales_required,
+              canonicalPathTemplate: m.canonical_path_template ?? null,
               ...(includeFieldDetails
                 ? {
                     fields: mFields.map((f) => ({
@@ -839,17 +893,20 @@ export function createMcpLayer(
     update_field: withDecoded(UpdateFieldInput, ({ fieldId, ...rest }) => FieldService.updateField(fieldId, rest)),
     delete_model: withDecoded(ModelIdInput, ({ modelId }) => ModelService.deleteModel(modelId)),
     delete_field: withDecoded(FieldIdInput, ({ fieldId }) => FieldService.deleteField(fieldId)),
-    create_record: withDecoded(CreateRecordInput, (input) => RecordService.createRecord(input, options?.actor)),
+    create_record: withDecoded(CreateRecordInput, (input) =>
+      RecordService.createRecord(input, options?.actor).pipe(Effect.flatMap((r) => addPreviewPath(input.modelApiKey, r)))),
     update_record: withDecoded(UpdateRecordInput, ({ recordId, modelApiKey, data }) => {
-      if (recordId) {
-        return RecordService.patchRecord(recordId, { modelApiKey, data }, options?.actor);
-      }
-      return RecordService.updateSingletonRecord(modelApiKey, data, options?.actor);
+      const effect = recordId
+        ? RecordService.patchRecord(recordId, { modelApiKey, data }, options?.actor)
+        : RecordService.updateSingletonRecord(modelApiKey, data, options?.actor);
+      return effect.pipe(Effect.flatMap((r) => addPreviewPath(modelApiKey, r)));
     }),
     patch_blocks: withDecoded(PatchBlocksInput, (input) => RecordService.patchBlocksForField(input, options?.actor)),
     delete_record: withDecoded(DeleteRecordInput, ({ recordId, modelApiKey }) => RecordService.removeRecord(modelApiKey, recordId)),
-    get_record: withDecoded(GetRecordInput, ({ recordId, modelApiKey }) => RecordService.getRecord(modelApiKey, recordId)),
-    query_records: withDecoded(QueryRecordsInput, ({ modelApiKey }) => RecordService.listRecords(modelApiKey)),
+    get_record: withDecoded(GetRecordInput, ({ recordId, modelApiKey }) =>
+      RecordService.getRecord(modelApiKey, recordId).pipe(Effect.flatMap((r) => addPreviewPath(modelApiKey, r)))),
+    query_records: withDecoded(QueryRecordsInput, ({ modelApiKey }) =>
+      RecordService.listRecords(modelApiKey).pipe(Effect.flatMap((r) => addPreviewPathToList(modelApiKey, r)))),
     bulk_create_records: withDecoded(BulkCreateRecordsInput, ({ modelApiKey, records }) => RecordService.bulkCreateRecords({ modelApiKey, records }, options?.actor)),
     publish_records: withDecoded(PublishRecordsInput, ({ recordIds, modelApiKey }) =>
       recordIds.length === 1
@@ -973,6 +1030,24 @@ export function createMcpLayer(
     reindex_search: withDecoded(ReindexSearchInput, ({ modelApiKey }) => SearchService.reindexAll(modelApiKey)),
     get_site_settings: () => SiteSettingsService.getSiteSettings(),
     update_site_settings: withDecoded(UpdateSiteSettingsInput, SiteSettingsService.updateSiteSettings),
+    get_preview_url: withDecoded(GetPreviewUrlInput, ({ recordId, modelApiKey }) =>
+      Effect.gen(function* () {
+        const model = yield* ModelService.getModelByApiKey(modelApiKey);
+        if (!model.canonical_path_template) {
+          return yield* Effect.fail({ _tag: "ValidationError", message: `Model '${modelApiKey}' has no canonicalPathTemplate configured` });
+        }
+        const record = yield* RecordService.getRecord(modelApiKey, recordId);
+        const recordData = typeof record === "object" && record !== null ? record as Record<string, unknown> : {};
+        const previewPath = PreviewService.resolvePreviewPath(model.canonical_path_template, recordData);
+        const { token, expiresAt } = yield* PreviewService.createPreviewToken();
+        const siteUrl = options?.siteUrl;
+        if (siteUrl) {
+          const base = siteUrl.replace(/\/$/, "");
+          const url = `${base}/api/draft-mode/enable?token=${encodeURIComponent(token)}&redirect=${encodeURIComponent(previewPath)}`;
+          return { url, previewPath, token, expiresAt };
+        }
+        return { previewPath, token, expiresAt };
+      })),
     editor_tokens: withDecoded(EditorTokensInput, ({ action, name, expiresIn, tokenId }) => {
       if (action === "list") return TokenService.listEditorTokens();
       if (action === "create") {

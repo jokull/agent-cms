@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS "models" (
   "has_draft" integer DEFAULT true NOT NULL,
   "all_locales_required" integer DEFAULT 0 NOT NULL,
   "ordering" text,
+  "canonical_path_template" text,
   "created_at" text NOT NULL,
   "updated_at" text NOT NULL
 );
@@ -116,3 +117,13 @@ CREATE TABLE IF NOT EXISTS "editor_tokens" (
 
 CREATE UNIQUE INDEX IF NOT EXISTS "idx_editor_tokens_secret_hash"
   ON "editor_tokens" ("secret_hash");
+
+CREATE TABLE IF NOT EXISTS "preview_tokens" (
+  "id" text PRIMARY KEY,
+  "token_hash" text NOT NULL UNIQUE,
+  "expires_at" text NOT NULL,
+  "created_at" text NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS "idx_preview_tokens_hash"
+  ON "preview_tokens" ("token_hash");

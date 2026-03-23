@@ -43,6 +43,8 @@ export interface CmsBindings {
   r2BucketName?: string;
   /** Cloudflare account ID — needed for the R2 S3-compatible endpoint */
   cfAccountId?: string;
+  /** Public URL of the frontend site — used for assembling preview URLs */
+  siteUrl?: string;
 }
 
 export interface CmsHandlerConfig {
@@ -79,6 +81,7 @@ function cacheKey(bindings: DecodedCmsBindings, hooks: CmsHooks | undefined): st
     bindings.r2Credentials?.accessKeyId ?? "",
     bindings.r2Credentials?.bucketName ?? "",
     bindings.r2Credentials?.accountId ?? "",
+    bindings.siteUrl ?? "",
   ].join("|");
 }
 
@@ -136,6 +139,7 @@ function createCMSHandlerUncached(bindings: DecodedCmsBindings, hooks?: CmsHooks
     vectorize: bindings.vectorize,
     hooks,
     r2Credentials: bindings.r2Credentials,
+    siteUrl: bindings.siteUrl,
   });
 
   return {
