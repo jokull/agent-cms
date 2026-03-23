@@ -6,7 +6,7 @@ Agent-first headless CMS. Runs as a Cloudflare Worker backed by D1 and R2 in you
 
 - **Structured text with typed blocks** — a document tree where rich components (code blocks, media, custom types) are embedded inline. One GraphQL query returns the full tree with discriminated block unions. Map directly to React/Svelte/Vue components in a single server hop. Render with [`react-datocms`](https://github.com/datocms/react-datocms), `vue-datocms`, or `datocms-svelte` — the structured text format is [DAST](https://www.datocms.com/docs/structured-text/dast), an open standard.
 - **Hybrid search** — FTS5 for keyword matching, Cloudflare Vectorize for semantic similarity, combined with reciprocal rank fusion. All on D1.
-- **Draft/publish with scheduling** — records start as drafts. Publishing captures a version snapshot. Schedule publish/unpublish at future datetimes. Full version history — restore to any snapshot, and the restore itself is reversible.
+- **Draft/publish with preview** — records start as drafts. Publishing captures a version snapshot. Models can declare a `canonicalPathTemplate` so agents and editors get preview URLs for drafts. Short-lived preview tokens grant draft access to GraphQL without editor credentials. Schedule publish/unpublish at future datetimes. Full version history — restore to any snapshot, and the restore itself is reversible.
 - **Geospatial filtering** — `lat_lon` field type with `near(latitude, longitude, radius)` queries in GraphQL.
 - **Automatic reverse references** — link model A to model B, and B gets a query field for all records in A that reference it, with full filtering, ordering, and pagination.
 - **Two MCP servers** — admin MCP (`/mcp`) for schema and content, editor MCP (`/mcp/editor`) scoped to content operations only. Create editor tokens with optional expiry.
@@ -106,6 +106,75 @@ FTS5 keyword search with BM25 ranking and snippets, scoped to all models or a si
 - **`keyword`** — FTS5. Phrases (`"exact match"`), prefix (`word*`), boolean (`AND`/`OR`).
 - **`semantic`** — Vectorize cosine similarity.
 - **`hybrid`** (default) — Reciprocal rank fusion of keyword + semantic results.
+
+## Draft preview
+
+Records on draft-enabled models start as drafts. The CMS stores both the draft state (real columns) and the published snapshot. GraphQL serves published content by default.
+
+### How it works
+
+1. **Set a URL template on your model** — `canonicalPathTemplate: "/posts/{slug}"`. The CMS resolves `{slug}` from the record and includes `_previewPath` in MCP/REST responses.
+
+2. **Get a preview token** — `POST /api/preview-tokens` returns a short-lived token (default 1 hour). Preview tokens grant draft access to GraphQL without needing editor credentials.
+
+3. **Enable draft mode on your site** — redirect through an enable route that sets a cookie:
+   ```
+   /api/draft-mode/enable?token=pvt_abc123&redirect=/posts/my-draft
+   ```
+   The cookie tells your site to pass `X-Preview-Token` to the CMS on GraphQL requests. The CMS validates the token and serves draft content.
+
+4. **Disable draft mode** — clear the cookie:
+   ```
+   /api/draft-mode/disable?redirect=/
+   ```
+
+### Site integration
+
+The package exports a `createPreviewHandler` helper for your site:
+
+```ts
+import { createPreviewHandler } from "agent-cms";
+
+const preview = createPreviewHandler({
+  cmsBaseUrl: "https://my-cms.workers.dev", // or env.CMS via service binding
+});
+
+// Mount at /api/draft-mode/* in your site's router
+```
+
+In your GraphQL client, read the `__cms_preview` cookie and forward it:
+
+```ts
+const headers: Record<string, string> = {};
+const previewToken = getCookie("__cms_preview");
+if (previewToken) {
+  headers["X-Preview-Token"] = previewToken;
+}
+const data = await gqlFetch(query, { headers });
+```
+
+### MCP workflow
+
+The editor agent gets `_previewPath` in tool responses when the model has a `canonicalPathTemplate`:
+
+```
+Agent: create_record({ modelApiKey: "post", data: { title: "Draft Post", ... } })
+CMS:   { id: "abc123", _status: "draft", _previewPath: "/posts/draft-post" }
+```
+
+The agent can generate a full preview URL by combining the site origin + preview token + path. If the agent has browser access, it can follow the link to verify the content visually before publishing.
+
+### URL templates
+
+Templates use `{field_name}` placeholders resolved from the record:
+
+| Template | Record | Result |
+|----------|--------|--------|
+| `/posts/{slug}` | `{ slug: "hello-world" }` | `/posts/hello-world` |
+| `/docs/{category}/{slug}` | `{ category: "guides", slug: "setup" }` | `/docs/guides/setup` |
+| `/{slug}` | `{ slug: "about" }` | `/about` |
+
+Templates are paths only — no origin, no locale prefix. Locale URL strategies (prefix, subdomain, root folding) are handled by your site's routing, not the CMS. Pass `locale` to the enable route if your middleware needs it.
 
 ## Editor tokens
 
