@@ -4,6 +4,7 @@ import type { CmsRequestTrace } from "../lib/cms-trace";
 
 interface GqlFetchOptions {
   trace?: CmsRequestTrace;
+  previewToken?: string;
 }
 
 function inferOperationName(query: string): string | null {
@@ -36,6 +37,7 @@ export async function gqlFetch<TResult, TVariables extends Record<string, unknow
       "Content-Type": "application/json",
       ...(trace ? { "X-Trace-Id": trace.traceId } : {}),
       ...(trace?.enabled ? { "X-Bench-Trace": "1" } : {}),
+      ...(options?.previewToken ? { "X-Preview-Token": options.previewToken } : {}),
     },
     body: JSON.stringify({
       query: printed,

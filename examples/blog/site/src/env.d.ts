@@ -10,5 +10,6 @@ declare module "cloudflare:workers" {
 declare namespace App {
   interface Locals {
     cmsTrace: CmsRequestTrace;
+    previewToken?: string;
   }
 }

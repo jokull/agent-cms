@@ -9,7 +9,8 @@ const { slug } = Astro.params;
 const cms = env.CMS;
 const trace = Astro.locals.cmsTrace;
 
-const data = await gqlFetch(cms, POST_BY_SLUG_QUERY, { slug: slug! }, { trace });
+const previewToken = Astro.locals.previewToken;
+const data = await gqlFetch(cms, POST_BY_SLUG_QUERY, { slug: slug! }, { trace, previewToken });
 const post = data.post;
 
 if (!post) {

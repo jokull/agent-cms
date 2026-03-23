@@ -6,8 +6,19 @@ export const onRequest: MiddlewareHandler = async (context, next) => {
   const trace = createCmsRequestTrace(context.request);
   context.locals.cmsTrace = trace;
 
+  // Draft preview: read token from cookie
+  const previewToken = context.cookies.get("__agentcms_preview")?.value;
+  if (previewToken) {
+    context.locals.previewToken = previewToken;
+  }
+
   const response = await next();
   const totalMs = performance.now() - startedAt;
+
+  // Bypass caches when in preview mode
+  if (previewToken) {
+    response.headers.set("Cache-Control", "private, no-store");
+  }
 
   if (!trace.enabled) {
     return response;

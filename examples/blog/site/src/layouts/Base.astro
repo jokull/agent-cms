@@ -1,5 +1,6 @@
 ---
 import SeoHead from "../components/SeoHead.astro";
+import PreviewBar from "../components/PreviewBar.astro";
 
 interface Props {
   title?: string;
@@ -34,6 +35,7 @@ const { title = "Blog", seoTags } = Astro.props;
     <footer>
       <p>Built with <a href="https://github.com/jokull/agent-cms">agent-cms</a> + <a href="https://astro.build">Astro</a></p>
     </footer>
+    <PreviewBar />
   </body>
 </html>
 

@@ -6,11 +6,12 @@ import { SITE_SETTINGS_QUERY } from "../graphql/queries";
 
 const cms = env.CMS;
 const trace = Astro.locals.cmsTrace;
+const previewToken = Astro.locals.previewToken;
 
 const url = new URL(Astro.request.url);
 const query = url.searchParams.get("q")?.trim() ?? "";
 
-const settings = await gqlFetch(cms, SITE_SETTINGS_QUERY, { trace });
+const settings = await gqlFetch(cms, SITE_SETTINGS_QUERY, { trace, previewToken });
 const site = settings.siteSettings;
 
 interface SearchResult {

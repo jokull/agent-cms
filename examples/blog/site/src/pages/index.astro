@@ -6,10 +6,11 @@ import { SITE_SETTINGS_QUERY, ALL_POSTS_QUERY } from "../graphql/queries";
 
 const cms = env.CMS;
 const trace = Astro.locals.cmsTrace;
+const previewToken = Astro.locals.previewToken;
 
 const [settings, posts] = await Promise.all([
-  gqlFetch(cms, SITE_SETTINGS_QUERY, { trace }),
-  gqlFetch(cms, ALL_POSTS_QUERY, { first: 6 }, { trace }),
+  gqlFetch(cms, SITE_SETTINGS_QUERY, { trace, previewToken }),
+  gqlFetch(cms, ALL_POSTS_QUERY, { first: 6 }, { trace, previewToken }),
 ]);
 
 const site = settings.siteSettings;

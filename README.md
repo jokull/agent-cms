@@ -322,7 +322,8 @@ Focal points, blurhash, and color palette are stored per-asset. Cloudflare Image
 
 ## Examples
 
-- [`examples/blog/`](./examples/blog/) — CMS Worker + Astro SSR site with typed GraphQL (gql.tada), structured text rendering, responsive images, service bindings
+- [`examples/blog/`](./examples/blog/) — CMS Worker + Astro SSR site with typed GraphQL (gql.tada), structured text rendering, responsive images, service bindings, **draft preview mode**
+- [`examples/nextjs/`](./examples/nextjs/) — Next.js App Router with `draftMode()` integration, multi-root GraphQL queries, preview bar component
 - [`examples/editor-mcp/`](./examples/editor-mcp/) — editor onboarding: app-land OAuth gateway, scoped editor tokens, separate MCP URLs for developers and editors
 
 ## License

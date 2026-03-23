@@ -6,10 +6,11 @@ import { ALL_POSTS_QUERY, ALL_CATEGORIES_QUERY } from "../../graphql/queries";
 
 const cms = env.CMS;
 const trace = Astro.locals.cmsTrace;
+const previewToken = Astro.locals.previewToken;
 
 const [postsData, categoriesData] = await Promise.all([
-  gqlFetch(cms, ALL_POSTS_QUERY, { first: 20 }, { trace }),
-  gqlFetch(cms, ALL_CATEGORIES_QUERY, { trace }),
+  gqlFetch(cms, ALL_POSTS_QUERY, { first: 20 }, { trace, previewToken }),
+  gqlFetch(cms, ALL_CATEGORIES_QUERY, { trace, previewToken }),
 ]);
 
 const posts = postsData.allPosts;

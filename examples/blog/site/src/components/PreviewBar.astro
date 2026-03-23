@@ -1,0 +1,46 @@
+---
+/**
+ * Shows a fixed bar at the top of the page when draft preview mode is active.
+ * Include this in your layout. It renders nothing when not in preview mode.
+ */
+const previewToken = Astro.locals.previewToken;
+const currentPath = new URL(Astro.request.url).pathname;
+---
+
+{previewToken && (
+  <div class="preview-bar">
+    <span>Draft Preview</span>
+    <a href={`/api/draft-mode/disable?redirect=${encodeURIComponent(currentPath)}`}>
+      Exit preview
+    </a>
+  </div>
+)}
+
+<style>
+  .preview-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    padding: 0.5rem 1rem;
+    background: #1e293b;
+    color: #f8fafc;
+    font-size: 0.8rem;
+    font-family: system-ui, sans-serif;
+  }
+
+  .preview-bar span {
+    font-weight: 600;
+  }
+
+  .preview-bar a {
+    color: #93c5fd;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+</style>
