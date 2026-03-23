@@ -109,60 +109,92 @@ FTS5 keyword search with BM25 ranking and snippets, scoped to all models or a si
 
 ## Draft preview
 
-Records on draft-enabled models start as drafts. The CMS stores both the draft state (real columns) and the published snapshot. GraphQL serves published content by default.
+Records on draft-enabled models start as drafts. The CMS stores both the draft state (real columns) and the published snapshot. GraphQL serves published content by default. Draft preview lets agents and editors see unpublished content on the real site before publishing.
 
 ### How it works
 
-1. **Set a URL template on your model** — `canonicalPathTemplate: "/posts/{slug}"`. The CMS resolves `{slug}` from the record and includes `_previewPath` in MCP/REST responses.
+1. **Set a URL template on your model** — `canonicalPathTemplate: "/posts/{slug}"`. The CMS resolves `{slug}` from the record and includes `_previewPath` in tool/REST responses.
 
-2. **Get a preview token** — `POST /api/preview-tokens` returns a short-lived token (default 1 hour). Preview tokens grant draft access to GraphQL without needing editor credentials.
+2. **Configure the site URL** — pass `siteUrl` to `createCMSHandler`. The CMS uses this to generate fully assembled preview links.
 
-3. **Enable draft mode on your site** — redirect through an enable route that sets a cookie:
-   ```
-   /api/draft-mode/enable?token=pvt_abc123&redirect=/posts/my-draft
-   ```
-   The cookie tells your site to pass `X-Preview-Token` to the CMS on GraphQL requests. The CMS validates the token and serves draft content.
+3. **Agent or editor requests a preview** — the `get_preview_url` MCP tool returns a ready-to-share link with a short-lived preview token baked in. One tool call, no assembly required.
 
-4. **Disable draft mode** — clear the cookie:
-   ```
-   /api/draft-mode/disable?redirect=/
-   ```
+4. **User clicks the preview link** — the site's enable route validates the token against the CMS, sets a cookie, and redirects to the content page. The site then fetches draft content from GraphQL.
+
+5. **Disable draft mode** — clear the cookie via `/api/draft-mode/disable?redirect=/`.
+
+### MCP workflow
+
+The agent never assembles preview URLs manually. One tool call does everything:
+
+```
+Agent: create_record({ modelApiKey: "post", data: { title: "Draft Post", ... } })
+CMS:   { id: "abc", _status: "draft", _previewPath: "/posts/draft-post" }
+
+Agent: get_preview_url({ recordId: "abc", modelApiKey: "post" })
+CMS:   { url: "https://mysite.com/api/draft-mode/enable?token=pvt_...&redirect=/posts/draft-post",
+         previewPath: "/posts/draft-post", expiresAt: "2026-03-24T17:00:00Z" }
+
+Agent: "Here's your draft preview: https://mysite.com/api/draft-mode/enable?token=pvt_...&redirect=/posts/draft-post"
+```
+
+If the agent has browser access, it can follow the link to visually verify content and iterate before publishing.
 
 ### Site integration
 
-The package exports a `createPreviewHandler` helper for your site:
+The package exports `createPreviewHandler` for the common case (Astro, SvelteKit, generic Workers). For Next.js, use `draftMode().enable()` in your route handler alongside the CMS cookie — see the framework-specific notes below.
 
 ```ts
 import { createPreviewHandler } from "agent-cms";
 
 const preview = createPreviewHandler({
-  cmsBaseUrl: "https://my-cms.workers.dev", // or env.CMS via service binding
+  cmsBaseUrl: "https://my-cms.workers.dev",
 });
 
 // Mount at /api/draft-mode/* in your site's router
 ```
 
-In your GraphQL client, read the `__cms_preview` cookie and forward it:
+The handler validates the token against the CMS, sets an `HttpOnly` cookie (`__agentcms_preview`) with the token, and redirects. The cookie's `Max-Age` matches the token's remaining TTL.
+
+In your GraphQL client, forward the cookie as a header when present:
 
 ```ts
+const previewToken = getCookie("__agentcms_preview");
 const headers: Record<string, string> = {};
-const previewToken = getCookie("__cms_preview");
 if (previewToken) {
   headers["X-Preview-Token"] = previewToken;
+  headers["Cache-Control"] = "no-store"; // bypass CDN for draft content
 }
-const data = await gqlFetch(query, { headers });
 ```
 
-### MCP workflow
+GraphQL responses in preview mode include `Cache-Control: private, no-store` and a `_preview` field:
 
-The editor agent gets `_previewPath` in tool responses when the model has a `canonicalPathTemplate`:
-
-```
-Agent: create_record({ modelApiKey: "post", data: { title: "Draft Post", ... } })
-CMS:   { id: "abc123", _status: "draft", _previewPath: "/posts/draft-post" }
+```graphql
+{ _preview { enabled expiresAt } }
 ```
 
-The agent can generate a full preview URL by combining the site origin + preview token + path. If the agent has browser access, it can follow the link to verify the content visually before publishing.
+Use this to render a preview banner — or include the `<agent-cms-preview-bar>` web component that shows "Draft Mode" with a disable link.
+
+### Service bindings
+
+When your site and CMS are in the same Cloudflare account, skip cookies entirely. Pass `X-Preview-Token` directly on the service binding call:
+
+```ts
+const res = await env.CMS.fetch("https://internal/graphql", {
+  headers: {
+    "X-Preview-Token": previewToken, // from your site's own session/cookie
+  },
+  body: JSON.stringify({ query }),
+});
+```
+
+No CORS, no cross-origin cookies, zero latency. This is the recommended path for Cloudflare deployments.
+
+### Framework notes
+
+**Astro / SvelteKit / generic Workers** — use `createPreviewHandler` directly. Read the cookie in middleware and forward as `X-Preview-Token`.
+
+**Next.js** — your enable route must also call `draftMode().enable()` to integrate with Next.js ISR/caching. Set `SameSite=None; Secure` on the cookie for iframe compatibility. See the DatoCMS Next.js pattern — the same approach applies.
 
 ### URL templates
 
@@ -174,7 +206,15 @@ Templates use `{field_name}` placeholders resolved from the record:
 | `/docs/{category}/{slug}` | `{ category: "guides", slug: "setup" }` | `/docs/guides/setup` |
 | `/{slug}` | `{ slug: "about" }` | `/about` |
 
-Templates are paths only — no origin, no locale prefix. Locale URL strategies (prefix, subdomain, root folding) are handled by your site's routing, not the CMS. Pass `locale` to the enable route if your middleware needs it.
+Templates are paths only — no origin, no locale prefix. Locale URL strategies (prefix, subdomain, root folding) are handled by your site's routing, not the CMS. The enable route accepts an optional `locale` param for your middleware to use.
+
+### Preview tokens
+
+- Created internally by `get_preview_url` or via `POST /api/preview-tokens`
+- Default expiry: 24 hours (editorial workflows are async)
+- Stored as SHA-256 hashes in D1 (a database breach doesn't leak usable tokens)
+- Grant read-only access to all draft content via GraphQL
+- `X-Preview-Token` header takes precedence over `__agentcms_preview` cookie if both are present
 
 ## Editor tokens
 
@@ -246,6 +286,7 @@ Only `DB` is required. Everything else is optional and degrades gracefully.
 | `VECTORIZE` | Vectorize | Semantic vector search. Requires `AI`. |
 | `CMS_WRITE_KEY` | Secret | Auth for writes, MCP, and publish. Without it, writes are open. |
 | `ASSET_BASE_URL` | Variable | Public URL prefix for assets and Image Resizing. Must be a custom domain for transforms. |
+| `SITE_URL` | Variable | Your site's public URL (e.g. `https://mysite.com`). Required for `get_preview_url` to generate fully assembled preview links. |
 
 ```jsonc
 {
