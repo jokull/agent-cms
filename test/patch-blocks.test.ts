@@ -251,4 +251,180 @@ describe("patch_blocks — partial block updates", () => {
     expect(content.value.document.children[1].type).toBe("paragraph");
     expect(content.value.document.children[2].item).toBe("v1");
   });
+
+  // ── append tests ──
+
+  it("appends a single new block to existing structured_text", async () => {
+    const record = await createGuideWithVenues();
+
+    const patchRes = await jsonRequest(handler, "PATCH", `/api/records/${record.id}/blocks`, {
+      modelApiKey: "guide",
+      fieldApiKey: "content",
+      blocks: {},
+      append: [{ _type: "venue", name: "Messinn", description: "Fish stew" }],
+    });
+    expect(patchRes.status).toBe(200);
+
+    const result = await patchRes.json();
+    expect(result._appendedIds).toHaveLength(1);
+    const newId = result._appendedIds[0];
+
+    // Block exists in DB
+    const blocks = await getBlocks(record.id);
+    expect(blocks).toHaveLength(4);
+    const newBlock = blocks.find((b) => b.id === newId);
+    expect(newBlock?.name).toBe("Messinn");
+    expect(newBlock?.description).toBe("Fish stew");
+
+    // DAST has 4 block nodes, new one at end
+    const content = typeof result.content === "string" ? JSON.parse(result.content) : result.content;
+    expect(content.value.document.children).toHaveLength(4);
+    expect(content.value.document.children[3].type).toBe("block");
+    expect(content.value.document.children[3].item).toBe(newId);
+  });
+
+  it("appends multiple new blocks", async () => {
+    const record = await createGuideWithVenues();
+
+    const patchRes = await jsonRequest(handler, "PATCH", `/api/records/${record.id}/blocks`, {
+      modelApiKey: "guide",
+      fieldApiKey: "content",
+      blocks: {},
+      append: [
+        { _type: "venue", name: "Messinn", description: "Fish stew" },
+        { _type: "venue", name: "Snaps", description: "Nordic bistro" },
+      ],
+    });
+    expect(patchRes.status).toBe(200);
+
+    const result = await patchRes.json();
+    expect(result._appendedIds).toHaveLength(2);
+
+    const blocks = await getBlocks(record.id);
+    expect(blocks).toHaveLength(5);
+
+    const content = typeof result.content === "string" ? JSON.parse(result.content) : result.content;
+    expect(content.value.document.children).toHaveLength(5);
+    expect(content.value.document.children[3].item).toBe(result._appendedIds[0]);
+    expect(content.value.document.children[4].item).toBe(result._appendedIds[1]);
+  });
+
+  it("appends + patches existing blocks in the same call", async () => {
+    const record = await createGuideWithVenues();
+
+    const patchRes = await jsonRequest(handler, "PATCH", `/api/records/${record.id}/blocks`, {
+      modelApiKey: "guide",
+      fieldApiKey: "content",
+      blocks: {
+        v1: { description: "Updated fine dining" },
+      },
+      append: [{ _type: "venue", name: "Messinn", description: "Fish stew" }],
+    });
+    expect(patchRes.status).toBe(200);
+
+    const result = await patchRes.json();
+    expect(result._appendedIds).toHaveLength(1);
+
+    const blocks = await getBlocks(record.id);
+    expect(blocks).toHaveLength(4);
+    expect(blocks.find((b) => b.id === "v1")?.description).toBe("Updated fine dining");
+    expect(blocks.find((b) => b.id === result._appendedIds[0])?.name).toBe("Messinn");
+  });
+
+  it("appends + deletes existing blocks in the same call", async () => {
+    const record = await createGuideWithVenues();
+
+    const patchRes = await jsonRequest(handler, "PATCH", `/api/records/${record.id}/blocks`, {
+      modelApiKey: "guide",
+      fieldApiKey: "content",
+      blocks: {
+        v2: null,
+      },
+      append: [{ _type: "venue", name: "Messinn", description: "Fish stew" }],
+    });
+    expect(patchRes.status).toBe(200);
+
+    const result = await patchRes.json();
+    expect(result._appendedIds).toHaveLength(1);
+
+    const blocks = await getBlocks(record.id);
+    expect(blocks).toHaveLength(3); // 3 original - 1 deleted + 1 appended
+    expect(blocks.find((b) => b.id === "v2")).toBeUndefined();
+    expect(blocks.find((b) => b.id === result._appendedIds[0])?.name).toBe("Messinn");
+
+    // DAST: v2 pruned, new block appended
+    const content = typeof result.content === "string" ? JSON.parse(result.content) : result.content;
+    const items = content.value.document.children.map((c: Record<string, unknown>) => c.item).filter(Boolean);
+    expect(items).toContain("v1");
+    expect(items).not.toContain("v2");
+    expect(items).toContain("v3");
+    expect(items).toContain(result._appendedIds[0]);
+  });
+
+  it("rejects append + value together", async () => {
+    const record = await createGuideWithVenues();
+
+    const patchRes = await jsonRequest(handler, "PATCH", `/api/records/${record.id}/blocks`, {
+      modelApiKey: "guide",
+      fieldApiKey: "content",
+      blocks: {},
+      value: {
+        schema: "dast",
+        document: { type: "root", children: [{ type: "block", item: "v1" }] },
+      },
+      append: [{ _type: "venue", name: "Messinn", description: "Fish stew" }],
+    });
+    expect(patchRes.status).toBe(400);
+    const body = await patchRes.json();
+    expect(body.error).toContain("Cannot use both 'value' and 'append'");
+  });
+
+  it("rejects append with block missing _type via downstream validation", async () => {
+    const record = await createGuideWithVenues();
+
+    const patchRes = await jsonRequest(handler, "PATCH", `/api/records/${record.id}/blocks`, {
+      modelApiKey: "guide",
+      fieldApiKey: "content",
+      blocks: {},
+      append: [{ name: "No Type Block" }],
+    });
+    expect(patchRes.status).toBe(400);
+  });
+
+  it("verify appended blocks appear in DB with correct data", async () => {
+    const record = await createGuideWithVenues();
+
+    const patchRes = await jsonRequest(handler, "PATCH", `/api/records/${record.id}/blocks`, {
+      modelApiKey: "guide",
+      fieldApiKey: "content",
+      blocks: {},
+      append: [{ _type: "venue", name: "Kopar", description: "Harbour restaurant" }],
+    });
+    expect(patchRes.status).toBe(200);
+
+    const result = await patchRes.json();
+    const newId = result._appendedIds[0];
+
+    const blocks = await getBlocks(record.id);
+    const newBlock = blocks.find((b) => b.id === newId);
+    expect(newBlock).toBeDefined();
+    expect(newBlock?.name).toBe("Kopar");
+    expect(newBlock?.description).toBe("Harbour restaurant");
+    expect(newBlock?._root_record_id).toBe(record.id);
+  });
+
+  it("response does not include _appendedIds when no append is used", async () => {
+    const record = await createGuideWithVenues();
+
+    const patchRes = await jsonRequest(handler, "PATCH", `/api/records/${record.id}/blocks`, {
+      modelApiKey: "guide",
+      fieldApiKey: "content",
+      blocks: {
+        v1: { description: "Updated" },
+      },
+    });
+    expect(patchRes.status).toBe(200);
+    const result = await patchRes.json();
+    expect(result._appendedIds).toBeUndefined();
+  });
 });
