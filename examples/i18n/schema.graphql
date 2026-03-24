@@ -1,0 +1,98 @@
+scalar JSON
+
+enum SiteLocale {
+  en
+  is
+}
+
+type StringMultiLocaleField {
+  locale: String!
+  value: String
+}
+
+"""DatoCMS-compatible SEO meta tag"""
+type Tag {
+  tag: String!
+  attributes: JSON
+  content: String
+}
+
+type SiteInfo {
+  locales: [String!]!
+  faviconMetaTags: [Tag!]!
+  noIndex: Boolean!
+}
+
+type Page {
+  id: ID!
+  _modelApiKey: String!
+  _status: String
+  _isValid: Boolean!
+  _createdAt: String
+  _updatedAt: String
+  _publishedAt: String
+  _firstPublishedAt: String
+  _seoMetaTags: [Tag!]!
+  title: String
+  body: String
+  _allTitleLocales: [StringMultiLocaleField!]
+}
+
+input StringFilter {
+  eq: String
+  neq: String
+  in: [String!]
+  notIn: [String!]
+  matches: String
+  notMatches: String
+  isBlank: Boolean
+  isPresent: Boolean
+  exists: Boolean
+}
+
+input DateTimeFilter {
+  eq: String
+  neq: String
+  gt: String
+  lt: String
+  gte: String
+  lte: String
+  exists: Boolean
+}
+
+input PageFilter {
+  id: StringFilter
+  _status: StringFilter
+  _createdAt: DateTimeFilter
+  _updatedAt: DateTimeFilter
+  _publishedAt: DateTimeFilter
+  _firstPublishedAt: DateTimeFilter
+  title: StringFilter
+  body: StringFilter
+  AND: [PageFilter!]
+  OR: [PageFilter!]
+}
+
+enum PageOrderBy {
+  _createdAt_ASC
+  _createdAt_DESC
+  _updatedAt_ASC
+  _updatedAt_DESC
+  _publishedAt_ASC
+  _publishedAt_DESC
+  _firstPublishedAt_ASC
+  _firstPublishedAt_DESC
+  title_ASC
+  title_DESC
+}
+
+type PageMeta {
+  count: Int!
+}
+
+type Query {
+  allPages(locale: SiteLocale, fallbackLocales: [SiteLocale!], filter: PageFilter, orderBy: [PageOrderBy!], first: Int, skip: Int, excludeInvalid: Boolean): [Page!]!
+  page(locale: SiteLocale, fallbackLocales: [SiteLocale!], id: ID, filter: PageFilter): Page
+  _allPagesMeta(filter: PageFilter, excludeInvalid: Boolean): PageMeta!
+  _site: SiteInfo!
+}

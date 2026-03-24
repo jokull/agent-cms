@@ -5,9 +5,14 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "introspect": "gql.tada generate-schema 'http://localhost:8787/graphql' --output ./schema.graphql",
+    "generate": "gql.tada generate-output",
+    "graphql:check": "gql.tada check"
   },
   "dependencies": {
+    "gql.tada": "^1.8.0",
+    "graphql": "^16.13.1",
     "next": "^15.3.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

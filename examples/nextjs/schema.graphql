@@ -1,0 +1,531 @@
+scalar JSON
+
+"""Cloudflare Image Resizing transform parameters"""
+input ImageTransformParams {
+  width: Int
+  height: Int
+  fit: String
+  quality: Int
+  format: String
+  gravity: String
+  dpr: Int
+}
+
+type Asset {
+  id: ID!
+  filename: String!
+  mimeType: String!
+  size: Int!
+  width: Int
+  height: Int
+  alt: String
+  title: String
+  url: String!
+  blurhash: String
+  customData: JSON
+  responsiveImage(transforms: ImageTransformParams, cfImagesParams: ImageTransformParams, imgixParams: ImageTransformParams): ResponsiveImage
+}
+
+type ResponsiveImage {
+  src: String!
+  srcSet: String!
+  webpSrcSet: String!
+  width: Int!
+  height: Int!
+  aspectRatio: Float!
+  alt: String
+  title: String
+  base64: String
+  bgColor: String
+  sizes: String
+}
+
+type SiteInfo {
+  locales: [String!]!
+  faviconMetaTags: [Tag!]!
+  globalSeo(locale: String, fallbackLocales: [String!]): GlobalSeoField
+  noIndex: Boolean!
+}
+
+type GlobalSeoField {
+  siteName: String
+  titleSuffix: String
+  fallbackSeo: SeoField
+  facebookPageUrl: String
+  twitterAccount: String
+}
+
+"""DatoCMS-compatible SEO meta tag"""
+type Tag {
+  tag: String!
+  attributes: JSON
+  content: String
+}
+
+type SeoField {
+  title: String
+  description: String
+  image: Asset
+  twitterCard: String
+}
+
+type ColorField {
+  red: Int!
+  green: Int!
+  blue: Int!
+  alpha: Int
+  hex: String!
+}
+
+type LatLonField {
+  latitude: Float!
+  longitude: Float!
+}
+
+"""DatoCMS-compatible StructuredText response"""
+type StructuredText {
+  value: JSON!
+  blocks: [JSON!]!
+  inlineBlocks: [JSON!]!
+  links: [JSON!]!
+}
+
+type StringMultiLocaleField {
+  locale: String!
+  value: String
+}
+
+type IntMultiLocaleField {
+  locale: String!
+  value: Int
+}
+
+type FloatMultiLocaleField {
+  locale: String!
+  value: Float
+}
+
+type BooleanMultiLocaleField {
+  locale: String!
+  value: Boolean
+}
+
+input MatchesFilter {
+  pattern: String!
+  caseSensitive: Boolean
+}
+
+input StringFilter {
+  eq: String
+  neq: String
+  in: [String!]
+  notIn: [String!]
+  matches: String
+  notMatches: String
+  isBlank: Boolean
+  isPresent: Boolean
+  exists: Boolean
+}
+
+input TextFilter {
+  matches: String
+  notMatches: String
+  isBlank: Boolean
+  isPresent: Boolean
+  exists: Boolean
+}
+
+input IntFilter {
+  eq: Int
+  neq: Int
+  gt: Int
+  lt: Int
+  gte: Int
+  lte: Int
+  exists: Boolean
+}
+
+input FloatFilter {
+  eq: Float
+  neq: Float
+  gt: Float
+  lt: Float
+  gte: Float
+  lte: Float
+  exists: Boolean
+}
+
+input BooleanFilter {
+  eq: Boolean
+  exists: Boolean
+}
+
+input DateTimeFilter {
+  eq: String
+  neq: String
+  gt: String
+  lt: String
+  gte: String
+  lte: String
+  exists: Boolean
+}
+
+"""Filter for single-reference fields (link, media) by record/asset ID"""
+input LinkFilter {
+  eq: ID
+  neq: ID
+  in: [ID!]
+  notIn: [ID!]
+  exists: Boolean
+}
+
+"""
+Filter for multi-reference fields (links, media_gallery) stored as JSON arrays
+"""
+input LinksFilter {
+  eq: [ID!]
+  allIn: [ID!]
+  anyIn: [ID!]
+  notIn: [ID!]
+  exists: Boolean
+}
+
+"""Filter for geolocation fields"""
+input NearFilter {
+  latitude: Float!
+  longitude: Float!
+  radius: Float!
+}
+
+input LatLonFilter {
+  near: NearFilter
+  exists: Boolean
+}
+
+"""
+Filter for fields that only support existence checks (seo, json, color)
+"""
+input ExistsFilter {
+  exists: Boolean
+}
+
+"""Filter records by which locales have content"""
+input LocalesFilter {
+  allIn: [String!]
+  anyIn: [String!]
+  notIn: [String!]
+}
+
+"""Filter for tree model parent field"""
+input ParentFilter {
+  eq: ID
+  exists: Boolean
+}
+
+input PositionFilter {
+  eq: Int
+  neq: Int
+  gt: Int
+  lt: Int
+  gte: Int
+  lte: Int
+}
+
+union PostContentBlock = HeroSectionRecord | CodeBlockRecord
+
+type PostContentField {
+  value: JSON!
+  blocks: [PostContentBlock!]!
+  inlineBlocks: [PostContentBlock!]!
+  links: [JSON!]!
+}
+
+type HeroSectionRecord {
+  id: ID!
+  _modelApiKey: String!
+  headline: String
+  subheadline: String
+}
+
+type CodeBlockRecord {
+  id: ID!
+  _modelApiKey: String!
+  code: String
+  language: String
+  filename: String
+}
+
+type SiteSettings {
+  id: ID!
+  _modelApiKey: String!
+  _status: String
+  _isValid: Boolean!
+  _createdAt: String
+  _updatedAt: String
+  _publishedAt: String
+  _firstPublishedAt: String
+  _seoMetaTags: [Tag!]!
+  siteName: String
+  tagline: String
+  defaultSeo: SeoField
+}
+
+type Author {
+  id: ID!
+  _modelApiKey: String!
+  _status: String
+  _isValid: Boolean!
+  _createdAt: String
+  _updatedAt: String
+  _publishedAt: String
+  _firstPublishedAt: String
+  _seoMetaTags: [Tag!]!
+  name: String
+  bio: String
+  _allReferencingPosts(filter: PostFilter, orderBy: [PostOrderBy!], first: Int, skip: Int): [Post!]!
+}
+
+type Category {
+  id: ID!
+  _modelApiKey: String!
+  _status: String
+  _isValid: Boolean!
+  _createdAt: String
+  _updatedAt: String
+  _publishedAt: String
+  _firstPublishedAt: String
+  _seoMetaTags: [Tag!]!
+  name: String
+  slug: String
+  description: String
+  icon: String
+  sortOrder: Int
+  _allReferencingPosts(filter: PostFilter, orderBy: [PostOrderBy!], first: Int, skip: Int): [Post!]!
+}
+
+type Post {
+  id: ID!
+  _modelApiKey: String!
+  _status: String
+  _isValid: Boolean!
+  _createdAt: String
+  _updatedAt: String
+  _publishedAt: String
+  _firstPublishedAt: String
+  _seoMetaTags: [Tag!]!
+  title: String
+  slug: String
+  excerpt: String
+  content: PostContentField
+  author: Author
+  category: Category
+  publishedDate: String
+  readingTime: Int
+  featured: Boolean
+  seoField: SeoField
+}
+
+input SiteSettingsFilter {
+  id: StringFilter
+  _status: StringFilter
+  _createdAt: DateTimeFilter
+  _updatedAt: DateTimeFilter
+  _publishedAt: DateTimeFilter
+  _firstPublishedAt: DateTimeFilter
+  siteName: StringFilter
+  tagline: StringFilter
+  defaultSeo: ExistsFilter
+  AND: [SiteSettingsFilter!]
+  OR: [SiteSettingsFilter!]
+}
+
+enum SiteSettingsOrderBy {
+  _createdAt_ASC
+  _createdAt_DESC
+  _updatedAt_ASC
+  _updatedAt_DESC
+  _publishedAt_ASC
+  _publishedAt_DESC
+  _firstPublishedAt_ASC
+  _firstPublishedAt_DESC
+  siteName_ASC
+  siteName_DESC
+  tagline_ASC
+  tagline_DESC
+}
+
+type SiteSettingsMeta {
+  count: Int!
+}
+
+input AuthorFilter {
+  id: StringFilter
+  _status: StringFilter
+  _createdAt: DateTimeFilter
+  _updatedAt: DateTimeFilter
+  _publishedAt: DateTimeFilter
+  _firstPublishedAt: DateTimeFilter
+  name: StringFilter
+  bio: StringFilter
+  AND: [AuthorFilter!]
+  OR: [AuthorFilter!]
+}
+
+enum AuthorOrderBy {
+  _createdAt_ASC
+  _createdAt_DESC
+  _updatedAt_ASC
+  _updatedAt_DESC
+  _publishedAt_ASC
+  _publishedAt_DESC
+  _firstPublishedAt_ASC
+  _firstPublishedAt_DESC
+  name_ASC
+  name_DESC
+  bio_ASC
+  bio_DESC
+}
+
+type AuthorMeta {
+  count: Int!
+}
+
+input CategoryFilter {
+  id: StringFilter
+  _status: StringFilter
+  _createdAt: DateTimeFilter
+  _updatedAt: DateTimeFilter
+  _publishedAt: DateTimeFilter
+  _firstPublishedAt: DateTimeFilter
+  name: StringFilter
+  slug: StringFilter
+  description: StringFilter
+  icon: StringFilter
+  sortOrder: IntFilter
+  AND: [CategoryFilter!]
+  OR: [CategoryFilter!]
+}
+
+enum CategoryOrderBy {
+  _createdAt_ASC
+  _createdAt_DESC
+  _updatedAt_ASC
+  _updatedAt_DESC
+  _publishedAt_ASC
+  _publishedAt_DESC
+  _firstPublishedAt_ASC
+  _firstPublishedAt_DESC
+  name_ASC
+  name_DESC
+  slug_ASC
+  slug_DESC
+  description_ASC
+  description_DESC
+  icon_ASC
+  icon_DESC
+  sortOrder_ASC
+  sortOrder_DESC
+}
+
+type CategoryMeta {
+  count: Int!
+}
+
+input PostFilter {
+  id: StringFilter
+  _status: StringFilter
+  _createdAt: DateTimeFilter
+  _updatedAt: DateTimeFilter
+  _publishedAt: DateTimeFilter
+  _firstPublishedAt: DateTimeFilter
+  title: StringFilter
+  slug: StringFilter
+  excerpt: StringFilter
+  content: TextFilter
+  author: LinkFilter
+  category: LinkFilter
+  publishedDate: StringFilter
+  readingTime: IntFilter
+  featured: BooleanFilter
+  seoField: ExistsFilter
+  AND: [PostFilter!]
+  OR: [PostFilter!]
+}
+
+enum PostOrderBy {
+  _createdAt_ASC
+  _createdAt_DESC
+  _updatedAt_ASC
+  _updatedAt_DESC
+  _publishedAt_ASC
+  _publishedAt_DESC
+  _firstPublishedAt_ASC
+  _firstPublishedAt_DESC
+  title_ASC
+  title_DESC
+  slug_ASC
+  slug_DESC
+  excerpt_ASC
+  excerpt_DESC
+  content_ASC
+  content_DESC
+  author_ASC
+  author_DESC
+  category_ASC
+  category_DESC
+  publishedDate_ASC
+  publishedDate_DESC
+  readingTime_ASC
+  readingTime_DESC
+  featured_ASC
+  featured_DESC
+}
+
+type PostMeta {
+  count: Int!
+}
+
+input UploadFilter {
+  id: StringFilter
+  filename: StringFilter
+  mimeType: StringFilter
+  width: IntFilter
+  height: IntFilter
+  size: IntFilter
+  alt: StringFilter
+  title: StringFilter
+  _createdAt: DateTimeFilter
+  AND: [UploadFilter!]
+  OR: [UploadFilter!]
+}
+
+enum UploadOrderBy {
+  filename_ASC
+  filename_DESC
+  size_ASC
+  size_DESC
+  _createdAt_ASC
+  _createdAt_DESC
+}
+
+type UploadMeta {
+  count: Int!
+}
+
+type Query {
+  allSiteSettingses(locale: String, fallbackLocales: [String!], filter: SiteSettingsFilter, orderBy: [SiteSettingsOrderBy!], first: Int, skip: Int, excludeInvalid: Boolean): [SiteSettings!]!
+  siteSettings(locale: String, fallbackLocales: [String!], id: ID, filter: SiteSettingsFilter): SiteSettings
+  _allSiteSettingsesMeta(filter: SiteSettingsFilter, excludeInvalid: Boolean): SiteSettingsMeta!
+  allAuthors(locale: String, fallbackLocales: [String!], filter: AuthorFilter, orderBy: [AuthorOrderBy!], first: Int, skip: Int, excludeInvalid: Boolean): [Author!]!
+  author(locale: String, fallbackLocales: [String!], id: ID, filter: AuthorFilter): Author
+  _allAuthorsMeta(filter: AuthorFilter, excludeInvalid: Boolean): AuthorMeta!
+  allCategories(locale: String, fallbackLocales: [String!], filter: CategoryFilter, orderBy: [CategoryOrderBy!], first: Int, skip: Int, excludeInvalid: Boolean): [Category!]!
+  category(locale: String, fallbackLocales: [String!], id: ID, filter: CategoryFilter): Category
+  _allCategoriesMeta(filter: CategoryFilter, excludeInvalid: Boolean): CategoryMeta!
+  allPosts(locale: String, fallbackLocales: [String!], filter: PostFilter, orderBy: [PostOrderBy!], first: Int, skip: Int, excludeInvalid: Boolean): [Post!]!
+  post(locale: String, fallbackLocales: [String!], id: ID, filter: PostFilter): Post
+  _allPostsMeta(filter: PostFilter, excludeInvalid: Boolean): PostMeta!
+  _site: SiteInfo!
+  allUploads(filter: UploadFilter, orderBy: [UploadOrderBy!], first: Int, skip: Int): [Asset!]!
+  _allUploadsMeta(filter: UploadFilter): UploadMeta!
+}
