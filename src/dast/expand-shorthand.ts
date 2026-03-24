@@ -87,16 +87,30 @@ function typedNodesToDastChildren(nodes: readonly unknown[]): unknown[] {
 
 /**
  * Build a block map from an array of block entries.
+ *
+ * Accepts two entry formats:
+ * - { id, type, data: { ...fields } }  — shorthand (type becomes _type)
+ * - { id, _type, ...fields }           — canonical (matches get_record output)
  */
-function buildBlockMap(blocks: readonly unknown[]): Record<string, unknown> {
+function buildBlockMapFromArray(blocks: readonly unknown[]): Record<string, unknown> {
   const map: Record<string, unknown> = {};
   for (const b of blocks) {
     if (b == null || typeof b !== "object") continue;
     const entry = b as Record<string, unknown>;
     const id = entry.id;
+    if (typeof id !== "string") continue;
+
+    // Canonical format: { id, _type, ...fields }
+    if (typeof entry._type === "string") {
+      const { id: _, ...rest } = entry;
+      map[id] = rest;
+      continue;
+    }
+
+    // Shorthand format: { id, type, data: { ...fields } }
     const type = entry.type;
-    const data = entry.data;
-    if (typeof id === "string" && typeof type === "string") {
+    if (typeof type === "string") {
+      const data = entry.data;
       const rest = (data != null && typeof data === "object" && !Array.isArray(data))
         ? data as Record<string, unknown>
         : {};
@@ -104,6 +118,21 @@ function buildBlockMap(blocks: readonly unknown[]): Record<string, unknown> {
     }
   }
   return map;
+}
+
+/**
+ * Normalize a blocks value to a canonical map.
+ *
+ * Accepts:
+ * - Array of block entries (shorthand or canonical format)
+ * - Object/map keyed by block ID (canonical DAST format, passed through)
+ */
+function normalizeBlocks(blocks: unknown): Record<string, unknown> {
+  if (Array.isArray(blocks)) return buildBlockMapFromArray(blocks);
+  if (blocks != null && typeof blocks === "object" && !Array.isArray(blocks)) {
+    return blocks as Record<string, unknown>;
+  }
+  return {};
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -138,14 +167,14 @@ export function expandStructuredTextShorthand(rawValue: unknown): unknown {
   // 3. Object with "markdown" key → markdown + optional blocks wrapper
   if ("markdown" in rawValue && typeof rawValue.markdown === "string") {
     const doc = markdownToDast(rawValue.markdown);
-    const blocks = Array.isArray(rawValue.blocks) ? buildBlockMap(rawValue.blocks) : {};
+    const blocks = normalizeBlocks(rawValue.blocks);
     return { value: doc, blocks };
   }
 
   // 4. Object with "nodes" key → typed nodes + optional blocks wrapper
   if ("nodes" in rawValue && Array.isArray(rawValue.nodes)) {
     const children = typedNodesToDastChildren(rawValue.nodes);
-    const blocks = Array.isArray(rawValue.blocks) ? buildBlockMap(rawValue.blocks) : {};
+    const blocks = normalizeBlocks(rawValue.blocks);
     return {
       value: { schema: "dast", document: { type: "root", children } },
       blocks,

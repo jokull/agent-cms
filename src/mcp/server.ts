@@ -327,9 +327,18 @@ Field value formats:
 - links: array of record ID strings
 - seo: {"title":"...","description":"...","image":"<asset_id>","twitterCard":"summary_large_image"}
 - structured_text: markdown string, typed nodes array, {markdown:"...",blocks:[...]}, {nodes:[...],blocks:[...]}, or full DAST envelope {"value":{"schema":"dast","document":{...}},"blocks":{...}}
+  Markdown mode is the easiest way to write prose. Standard inline formatting (**bold**, *italic*, \`code\`, ~~strikethrough~~, [links](url)) all work.
+  Special sentinels for CMS references in markdown:
+  - Block refs: <!-- cms:block:BLOCK_ID --> (on its own line)
+  - Inline items: <!-- cms:inlineItem:RECORD_ID -->
+  - Inline blocks: <!-- cms:inlineBlock:BLOCK_ID -->
+  - Record links: [link text](itemLink:RECORD_ID)
+  When using {markdown, blocks}, the blocks array provides block data and sentinels place them in the document.
 - color: {"red":255,"green":0,"blue":0,"alpha":255}
 - lat_lon: {"latitude":64.13,"longitude":-21.89}`, CreateRecordInput.fields);
-const UpdateRecordTool = cmsTool("update_record", "Update record fields. For singletons, recordId can be omitted — the single record is found automatically.", UpdateRecordInput.fields);
+const UpdateRecordTool = cmsTool("update_record", `Update record fields. For singletons, recordId can be omitted — the single record is found automatically.
+
+Accepts all the same field value formats as create_record, including markdown mode for structured_text. For editorial content edits, prefer markdown mode over hand-assembled DAST — it's simpler and less error-prone.`, UpdateRecordInput.fields);
 const PatchBlocksTool = cmsTool("patch_blocks", `Partially update blocks in a structured text field without resending the entire content tree.
 
 You can target block IDs from either:
@@ -522,6 +531,12 @@ Field value formats (composite types):
   - links: array of record ID strings
   - seo: {"title":"...","description":"...","image":"<asset_id>","twitterCard":"summary_large_image"}
   - structured_text: markdown string, typed nodes array, {markdown:"...",blocks:[...]}, {nodes:[...],blocks:[...]}, or full DAST envelope {"value":{"schema":"dast","document":{...}},"blocks":{...}}
+    Prefer markdown mode for prose-heavy content. Inline formatting, links, and block placement all work:
+    - Standard markdown: **bold**, *italic*, \`code\`, ~~strike~~, [links](url)
+    - Block refs: <!-- cms:block:BLOCK_ID --> (own line)
+    - Record links: [link text](itemLink:RECORD_ID)
+    - Inline items: <!-- cms:inlineItem:RECORD_ID -->
+    - Inline blocks: <!-- cms:inlineBlock:BLOCK_ID -->
   - color: {"red":255,"green":0,"blue":0,"alpha":255}
   - lat_lon: {"latitude":64.13,"longitude":-21.89}
 
