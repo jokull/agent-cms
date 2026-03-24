@@ -276,12 +276,12 @@ function compileStructuredText(
       for (const field of blockModel.fields) {
         const value = blockData[field.api_key];
         if (value === undefined) continue;
+        if (value === null) {
+          row[field.api_key] = null;
+          continue;
+        }
 
         if (field.field_type === "structured_text") {
-          if (value === null) {
-            row[field.api_key] = null;
-            continue;
-          }
 
           const nestedInput = yield* decodeStructuredTextInput(field.api_key, value);
           const nestedCompiled = yield* compileStructuredText(

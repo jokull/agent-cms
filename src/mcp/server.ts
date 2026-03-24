@@ -224,7 +224,15 @@ function compactPatchBlocksResponse(
   })();
 
   if (!envelope) {
-    return { recordId: fullRecord.id, status: fullRecord._status ?? null, blocks: {}, deleted: deletedBlockIds, blockOrder: [] };
+    return {
+      recordId: fullRecord.id,
+      status: fullRecord._status ?? null,
+      fieldApiKey,
+      field: null,
+      blocks: {},
+      deleted: deletedBlockIds,
+      blockOrder: [],
+    };
   }
 
   const blocks = (typeof envelope.blocks === "object" && envelope.blocks !== null && !Array.isArray(envelope.blocks))
@@ -247,6 +255,8 @@ function compactPatchBlocksResponse(
   return {
     recordId: fullRecord.id as string,
     status: fullRecord._status ?? null,
+    fieldApiKey,
+    field: envelope,
     blocks,
     deleted: deletedBlockIds,
     blockOrder,
@@ -368,8 +378,8 @@ Example — append a new block while patching an existing one:
 Example — reorder blocks on a blocks_only field:
 { order: ["block-3", "block-1", "block-2"], blocks: {} }`, PatchBlocksInput.fields);
 const DeleteRecordTool = cmsTool("delete_record", "Delete a record", DeleteRecordInput.fields);
-const GetRecordTool = cmsTool("get_record", "Get a single record by modelApiKey + recordId. Useful after search_content when you need the full materialized record, including structured_text fields, before patch_blocks or update_record.", GetRecordInput.fields);
-const QueryRecordsTool = cmsTool("query_records", "List records for a model. Structured_text fields are materialized for inspection, including nested blocks inside parent block fields. Useful for finding record IDs before update_record, patch_blocks, set_publish_status, or record_versions.", QueryRecordsInput.fields);
+const GetRecordTool = cmsTool("get_record", "Get a single record by modelApiKey + recordId. Useful after search_content when you need the full materialized record, including structured_text fields, before patch_blocks or update_record. This is a workspace/content-management read tool, not a substitute for final live verification via GraphQL or the site URL.", GetRecordInput.fields);
+const QueryRecordsTool = cmsTool("query_records", "List records for a model. Structured_text fields are materialized for inspection, including nested blocks inside parent block fields. Useful for finding record IDs before update_record, patch_blocks, set_publish_status, or record_versions. Use GraphQL or the site URL for final public/live verification after publishing.", QueryRecordsInput.fields);
 const BulkCreateRecordsTool = cmsTool("bulk_create_records", `Create multiple records in one operation (up to 1000). Much faster than calling create_record in a loop.
 
 All records must belong to the same model. Slugs are auto-generated. Returns {created, records}, where records is an array of objects like {id}.`, BulkCreateRecordsInput.fields);
@@ -553,6 +563,7 @@ Draft/publish lifecycle:
   Required-field validation for draft-enabled models happens at publish time, not create_record time.
   Edits after publishing create a new draft version — publish again to update.
   GraphQL serves published content by default; use X-Include-Drafts header for previews.
+  If a task says to verify what is live or publicly visible, do that via GraphQL or the site URL after publishing — not via query_records/get_record, which show workspace state rather than the public delivery surface.
 
 Singletons and site settings:
   - If a singleton exists as a normal content model in your schema (for example a site_settings record with fields like tagline), treat it like content. Use update_record without recordId for direct singleton edits, or query_records + update_record if you need to inspect first.

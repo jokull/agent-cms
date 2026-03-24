@@ -182,7 +182,9 @@ describe("patch_blocks compact MCP response", () => {
     expect(result.title).toBeUndefined();
     expect(result.content).toBeUndefined();
     // But should have the compact keys
-    expect(Object.keys(result).sort()).toEqual(["blockOrder", "blocks", "deleted", "recordId", "status"]);
+    expect(Object.keys(result).sort()).toEqual(["blockOrder", "blocks", "deleted", "field", "fieldApiKey", "recordId", "status"]);
+    expect(result.fieldApiKey).toBe("content");
+    expect(result.field.blocks.v1.name).toBe("Updated");
   });
 
   it("reflects pruned blockOrder after deletion", async () => {

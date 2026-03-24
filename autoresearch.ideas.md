@@ -13,6 +13,7 @@
 
 ### Medium priority
 - Mixed workflow: create with markdown mode, then patch_blocks for targeted edits, then markdown mode for prose rewrites
+- `patch_blocks` returns a compact summary (`blocks`, `deleted`, `blockOrder`) rather than the full record; agents may still misread this and invent draft-state bugs. Consider whether a richer response or more forceful docs/example would actually reduce friction on block-edit prompts.
 - Inline formatting round-trip: create with markdown bold/italic/code/links, query via GraphQL, verify marks are correct
 - Large content updates: 10+ paragraphs with blocks — does the agent choose markdown over DAST?
 - update_record description: does the agent find the field format docs (they live on create_record)?
