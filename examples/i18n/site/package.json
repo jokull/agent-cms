@@ -9,10 +9,10 @@
     "preview": "wrangler dev",
     "deploy": "wrangler deploy",
     "introspect": "gql.tada generate-schema 'http://localhost:8787/graphql' --output ../schema.graphql",
-    "generate": "gql.tada generate-output"
+    "generate": "gql.tada generate-output",
+    "graphql:check": "gql.tada check"
   },
   "dependencies": {
-    "@0no-co/graphqlsp": "^1.12.0",
     "@astrojs/cloudflare": "^13.1.1",
     "astro": "^6.0.4",
     "gql.tada": "^1.8.0",
