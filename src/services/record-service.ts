@@ -1352,7 +1352,31 @@ export function patchBlocksForField(body: PatchBlocksInput, actor?: RequestActor
 
     // Build final DAST value
     let finalDastValue: unknown;
-    if (body.value !== undefined && appendedIds.length > 0) {
+    if (body.order) {
+      // order is only valid on blocks_only fields
+      const blocksOnlyFlag = getBlocksOnly(field.validators);
+      if (!blocksOnlyFlag) {
+        return yield* new ValidationError({
+          message: "The 'order' parameter is only supported on blocks_only structured_text fields. Use the 'value' parameter to provide a custom DAST for mixed prose+block fields.",
+          field: body.fieldApiKey,
+        });
+      }
+      // order and value are mutually exclusive
+      if (body.value !== undefined) {
+        return yield* new ValidationError({
+          message: "Cannot use both 'order' and 'value' — they both control the DAST document structure.",
+          field: body.fieldApiKey,
+        });
+      }
+      // Build DAST from order
+      finalDastValue = {
+        schema: "dast",
+        document: {
+          type: "root",
+          children: body.order.map((id) => ({ type: "block", item: id })),
+        },
+      };
+    } else if (body.value !== undefined && appendedIds.length > 0) {
       return yield* new ValidationError({
         message: "Cannot use both 'value' and 'append' — appended blocks need auto-generated DAST nodes which conflict with a custom DAST value.",
         field: body.fieldApiKey,
