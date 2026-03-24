@@ -8,3 +8,5 @@ package-lock.json
 # pnpm-lock.yaml is committed for reproducible installs
 .claude/
 .reference/
+autoresearch.jsonl
+autoresearch.ideas.md
