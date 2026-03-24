@@ -1342,17 +1342,50 @@ export function patchBlocksForField(body: PatchBlocksInput, actor?: RequestActor
       }
     }
 
+    // Process append entries — add new blocks with auto-generated IDs
+    const appendedIds: string[] = [];
+    for (const entry of body.append ?? []) {
+      const id = generateId();
+      appendedIds.push(id);
+      mergedBlocks[id] = entry as Record<string, unknown>;
+    }
+
     // Build final DAST value
     let finalDastValue: unknown;
-    if (body.value !== undefined) {
+    if (body.value !== undefined && appendedIds.length > 0) {
+      return yield* new ValidationError({
+        message: "Cannot use both 'value' and 'append' — appended blocks need auto-generated DAST nodes which conflict with a custom DAST value.",
+        field: body.fieldApiKey,
+      });
+    } else if (body.value !== undefined) {
       finalDastValue = body.value;
-    } else if (blockIdsToDelete.size > 0) {
-      // Auto-prune deleted blocks from existing DAST
+    } else if (blockIdsToDelete.size > 0 || appendedIds.length > 0) {
+      // Clone existing DAST, prune deleted blocks, append new block nodes
       const existingDast = existingEnvelope.value as {
         schema: string;
         document: { type: string; children: readonly unknown[] };
       };
-      finalDastValue = pruneBlockNodes(existingDast, blockIdsToDelete);
+      const pruned = blockIdsToDelete.size > 0
+        ? pruneBlockNodes(existingDast, blockIdsToDelete)
+        : existingDast;
+      if (appendedIds.length > 0) {
+        const prunedDoc = pruned as {
+          schema: string;
+          document: { type: string; children: readonly unknown[] };
+        };
+        finalDastValue = {
+          ...prunedDoc,
+          document: {
+            ...prunedDoc.document,
+            children: [
+              ...prunedDoc.document.children,
+              ...appendedIds.map((id) => ({ type: "block", item: id })),
+            ],
+          },
+        };
+      } else {
+        finalDastValue = pruned;
+      }
     } else {
       finalDastValue = existingEnvelope.value;
     }
@@ -1418,11 +1451,15 @@ export function patchBlocksForField(body: PatchBlocksInput, actor?: RequestActor
 
     const updatedRecord = yield* selectById(tableName, body.recordId);
     if (!updatedRecord) return null;
-    return yield* materializeRecordStructuredTextFields({
+    const materialized = yield* materializeRecordStructuredTextFields({
       modelApiKey: model.api_key,
       record: normalizeBooleanFields(updatedRecord, modelFields),
       fields: modelFields,
     });
+    if (materialized && appendedIds.length > 0) {
+      return { ...materialized, _appendedIds: appendedIds };
+    }
+    return materialized;
   });
 }
 

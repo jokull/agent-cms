@@ -285,6 +285,7 @@ export const PatchBlocksInput = Schema.Struct({
   fieldApiKey: Schema.NonEmptyString,
   value: Schema.optional(Schema.Unknown),
   blocks: Schema.Record({ key: Schema.String, value: Schema.NullOr(Schema.Unknown) }),
+  append: Schema.optional(Schema.Array(Schema.Record({ key: Schema.String, value: Schema.Unknown }))),
 });
 export type PatchBlocksInput = typeof PatchBlocksInput.Type;
 

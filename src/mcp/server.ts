@@ -298,8 +298,13 @@ If a nested block ID appears in multiple nested structured_text locations, the t
 
 Optionally provide a new top-level DAST \`value\`. If omitted, the existing DAST is preserved (with deleted top-level blocks auto-pruned).
 
+Use \`append\` to insert new blocks without reconstructing the DAST. Each entry is a record with \`_type\` and field values. New block IDs are auto-generated, DAST block nodes are appended to the end, and the response includes \`_appendedIds\`. Cannot be combined with \`value\`.
+
 Example — update one block's description, delete another, keep the rest:
-{ blocks: { "block-2": { "description": "New text" }, "block-3": null } }`, PatchBlocksInput.fields);
+{ blocks: { "block-2": { "description": "New text" }, "block-3": null } }
+
+Example — append a new block while patching an existing one:
+{ blocks: { "block-2": { "description": "Updated" } }, append: [{ "_type": "venue", "name": "New Place" }] }`, PatchBlocksInput.fields);
 const DeleteRecordTool = cmsTool("delete_record", "Delete a record", DeleteRecordInput.fields);
 const GetRecordTool = cmsTool("get_record", "Get a single record by modelApiKey + recordId. Useful after search_content when you need the full materialized record, including structured_text fields, before patch_blocks or update_record.", GetRecordInput.fields);
 const QueryRecordsTool = cmsTool("query_records", "List records for a model. Structured_text fields are materialized for inspection, including nested blocks inside parent block fields. Useful for finding record IDs before update_record, patch_blocks, set_publish_status, or record_versions.", QueryRecordsInput.fields);
@@ -470,6 +475,7 @@ Field value formats (composite types):
 Structured text editing notes:
   - patch_blocks can target both top-level blocks and nested blocks inside structured_text sub-fields.
   - If the same nested block ID exists in multiple locations, patch_blocks will ask you to patch the parent block explicitly.
+  - patch_blocks supports an \`append\` array to insert new blocks without rebuilding the DAST. Each entry needs \`_type\` plus field values. New block nodes are appended to the end of the document. The response includes \`_appendedIds\` with the generated IDs.
   - get_record is the fastest way to inspect one known record's full materialized structured_text after search_content returns its id.
   - query_records materializes structured_text fields for inspection; on published records, _published_snapshot remains useful as a raw snapshot of what is live.
 
