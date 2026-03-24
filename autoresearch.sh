@@ -166,6 +166,14 @@ round-trips, unclear field formats, schema discovery difficulties, wheels spinni
 (retrying the same thing), not knowing which tool to use, wrong sequencing of
 schema creation steps.
 
+DAST-specific friction to watch for:
+- Hand-assembling raw DAST JSON instead of using markdown mode (major friction)
+- Wrong block sentinel format (<!-- block:ID --> instead of <!-- cms:block:ID -->)
+- Blocks passed as map but silently dropped (should work now)
+- Blocks passed as array with _type but not recognized (should work now)
+- Full document re-send to change one paragraph or link (should use markdown mode)
+- Not discovering markdown mode exists (check if agent read create_record description)
+
 Schema design from scratch is expected — do NOT count "had to create models first"
 as friction. DO count things like: creating fields in wrong order, needing to retry
 because of missing validators, confusion about field types, etc.
