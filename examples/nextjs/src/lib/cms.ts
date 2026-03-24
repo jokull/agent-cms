@@ -1,8 +1,7 @@
 /**
  * Type-safe GraphQL client for agent-cms using gql.tada.
  *
- * When a preview token is provided, it's sent as X-Preview-Token
- * and the response bypasses all caches.
+ * When a preview token is provided, it's sent as X-Preview-Token.
  */
 
 import type { TadaDocumentNode } from "gql.tada";
@@ -31,9 +30,6 @@ export async function cmsQuery<TResult, TVariables>(
     method: "POST",
     headers,
     body: JSON.stringify({ query: print(document), variables: variables ?? {} }),
-    // Bypass Next.js data cache in preview mode
-    cache: options?.previewToken ? "no-store" : "force-cache",
-    next: options?.previewToken ? { revalidate: 0 } : { revalidate: 60 },
   });
 
   if (!res.ok) {
