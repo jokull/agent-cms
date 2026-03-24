@@ -1,17 +1,12 @@
-import { draftMode } from "next/headers";
-import { NextRequest } from "next/server";
-
 /**
  * Disable draft preview mode.
  *
  * GET /api/draft-mode/disable?redirect=/
  */
-export async function GET(request: NextRequest) {
-  const rawRedirect = request.nextUrl.searchParams.get("redirect") ?? "/";
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const rawRedirect = url.searchParams.get("redirect") ?? "/";
   const redirectPath = safePath(rawRedirect);
-
-  const draft = await draftMode();
-  draft.disable();
 
   return new Response(null, {
     status: 307,

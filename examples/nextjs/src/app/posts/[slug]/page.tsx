@@ -1,4 +1,4 @@
-import { draftMode, cookies } from "next/headers";
+import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { cmsQuery } from "../../../lib/cms";
 import { POST_PAGE_QUERY } from "../../../graphql/queries";
@@ -17,16 +17,10 @@ export default async function PostPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const draft = await draftMode();
-  const previewToken = draft.isEnabled
-    ? (await cookies()).get("__agentcms_preview")?.value
-    : undefined;
+  const cookieStore = await cookies();
+  const previewToken = cookieStore.get("__agentcms_preview")?.value;
 
-  const data = await cmsQuery(
-    POST_PAGE_QUERY,
-    { slug },
-    { previewToken },
-  );
+  const data = await cmsQuery(POST_PAGE_QUERY, { slug }, { previewToken });
 
   if (!data.post) notFound();
 
@@ -50,7 +44,13 @@ export default async function PostPage({
               {post.category.name}
             </a>
           )}
-          <h1 style={{ fontSize: "2.5rem", lineHeight: 1.2, margin: "0.5rem 0 1rem" }}>
+          <h1
+            style={{
+              fontSize: "2.5rem",
+              lineHeight: 1.2,
+              margin: "0.5rem 0 1rem",
+            }}
+          >
             {post.title}
           </h1>
           {post._status === "draft" && (
@@ -67,7 +67,15 @@ export default async function PostPage({
               Draft
             </span>
           )}
-          <div style={{ display: "flex", gap: "1.5rem", fontSize: "0.9rem", color: "#666", marginTop: "0.5rem" }}>
+          <div
+            style={{
+              display: "flex",
+              gap: "1.5rem",
+              fontSize: "0.9rem",
+              color: "#666",
+              marginTop: "0.5rem",
+            }}
+          >
             {post.author && <span>{post.author.name}</span>}
             {post.publishedDate && (
               <time dateTime={post.publishedDate}>

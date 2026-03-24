@@ -2,10 +2,12 @@
   "name": "agent-cms-nextjs-example",
   "version": "0.0.1",
   "private": true,
+  "type": "module",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
+    "dev": "vinext dev",
+    "build": "vite build",
+    "start": "vinext start",
+    "deploy": "vite build && wrangler deploy",
     "introspect": "gql.tada generate-schema 'http://localhost:8787/graphql' --output ./schema.graphql",
     "generate": "gql.tada generate-output",
     "graphql:check": "gql.tada check"
@@ -13,8 +15,14 @@
   "dependencies": {
     "gql.tada": "^1.8.0",
     "graphql": "^16.13.1",
-    "next": "^15.3.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "vinext": "^0.0.29"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.30.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.0.1",
+    "wrangler": "^4.76.0"
   }
 }

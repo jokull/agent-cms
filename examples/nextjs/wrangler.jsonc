@@ -1,0 +1,13 @@
+{
+  "name": "agent-cms-nextjs-example",
+  "compatibility_date": "2026-02-28",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "./worker/index.ts",
+  "vars": {
+    "CMS_URL": "http://localhost:8787"
+  },
+  "assets": {
+    "not_found_handling": "none",
+    "directory": "dist/client"
+  }
+}

@@ -1,12 +1,13 @@
-import { draftMode } from "next/headers";
+import { cookies } from "next/headers";
 
 /**
  * Fixed bar at the bottom of the page when draft mode is active.
- * Server component — reads draftMode() directly.
+ * Server component — reads the __agentcms_preview cookie directly.
  */
 export async function PreviewBar() {
-  const draft = await draftMode();
-  if (!draft.isEnabled) return null;
+  const cookieStore = await cookies();
+  const previewCookie = cookieStore.get("__agentcms_preview");
+  if (!previewCookie?.value) return null;
 
   return (
     <div
