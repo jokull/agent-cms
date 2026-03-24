@@ -205,6 +205,54 @@ function isToolPayload(value: unknown): value is Record<PropertyKey, unknown> {
   return value !== null && typeof value === "object";
 }
 
+function compactPatchBlocksResponse(
+  fullRecord: Record<string, unknown>,
+  fieldApiKey: string,
+  deletedBlockIds: string[],
+): Record<string, unknown> {
+  const fieldValue = fullRecord[fieldApiKey];
+
+  const envelope: Record<string, unknown> | null = (() => {
+    if (fieldValue === null || fieldValue === undefined) return null;
+    if (typeof fieldValue === "string") {
+      try { return JSON.parse(fieldValue) as Record<string, unknown>; } catch { return null; }
+    }
+    if (typeof fieldValue === "object" && !Array.isArray(fieldValue)) {
+      return fieldValue as Record<string, unknown>;
+    }
+    return null;
+  })();
+
+  if (!envelope) {
+    return { recordId: fullRecord.id, status: fullRecord._status ?? null, blocks: {}, deleted: deletedBlockIds, blockOrder: [] };
+  }
+
+  const blocks = (typeof envelope.blocks === "object" && envelope.blocks !== null && !Array.isArray(envelope.blocks))
+    ? envelope.blocks as Record<string, unknown>
+    : {};
+
+  // Extract block order from DAST traversal
+  const blockOrder: string[] = [];
+  function walkDast(node: unknown) {
+    if (typeof node !== "object" || node === null) return;
+    const n = node as Record<string, unknown>;
+    if (n.type === "block" && typeof n.item === "string") blockOrder.push(n.item);
+    if (Array.isArray(n.children)) (n.children as unknown[]).forEach(walkDast);
+  }
+  const value = envelope.value;
+  if (typeof value === "object" && value !== null) {
+    walkDast((value as Record<string, unknown>).document);
+  }
+
+  return {
+    recordId: fullRecord.id as string,
+    status: fullRecord._status ?? null,
+    blocks,
+    deleted: deletedBlockIds,
+    blockOrder,
+  };
+}
+
 function parseValidators(value: unknown): Record<string, unknown> {
   if (value == null || value === "") return {};
   if (typeof value === "string") return decodeJsonRecordStringOr(value, {});
@@ -778,7 +826,20 @@ export function createMcpLayer(
         : RecordService.updateSingletonRecord(modelApiKey, data, options?.actor);
       return effect.pipe(Effect.flatMap((r) => addPreviewPath(modelApiKey, r)));
     }),
-    patch_blocks: withDecoded(PatchBlocksInput, (input) => RecordService.patchBlocksForField(input, options?.actor)),
+    patch_blocks: withDecoded(PatchBlocksInput, (input) =>
+      RecordService.patchBlocksForField(input, options?.actor).pipe(
+        Effect.map((record) => {
+          const deletedIds = Object.entries(input.blocks)
+            .filter(([, v]) => v === null)
+            .map(([k]) => k);
+          return compactPatchBlocksResponse(
+            record as Record<string, unknown>,
+            input.fieldApiKey,
+            deletedIds,
+          );
+        }),
+      ),
+    ),
     delete_record: withDecoded(DeleteRecordInput, ({ recordId, modelApiKey }) => RecordService.removeRecord(modelApiKey, recordId)),
     get_record: withDecoded(GetRecordInput, ({ recordId, modelApiKey }) =>
       RecordService.getRecord(modelApiKey, recordId).pipe(Effect.flatMap((r) => addPreviewPath(modelApiKey, r)))),
