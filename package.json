@@ -22,7 +22,6 @@
   ],
   "scripts": {
     "build": "tsdown",
-    "dev": "wrangler dev",
     "test": "vitest",
     "test:run": "vitest run",
     "lint": "oxlint --type-check src/",
@@ -30,7 +29,6 @@
     "bench:blog": "node scripts/bench-blog.mjs",
     "dato:import": "node scripts/dato-import/cli.mjs",
     "prepublishOnly": "pnpm run build",
-    "db:migrate": "wrangler d1 migrations apply agent-cms-db --local",
     "prepare": "effect-language-service patch"
   },
   "keywords": [
