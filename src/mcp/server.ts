@@ -343,7 +343,8 @@ Field value formats:
   - Inline items: <!-- cms:inlineItem:RECORD_ID -->
   - Inline blocks: <!-- cms:inlineBlock:BLOCK_ID -->
   - Record links: [link text](itemLink:RECORD_ID)
-  When using {markdown, blocks}, the blocks array provides block data and sentinels place them in the document.
+  When using {markdown, blocks}, the blocks array/map provides block data and sentinels place them in the document.
+  Those block field values are persisted by the same create_record/update_record call — you do not need a follow-up patch_blocks call just to save the initial block payload.
 - color: {"red":255,"green":0,"blue":0,"alpha":255}
 - lat_lon: {"latitude":64.13,"longitude":-21.89}`, CreateRecordInput.fields);
 const UpdateRecordTool = cmsTool("update_record", `Update record fields. For singletons, recordId can be omitted — the single record is found automatically.
@@ -541,7 +542,7 @@ Field value formats (composite types):
   - links: array of record ID strings
   - seo: {"title":"...","description":"...","image":"<asset_id>","twitterCard":"summary_large_image"}
   - structured_text: markdown string, typed nodes array, {markdown:"...",blocks:[...]}, {nodes:[...],blocks:[...]}, or full DAST envelope {"value":{"schema":"dast","document":{...}},"blocks":{...}}
-    Prefer markdown mode for prose-heavy content. Inline formatting, links, and block placement all work:
+    Prefer markdown mode for prose-heavy content. Inline formatting, links, and block placement all work. Initial block payloads are persisted by the same create_record/update_record call; patch_blocks is for later targeted edits, not for finishing initial block creation:
     - Standard markdown: **bold**, *italic*, \`code\`, ~~strike~~, [links](url)
     - Block refs: <!-- cms:block:BLOCK_ID --> (own line)
     - Record links: [link text](itemLink:RECORD_ID)
