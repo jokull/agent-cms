@@ -160,14 +160,14 @@ describe("P5.6: End-to-end MCP → GraphQL", () => {
     // === Step 4: Agent publishes ===
 
     const published = parse(await agent.callTool({
-      name: "publish_records",
-      arguments: { recordIds: [authorRecord.id], modelApiKey: "author" },
+      name: "set_publish_status",
+      arguments: { action: "publish", recordIds: [authorRecord.id], modelApiKey: "author" },
     }));
     expect(published._status).toBe("published");
 
     parse(await agent.callTool({
-      name: "publish_records",
-      arguments: { recordIds: [postRecord.id], modelApiKey: "blog_post" },
+      name: "set_publish_status",
+      arguments: { action: "publish", recordIds: [postRecord.id], modelApiKey: "blog_post" },
     }));
 
     // === Step 5: Consumer queries via GraphQL ===

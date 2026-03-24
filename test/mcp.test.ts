@@ -204,8 +204,8 @@ describe("MCP Server", () => {
       expect(created.featured).toBe(true);
 
       const publishRes = await client.callTool({
-        name: "publish_records",
-        arguments: { recordIds: [created.id], modelApiKey: "post" },
+        name: "set_publish_status",
+        arguments: { action: "publish", recordIds: [created.id], modelApiKey: "post" },
       });
       const published = getResult(publishRes);
       expect(published.featured).toBe(true);
@@ -220,14 +220,14 @@ describe("MCP Server", () => {
       expect(record._status).toBe("draft");
 
       const pubRes = await client.callTool({
-        name: "publish_records",
-        arguments: { recordIds: [record.id], modelApiKey: "post" },
+        name: "set_publish_status",
+        arguments: { action: "publish", recordIds: [record.id], modelApiKey: "post" },
       });
       expect(getResult(pubRes)._status).toBe("published");
 
       const unpubRes = await client.callTool({
-        name: "unpublish_records",
-        arguments: { recordIds: [record.id], modelApiKey: "post" },
+        name: "set_publish_status",
+        arguments: { action: "unpublish", recordIds: [record.id], modelApiKey: "post" },
       });
       expect(getResult(unpubRes)._status).toBe("draft");
     });
@@ -243,8 +243,8 @@ describe("MCP Server", () => {
       }));
 
       const bulkPubRes = await client.callTool({
-        name: "publish_records",
-        arguments: { modelApiKey: "post", recordIds: [createOne.id, createTwo.id] },
+        name: "set_publish_status",
+        arguments: { action: "publish", modelApiKey: "post", recordIds: [createOne.id, createTwo.id] },
       });
       const published = getResult(bulkPubRes);
       expect(published).toHaveLength(2);
@@ -261,13 +261,13 @@ describe("MCP Server", () => {
         arguments: { modelApiKey: "post", data: { title: "Published B" } },
       }));
       await client.callTool({
-        name: "publish_records",
-        arguments: { modelApiKey: "post", recordIds: [createOne.id, createTwo.id] },
+        name: "set_publish_status",
+        arguments: { action: "publish", modelApiKey: "post", recordIds: [createOne.id, createTwo.id] },
       });
 
       const bulkUnpubRes = await client.callTool({
-        name: "unpublish_records",
-        arguments: { modelApiKey: "post", recordIds: [createOne.id, createTwo.id] },
+        name: "set_publish_status",
+        arguments: { action: "unpublish", modelApiKey: "post", recordIds: [createOne.id, createTwo.id] },
       });
       const unpublished = getResult(bulkUnpubRes);
       expect(unpublished).toHaveLength(2);
@@ -280,16 +280,16 @@ describe("MCP Server", () => {
         arguments: { modelApiKey: "post", data: { title: "Diffable", body: "Version one" } },
       }));
       await client.callTool({
-        name: "publish_records",
-        arguments: { recordIds: [created.id], modelApiKey: "post" },
+        name: "set_publish_status",
+        arguments: { action: "publish", recordIds: [created.id], modelApiKey: "post" },
       });
       await client.callTool({
         name: "update_record",
         arguments: { recordId: created.id, modelApiKey: "post", data: { body: "Version two" } },
       });
       await client.callTool({
-        name: "publish_records",
-        arguments: { recordIds: [created.id], modelApiKey: "post" },
+        name: "set_publish_status",
+        arguments: { action: "publish", recordIds: [created.id], modelApiKey: "post" },
       });
 
       const versions = getResult(await client.callTool({

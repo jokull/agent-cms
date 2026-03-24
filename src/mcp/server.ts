@@ -153,6 +153,11 @@ const PublishRecordsInput = Schema.Struct({
   ),
 });
 
+const SetPublishStatusInput = Schema.Struct({
+  action: Schema.Literal("publish", "unpublish"),
+  ...PublishRecordsInput.fields,
+});
+
 const ScheduleInput = Schema.Struct({
   recordId: Schema.String,
   modelApiKey: Schema.String,
@@ -356,10 +361,10 @@ Key validators by field type:
 const UpdateFieldTool = cmsTool("update_field", "Update field properties (label, apiKey, validators, hint)", UpdateFieldInput.fields);
 const DeleteModelTool = cmsTool("delete_model", "Delete a model (fails if referenced)", ModelIdInput.fields);
 const DeleteFieldTool = cmsTool("delete_field", "Delete a field and drop column", FieldIdInput.fields);
-const CreateRecordTool = cmsTool("create_record", `Create a content record. Records on draft-enabled models start as draft — call publish_records to make them visible in GraphQL.
+const CreateRecordTool = cmsTool("create_record", `Create a content record. Records on draft-enabled models start as draft — call set_publish_status to make them visible in GraphQL.
 
 Validation note:
-- For models with drafts (has_draft=true), required-field validation is deferred until publish_records.
+- For models with drafts (has_draft=true), required-field validation is deferred until set_publish_status.
 - For models without drafts (has_draft=false), required fields are enforced during create_record.
 
 Field value formats:
@@ -393,12 +398,11 @@ Example — update one block's description, delete another, keep the rest:
 { blocks: { "block-1": "block-1", "block-2": { "description": "New text" }, "block-3": null } }`, PatchBlocksInput.fields);
 const DeleteRecordTool = cmsTool("delete_record", "Delete a record", DeleteRecordInput.fields);
 const GetRecordTool = cmsTool("get_record", "Get a single record by modelApiKey + recordId. Useful after search_content when you need the full materialized record, including structured_text fields, before patch_blocks or update_record.", GetRecordInput.fields);
-const QueryRecordsTool = cmsTool("query_records", "List records for a model. Structured_text fields are materialized for inspection, including nested blocks inside parent block fields. Useful for finding record IDs before update_record, patch_blocks, publish_records, or record_versions.", QueryRecordsInput.fields);
+const QueryRecordsTool = cmsTool("query_records", "List records for a model. Structured_text fields are materialized for inspection, including nested blocks inside parent block fields. Useful for finding record IDs before update_record, patch_blocks, set_publish_status, or record_versions.", QueryRecordsInput.fields);
 const BulkCreateRecordsTool = cmsTool("bulk_create_records", `Create multiple records in one operation (up to 1000). Much faster than calling create_record in a loop.
 
 All records must belong to the same model. Slugs are auto-generated. Returns {created, records}, where records is an array of objects like {id}.`, BulkCreateRecordsInput.fields);
-const PublishRecordsTool = cmsTool("publish_records", "Publish one or more records. Required/unique validation is enforced at publish time for draft-enabled models. Pass recordIds as an array, even for a single record.", PublishRecordsInput.fields);
-const UnpublishRecordsTool = cmsTool("unpublish_records", "Unpublish one or more records.", PublishRecordsInput.fields);
+const SetPublishStatusTool = cmsTool("set_publish_status", "Publish or unpublish one or more records. Pass recordIds as an array, even for a single record. Required-field validation is enforced at publish time for draft-enabled models.", SetPublishStatusInput.fields);
 const ScheduleTool = cmsTool("schedule", `Schedule a record to publish or unpublish at a future ISO datetime, or clear both schedules.
 
 action: "publish" | "unpublish" | "clear"
@@ -513,8 +517,7 @@ const AdminTools = [
   GetRecordTool,
   QueryRecordsTool,
   BulkCreateRecordsTool,
-  PublishRecordsTool,
-  UnpublishRecordsTool,
+  SetPublishStatusTool,
   ScheduleTool,
   RecordVersionsTool,
   ReorderRecordsTool,
@@ -543,8 +546,7 @@ const EditorTools = [
   GetRecordTool,
   QueryRecordsTool,
   BulkCreateRecordsTool,
-  PublishRecordsTool,
-  UnpublishRecordsTool,
+  SetPublishStatusTool,
   ScheduleTool,
   RecordVersionsTool,
   ReorderRecordsTool,
@@ -576,7 +578,7 @@ Server boundary:
   - Editor MCP: /mcp/editor — content/publishing/assets/search only. If a schema-mutation tool is missing, you are probably on the editor MCP and should switch surfaces instead of retrying.
 
 Workflow order:
-  schema_info -> create_model -> create_field -> create_record -> publish_records
+  schema_info -> create_model -> create_field -> create_record -> set_publish_status
 
 Naming conventions:
   - api_key: snake_case (e.g. blog_post, cover_image)
@@ -603,8 +605,8 @@ Structured text editing notes:
   - query_records materializes structured_text fields for inspection; on published records, _published_snapshot remains useful as a raw snapshot of what is live.
 
 Draft/publish lifecycle:
-  Records on draft-enabled models start as drafts. create_record returns the created draft record object, including its top-level id. Call publish_records with that recordId to make it visible in GraphQL.
-  Use publish_records and unpublish_records for both single and bulk operations — just pass an array of recordIds.
+  Records on draft-enabled models start as drafts. create_record returns the created draft record object, including its top-level id. Call set_publish_status with action "publish" and that recordId to make it visible in GraphQL.
+  Use set_publish_status for both publish and unpublish, single and bulk operations — just pass an array of recordIds and the desired action.
   Required-field validation for draft-enabled models happens at publish time, not create_record time.
   Edits after publishing create a new draft version — publish again to update.
   GraphQL serves published content by default; use X-Include-Drafts header for previews.
@@ -713,7 +715,7 @@ Follow these steps:
 3. Present your plan before executing — list models, fields, and relationships.
 4. Create models first, then fields in order (slug fields after their source).
 5. Create a few sample records to verify the schema works.
-6. Publish the sample records with publish_records.
+6. Publish the sample records with set_publish_status.
 7. Show the GraphQL query that a frontend would use to fetch this content.
    Remember: api_key snake_case -> GraphQL camelCase fields, PascalCase types.`),
   });
@@ -908,16 +910,16 @@ export function createMcpLayer(
     query_records: withDecoded(QueryRecordsInput, ({ modelApiKey }) =>
       RecordService.listRecords(modelApiKey).pipe(Effect.flatMap((r) => addPreviewPathToList(modelApiKey, r)))),
     bulk_create_records: withDecoded(BulkCreateRecordsInput, ({ modelApiKey, records }) => RecordService.bulkCreateRecords({ modelApiKey, records }, options?.actor)),
-    publish_records: withDecoded(PublishRecordsInput, ({ recordIds, modelApiKey }) =>
-      recordIds.length === 1
-        ? PublishService.publishRecord(modelApiKey, recordIds[0], options?.actor)
-        : PublishService.bulkPublishRecords(modelApiKey, recordIds, options?.actor),
-    ),
-    unpublish_records: withDecoded(PublishRecordsInput, ({ recordIds, modelApiKey }) =>
-      recordIds.length === 1
-        ? PublishService.unpublishRecord(modelApiKey, recordIds[0], options?.actor)
-        : PublishService.bulkUnpublishRecords(modelApiKey, recordIds, options?.actor),
-    ),
+    set_publish_status: withDecoded(SetPublishStatusInput, ({ action, recordIds, modelApiKey }) => {
+      const op = action === "publish"
+        ? (recordIds.length === 1
+            ? PublishService.publishRecord(modelApiKey, recordIds[0], options?.actor)
+            : PublishService.bulkPublishRecords(modelApiKey, recordIds, options?.actor))
+        : (recordIds.length === 1
+            ? PublishService.unpublishRecord(modelApiKey, recordIds[0], options?.actor)
+            : PublishService.bulkUnpublishRecords(modelApiKey, recordIds, options?.actor));
+      return op;
+    }),
     schedule: withDecoded(ScheduleInput, ({ recordId, modelApiKey, action, at }) => {
       if (action === "clear") return ScheduleService.clearSchedule(modelApiKey, recordId, options?.actor);
       if (action === "publish") return ScheduleService.schedulePublish(modelApiKey, recordId, at ?? null, options?.actor);

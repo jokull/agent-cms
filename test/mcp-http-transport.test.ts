@@ -82,8 +82,7 @@ describe("MCP HTTP transport", () => {
 
     const tools = await client.listTools();
     expect(tools.tools.some((tool) => tool.name === "schema_info")).toBe(true);
-    expect(tools.tools.some((tool) => tool.name === "publish_records")).toBe(true);
-    expect(tools.tools.some((tool) => tool.name === "unpublish_records")).toBe(true);
+    expect(tools.tools.some((tool) => tool.name === "set_publish_status")).toBe(true);
     expect(tools.tools.some((tool) => tool.name === "get_record")).toBe(true);
     expect(tools.tools.some((tool) => tool.name === "update_record")).toBe(true);
     expect(tools.tools.some((tool) => tool.name === "create_model")).toBe(false);
