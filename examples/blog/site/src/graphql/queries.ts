@@ -1,4 +1,5 @@
 import { graphql } from "gql.tada";
+import { SeoFragment } from "./fragments";
 
 export const SITE_SETTINGS_QUERY = graphql(`
   query SiteSettings {
@@ -6,12 +7,11 @@ export const SITE_SETTINGS_QUERY = graphql(`
       siteName
       tagline
       defaultSeo {
-        title
-        description
+        ...SeoFields
       }
     }
   }
-`);
+`, [SeoFragment]);
 
 export const ALL_POSTS_QUERY = graphql(`
   query AllPosts($first: Int, $skip: Int) {
@@ -93,8 +93,7 @@ export const POST_BY_SLUG_QUERY = graphql(`
         slug
       }
       seoField {
-        title
-        description
+        ...SeoFields
       }
       _seoMetaTags {
         tag
@@ -103,7 +102,7 @@ export const POST_BY_SLUG_QUERY = graphql(`
       }
     }
   }
-`);
+`, [SeoFragment]);
 
 export const POSTS_BY_CATEGORY_QUERY = graphql(`
   query PostsByCategory($categoryId: ID!) {

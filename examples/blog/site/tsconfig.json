@@ -3,7 +3,7 @@
   "compilerOptions": {
     "plugins": [
       {
-        "name": "@0no-co/graphqlsp",
+        "name": "gql.tada/ts-plugin",
         "schema": "../schema.graphql",
         "tadaOutputLocation": "./src/graphql/graphql-env.d.ts"
       }
