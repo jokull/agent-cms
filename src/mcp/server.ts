@@ -29,6 +29,7 @@ import {
   CreateRecordInput,
   ImportAssetFromUrlInput,
   ImportSchemaInput,
+  PatchBlocksInput,
   ReindexSearchInput,
   ReorderInput,
   SearchInput as SearchContentInput,
@@ -123,13 +124,6 @@ const UpdateRecordInput = Schema.Struct({
   data: Schema.optionalWith(JsonRecord, { default: () => ({}) }),
 });
 
-const PatchBlocksInput = Schema.Struct({
-  recordId: Schema.String,
-  modelApiKey: Schema.String,
-  fieldApiKey: Schema.String,
-  value: Schema.optional(Schema.Unknown),
-  blocks: Schema.Record({ key: Schema.String, value: Schema.NullOr(Schema.Unknown) }),
-});
 
 const DeleteRecordInput = Schema.Struct({
   recordId: Schema.String,
@@ -379,18 +373,17 @@ You can target block IDs from either:
 - nested structured_text sub-fields stored inside those blocks
 
 Patch map semantics for each block ID:
-- string value (the block ID) → keep block unchanged
 - object with field overrides → merge into existing block (only specified fields updated)
 - null → delete block and auto-prune from the relevant DAST tree
 
-Block IDs not in the patch map are kept unchanged.
+Block IDs not in the patch map are kept unchanged. Omit a block ID to leave it as-is.
 
 If a nested block ID appears in multiple nested structured_text locations, the tool will fail and ask you to patch the parent block explicitly.
 
 Optionally provide a new top-level DAST \`value\`. If omitted, the existing DAST is preserved (with deleted top-level blocks auto-pruned).
 
 Example — update one block's description, delete another, keep the rest:
-{ blocks: { "block-1": "block-1", "block-2": { "description": "New text" }, "block-3": null } }`, PatchBlocksInput.fields);
+{ blocks: { "block-2": { "description": "New text" }, "block-3": null } }`, PatchBlocksInput.fields);
 const DeleteRecordTool = cmsTool("delete_record", "Delete a record", DeleteRecordInput.fields);
 const GetRecordTool = cmsTool("get_record", "Get a single record by modelApiKey + recordId. Useful after search_content when you need the full materialized record, including structured_text fields, before patch_blocks or update_record.", GetRecordInput.fields);
 const QueryRecordsTool = cmsTool("query_records", "List records for a model. Structured_text fields are materialized for inspection, including nested blocks inside parent block fields. Useful for finding record IDs before update_record, patch_blocks, publish_records, or record_versions.", QueryRecordsInput.fields);
@@ -553,7 +546,6 @@ const EditorTools = [
   ImportAssetFromUrlTool,
   ListAssetsTool,
   ReplaceAssetTool,
-  SchemaIOTool,
   SearchContentTool,
   GetSiteSettingsTool,
   UpdateSiteSettingsTool,

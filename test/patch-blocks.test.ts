@@ -133,7 +133,7 @@ describe("patch_blocks — partial block updates", () => {
     expect(blockItems).not.toContain("v2");
   });
 
-  it("keeps block unchanged with string passthrough", async () => {
+  it("rejects string passthrough with a clear error message", async () => {
     const record = await createGuideWithVenues();
 
     const patchRes = await jsonRequest(handler, "PATCH", `/api/records/${record.id}/blocks`, {
@@ -144,16 +144,10 @@ describe("patch_blocks — partial block updates", () => {
         v3: { name: "Dill Restaurant" },
       },
     });
-    expect(patchRes.status).toBe(200);
-
-    const blocks = await getBlocks(record.id);
-    expect(blocks).toHaveLength(3);
-
-    const v1 = blocks.find((b) => b.id === "v1");
-    const v3 = blocks.find((b) => b.id === "v3");
-    expect(v1?.name).toBe("Grillid");
-    expect(v3?.name).toBe("Dill Restaurant");
-    expect(v3?.description).toBe("Nordic cuisine");
+    expect(patchRes.status).toBe(400);
+    const body = await patchRes.json();
+    expect(body.error).toContain("Invalid patch value for block 'v1'");
+    expect(body.error).toContain("use an object to update fields, null to delete, or omit the key to keep unchanged");
   });
 
   it("allows combined update + delete in one call", async () => {
@@ -206,12 +200,11 @@ describe("patch_blocks — partial block updates", () => {
   it("works via MCP tool input shape", async () => {
     const record = await createGuideWithVenues();
 
-    // Same payload shape as MCP tool would use
+    // Same payload shape as MCP tool would use — omit v1 to keep unchanged
     const patchRes = await jsonRequest(handler, "PATCH", `/api/records/${record.id}/blocks`, {
       modelApiKey: "guide",
       fieldApiKey: "content",
       blocks: {
-        v1: "v1",
         v2: { name: "BBB", description: "Best hot dogs" },
         v3: null,
       },
