@@ -1288,26 +1288,10 @@ export function patchBlocksForField(body: PatchBlocksInput, actor?: RequestActor
           });
         }
       } else if (typeof patchValue === "string") {
-        // Keep unchanged — verify it exists
-        if (!Object.hasOwn(existingBlocks, blockId)) {
-          let nestedMatched = false;
-          for (const topLevelBlock of Object.values(mergedBlocks)) {
-            const result = applyPatchToNestedStructuredText(topLevelBlock, blockId, patchValue);
-            if (result.ambiguous) {
-              return yield* new ValidationError({
-                message: `Block '${blockId}' matched multiple nested structured_text locations in field '${body.fieldApiKey}'. Patch the parent block explicitly instead.`,
-                field: body.fieldApiKey,
-              });
-            }
-            nestedMatched = nestedMatched || result.applied;
-          }
-          if (!nestedMatched) {
-            return yield* new ValidationError({
-              message: `Block '${blockId}' does not exist in field '${body.fieldApiKey}'.`,
-              field: body.fieldApiKey,
-            });
-          }
-        }
+        return yield* new ValidationError({
+          message: `Invalid patch value for block '${blockId}': use an object to update fields, null to delete, or omit the key to keep unchanged.`,
+          field: body.fieldApiKey,
+        });
       } else if (typeof patchValue === "object" && !Array.isArray(patchValue)) {
         // Partial merge
         if (!Object.hasOwn(existingBlocks, blockId)) {
