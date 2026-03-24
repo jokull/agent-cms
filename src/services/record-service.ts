@@ -20,7 +20,7 @@ import { getFieldTypeDef } from "../field-types.js";
 import { isFieldType } from "../types.js";
 import { parseMediaFieldReference, parseMediaGalleryReferences } from "../media-field.js";
 import { StructuredTextWriteInput } from "../dast/schema.js";
-import { pruneBlockNodes } from "../dast/index.js";
+import { pruneBlockNodes, expandStructuredTextShorthand } from "../dast/index.js";
 import { fireHook } from "../hooks.js";
 import * as VersionService from "./version-service.js";
 import { decodeJsonIfString, encodeJson } from "../json.js";
@@ -356,7 +356,9 @@ function processCreateLikeRecordFields({
               continue;
             }
 
-            const stInput = yield* Schema.decodeUnknown(StructuredTextWriteInput)(scopeStructuredTextIds(localeValue, `${field.api_key}:${localeCode}`)).pipe(
+            const expandedLocale = expandStructuredTextShorthand(localeValue);
+
+            const stInput = yield* Schema.decodeUnknown(StructuredTextWriteInput)(scopeStructuredTextIds(expandedLocale, `${field.api_key}:${localeCode}`)).pipe(
               Effect.mapError((e) => new ValidationError({
                 message: createFieldErrorMessage(errorPrefix, `Invalid StructuredText for field '${field.api_key}' locale '${localeCode}': ${e.message}`),
                 field: field.api_key,
@@ -385,7 +387,9 @@ function processCreateLikeRecordFields({
           continue;
         }
 
-        const stInput = yield* Schema.decodeUnknown(StructuredTextWriteInput)(data[field.api_key]).pipe(
+        const expanded = expandStructuredTextShorthand(data[field.api_key]);
+
+        const stInput = yield* Schema.decodeUnknown(StructuredTextWriteInput)(expanded).pipe(
           Effect.mapError((e) => new ValidationError({
             message: createFieldErrorMessage(errorPrefix, `Invalid StructuredText for field '${field.api_key}': ${e.message}`),
             field: field.api_key,
@@ -797,7 +801,9 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
                 continue;
               }
 
-              const stInput = yield* Schema.decodeUnknown(StructuredTextWriteInput)(scopeStructuredTextIds(localeValue, `${field.api_key}:${localeCode}`)).pipe(
+              const expandedLocale = expandStructuredTextShorthand(localeValue);
+
+              const stInput = yield* Schema.decodeUnknown(StructuredTextWriteInput)(scopeStructuredTextIds(expandedLocale, `${field.api_key}:${localeCode}`)).pipe(
                 Effect.mapError((e) => new ValidationError({
                   message: `Invalid StructuredText for field '${field.api_key}' locale '${localeCode}': ${e.message}`,
                   field: field.api_key,
@@ -826,7 +832,9 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
             continue;
           }
 
-          const stInput = yield* Schema.decodeUnknown(StructuredTextWriteInput)(data[field.api_key]).pipe(
+          const expanded = expandStructuredTextShorthand(data[field.api_key]);
+
+          const stInput = yield* Schema.decodeUnknown(StructuredTextWriteInput)(expanded).pipe(
             Effect.mapError((e) => new ValidationError({
               message: `Invalid StructuredText for field '${field.api_key}': ${e.message}`,
               field: field.api_key,
