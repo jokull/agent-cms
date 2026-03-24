@@ -135,89 +135,8 @@ describe("Schema Lifecycle — Advanced Operations", () => {
     });
   });
 
-  describe("P5.4: StructuredText helper tool", () => {
-    it("builds a valid DAST document from typed nodes and referenced blocks", async () => {
-      const result = parse(await agent.callTool({
-        name: "build_structured_text",
-        arguments: {
-          blocks: [
-            { id: "hero-1", type: "hero_section", data: { headline: "Hello World" } },
-          ],
-          nodes: [
-            { type: "paragraph", text: "Welcome to our site." },
-            { type: "block", ref: "hero-1" },
-            { type: "paragraph", text: "We build great things." },
-          ],
-        },
-      }));
-
-      expect(result.value.schema).toBe("dast");
-      expect(result.value.document.type).toBe("root");
-
-      // Should interleave: paragraph, block, paragraph
-      const children = result.value.document.children;
-      expect(children).toHaveLength(3);
-      expect(children[0].type).toBe("paragraph");
-      expect(children[0].children[0].value).toBe("Welcome to our site.");
-      expect(children[1].type).toBe("block");
-      expect(children[2].type).toBe("paragraph");
-
-      const blockId = children[1].item;
-      expect(blockId).toBe("hero-1");
-      expect(result.blocks[blockId]).toBeDefined();
-      expect(result.blocks[blockId]._type).toBe("hero_section");
-      expect(result.blocks[blockId].headline).toBe("Hello World");
-    });
-
-    it("builds blocks-only content", async () => {
-      const result = parse(await agent.callTool({
-        name: "build_structured_text",
-        arguments: {
-          blocks: [
-            { id: "hero-1", type: "hero", data: { headline: "A" } },
-            { id: "cta-1", type: "cta", data: { text: "B" } },
-          ],
-          nodes: [
-            { type: "block", ref: "hero-1" },
-            { type: "block", ref: "cta-1" },
-          ],
-        },
-      }));
-
-      expect(result.value.document.children).toHaveLength(2);
-      expect(result.value.document.children[0].type).toBe("block");
-      expect(result.value.document.children[1].type).toBe("block");
-      expect(Object.keys(result.blocks)).toHaveLength(2);
-    });
-
-    it("builds prose-only content", async () => {
-      const result = parse(await agent.callTool({
-        name: "build_structured_text",
-        arguments: {
-          nodes: [
-            { type: "paragraph", text: "Hello" },
-            { type: "paragraph", text: "World" },
-          ],
-        },
-      }));
-
-      expect(result.value.document.children).toHaveLength(2);
-      expect(result.blocks).toEqual({});
-    });
-
-    it("fails when markdown builder receives unused blocks", async () => {
-      await expect(agent.callTool({
-        name: "build_structured_text",
-        arguments: {
-          markdown: "# Hello",
-          blocks: [
-            { id: "hero-1", type: "hero", data: { headline: "Unused" } },
-          ],
-        },
-      })).rejects.toThrow(/Unused blocks/);
-    });
-
-    it("round-trips helper output through create_record and query_records", async () => {
+  describe("P5.4: Inline structured_text shorthand in create_record", () => {
+    it("creates a record with typed nodes shorthand via MCP", async () => {
       const hero = parse(await agent.callTool({
         name: "create_model",
         arguments: { name: "Hero Section", apiKey: "hero_section", isBlock: true },
@@ -242,26 +161,22 @@ describe("Schema Lifecycle — Advanced Operations", () => {
         },
       }));
 
-      const structuredText = parse(await agent.callTool({
-        name: "build_structured_text",
-        arguments: {
-          blocks: [
-            { id: "hero-1", type: "hero_section", data: { headline: "Hello from MCP" } },
-          ],
-          nodes: [
-            { type: "paragraph", text: "Intro with **bold** copy." },
-            { type: "block", ref: "hero-1" },
-            { type: "paragraph", text: "Closing line." },
-          ],
-        },
-      }));
-
+      // Create record with inline { nodes, blocks } shorthand
       parse(await agent.callTool({
         name: "create_record",
         arguments: {
           modelApiKey: "page",
           data: {
-            content: structuredText,
+            content: {
+              nodes: [
+                { type: "paragraph", text: "Intro with **bold** copy." },
+                { type: "block", ref: "hero-1" },
+                { type: "paragraph", text: "Closing line." },
+              ],
+              blocks: [
+                { id: "hero-1", type: "hero_section", data: { headline: "Hello from MCP" } },
+              ],
+            },
           },
         },
       }));
@@ -289,6 +204,41 @@ describe("Schema Lifecycle — Advanced Operations", () => {
       expect(blocks[0].id).toBe("hero-1");
       expect(blocks[0].headline).toBe("Hello from MCP");
       expect(blocks[0]._root_field_api_key).toBe("content");
+    });
+
+    it("creates a record with markdown shorthand via MCP", async () => {
+      const page = parse(await agent.callTool({
+        name: "create_model",
+        arguments: { name: "Page", apiKey: "page" },
+      }));
+      parse(await agent.callTool({
+        name: "create_field",
+        arguments: {
+          modelId: page.id,
+          label: "Content",
+          apiKey: "content",
+          fieldType: "structured_text",
+        },
+      }));
+
+      // Create record with markdown string shorthand
+      parse(await agent.callTool({
+        name: "create_record",
+        arguments: {
+          modelApiKey: "page",
+          data: {
+            content: "# Hello\n\nThis is **bold** text.",
+          },
+        },
+      }));
+
+      const records = parse(await agent.callTool({ name: "query_records", arguments: { modelApiKey: "page" } }));
+      const content = typeof records[0].content === "string" ? JSON.parse(records[0].content) : records[0].content;
+
+      expect(content.value.schema).toBe("dast");
+      expect(content.value.document.children).toHaveLength(2);
+      expect(content.value.document.children[0].type).toBe("heading");
+      expect(content.value.document.children[1].type).toBe("paragraph");
     });
   });
 });

@@ -38,56 +38,11 @@ import type { ModelRow, FieldRow, LocaleRow } from "../db/row-types.js";
 import { VectorizeContext } from "../search/vectorize-context.js";
 import { HooksContext } from "../hooks.js";
 import { decodeJsonRecordStringOr, encodeJson } from "../json.js";
-import { markdownToDast } from "../dast/index.js";
+
 import type { RequestActor } from "../attribution.js";
 
 const JsonRecord = Schema.Record({ key: Schema.String, value: Schema.Unknown });
 const CommonDependencies = [SqlClient.SqlClient, VectorizeContext, HooksContext, AssetImportContext];
-
-const BlockEntry = Schema.Struct({
-  id: Schema.String,
-  type: Schema.String,
-  data: JsonRecord,
-});
-
-const BuildStructuredTextInput = Schema.Struct({
-  markdown: Schema.optional(Schema.String),
-  blocks: Schema.optional(Schema.Array(BlockEntry)),
-  nodes: Schema.optional(Schema.Array(
-    Schema.Union(
-      Schema.Struct({
-        type: Schema.Literal("paragraph"),
-        text: Schema.String,
-      }),
-      Schema.Struct({
-        type: Schema.Literal("heading"),
-        level: Schema.Number,
-        text: Schema.String,
-      }),
-      Schema.Struct({
-        type: Schema.Literal("code"),
-        code: Schema.String,
-        language: Schema.optional(Schema.String),
-      }),
-      Schema.Struct({
-        type: Schema.Literal("blockquote"),
-        text: Schema.String,
-      }),
-      Schema.Struct({
-        type: Schema.Literal("list"),
-        style: Schema.optional(Schema.Literal("bulleted", "numbered")),
-        items: Schema.Array(Schema.String),
-      }),
-      Schema.Struct({
-        type: Schema.Literal("thematicBreak"),
-      }),
-      Schema.Struct({
-        type: Schema.Literal("block"),
-        ref: Schema.String,
-      }),
-    )
-  )),
-});
 
 const UpdateModelInput = Schema.Struct({
   modelId: Schema.String,
@@ -234,56 +189,12 @@ function cmsTool<Name extends string>(
   const isReadonly = name.startsWith("query_")
     || name.startsWith("get_")
     || name === "schema_info"
-    || name === "build_structured_text"
     || name === "search_content";
   tool = tool.annotate(AiTool.Readonly, isReadonly);
   tool = tool.annotate(AiTool.Idempotent, isReadonly || name.startsWith("update_") || name.startsWith("replace_"));
   tool = tool.annotate(AiTool.Destructive, name.startsWith("delete_") || name === "remove_block");
   tool = tool.annotate(AiTool.OpenWorld, name === "search_content");
   return tool;
-}
-
-/**
- * Parse a text string with inline markdown into DAST inline (span) nodes.
- * Returns the children of the first paragraph, or a single span fallback.
- */
-function parseInlineSpans(text: string): readonly unknown[] {
-  const doc = markdownToDast(text);
-  const first = doc.document.children.at(0);
-  if (first != null && "children" in first) {
-    return first.children as readonly unknown[];
-  }
-  return [{ type: "span", value: text }];
-}
-
-function collectBlockRefs(node: unknown, refs: Set<string> = new Set()): Set<string> {
-  if (node == null || typeof node !== "object") return refs;
-  if (Array.isArray(node)) {
-    for (const entry of node) collectBlockRefs(entry, refs);
-    return refs;
-  }
-  if ("type" in node && node.type === "block" && "item" in node && typeof node.item === "string") {
-    refs.add(node.item);
-  }
-  for (const value of Object.values(node)) {
-    collectBlockRefs(value, refs);
-  }
-  return refs;
-}
-
-function assertKnownBlockRefs(blockMap: Record<string, unknown>, refs: Iterable<string>) {
-  for (const ref of refs) {
-    if (!(ref in blockMap)) {
-      throw new Error(`Unknown block ref '${ref}'. Define it in blocks before referencing it.`);
-    }
-  }
-}
-
-function assertNoUnusedBlocks(blockMap: Record<string, unknown>, refs: ReadonlySet<string>) {
-  const unused = Object.keys(blockMap).filter((id) => !refs.has(id));
-  if (unused.length > 0) {
-    throw new Error(`Unused blocks: ${unused.join(", ")}. Every block must be referenced in the document.`);
-  }
 }
 
 function toStructuredContent(value: unknown) {
@@ -367,7 +278,7 @@ Field value formats:
 - link: record ID string
 - links: array of record ID strings
 - seo: {"title":"...","description":"...","image":"<asset_id>","twitterCard":"summary_large_image"}
-- structured_text: {"value":{"schema":"dast","document":{...}},"blocks":{"<id>":{"_type":"block_api_key",...}}}
+- structured_text: markdown string, typed nodes array, {markdown:"...",blocks:[...]}, {nodes:[...],blocks:[...]}, or full DAST envelope {"value":{"schema":"dast","document":{...}},"blocks":{...}}
 - color: {"red":255,"green":0,"blue":0,"alpha":255}
 - lat_lon: {"latitude":64.13,"longitude":-21.89}`, CreateRecordInput.fields);
 const UpdateRecordTool = cmsTool("update_record", "Update record fields. For singletons, recordId can be omitted — the single record is found automatically.", UpdateRecordInput.fields);
@@ -410,38 +321,6 @@ action: "list" | "get" | "restore"
 const ReorderRecordsTool = cmsTool("reorder_records", "Reorder records in a sortable/tree model by providing ordered record IDs", ReorderInput.fields);
 const RemoveBlockTool = cmsTool("remove_block", "Remove a block type entirely (cleans DAST trees, deletes blocks, drops table), or remove it from a specific field's whitelist (provide fieldId).", RemoveBlockInput.fields);
 const RemoveLocaleTool = cmsTool("remove_locale", "Remove a locale and strip it from all localized field values", LocaleIdInput.fields);
-const BuildStructuredTextTool = cmsTool("build_structured_text", `Build a StructuredText value from typed nodes or markdown, plus optional block definitions.
-
-Two modes:
-1. Typed nodes (provide "nodes"): precise control over document structure
-2. Markdown (provide "markdown"): natural formatting for prose-heavy content
-
-Workflow: prepare blocks first, then reference them in nodes or markdown.
-
-blocks: [{id: "v1", type: "venue", data: {name: "Chickpea", image: "asset_id"}}]
-
-Typed nodes (text structure referencing blocks by ID):
-- paragraph: {type:"paragraph", text:"Inline **markdown** and [links](url) supported"}
-- heading: {type:"heading", level:2, text:"Section Title"}
-- code: {type:"code", code:"const x = 1", language:"typescript"}
-- blockquote: {type:"blockquote", text:"Quote text"}
-- list: {type:"list", style:"bulleted"|"numbered", items:["First","Second"]}
-- thematicBreak: {type:"thematicBreak"}
-- block: {type:"block", ref:"v1"} — places a block defined in the blocks array
-
-Markdown mode: write standard markdown. Place blocks with sentinels: <!-- cms:block:BLOCK_ID -->
-
-Inline markdown in text fields: **bold**, *italic*, \`code\`, [links](url), ~~strikethrough~~.
-
-Encoding note: MCP tool arguments are XML-encoded by some clients. If any literal string in your structured text includes angle brackets (for example TypeScript generics like <T>, JSX, or HTML snippets), escape them as Unicode in the JSON string: \u003C and \u003E.
-
-For nested blocks (e.g. sections containing venues), compose bottom-up:
-1. Build inner structured text (venues) → get {value, blocks} result
-2. Use that result as a field value in a parent block's data
-3. Build outer structured text (sections) referencing the parent blocks
-
-IMPORTANT: Call schema_info first to verify which block types are allowed on the target structured_text field (check the structured_text_blocks validator).`, BuildStructuredTextInput.fields);
-
 const UploadAssetTool = cmsTool("upload_asset", `Register an asset after uploading the original file to R2 out of band.
 
 Upload flow:
@@ -516,7 +395,6 @@ const AdminTools = [
   ReorderRecordsTool,
   RemoveBlockTool,
   RemoveLocaleTool,
-  BuildStructuredTextTool,
   UploadAssetTool,
   ImportAssetFromUrlTool,
   ListAssetsTool,
@@ -543,7 +421,6 @@ const EditorTools = [
   ScheduleTool,
   RecordVersionsTool,
   ReorderRecordsTool,
-  BuildStructuredTextTool,
   UploadAssetTool,
   ImportAssetFromUrlTool,
   ListAssetsTool,
@@ -586,7 +463,7 @@ Field value formats (composite types):
   - link: record ID string
   - links: array of record ID strings
   - seo: {"title":"...","description":"...","image":"<asset_id>","twitterCard":"summary_large_image"}
-  - structured_text: {"value":{"schema":"dast","document":{...}},"blocks":{"<id>":{"_type":"block_api_key",...}}}
+  - structured_text: markdown string, typed nodes array, {markdown:"...",blocks:[...]}, {nodes:[...],blocks:[...]}, or full DAST envelope {"value":{"schema":"dast","document":{...}},"blocks":{...}}
   - color: {"red":255,"green":0,"blue":0,"alpha":255}
   - lat_lon: {"latitude":64.13,"longitude":-21.89}
 
@@ -621,7 +498,7 @@ Asset upload flow:
 Tool argument encoding:
   - Some MCP clients XML-encode tool arguments before they reach the server.
   - If a literal string value contains angle brackets (for example TypeScript generics like <T>, JSX, or inline HTML), escape them inside the JSON string as \u003C and \u003E.
-  - This matters most for build_structured_text code nodes and any create_record/update_record payload carrying code snippets.
+  - This matters most for create_record/update_record payloads carrying code snippets in structured_text fields.
 
 Raw HTTP / JSON-RPC access:
   - Endpoint: POST <mount>/mcp for admin, POST <mount>/mcp/editor for editor
@@ -932,78 +809,6 @@ export function createMcpLayer(
       return SchemaLifecycle.removeBlockType(blockApiKey);
     }),
     remove_locale: withDecoded(LocaleIdInput, ({ localeId }) => SchemaLifecycle.removeLocale(localeId)),
-    build_structured_text: withDecoded(BuildStructuredTextInput, ({ markdown, blocks, nodes }) =>
-      Effect.sync(() => {
-        const blockMap: Record<string, unknown> = {};
-        for (const b of blocks ?? []) {
-          blockMap[b.id] = { _type: b.type, ...b.data };
-        }
-
-        if (markdown != null) {
-          // Markdown mode
-          const doc = markdownToDast(markdown);
-          const refs = collectBlockRefs(doc.document);
-          assertKnownBlockRefs(blockMap, refs);
-          assertNoUnusedBlocks(blockMap, refs);
-          return { value: doc, blocks: blockMap };
-        }
-
-        // Typed nodes mode
-        const children: unknown[] = [];
-        for (const node of nodes ?? []) {
-          switch (node.type) {
-            case "paragraph":
-              children.push({
-                type: "paragraph",
-                children: parseInlineSpans(node.text),
-              });
-              break;
-            case "heading":
-              children.push({
-                type: "heading",
-                level: node.level,
-                children: parseInlineSpans(node.text),
-              });
-              break;
-            case "code":
-              children.push({
-                type: "code",
-                code: node.code,
-                ...(node.language ? { language: node.language } : {}),
-              });
-              break;
-            case "blockquote":
-              children.push({
-                type: "blockquote",
-                children: [{ type: "paragraph", children: parseInlineSpans(node.text) }],
-              });
-              break;
-            case "list":
-              children.push({
-                type: "list",
-                style: node.style ?? "bulleted",
-                children: node.items.map((item) => ({
-                  type: "listItem",
-                  children: [{ type: "paragraph", children: parseInlineSpans(item) }],
-                })),
-              });
-              break;
-            case "thematicBreak":
-              children.push({ type: "thematicBreak" });
-              break;
-            case "block":
-              children.push({ type: "block", item: node.ref });
-              break;
-          }
-        }
-
-        assertKnownBlockRefs(blockMap, collectBlockRefs(children));
-
-        return {
-          value: { schema: "dast", document: { type: "root", children } },
-          blocks: blockMap,
-        };
-      })),
     upload_asset: withDecoded(AssetInput, (input) =>
       AssetService.createAsset(input, options?.actor).pipe(Effect.map(withAssetUrl))),
     import_asset_from_url: withDecoded(ImportAssetFromUrlInput, (input) =>

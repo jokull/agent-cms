@@ -204,7 +204,7 @@ Create 3 categories:
 
 ### 2.5 Posts
 
-Create 3 blog posts. For each, use `build_structured_text` to construct the content field.
+Create 3 blog posts. For each, pass structured_text shorthand (markdown string, typed nodes, or `{nodes, blocks}` wrapper) directly to `create_record`.
 
 **Post 1: "The Agent-First CMS"**
 - category: Technology

@@ -54,3 +54,5 @@ export type { ValidationError } from "./validate.js";
 
 export { dastToMarkdown, markdownToDast, dastToEditableMarkdown, editableMarkdownToDast } from "./markdown.js";
 export type { EditableMarkdown, PreservationMap, BlockNodeMeta, LinkMeta } from "./markdown.js";
+
+export { expandStructuredTextShorthand, parseInlineSpans } from "./expand-shorthand.js";
