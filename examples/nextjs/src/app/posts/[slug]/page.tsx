@@ -1,59 +1,15 @@
 import { draftMode, cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { cmsQuery } from "../../../lib/cms";
+import { POST_PAGE_QUERY } from "../../../graphql/queries";
 import { PreviewBar } from "../../../components/preview-bar";
 
 /**
  * Single post page with draft preview support.
  *
  * Uses a multi-root GraphQL query to fetch the post and site settings
- * in a single request.
+ * in a single request. Types are inferred from the schema via gql.tada.
  */
-
-const POST_PAGE_QUERY = `
-  query PostPage($slug: String!) {
-    post(filter: { slug: { eq: $slug } }) {
-      id
-      title
-      slug
-      excerpt
-      publishedDate
-      _status
-      author {
-        name
-      }
-      category {
-        name
-        slug
-      }
-      content {
-        value
-      }
-    }
-    _site {
-      globalSeo {
-        siteName
-      }
-    }
-  }
-`;
-
-interface PostPageData {
-  post: {
-    id: string;
-    title: string;
-    slug: string;
-    excerpt: string | null;
-    publishedDate: string | null;
-    _status: string;
-    author: { name: string } | null;
-    category: { name: string; slug: string } | null;
-    content: { value: unknown } | null;
-  } | null;
-  _site: {
-    globalSeo: { siteName: string | null } | null;
-  };
-}
 
 export default async function PostPage({
   params,
@@ -66,7 +22,7 @@ export default async function PostPage({
     ? (await cookies()).get("__agentcms_preview")?.value
     : undefined;
 
-  const data = await cmsQuery<PostPageData>(
+  const data = await cmsQuery(
     POST_PAGE_QUERY,
     { slug },
     { previewToken },
