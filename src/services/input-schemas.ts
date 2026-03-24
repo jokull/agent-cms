@@ -284,6 +284,7 @@ export const PatchBlocksInput = Schema.Struct({
   modelApiKey: Schema.NonEmptyString,
   fieldApiKey: Schema.NonEmptyString,
   value: Schema.optional(Schema.Unknown),
+  order: Schema.optional(Schema.Array(Schema.NonEmptyString)),
   blocks: Schema.Record({ key: Schema.String, value: Schema.NullOr(Schema.Unknown) }),
   append: Schema.optional(Schema.Array(Schema.Record({ key: Schema.String, value: Schema.Unknown }))),
 });

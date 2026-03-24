@@ -348,11 +348,16 @@ Optionally provide a new top-level DAST \`value\`. If omitted, the existing DAST
 
 Use \`append\` to insert new blocks without reconstructing the DAST. Each entry is a record with \`_type\` and field values. New block IDs are auto-generated, DAST block nodes are appended to the end, and the response includes \`_appendedIds\`. Cannot be combined with \`value\`.
 
+For blocks_only structured_text fields, you can pass an \`order\` array of block IDs to reorder blocks without constructing a full DAST document. The order array replaces the DAST children list. Cannot be combined with \`value\`. All block IDs in \`order\` must exist in the merged blocks map, and all merged blocks must appear in \`order\`.
+
 Example — update one block's description, delete another, keep the rest:
 { blocks: { "block-2": { "description": "New text" }, "block-3": null } }
 
 Example — append a new block while patching an existing one:
-{ blocks: { "block-2": { "description": "Updated" } }, append: [{ "_type": "venue", "name": "New Place" }] }`, PatchBlocksInput.fields);
+{ blocks: { "block-2": { "description": "Updated" } }, append: [{ "_type": "venue", "name": "New Place" }] }
+
+Example — reorder blocks on a blocks_only field:
+{ order: ["block-3", "block-1", "block-2"], blocks: {} }`, PatchBlocksInput.fields);
 const DeleteRecordTool = cmsTool("delete_record", "Delete a record", DeleteRecordInput.fields);
 const GetRecordTool = cmsTool("get_record", "Get a single record by modelApiKey + recordId. Useful after search_content when you need the full materialized record, including structured_text fields, before patch_blocks or update_record.", GetRecordInput.fields);
 const QueryRecordsTool = cmsTool("query_records", "List records for a model. Structured_text fields are materialized for inspection, including nested blocks inside parent block fields. Useful for finding record IDs before update_record, patch_blocks, set_publish_status, or record_versions.", QueryRecordsInput.fields);
