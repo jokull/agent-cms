@@ -154,5 +154,13 @@ function createCMSHandlerUncached(bindings: DecodedCmsBindings, hooks?: CmsHooks
 
     /** Run due scheduled publish/unpublish transitions. Safe to call from a cron trigger. */
     runScheduledTransitions: (now?: Date) => webHandler.runScheduledTransitions(now),
+
+    /**
+     * Resolve canonical paths for all published records of a model.
+     * Uses the model's canonicalPathTemplate with dot-notation traversal
+     * for nested link fields (e.g., "/blog/{category.slug}/{slug}").
+     * For in-process sitemap generation when CMS and site share a Worker.
+     */
+    resolveCanonicalPaths: (modelApiKey: string) => webHandler.resolveCanonicalPaths(modelApiKey),
   };
 }

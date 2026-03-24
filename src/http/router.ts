@@ -36,6 +36,7 @@ import * as SchemaIO from "../services/schema-io.js";
 import * as VersionService from "../services/version-service.js";
 import * as TokenService from "../services/token-service.js";
 import * as PreviewService from "../services/preview-service.js";
+import * as PathService from "../services/path-service.js";
 import * as SearchService from "../search/search-service.js";
 import type { AiBinding, VectorizeBinding } from "../search/vectorize.js";
 import { VectorizeContext } from "../search/vectorize-context.js";
@@ -557,6 +558,17 @@ const previewTokensRouter = HttpRouter.empty.pipe(
   ),
 );
 
+// --- Canonical paths ---
+const pathsRouter = HttpRouter.empty.pipe(
+  HttpRouter.get(
+    "/:modelApiKey",
+    Effect.gen(function* () {
+      const params = yield* HttpRouter.params;
+      return yield* handle(PathService.resolveCanonicalPaths(param(params, "modelApiKey")));
+    })
+  ),
+);
+
 // --- Setup / bootstrap ---
 const setupRouter = HttpRouter.empty.pipe(
   HttpRouter.post(
@@ -583,6 +595,7 @@ export const appRouter = HttpRouter.empty.pipe(
   HttpRouter.concat(tokensRouter.pipe(HttpRouter.prefixAll("/api/tokens"))),
   HttpRouter.concat(previewTokensRouter.pipe(HttpRouter.prefixAll("/api/preview-tokens"))),
   HttpRouter.concat(setupRouter.pipe(HttpRouter.prefixAll("/api"))),
+  HttpRouter.concat(pathsRouter.pipe(HttpRouter.prefixAll("/paths"))),
 );
 
 /**
@@ -1138,5 +1151,15 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
     },
 
     runScheduledTransitions,
+
+    /**
+     * Resolve canonical paths for all published records of a model.
+     * For in-process sitemap generation when CMS and site share a Worker.
+     */
+    resolveCanonicalPaths(modelApiKey: string): Promise<Array<{ id: string; path: string; lastmod: string }>> {
+      return Effect.runPromise(
+        PathService.resolveCanonicalPaths(modelApiKey).pipe(Effect.provide(fullLayer))
+      );
+    },
   };
 }

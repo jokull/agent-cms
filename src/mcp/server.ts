@@ -609,7 +609,14 @@ Slug fields:
 
 Pluralization:
   category -> allCategories, blog_post -> allBlogPosts, person -> allPeople
-  Powered by standard English pluralization rules.`),
+  Powered by standard English pluralization rules.
+
+Translation:
+  For translating structured_text fields, work with the markdown representation.
+  Translate the full markdown document — not field by field — to preserve context, tone, and flow.
+  Leave block sentinels (<!-- cms:block:ID -->), record links ([text](itemLink:ID)), and inline refs untouched.
+  The CMS reconstructs DAST from the translated markdown when you update the record.
+  This gives full article context for fluid translations vs. isolated sentence-level machine translation.`),
   });
 }
 
