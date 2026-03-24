@@ -695,7 +695,11 @@ export function getRecord(modelApiKey: string, id: string) {
     const record = yield* selectById(`content_${model.api_key}`, id);
     if (!record) return yield* new NotFoundError({ entity: "Record", id });
     const fields = yield* getModelFields(model.id);
-    return normalizeBooleanFields(record, fields);
+    return yield* materializeRecordStructuredTextFields({
+      modelApiKey: model.api_key,
+      record: normalizeBooleanFields(record, fields),
+      fields,
+    });
   });
 }
 

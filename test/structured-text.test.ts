@@ -81,8 +81,9 @@ describe("StructuredText write orchestration", () => {
     const getRes = await handler(new Request(`http://localhost/api/records/${record.id}?modelApiKey=page`));
     const fromDb = await getRes.json();
     expect(fromDb.content).toBeDefined();
-    expect(fromDb.content.schema).toBe("dast");
-    expect(fromDb.content.document.children).toHaveLength(2);
+    expect(fromDb.content.value.schema).toBe("dast");
+    expect(fromDb.content.value.document.children).toHaveLength(2);
+    expect(fromDb.content.blocks[blockId].headline).toBe("Build amazing things");
 
     // Verify block was written to the block table
     const blocks = await Effect.runPromise(
