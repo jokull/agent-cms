@@ -512,6 +512,16 @@ const EditorTools = [
 const CmsToolkit = Toolkit.make(...AdminTools);
 const EditorToolkit = Toolkit.make(...EditorTools);
 
+/** Tool metadata for Code Mode — extracted without MCP protocol overhead */
+export function getToolMeta(mode: "admin" | "editor" = "admin") {
+  const toolkit = mode === "editor" ? EditorToolkit : CmsToolkit;
+  return Object.values(toolkit.tools).map((tool: AiTool.Any) => ({
+    name: tool.name,
+    description: tool.description ?? "",
+    inputSchema: toMcpInputSchema(tool) as Record<string, unknown>,
+  }));
+}
+
 function createGuideResource() {
   return McpServer.resource({
     uri: "agent-cms://guide",

@@ -582,8 +582,15 @@ const healthRouter = HttpRouter.empty.pipe(
   HttpRouter.get("/health", HttpServerResponse.json({ status: "ok" }))
 );
 
+// --- OpenAPI spec ---
+import { openApiSpec } from "./api/index.js";
+const openApiRouter = HttpRouter.empty.pipe(
+  HttpRouter.get("/openapi.json", HttpServerResponse.json(openApiSpec))
+);
+
 // --- Combine all routes ---
 export const appRouter = HttpRouter.empty.pipe(
+  HttpRouter.concat(openApiRouter),
   HttpRouter.concat(healthRouter),
   HttpRouter.concat(modelsRouter.pipe(HttpRouter.prefixAll("/api/models"))),
   HttpRouter.concat(fieldsRouter.pipe(HttpRouter.prefixAll("/api"))),
@@ -625,6 +632,8 @@ export interface WebHandlerOptions {
   };
   /** Public URL of the frontend site — used for assembling preview URLs */
   siteUrl?: string;
+  /** Worker Loader binding for Code Mode MCP (optional — enables /mcp/codemode) */
+  loader?: unknown;
 }
 
 export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, options?: WebHandlerOptions) {
@@ -686,6 +695,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
   let mcpHandler: ((req: Request) => Promise<Response>) | null = null;
   let graphqlModulePromise: Promise<typeof import("../graphql/handler.js")> | null = null;
   let mcpEditorHandler: ((req: Request) => Promise<Response>) | null = null;
+  let codeModeHandler: ((req: Request, env: unknown, ctx: ExecutionContext) => Promise<Response>) | null = null;
 
   function invalidateGraphqlSchemaCache() {
     if (graphqlInstance) graphqlInstance.invalidateSchema();
@@ -938,6 +948,43 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
           }));
         }
       }
+      // /mcp/codemode — admin only, requires worker_loaders binding
+      else if (url.pathname === "/mcp/codemode") {
+        if (!options?.loader) {
+          return finish(new Response(JSON.stringify({
+            error: "Code Mode not available. Configure worker_loaders binding.",
+          }), {
+            status: 501,
+            headers: { "Content-Type": "application/json" },
+          }));
+        }
+        const denied = await checkWriteAuth(instrumentedRequest, true);
+        if (denied) {
+          const mapped = errorToResponse(denied);
+          return finish(new Response(JSON.stringify(mapped.body), {
+            status: mapped.status,
+            headers: { "Content-Type": "application/json" },
+          }));
+        }
+      }
+      else if (url.pathname === "/mcp/editor/codemode") {
+        if (!options?.loader) {
+          return finish(new Response(JSON.stringify({
+            error: "Code Mode not available. Configure worker_loaders binding.",
+          }), {
+            status: 501,
+            headers: { "Content-Type": "application/json" },
+          }));
+        }
+        const denied = await checkWriteAuth(instrumentedRequest, false);
+        if (denied) {
+          const mapped = errorToResponse(denied);
+          return finish(new Response(JSON.stringify(mapped.body), {
+            status: mapped.status,
+            headers: { "Content-Type": "application/json" },
+          }));
+        }
+      }
       else if (url.pathname === "/mcp/editor") {
         const denied = await checkWriteAuth(instrumentedRequest, false);
         if (denied) {
@@ -994,6 +1041,53 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
               actor,
             });
         return finish(await handler(instrumentedRequest));
+      }
+
+      // Route /mcp/codemode to Code Mode MCP
+      // Each request gets a fresh McpServer — the SDK requires it for stateless handlers.
+      if (url.pathname === "/mcp/codemode" && options?.loader) {
+        const { createMcpHttpHandler } = await import("../mcp/http-transport.js");
+        const adminMcpHandler = mcpHandler ??= createMcpHttpHandler(fullLayer, {
+          mode: "admin",
+          path: "/mcp",
+          r2Bucket: options.r2Bucket,
+          assetBaseUrl: options.assetBaseUrl,
+          siteUrl: options.siteUrl,
+          actor: { type: "admin", label: "admin" },
+        });
+        const { createCodeModeMcpServer } = await import("../mcp/codemode-handler.js");
+        const { createMcpHandler } = await import("agents/mcp");
+        const codeModeServer = await createCodeModeMcpServer({
+          loader: options.loader,
+          mcpHandler: adminMcpHandler,
+        });
+        const handler = createMcpHandler(codeModeServer, { route: "/mcp/codemode" });
+        const stubCtx = { waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext;
+        return finish(await handler(instrumentedRequest, {}, stubCtx));
+      }
+
+      // Route /mcp/editor/codemode to Code Mode MCP (editor subset)
+      if (url.pathname === "/mcp/editor/codemode" && options?.loader) {
+        const { createMcpHttpHandler } = await import("../mcp/http-transport.js");
+        const editorMcpHandler = mcpEditorHandler ??= createMcpHttpHandler(fullLayer, {
+          mode: "editor",
+          path: "/mcp/editor",
+          r2Bucket: options.r2Bucket,
+          assetBaseUrl: options.assetBaseUrl,
+          siteUrl: options.siteUrl,
+          actor: { type: "editor", label: "editor" },
+        });
+        const { createCodeModeMcpServer } = await import("../mcp/codemode-handler.js");
+        const { createMcpHandler } = await import("agents/mcp");
+        const codeModeServer = await createCodeModeMcpServer({
+          loader: options.loader,
+          mcpHandler: editorMcpHandler,
+          mode: "editor",
+          mcpPath: "/mcp/editor",
+        });
+        const handler = createMcpHandler(codeModeServer, { route: "/mcp/editor/codemode" });
+        const stubCtx = { waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext;
+        return finish(await handler(instrumentedRequest, {}, stubCtx));
       }
 
       if (url.pathname === "/mcp/editor") {
