@@ -358,6 +358,28 @@ export function createImportProgram({
     return items;
   }
 
+  async function loadExportItemById(itemId) {
+    const cached = sourceItemsById.get(itemId);
+    if (cached) return cached;
+
+    const location = sourceRecordIndex.get(itemId);
+    if (location?.chunkPath) {
+      await readSourceChunk(location.chunkPath);
+      return sourceItemsById.get(itemId) ?? null;
+    }
+
+    return null;
+  }
+
+  async function loadExportItemsByIds(ids) {
+    const items = [];
+    for (const id of ids) {
+      const item = await loadExportItemById(id);
+      if (item) items.push(item);
+    }
+    return items;
+  }
+
   // =========================================================================
   // Record bookkeeping
   // =========================================================================
@@ -641,16 +663,20 @@ export function createImportProgram({
   async function transformStructuredTextRaw(dast, scopeId) {
     if (!dast) return null;
     const inlineBlocks = collectInlineBlockItems(dast, []);
-    if (fromExport && inlineBlocks.length === 0 && collectBlockRefs(dast).size > 0) {
+    const blockRefIds = [...collectBlockRefs(dast)];
+    const rawBlocks = inlineBlocks.length > 0
+      ? inlineBlocks
+      : fromExport
+        ? await loadExportItemsByIds(blockRefIds)
+        : await datoClient.getItems(blockRefIds);
+
+    if (fromExport && inlineBlocks.length === 0 && blockRefIds.length > 0 && rawBlocks.length === 0) {
       noteFinding({
         type: "skipped_block",
-        detail: `Structured text at '${scopeId}' contained block IDs instead of inline nested blocks in export mode.`,
+        detail: `Structured text at '${scopeId}' referenced ${blockRefIds.length} block ID(s) that were missing from the export snapshot.`,
       });
       return { value: rewriteBlockRefs(deepClone(dast), new Map(), scopeId), blocks: {} };
     }
-    const rawBlocks = inlineBlocks.length > 0
-      ? inlineBlocks
-      : await datoClient.getItems([...collectBlockRefs(dast)]);
 
     const blocks = {};
     const idMap = new Map();
@@ -739,16 +765,20 @@ export function createImportProgram({
   async function transformRichTextRaw(blockIds, scopeId) {
     if (!Array.isArray(blockIds) || blockIds.length === 0) return [];
     const inlineBlocks = blockIds.filter((entry) => isInlineItem(entry));
-    if (fromExport && inlineBlocks.length === 0 && blockIds.some((entry) => typeof entry === "string")) {
+    const blockRefIds = blockIds.filter((id) => typeof id === "string");
+    const rawBlocks = inlineBlocks.length > 0
+      ? inlineBlocks
+      : fromExport
+        ? await loadExportItemsByIds(blockRefIds)
+        : await datoClient.getItems(blockRefIds);
+
+    if (fromExport && inlineBlocks.length === 0 && blockRefIds.length > 0 && rawBlocks.length === 0) {
       noteFinding({
         type: "skipped_block",
-        detail: `Rich text at '${scopeId}' contained block IDs instead of inline nested blocks in export mode.`,
+        detail: `Rich text at '${scopeId}' referenced ${blockRefIds.length} block ID(s) that were missing from the export snapshot.`,
       });
       return [];
     }
-    const rawBlocks = inlineBlocks.length > 0
-      ? inlineBlocks
-      : await datoClient.getItems(blockIds.filter((id) => typeof id === "string"));
     const result = [];
 
     for (const block of rawBlocks) {

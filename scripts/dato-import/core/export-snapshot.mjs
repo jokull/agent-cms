@@ -58,10 +58,6 @@ export async function exportDatoEnvironment({
   const schema = await generateSchema(dato);
   const { itemTypes, itemTypeIdToApiKey, fieldMap } = await fetchDatoSchemaMetadata(dato);
   const serializedFieldMap = Object.fromEntries(fieldMap);
-  const modularBlockApiKeys = new Set(
-    itemTypes.filter((itemType) => itemType.modularBlock).map((itemType) => itemType.apiKey),
-  );
-
   const itemCountProbe = await dato.cmaRequest("/items", {
     nested: true,
     version: "current",
@@ -101,7 +97,7 @@ export async function exportDatoEnvironment({
       const modelApiKey = item.relationships?.item_type?.data?.id
         ? (itemTypeIdToApiKey.get(item.relationships.item_type.data.id) ?? null)
         : null;
-      if (!modelApiKey || modularBlockApiKeys.has(modelApiKey)) {
+      if (!modelApiKey) {
         continue;
       }
       const existing = itemsByModel.get(modelApiKey) ?? [];
@@ -123,8 +119,9 @@ export async function exportDatoEnvironment({
   const recordIndex = {};
   let exportedRecordCount = 0;
 
-  for (const modelEntry of schema.models.filter((entry) => !entry.isBlock)) {
-    const modelApiKey = modelEntry.apiKey;
+  const manifestModelOrder = Array.from(itemsByModel.keys()).sort((left, right) => left.localeCompare(right));
+
+  for (const modelApiKey of manifestModelOrder) {
     const items = itemsByModel.get(modelApiKey) ?? [];
     if (items.length === 0) continue;
 
