@@ -1,5 +1,4 @@
 import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 
 import * as Command from "@effect/cli/Command";
 import * as Options from "@effect/cli/Options";
@@ -10,7 +9,7 @@ import { runInspect } from "./commands/inspect.mjs";
 import { readReport } from "./commands/report.mjs";
 import { readStatus } from "./commands/status.mjs";
 
-const defaultOutDir = resolve(process.cwd(), "scripts/dato-import/out/trip");
+const defaultOutDir = resolve(process.cwd(), "scripts/dato-import/out");
 const tokenOption = Options.text("dato-token").pipe(
   Options.withDescription("Dato read token. Falls back to DATOCMS_API_TOKEN."),
   Options.withDefault(process.env.DATOCMS_API_TOKEN ?? ""),
@@ -19,9 +18,9 @@ const cmsUrlOption = Options.text("cms-url").pipe(
   Options.withDescription("agent-cms base URL."),
   Options.withDefault(process.env.CMS_URL ?? "http://127.0.0.1:8791"),
 );
-const adapterOption = Options.choice("adapter", ["trip"]).pipe(
-  Options.withDescription("Import adapter. 'trip' is the currently proven large fixture."),
-  Options.withDefault("trip"),
+const cmsWriteKeyOption = Options.text("cms-write-key").pipe(
+  Options.withDescription("agent-cms write key. Falls back to CMS_WRITE_KEY."),
+  Options.withDefault(process.env.CMS_WRITE_KEY ?? ""),
 );
 const modelOption = Options.text("model").pipe(Options.withDescription("Root content model to import."));
 const limitOption = Options.integer("limit").pipe(
@@ -55,30 +54,60 @@ const inspectCommand = Command.make("inspect", { datoToken: tokenOption }).pipe(
     })),
 );
 
-const bootstrapCommand = Command.make("bootstrap", {
-  adapter: adapterOption,
-  cmsUrl: cmsUrlOption,
+const codegenCommand = Command.make("codegen", {
   datoToken: tokenOption,
-  locale: localeOption,
+  outDir: outDirOption,
 }).pipe(
-  Command.withDescription("Bootstrap an agent-cms schema for a Dato import adapter."),
-  Command.withHandler(({ adapter, cmsUrl, datoToken, locale }) => {
-    if (!datoToken) {
-      return Effect.fail(new Error("Missing Dato token. Pass --dato-token or set DATOCMS_API_TOKEN."));
-    }
-    return Effect.tryPromise(() =>
-      importWithEnv(
-        resolve(process.cwd(), `scripts/dato-import/adapters/${adapter}/bootstrap.mjs`),
-      ),
-    ).pipe(
-      Effect.flatMap(({ createBootstrapProgram }) => createBootstrapProgram({ cmsUrl, datoToken, locale })),
-    );
-  }),
+  Command.withDescription("Auto-generate an agent-cms schema from a DatoCMS project via CMA."),
+  Command.withHandler(({ datoToken, outDir }) =>
+    Effect.tryPromise(async () => {
+      if (!datoToken) throw new Error("Missing Dato token. Pass --dato-token or set DATOCMS_API_TOKEN.");
+      const { createDatoClient } = await import("./core/datocms.mjs");
+      const { generateSchema } = await import("./core/schema-codegen.mjs");
+      const { ensureOutDir, writeJson } = await import("./core/runtime.mjs");
+      const dato = createDatoClient({ token: datoToken });
+      const schema = await generateSchema(dato);
+      await ensureOutDir(outDir);
+      const outPath = await writeJson(outDir, "generated-schema.json", schema);
+      console.log(`Generated schema: ${schema.models.length} models, ${schema.locales.length} locales`);
+      console.log(`  Models: ${schema.models.filter((m) => !m.isBlock).map((m) => m.apiKey).join(", ")}`);
+      console.log(`  Blocks: ${schema.models.filter((m) => m.isBlock).map((m) => m.apiKey).join(", ")}`);
+      console.log(`Saved ${outPath}`);
+    })),
+);
+
+const bootstrapCommand = Command.make("bootstrap", {
+  cmsUrl: cmsUrlOption,
+  cmsWriteKey: cmsWriteKeyOption,
+  datoToken: tokenOption,
+}).pipe(
+  Command.withDescription("Auto-generate schema from Dato and import it into agent-cms via schema_io."),
+  Command.withHandler(({ cmsUrl, cmsWriteKey, datoToken }) =>
+    Effect.tryPromise(async () => {
+      if (!datoToken) throw new Error("Missing Dato token. Pass --dato-token or set DATOCMS_API_TOKEN.");
+      const { createDatoClient } = await import("./core/datocms.mjs");
+      const { generateSchema } = await import("./core/schema-codegen.mjs");
+      const { createAgentCmsClient } = await import("./core/agent-cms.mjs");
+
+      // Generate schema from Dato
+      const dato = createDatoClient({ token: datoToken });
+      const schema = await generateSchema(dato);
+      console.log(`Generated schema: ${schema.models.length} models, ${schema.locales.length} locales`);
+
+      // Import into agent-cms via schema_io
+      const cms = createAgentCmsClient({ baseUrl: cmsUrl, writeKey: cmsWriteKey });
+      const response = await cms.json("/api/schema", {
+        method: "POST",
+        body: JSON.stringify(schema),
+      });
+      console.log(`Schema imported into ${cmsUrl}`);
+      console.log(`  Created: ${JSON.stringify(response)}`);
+    })),
 );
 
 const importCommand = Command.make("import", {
-  adapter: adapterOption,
   cmsUrl: cmsUrlOption,
+  cmsWriteKey: cmsWriteKeyOption,
   datoToken: tokenOption,
   model: modelOption,
   limit: limitOption,
@@ -86,16 +115,14 @@ const importCommand = Command.make("import", {
   locale: localeOption,
 }).pipe(
   Command.withDescription("Import a thin Dato root slice and expand it to a referentially intact local closure."),
-  Command.withHandler(({ adapter, cmsUrl, datoToken, model, limit, skip, locale }) => {
+  Command.withHandler(({ cmsUrl, cmsWriteKey, datoToken, model, limit, skip, locale }) => {
     if (!datoToken) {
       return Effect.fail(new Error("Missing Dato token. Pass --dato-token or set DATOCMS_API_TOKEN."));
     }
-    return Effect.tryPromise(() =>
-      importWithEnv(
-        resolve(process.cwd(), `scripts/dato-import/adapters/${adapter}/import.mjs`),
+    return Effect.tryPromise(() => import("./core/generic-import.mjs")).pipe(
+      Effect.flatMap(({ createImportProgram }) =>
+        createImportProgram({ cmsUrl, cmsWriteKey, datoToken, locale, model, limit, skip }),
       ),
-    ).pipe(
-      Effect.flatMap(({ createImportProgram }) => createImportProgram({ cmsUrl, datoToken, locale, model, limit, skip })),
     );
   }),
 );
@@ -143,8 +170,8 @@ const reportCommand = Command.make("report", { outDir: outDirOption }).pipe(
 );
 
 const root = Command.make("dato-import").pipe(
-  Command.withDescription("Import DatoCMS content into agent-cms with explicit setup, resumable runs, and direct-to-R2 assets."),
-  Command.withSubcommands([inspectCommand, bootstrapCommand, importCommand, statusCommand, reportCommand]),
+  Command.withDescription("Import DatoCMS content into agent-cms. Auto-discovers schema, imports records with assets, links, and structured text."),
+  Command.withSubcommands([inspectCommand, codegenCommand, bootstrapCommand, importCommand, statusCommand, reportCommand]),
 );
 
 const helpText = buildHelp(process.argv.slice(2));
@@ -155,17 +182,13 @@ if (helpText) {
 
 const run = Command.run(root, {
   name: "agent-cms dato-import",
-  version: "0.1.0",
+  version: "0.2.0",
   summary:
-    "Integrity-first Dato import tooling for agent-cms. Thin root slices expand to full dependency closure; assets copy directly to R2 and are then registered in agent-cms.",
+    "Integrity-first Dato import tooling for agent-cms. Auto-discovers schema from DatoCMS CMA. Thin root slices expand to full dependency closure; assets copy directly to R2.",
   footer: "",
 });
 
 NodeRuntime.runMain(run(process.argv));
-
-async function importWithEnv(modulePath) {
-  return import(pathToFileURL(modulePath).href);
-}
 
 function buildHelp(args) {
   if (!args.includes("--help") && !args.includes("-h")) {
@@ -174,6 +197,7 @@ function buildHelp(args) {
 
   const command = args.find((arg) => !arg.startsWith("-"));
   if (command === "inspect") return inspectHelp();
+  if (command === "codegen") return codegenHelp();
   if (command === "bootstrap") return bootstrapHelp();
   if (command === "import") return importHelp();
   if (command === "status") return statusHelp();
@@ -184,7 +208,7 @@ function buildHelp(args) {
 function rootHelp() {
   return `agent-cms dato-import
 
-Integrity-first Dato import tooling for agent-cms.
+Import DatoCMS content into agent-cms. Auto-discovers schema from CMA.
 
 The requested root slice is not the final row count:
 - linked records are crawled automatically
@@ -199,7 +223,8 @@ USAGE
 COMMANDS
 
   inspect      Inspect a Dato project via CMA and write a schema snapshot
-  bootstrap    Bootstrap an agent-cms schema for a Dato import adapter
+  codegen      Auto-generate an agent-cms schema from a DatoCMS project
+  bootstrap    Generate schema from Dato and import it into agent-cms
   import       Import a thin root slice and expand to dependency closure
   status       Show the latest output path for an import run
   report       Summarize the latest findings JSON
@@ -208,7 +233,7 @@ GLOBAL ENV
 
   DATOCMS_API_TOKEN    Dato read token
   CMS_URL              agent-cms base URL (default: http://127.0.0.1:8791)
-  IMPORT_LOCALE        Locale for adapter-backed import runs (default: en)
+  CMS_WRITE_KEY        agent-cms write key
 `;
 }
 
@@ -221,12 +246,25 @@ USAGE
 `;
 }
 
-function bootstrapHelp() {
-  return `agent-cms dato-import bootstrap
+function codegenHelp() {
+  return `agent-cms dato-import codegen
+
+Auto-generate an agent-cms ImportSchemaInput from a DatoCMS project.
 
 USAGE
 
-  npm run dato:import -- bootstrap --adapter trip [--cms-url <url>] [--dato-token <token>] [--locale <code>]
+  npm run dato:import -- codegen [--dato-token <token>] [--out-dir <path>]
+`;
+}
+
+function bootstrapHelp() {
+  return `agent-cms dato-import bootstrap
+
+Generate schema from Dato CMA and import into agent-cms via schema_io.
+
+USAGE
+
+  npm run dato:import -- bootstrap [--cms-url <url>] [--dato-token <token>]
 `;
 }
 
@@ -235,7 +273,7 @@ function importHelp() {
 
 USAGE
 
-  npm run dato:import -- import --adapter trip --model <apiKey> [options]
+  npm run dato:import -- import --model <apiKey> [options]
 `;
 }
 

@@ -10,3 +10,5 @@ package-lock.json
 .reference/
 autoresearch.jsonl
 autoresearch.ideas.md
+scripts/dato-import/out/
+scripts/dato-import/adapters/

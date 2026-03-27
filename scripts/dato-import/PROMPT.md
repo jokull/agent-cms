@@ -1,54 +1,62 @@
-# Dato Import Prompt
+# Dato Import
 
-Use this when acting as an import agent for `agent-cms`.
+Import DatoCMS content into agent-cms with high fidelity.
 
-## Goal
+## How it works
 
-Hydrate an `agent-cms` instance from a DatoCMS project with high fidelity:
-
-- preserve source IDs where possible
-- preserve timestamps via REST `overrides`
-- preserve locale-specific values without inventing fallback data
-- preserve StructuredText block trees
-- preserve original asset blobs by copying them directly to R2, then registering metadata in `agent-cms`
-- keep local records referentially intact or fail loudly
-
-## Operating rules
-
-1. Read Dato via CMA/REST, not delivery GraphQL, for the source of truth.
-2. Import thin root slices, then crawl the dependency closure.
-3. Upsert drafts first. Publish only after the touched graph is complete.
-4. Never route asset binaries through the Worker.
-5. Reuse source IDs locally. Do not duplicate records on repeated runs.
-6. Accept regressions only when they are explicitly recorded.
-7. Prefer fixing `agent-cms` gaps over adding import-specific hacks.
-
-## CLI
-
-Primary entrypoint:
-
-```bash
-npm run dato:import -- --help
-```
-
-Current proven commands:
-
-- `inspect`
-- `bootstrap --adapter trip`
-- `import --adapter trip --model article --limit 1`
-- `status --out-dir scripts/dato-import/out/trip`
-- `report --out-dir scripts/dato-import/out/trip`
+The importer auto-discovers the DatoCMS project schema via CMA — no manual adapters or hardcoded field mappings needed. Field types are mapped automatically (Dato `file` → agent-cms `media`, `structured_text` → `structured_text`, etc.), and records are imported with their full dependency closure (linked records, block references, assets).
 
 ## Workflow
 
-1. Run `inspect` to understand the Dato project shape.
-2. Bootstrap the target schema.
-3. Import one thin root slice.
-4. Verify referential integrity, localization, assets, and publish state.
-5. Fix `agent-cms` gaps, then rerun the same slice.
-6. Expand gradually.
+```bash
+# 1. Inspect the Dato project
+npm run dato:import -- inspect
 
-## Notes
+# 2. Generate the agent-cms schema from Dato
+npm run dato:import -- codegen
 
-- The current built-in adapter is the Trip mapping because it is the first large real-world fixture we validated.
-- The runtime and CLI are generic. More automatic schema discovery/mapping belongs here over time.
+# 3. Bootstrap: generate + import schema into agent-cms
+npm run dato:import -- bootstrap
+
+# 4. Import records by model, expanding dependencies automatically
+npm run dato:import -- import --model article --limit 5
+
+# 5. Check status / findings
+npm run dato:import -- status
+npm run dato:import -- report
+```
+
+## What gets preserved
+
+- Source record IDs (reused in agent-cms)
+- Timestamps via REST `overrides` (createdAt, updatedAt, publishedAt)
+- Locale-specific values without inventing fallback data
+- StructuredText block trees with scoped block IDs
+- Asset blobs copied directly to R2, then registered in agent-cms
+- Referential integrity across linked records
+
+## Environment
+
+```
+DATOCMS_API_TOKEN    Dato CMA read token
+CMS_URL              agent-cms base URL (default: http://127.0.0.1:8791)
+CMS_WRITE_KEY        agent-cms write key
+```
+
+## Architecture
+
+```
+core/
+  datocms.mjs          — DatoCMS CMA client (items, uploads, site)
+  agent-cms.mjs        — agent-cms REST client (models, fields, records, assets)
+  local-r2.mjs         — Local R2 via Miniflare for asset storage
+  schema-codegen.mjs   — Auto-generate ImportSchemaInput from Dato CMA
+  field-transforms.mjs — Generic field value transforms (media, links, DAST, SEO, etc.)
+  generic-import.mjs   — Record import with dependency crawling, checkpoints, findings
+  runtime.mjs          — Filesystem and CLI helpers
+commands/
+  inspect.mjs          — Schema inspection
+  status.mjs           — Checkpoint status
+  report.mjs           — Findings summary
+cli.mjs                — Effect CLI entry point
+```
