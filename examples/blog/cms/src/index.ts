@@ -12,6 +12,7 @@ function getHandler(env: Env) {
         assetBaseUrl: env.ASSET_BASE_URL,
         ai: env.AI,
         vectorize: env.VECTORIZE,
+        loader: env.LOADER,
       },
     });
   }
@@ -33,6 +34,7 @@ interface Env {
   ENVIRONMENT?: string;
   ASSET_BASE_URL?: string;
   AI?: { run(model: string, input: { text: string[] }): Promise<{ data: number[][] }> };
+  LOADER?: unknown;
   VECTORIZE?: {
     upsert(vectors: Array<{ id: string; values: number[]; metadata?: Record<string, string> }>): Promise<unknown>;
     deleteByIds(ids: string[]): Promise<unknown>;

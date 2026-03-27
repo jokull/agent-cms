@@ -582,8 +582,15 @@ const healthRouter = HttpRouter.empty.pipe(
   HttpRouter.get("/health", HttpServerResponse.json({ status: "ok" }))
 );
 
+// --- OpenAPI spec ---
+import { openApiSpec } from "./api/index.js";
+const openApiRouter = HttpRouter.empty.pipe(
+  HttpRouter.get("/openapi.json", HttpServerResponse.json(openApiSpec))
+);
+
 // --- Combine all routes ---
 export const appRouter = HttpRouter.empty.pipe(
+  HttpRouter.concat(openApiRouter),
   HttpRouter.concat(healthRouter),
   HttpRouter.concat(modelsRouter.pipe(HttpRouter.prefixAll("/api/models"))),
   HttpRouter.concat(fieldsRouter.pipe(HttpRouter.prefixAll("/api"))),
@@ -625,6 +632,8 @@ export interface WebHandlerOptions {
   };
   /** Public URL of the frontend site — used for assembling preview URLs */
   siteUrl?: string;
+  /** Worker Loader binding for Code Mode MCP (optional — enables /mcp/codemode) */
+  loader?: unknown;
 }
 
 export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, options?: WebHandlerOptions) {
@@ -918,7 +927,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
         instrumentedRequest = new Request(instrumentedRequest, { headers: h });
         // Fall through to graphql handler below
       }
-      // /mcp — admin only
+      // /mcp — admin only (Code Mode when loader available, standard MCP fallback)
       else if (url.pathname === "/mcp") {
         const actor = await getRequestActor(instrumentedRequest);
         if (actor?.type === "editor") {
@@ -972,8 +981,30 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
         instrumentedRequest = new Request(instrumentedRequest, { headers: h });
       }
 
-      // Route /mcp to MCP HTTP transport
+      // Route /mcp — Code Mode when loader available, standard MCP fallback
       if (url.pathname === "/mcp") {
+        if (options?.loader) {
+          // Code Mode: wrap admin MCP tools in V8 sandbox
+          const { createMcpHttpHandler } = await import("../mcp/http-transport.js");
+          const adminMcpHandler = mcpHandler ??= createMcpHttpHandler(fullLayer, {
+            mode: "admin",
+            path: "/mcp",
+            r2Bucket: options.r2Bucket,
+            assetBaseUrl: options.assetBaseUrl,
+            siteUrl: options.siteUrl,
+            actor: { type: "admin", label: "admin" },
+          });
+          const { createCodeModeMcpServer } = await import("../mcp/codemode-handler.js");
+          const { createMcpHandler } = await import("agents/mcp");
+          const codeModeServer = await createCodeModeMcpServer({
+            loader: options.loader,
+            mcpHandler: adminMcpHandler,
+          });
+          const handler = createMcpHandler(codeModeServer, { route: "/mcp" });
+          const stubCtx = { waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext;
+          return finish(await handler(instrumentedRequest, {}, stubCtx));
+        }
+        // Standard MCP fallback (no loader)
         const { createMcpHttpHandler } = await import("../mcp/http-transport.js");
         const actor = await getRequestActor(instrumentedRequest);
         const handler = actor?.type === "admin"
@@ -996,7 +1027,32 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
         return finish(await handler(instrumentedRequest));
       }
 
+      // Route /mcp/editor — Code Mode when loader available, standard MCP fallback
       if (url.pathname === "/mcp/editor") {
+        if (options?.loader) {
+          // Code Mode: wrap editor MCP tools in V8 sandbox
+          const { createMcpHttpHandler } = await import("../mcp/http-transport.js");
+          const editorMcpHandler = mcpEditorHandler ??= createMcpHttpHandler(fullLayer, {
+            mode: "editor",
+            path: "/mcp/editor",
+            r2Bucket: options.r2Bucket,
+            assetBaseUrl: options.assetBaseUrl,
+            siteUrl: options.siteUrl,
+            actor: { type: "editor", label: "editor" },
+          });
+          const { createCodeModeMcpServer } = await import("../mcp/codemode-handler.js");
+          const { createMcpHandler } = await import("agents/mcp");
+          const codeModeServer = await createCodeModeMcpServer({
+            loader: options.loader,
+            mcpHandler: editorMcpHandler,
+            mode: "editor",
+            mcpPath: "/mcp/editor",
+          });
+          const handler = createMcpHandler(codeModeServer, { route: "/mcp/editor" });
+          const stubCtx = { waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext;
+          return finish(await handler(instrumentedRequest, {}, stubCtx));
+        }
+        // Standard MCP fallback (no loader)
         const { createMcpHttpHandler } = await import("../mcp/http-transport.js");
         const actor = await getRequestActor(instrumentedRequest);
         const handler = actor?.type === "editor"

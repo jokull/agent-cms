@@ -45,6 +45,8 @@ export interface CmsBindings {
   cfAccountId?: string;
   /** Public URL of the frontend site — used for assembling preview URLs */
   siteUrl?: string;
+  /** Worker Loader binding for Code Mode MCP (optional — enables /mcp/codemode) */
+  loader?: unknown;
 }
 
 export interface CmsHandlerConfig {
@@ -140,6 +142,7 @@ function createCMSHandlerUncached(bindings: DecodedCmsBindings, hooks?: CmsHooks
     hooks,
     r2Credentials: bindings.r2Credentials,
     siteUrl: bindings.siteUrl,
+    loader: bindings.loader,
   });
 
   return {

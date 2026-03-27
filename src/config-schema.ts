@@ -34,6 +34,7 @@ const RawCmsBindingsSchema = Schema.Struct({
   r2BucketName: OptionalNonEmptyString,
   cfAccountId: OptionalNonEmptyString,
   siteUrl: Schema.optional(Schema.String),
+  loader: Schema.optional(RuntimeObject),
 }).pipe(
   Schema.filter((bindings) => {
     const hasAi = bindings.ai !== undefined;
@@ -69,6 +70,7 @@ export interface DecodedCmsBindings {
     accountId: string;
   };
   siteUrl?: string;
+  loader?: unknown;
 }
 
 function formatConfigParseError(error: ParseResult.ParseError): string {
@@ -101,5 +103,6 @@ export function decodeCmsBindings(input: unknown): DecodedCmsBindings {
         }
       : undefined,
     siteUrl: bindings.siteUrl,
+    loader: bindings.loader,
   };
 }
