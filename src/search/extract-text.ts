@@ -123,6 +123,21 @@ function extractFieldText(field: ParsedFieldRow, value: unknown): string[] {
       return parts;
     }
 
+    case "rich_text": {
+      // Rich text stores a JSON array of block IDs — block content is in block tables.
+      // At this point, the record may be materialized (array of block objects) or raw (array of IDs).
+      const parsed = typeof value === "string" ? safeParse(value) : value;
+      if (!Array.isArray(parsed)) return [];
+      const parts: string[] = [];
+      for (const item of parsed) {
+        if (typeof item === "string") continue; // raw block ID — no text to extract
+        if (isRecord(item)) {
+          parts.push(...extractGenericText(item));
+        }
+      }
+      return parts;
+    }
+
     case "seo": {
       const parsed = typeof value === "string" ? safeParse(value) : value;
       if (!isRecord(parsed)) return [];

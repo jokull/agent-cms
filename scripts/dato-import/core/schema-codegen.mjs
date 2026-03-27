@@ -20,7 +20,7 @@ const FIELD_TYPE_MAP = {
   link: "link",
   links: "links",
   structured_text: "structured_text",
-  rich_text: "structured_text",
+  rich_text: "rich_text",
   seo: "seo",
   lat_lon: "lat_lon",
 };
@@ -132,6 +132,13 @@ export async function generateSchema(datoClient) {
           );
       }
 
+      if (datoValidators.rich_text_blocks?.item_types?.length) {
+        validators.rich_text_blocks =
+          datoValidators.rich_text_blocks.item_types.map(
+            (id) => itemTypeIdToApiKey.get(id) ?? id,
+          );
+      }
+
       if (datoValidators.enum?.values?.length) {
         validators.enum = datoValidators.enum.values;
       }
@@ -174,7 +181,7 @@ export async function generateSchema(datoClient) {
 
   // Build locales
   const locales = siteLocales.map((code, index) => ({
-    code,
+    code: code.replace(/-/g, "_"),
     position: index,
     fallbackLocale: null,
   }));

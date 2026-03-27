@@ -5,10 +5,11 @@
 import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
 import type { AssetRow } from "../db/row-types.js";
-import { getLinkTargets, getLinksTargets, getBlockWhitelist } from "../db/validators.js";
+import { getLinkTargets, getLinksTargets, getBlockWhitelist, getRichTextBlockWhitelist } from "../db/validators.js";
 import type { SchemaBuilderContext, DynamicRow, GqlContext } from "./gql-types.js";
 import { toTypeName, toCamelCase, fieldToSDL, getRegistryDef, resolveVideoField } from "./gql-utils.js";
 import { resolveStructuredTextValue } from "./structured-text-resolver.js";
+import { materializeRichTextValue } from "../services/structured-text-service.js";
 import { loadLinkedRecords } from "./linked-record-loader.js";
 import { decodeJsonIfString, decodeJsonStringOr } from "../json.js";
 import { mergeAssetWithMediaReference, parseMediaFieldReference, parseMediaGalleryReferences } from "../media-field.js";
@@ -155,6 +156,31 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
             context,
           });
         };
+      } else if (f.field_type === "rich_text") {
+        bmResolvers[gqlName] = async (parent: DynamicRow, _args: unknown, context: GqlContext) => {
+          const localized = f.localized
+            ? pickLocalizedEntry(parent[f.api_key], context)
+            : { locale: null, value: parent[f.api_key] };
+          const raw = localized.value;
+          if (!raw) return [];
+          const blocks = await runSql(
+            materializeRichTextValue({
+              allowedBlockApiKeys: getRichTextBlockWhitelist(f.validators) ?? [],
+              parentContainerModelApiKey: bm.api_key,
+              parentBlockId: String(parent.id),
+              parentFieldApiKey: f.api_key,
+              rootRecordId: typeof parent._root_record_id === "string" ? parent._root_record_id : String(parent.id),
+              rootFieldApiKey: typeof parent._root_field_api_key === "string" ? parent._root_field_api_key : f.api_key,
+              rawValue: raw,
+            })
+          );
+          if (!blocks) return [];
+          return blocks.map((block) => ({
+            ...block,
+            __typename: block._type ? (blockTypeNames.get(block._type as string) ?? block._type) : undefined,
+            _modelApiKey: block._type,
+          }));
+        };
       } else if (f.field_type === "links") {
         const targets = getLinksTargets(f.validators);
         if (targets && targets.length > 0) {
@@ -195,8 +221,8 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
     resolvers[bmTypeName] = bmResolvers;
   }
 
-  // --- Pre-compute per-field StructuredText union types ---
-  // Maps model api_key + field api_key -> union type name (only for fields with block whitelists)
+  // --- Pre-compute per-field StructuredText and RichText union types ---
+  // Maps model api_key + field api_key -> union/field type name (only for fields with block whitelists)
   const structuredTextFieldTypes = new Map<string, string>();
 
   // Iterate both content models and block models
@@ -206,33 +232,46 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
     if (!modelTypeName) continue;
 
     for (const f of fields) {
-      if (f.field_type !== "structured_text") continue;
-      const whitelist = getBlockWhitelist(f.validators);
-      if (!whitelist || whitelist.length === 0) continue;
+      if (f.field_type === "structured_text") {
+        const whitelist = getBlockWhitelist(f.validators);
+        if (!whitelist || whitelist.length === 0) continue;
 
-      // Collect member type names for the union
-      const memberTypeNames: string[] = [];
-      for (const blockApiKey of whitelist) {
-        const bmtn = blockTypeNames.get(blockApiKey);
-        if (bmtn) memberTypeNames.push(bmtn);
+        const memberTypeNames: string[] = [];
+        for (const blockApiKey of whitelist) {
+          const bmtn = blockTypeNames.get(blockApiKey);
+          if (bmtn) memberTypeNames.push(bmtn);
+        }
+        if (memberTypeNames.length === 0) continue;
+
+        const fieldPascal = toTypeName(f.api_key);
+        const unionName = `${modelTypeName}${fieldPascal}Block`;
+        const fieldTypeName = `${modelTypeName}${fieldPascal}Field`;
+
+        typeDefs.push(`union ${unionName} = ${memberTypeNames.join(" | ")}`);
+        typeDefs.push(`type ${fieldTypeName} {\n  value: JSON!\n  blocks: [${unionName}!]!\n  inlineBlocks: [${unionName}!]!\n  links: [JSON!]!\n}`);
+        resolvers[unionName] = { __resolveType: (obj: DynamicRow) => obj.__typename as string };
+        structuredTextFieldTypes.set(`${model.api_key}.${f.api_key}`, fieldTypeName);
       }
-      if (memberTypeNames.length === 0) continue;
 
-      const fieldPascal = toTypeName(f.api_key);
-      const unionName = `${modelTypeName}${fieldPascal}Block`;
-      const fieldTypeName = `${modelTypeName}${fieldPascal}Field`;
+      if (f.field_type === "rich_text") {
+        const whitelist = getRichTextBlockWhitelist(f.validators);
+        if (!whitelist || whitelist.length === 0) continue;
 
-      // Generate union type
-      typeDefs.push(`union ${unionName} = ${memberTypeNames.join(" | ")}`);
+        const memberTypeNames: string[] = [];
+        for (const blockApiKey of whitelist) {
+          const bmtn = blockTypeNames.get(blockApiKey);
+          if (bmtn) memberTypeNames.push(bmtn);
+        }
+        if (memberTypeNames.length === 0) continue;
 
-      // Generate per-field StructuredText type
-      typeDefs.push(`type ${fieldTypeName} {\n  value: JSON!\n  blocks: [${unionName}!]!\n  inlineBlocks: [${unionName}!]!\n  links: [JSON!]!\n}`);
+        const fieldPascal = toTypeName(f.api_key);
+        const unionName = `${modelTypeName}${fieldPascal}Block`;
 
-      // __resolveType for the union
-      resolvers[unionName] = { __resolveType: (obj: DynamicRow) => obj.__typename as string };
-
-      // Store mapping so the content/block model field uses this type
-      structuredTextFieldTypes.set(`${model.api_key}.${f.api_key}`, fieldTypeName);
+        typeDefs.push(`union ${unionName} = ${memberTypeNames.join(" | ")}`);
+        resolvers[unionName] = { __resolveType: (obj: DynamicRow) => obj.__typename as string };
+        // rich_text returns [UnionType!]! directly — no wrapper type needed
+        structuredTextFieldTypes.set(`${model.api_key}.${f.api_key}`, `[${unionName}!]!`);
+      }
     }
   }
 

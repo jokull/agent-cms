@@ -10,10 +10,10 @@ import {
   updateRecord as sqlUpdateRecord,
   deleteRecord as sqlDeleteRecord,
 } from "../schema-engine/sql-records.js";
-import { writeStructuredText, deleteBlocksForField, getStructuredTextStorageKey, materializeRecordStructuredTextFields, materializeStructuredTextValue } from "./structured-text-service.js";
+import { writeStructuredText, writeRichText, deleteBlocksForField, getStructuredTextStorageKey, materializeRecordStructuredTextFields, materializeStructuredTextValue, type RichTextWriteBlock } from "./structured-text-service.js";
 import type { ModelRow, FieldRow, ParsedFieldRow } from "../db/row-types.js";
 import { parseFieldValidators, isContentRow } from "../db/row-types.js";
-import { getSlugSource, getBlockWhitelist, getBlocksOnly, isRequired, findUniqueConstraintViolations, isUnique, getLinkTargets, getLinksTargets } from "../db/validators.js";
+import { getSlugSource, getBlockWhitelist, getBlocksOnly, getRichTextBlockWhitelist, isRequired, findUniqueConstraintViolations, isUnique, getLinkTargets, getLinksTargets } from "../db/validators.js";
 import * as SearchService from "../search/search-service.js";
 import type { CreateRecordInput, PatchRecordInput, BulkCreateRecordsInput, PatchBlocksInput } from "./input-schemas.js";
 import { getFieldTypeDef } from "../field-types.js";
@@ -219,6 +219,7 @@ type CreateLikeFieldProcessingParams = {
   record: Record<string, unknown>;
   modelFields: readonly ParsedFieldRow[];
   errorPrefix?: string;
+  skipReferenceValidation?: boolean;
 };
 
 function createFieldErrorMessage(prefix: string | undefined, message: string) {
@@ -336,6 +337,7 @@ function processCreateLikeRecordFields({
   record,
   modelFields,
   errorPrefix,
+  skipReferenceValidation,
 }: CreateLikeFieldProcessingParams) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
@@ -410,6 +412,60 @@ function processCreateLikeRecordFields({
         });
 
         data[field.api_key] = dast;
+      }
+
+      if (field.field_type === "rich_text" && data[field.api_key] !== undefined && data[field.api_key] !== null) {
+        const allowedBlockTypes = getRichTextBlockWhitelist(field.validators) ?? [];
+
+        if (field.localized) {
+          const localeMap = yield* decodeLocalizedFieldMap(field, data[field.api_key]).pipe(
+            Effect.mapError((error) => new ValidationError({
+              message: createFieldErrorMessage(errorPrefix, error.message),
+              field: error.field,
+            }))
+          );
+          const localizedBlockIds: Record<string, unknown> = {};
+          for (const [localeCode, localeValue] of Object.entries(localeMap)) {
+            if (localeValue === null) {
+              localizedBlockIds[localeCode] = null;
+              continue;
+            }
+            if (!Array.isArray(localeValue)) {
+              return yield* new ValidationError({
+                message: createFieldErrorMessage(errorPrefix, `rich_text field '${field.api_key}' locale '${localeCode}' must be an array of block objects`),
+                field: field.api_key,
+              });
+            }
+            const blockIds = yield* writeRichText({
+              rootModelApiKey: modelApiKey,
+              fieldApiKey: field.api_key,
+              rootFieldStorageKey: getStructuredTextStorageKey(field.api_key, localeCode),
+              rootRecordId: recordId,
+              blocks: localeValue as RichTextWriteBlock[],
+              allowedBlockTypes,
+            });
+            localizedBlockIds[localeCode] = blockIds;
+          }
+          data[field.api_key] = localizedBlockIds;
+          record[field.api_key] = localizedBlockIds;
+          continue;
+        }
+
+        const rawBlocks = data[field.api_key];
+        if (!Array.isArray(rawBlocks)) {
+          return yield* new ValidationError({
+            message: createFieldErrorMessage(errorPrefix, `rich_text field '${field.api_key}' must be an array of block objects`),
+            field: field.api_key,
+          });
+        }
+        const blockIds = yield* writeRichText({
+          rootModelApiKey: modelApiKey,
+          fieldApiKey: field.api_key,
+          rootRecordId: recordId,
+          blocks: rawBlocks as RichTextWriteBlock[],
+          allowedBlockTypes,
+        });
+        data[field.api_key] = blockIds;
       }
 
       if (field.field_type === "slug") {
@@ -494,7 +550,8 @@ function processCreateLikeRecordFields({
 
       // Validate linked-record existence for link/links fields
       if (
-        (field.field_type === "link" || field.field_type === "links")
+        !skipReferenceValidation
+        && (field.field_type === "link" || field.field_type === "links")
         && data[field.api_key] !== undefined
         && data[field.api_key] !== null
       ) {
@@ -620,6 +677,7 @@ export function createRecord(body: CreateRecordInput, actor?: RequestActor | nul
       data,
       record,
       modelFields,
+      skipReferenceValidation: body.skipReferenceValidation,
     });
 
     const createUniqueViolations = yield* findUniqueConstraintViolations({
@@ -864,6 +922,71 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
         }
       }
 
+      // Rich text update: delete old blocks, write new ones
+      if (field.field_type === "rich_text" && data[field.api_key] !== undefined) {
+        if (data[field.api_key] === null) {
+          yield* deleteBlocksForField({
+            rootRecordId: id,
+            fieldApiKey: field.api_key,
+            includeLocalizedVariants: field.localized === 1,
+          });
+        } else if (field.localized) {
+          const localeMap = yield* decodeLocalizedFieldMap(field, data[field.api_key]);
+          const existingLocaleMap = parseExistingLocaleMap(existing[field.api_key]);
+          const nextLocaleMap = { ...existingLocaleMap };
+          const allowedBlockTypes = getRichTextBlockWhitelist(field.validators) ?? [];
+
+          for (const [localeCode, localeValue] of Object.entries(localeMap)) {
+            yield* deleteBlocksForField({
+              rootRecordId: id,
+              fieldApiKey: getStructuredTextStorageKey(field.api_key, localeCode),
+            });
+
+            if (localeValue === null) {
+              nextLocaleMap[localeCode] = null;
+              continue;
+            }
+            if (!Array.isArray(localeValue)) {
+              return yield* new ValidationError({
+                message: `rich_text field '${field.api_key}' locale '${localeCode}' must be an array of block objects`,
+                field: field.api_key,
+              });
+            }
+            const blockIds = yield* writeRichText({
+              rootModelApiKey: model.api_key,
+              fieldApiKey: field.api_key,
+              rootFieldStorageKey: getStructuredTextStorageKey(field.api_key, localeCode),
+              rootRecordId: id,
+              blocks: localeValue as RichTextWriteBlock[],
+              allowedBlockTypes,
+            });
+            nextLocaleMap[localeCode] = blockIds;
+          }
+
+          data[field.api_key] = nextLocaleMap;
+          updates[field.api_key] = nextLocaleMap;
+          continue;
+        } else {
+          const rawBlocks = data[field.api_key];
+          if (!Array.isArray(rawBlocks)) {
+            return yield* new ValidationError({
+              message: `rich_text field '${field.api_key}' must be an array of block objects`,
+              field: field.api_key,
+            });
+          }
+          yield* deleteBlocksForField({ rootRecordId: id, fieldApiKey: field.api_key });
+          const allowedBlockTypes = getRichTextBlockWhitelist(field.validators) ?? [];
+          const blockIds = yield* writeRichText({
+            rootModelApiKey: model.api_key,
+            fieldApiKey: field.api_key,
+            rootRecordId: id,
+            blocks: rawBlocks as RichTextWriteBlock[],
+            allowedBlockTypes,
+          });
+          data[field.api_key] = blockIds;
+        }
+      }
+
       // Slug field: normalize and enforce uniqueness (excluding current record)
       if (field.field_type === "slug" && data[field.api_key] !== undefined && data[field.api_key] !== null) {
         const sourceFieldKey = getSlugSource(field.validators);
@@ -962,6 +1085,7 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
       if (
         field.localized &&
         field.field_type !== "structured_text" &&
+        field.field_type !== "rich_text" &&
         data[field.api_key] !== undefined
       ) {
         const localeMap = yield* decodeLocalizedFieldMap(field, data[field.api_key]);

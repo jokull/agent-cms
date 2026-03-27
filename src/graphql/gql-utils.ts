@@ -51,6 +51,10 @@ export function fieldToSDL(
     if (targets?.length === 1 && typeNames.has(targets[0])) return `[${typeNames.get(targets[0])!}!]`;
     return "JSON";
   }
+  // rich_text: fallback to [JSON!]! when no per-field union is computed
+  if (fieldType === "rich_text") {
+    return "[JSON!]!";
+  }
   // All other field types: look up from registry
   if (isFieldType(fieldType)) {
     return FIELD_TYPE_REGISTRY[fieldType].graphqlType ?? "String";

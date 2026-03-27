@@ -23,6 +23,7 @@ const ALLOWED_FIELD_VALIDATOR_KEYS = new Set([
   "item_item_type",
   "items_item_type",
   "structured_text_blocks",
+  "rich_text_blocks",
   "blocks_only",
   "searchable",
 ]);
@@ -188,6 +189,22 @@ function validateFieldValidators(
       if (!Array.isArray(structuredTextBlocks) || !structuredTextBlocks.every((value) => typeof value === "string")) {
         return yield* new ValidationError({
           message: `structured_text_blocks validator must be an array of strings`,
+          field: apiKey,
+        });
+      }
+    }
+
+    const richTextBlocks = validators.rich_text_blocks;
+    if (richTextBlocks !== undefined) {
+      if (fieldType !== "rich_text") {
+        return yield* new ValidationError({
+          message: `rich_text_blocks validator is only supported for rich_text fields`,
+          field: apiKey,
+        });
+      }
+      if (!Array.isArray(richTextBlocks) || !richTextBlocks.every((value) => typeof value === "string")) {
+        return yield* new ValidationError({
+          message: `rich_text_blocks validator must be an array of strings`,
           field: apiKey,
         });
       }
@@ -476,8 +493,8 @@ export function updateField(fieldId: string, body: UpdateFieldInput) {
         yield* sql.unsafe(`ALTER TABLE "${tableName}" RENAME COLUMN "${field.api_key}" TO "${newApiKey}"`);
       }
 
-      // Update _root_field_api_key in block tables if this was a ST field
-      if (field.field_type === "structured_text") {
+      // Update _root_field_api_key in block tables if this was a ST/rich_text field
+      if (field.field_type === "structured_text" || field.field_type === "rich_text") {
         const blockModels = yield* sql.unsafe<{ api_key: string }>("SELECT api_key FROM models WHERE is_block = 1");
         for (const bm of blockModels) {
           if (modelInfo[0].is_block) {
@@ -564,8 +581,8 @@ export function deleteField(fieldId: string) {
         }
       }
 
-      // Clean up orphaned block rows if this is a structured_text field
-      if (field.field_type === "structured_text") {
+      // Clean up orphaned block rows if this is a structured_text or rich_text field
+      if (field.field_type === "structured_text" || field.field_type === "rich_text") {
         const blockModels = yield* sql.unsafe<{ api_key: string }>("SELECT api_key FROM models WHERE is_block = 1");
         if (modelInfo[0].is_block) {
           const directChildIds: string[] = [];

@@ -30,6 +30,12 @@ export function getBlockWhitelist(validators: Record<string, unknown>): string[]
   return Array.isArray(v) && v.every((x) => typeof x === "string") ? v : undefined;
 }
 
+/** Safely get the rich_text_blocks whitelist */
+export function getRichTextBlockWhitelist(validators: Record<string, unknown>): string[] | undefined {
+  const v = validators.rich_text_blocks;
+  return Array.isArray(v) && v.every((x) => typeof x === "string") ? v : undefined;
+}
+
 /** Safely get the blocks_only flag */
 export function getBlocksOnly(validators: Record<string, unknown>): boolean {
   return validators.blocks_only === true;

@@ -6,7 +6,7 @@ import { DastDocumentInput, DastDocumentSchema, StructuredTextWriteInput } from 
 import { runBatchedQueries, type BatchedQuery } from "../db/run-batched-queries.js";
 import type { FieldRow, ParsedFieldRow } from "../db/row-types.js";
 import { parseFieldValidators } from "../db/row-types.js";
-import { getBlockWhitelist, getBlocksOnly } from "../db/validators.js";
+import { getBlockWhitelist, getBlocksOnly, getRichTextBlockWhitelist } from "../db/validators.js";
 import { getFieldTypeDef } from "../field-types.js";
 import { isFieldType } from "../types.js";
 import { decodeJsonIfString, decodeJsonStringOr, encodeJson } from "../json.js";
@@ -111,8 +111,11 @@ function getBlockModelSchema(sql: SqlClient.SqlClient, blockApiKey: string) {
     const fields = yield* getParsedFields(sql, model.id);
     const structuredTextAllowedBlockApiKeysByField = new Map<string, readonly string[]>();
     for (const field of fields) {
-      if (field.field_type !== "structured_text") continue;
-      structuredTextAllowedBlockApiKeysByField.set(field.api_key, getBlockWhitelist(field.validators) ?? []);
+      if (field.field_type === "structured_text") {
+        structuredTextAllowedBlockApiKeysByField.set(field.api_key, getBlockWhitelist(field.validators) ?? []);
+      } else if (field.field_type === "rich_text") {
+        structuredTextAllowedBlockApiKeysByField.set(field.api_key, getRichTextBlockWhitelist(field.validators) ?? []);
+      }
     }
     return {
       id: model.id,
@@ -282,7 +285,6 @@ function compileStructuredText(
         }
 
         if (field.field_type === "structured_text") {
-
           const nestedInput = yield* decodeStructuredTextInput(field.api_key, value);
           const nestedCompiled = yield* compileStructuredText(
             ctx,
@@ -301,6 +303,32 @@ function compileStructuredText(
           );
           row[field.api_key] = nestedCompiled.dast;
           mergeRowMaps(nestedRows, nestedCompiled.rowsByTable);
+          continue;
+        }
+
+        if (field.field_type === "rich_text") {
+          if (!Array.isArray(value)) {
+            return yield* new ValidationError({
+              message: `Nested rich_text field '${field.api_key}' must be an array of block objects`,
+              field: field.api_key,
+            });
+          }
+          const nestedResult = yield* writeRichTextBlocks({
+            sql: ctx.sql,
+            rootRecordId: ctx.rootRecordId,
+            rootFieldApiKey: ctx.rootFieldApiKey,
+            rootModelApiKey: ctx.rootModelApiKey,
+            seenBlockIds: ctx.seenBlockIds,
+            parentContainerModelApiKey: blockModel.apiKey,
+            parentBlockId: blockId,
+            parentFieldApiKey: field.api_key,
+            depth: container.depth + 1,
+            fieldApiKey: field.api_key,
+            blocks: value as RichTextWriteBlock[],
+            allowedBlockTypes: getRichTextBlockWhitelist(field.validators) ?? [],
+          });
+          row[field.api_key] = nestedResult.blockIds;
+          mergeRowMaps(nestedRows, nestedResult.rowsByTable);
           continue;
         }
 
@@ -619,6 +647,7 @@ export function materializeStructuredTextValues(params: {
 
     const nestedRequests: MaterializeStructuredTextRequest[] = [];
     const nestedAssignments: Array<{ requestKey: string; target: DynamicRow; fieldApiKey: string }> = [];
+    const nestedRtAssignments: Array<{ target: DynamicRow; fieldApiKey: string; params: Parameters<typeof materializeRichTextValue>[0] }> = [];
 
     for (const requests of requestsByGroup.values()) {
       const sample = requests[0];
@@ -711,6 +740,23 @@ export function materializeStructuredTextValues(params: {
             nestedAssignments.push({ requestKey, target: payload, fieldApiKey: field.api_key });
             continue;
           }
+          if (field.field_type === "rich_text" && rawValue !== null) {
+            nestedRtAssignments.push({
+              target: payload,
+              fieldApiKey: field.api_key,
+              params: {
+                allowedBlockApiKeys: getRichTextBlockWhitelist(field.validators) ?? [],
+                parentContainerModelApiKey: blockApiKey,
+                parentBlockId: rowId,
+                parentFieldApiKey: field.api_key,
+                rootRecordId,
+                rootFieldApiKey: String(row._root_field_api_key),
+                rawValue,
+                materializeContext,
+              },
+            });
+            continue;
+          }
           payload[field.api_key] = rawValue;
         }
 
@@ -729,6 +775,11 @@ export function materializeStructuredTextValues(params: {
       for (const assignment of nestedAssignments) {
         assignment.target[assignment.fieldApiKey] = nestedResults.get(assignment.requestKey) ?? null;
       }
+    }
+
+    for (const assignment of nestedRtAssignments) {
+      const result = yield* materializeRichTextValue(assignment.params);
+      assignment.target[assignment.fieldApiKey] = result;
     }
 
     return results;
@@ -751,15 +802,56 @@ export function materializeRecordStructuredTextFields(params: {
   fields: ParsedFieldRow[];
 }): Effect.Effect<DynamicRow, unknown, SqlClient.SqlClient> {
   return Effect.gen(function* () {
+    const materializeContext: MaterializeContext = {
+      blockModelSchemas: new Map<string, BlockModelSchema>(),
+      candidateBlockModels: new Map<string, ReadonlyArray<{ api_key: string }>>(),
+    };
     const materialized: DynamicRow = { ...params.record };
     for (const field of params.fields) {
-      if (field.field_type !== "structured_text") continue;
+      if (field.field_type !== "structured_text" && field.field_type !== "rich_text") continue;
       const rawValue = params.record[field.api_key];
       if (rawValue === null || rawValue === undefined) continue;
-      const materializeContext = {
-        blockModelSchemas: new Map<string, BlockModelSchema>(),
-        candidateBlockModels: new Map<string, ReadonlyArray<{ api_key: string }>>(),
-      };
+
+      if (field.field_type === "rich_text") {
+        if (field.localized) {
+          const localeMap = decodeJsonIfString(rawValue);
+          if (typeof localeMap !== "object" || localeMap === null || Array.isArray(localeMap)) continue;
+          const localized: Record<string, unknown> = {};
+          for (const [localeCode, localeValue] of Object.entries(localeMap as Record<string, unknown>)) {
+            if (localeValue === null || localeValue === undefined) {
+              localized[localeCode] = localeValue;
+              continue;
+            }
+            const blocks = yield* materializeRichTextValue({
+              allowedBlockApiKeys: getRichTextBlockWhitelist(field.validators) ?? [],
+              parentContainerModelApiKey: params.modelApiKey,
+              materializeContext,
+              parentBlockId: null,
+              parentFieldApiKey: field.api_key,
+              rootRecordId: String(params.record.id),
+              rootFieldApiKey: getStructuredTextStorageKey(field.api_key, localeCode),
+              rawValue: localeValue,
+            });
+            localized[localeCode] = blocks;
+          }
+          materialized[field.api_key] = localized;
+        } else {
+          const blocks = yield* materializeRichTextValue({
+            allowedBlockApiKeys: getRichTextBlockWhitelist(field.validators) ?? [],
+            parentContainerModelApiKey: params.modelApiKey,
+            materializeContext,
+            parentBlockId: null,
+            parentFieldApiKey: field.api_key,
+            rootRecordId: String(params.record.id),
+            rootFieldApiKey: field.api_key,
+            rawValue,
+          });
+          materialized[field.api_key] = blocks;
+        }
+        continue;
+      }
+
+      // structured_text
       if (field.localized) {
         const localeMap = decodeJsonIfString(rawValue);
         if (typeof localeMap !== "object" || localeMap === null || Array.isArray(localeMap)) {
@@ -799,6 +891,520 @@ export function materializeRecordStructuredTextFields(params: {
         rawValue,
       });
       materialized[field.api_key] = envelope;
+    }
+    return materialized;
+  });
+}
+
+// ===========================================================================
+// Rich Text (Modular Content) — ordered array of blocks, no DAST
+// ===========================================================================
+
+export interface RichTextWriteBlock {
+  id?: string;
+  block_type: string;
+  [key: string]: unknown;
+}
+
+/**
+ * Write a rich_text field value.
+ * Input: array of block objects [{block_type, ...fields}, ...].
+ * Stores blocks in block_* tables, returns JSON array of block IDs for the column.
+ */
+export function writeRichText(params: {
+  rootModelApiKey: string;
+  fieldApiKey: string;
+  rootFieldStorageKey?: string;
+  rootRecordId: string;
+  blocks: RichTextWriteBlock[];
+  allowedBlockTypes: string[];
+}) {
+  return Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const { fieldApiKey, blocks, allowedBlockTypes } = params;
+    const rootFieldApiKey = params.rootFieldStorageKey ?? params.fieldApiKey;
+    const seenBlockIds = new Set<string>();
+    const rowsByTable = new Map<string, DynamicRow[]>();
+    const blockIds: string[] = [];
+
+    for (let i = 0; i < blocks.length; i++) {
+      const block = blocks[i];
+      if (typeof block !== "object" || block === null || Array.isArray(block)) {
+        return yield* new ValidationError({
+          message: `rich_text block at index ${i} must be an object`,
+          field: fieldApiKey,
+        });
+      }
+      if (typeof block.block_type !== "string" || block.block_type.length === 0) {
+        return yield* new ValidationError({
+          message: `rich_text block at index ${i} must have a block_type property`,
+          field: fieldApiKey,
+        });
+      }
+      if (allowedBlockTypes.length > 0 && !allowedBlockTypes.includes(block.block_type)) {
+        return yield* new ValidationError({
+          message: `Block type '${block.block_type}' is not allowed in rich_text field '${fieldApiKey}'. Allowed: ${allowedBlockTypes.join(", ")}`,
+          field: fieldApiKey,
+        });
+      }
+
+      const blockId = typeof block.id === "string" && block.id.length > 0
+        ? block.id
+        : crypto.randomUUID();
+
+      if (seenBlockIds.has(blockId)) {
+        return yield* new ValidationError({
+          message: `Duplicate block id '${blockId}' in rich_text field '${fieldApiKey}'`,
+          field: fieldApiKey,
+        });
+      }
+      seenBlockIds.add(blockId);
+      blockIds.push(blockId);
+
+      const blockModel = yield* getBlockModelSchema(sql, block.block_type);
+      const row: DynamicRow = {
+        id: blockId,
+        _root_record_id: params.rootRecordId,
+        _root_field_api_key: rootFieldApiKey,
+        _parent_container_model_api_key: params.rootModelApiKey,
+        _parent_block_id: null,
+        _parent_field_api_key: params.fieldApiKey,
+        _depth: 0,
+      };
+
+      for (const field of blockModel.fields) {
+        const value = block[field.api_key];
+        if (value === undefined) continue;
+        if (value === null) {
+          row[field.api_key] = null;
+          continue;
+        }
+
+        // Handle nested structured_text inside blocks
+        if (field.field_type === "structured_text") {
+          const nestedInput = yield* decodeStructuredTextInput(field.api_key, value);
+          const nestedCompiled = yield* compileStructuredText(
+            {
+              sql,
+              rootRecordId: params.rootRecordId,
+              rootFieldApiKey,
+              rootModelApiKey: params.rootModelApiKey,
+              seenBlockIds,
+            },
+            {
+              parentContainerModelApiKey: blockModel.apiKey,
+              parentBlockId: blockId,
+              parentFieldApiKey: field.api_key,
+              depth: 1,
+            },
+            {
+              fieldApiKey: field.api_key,
+              input: nestedInput,
+              allowedBlockTypes: getBlockWhitelist(field.validators) ?? [],
+              blocksOnly: getBlocksOnly(field.validators),
+            }
+          );
+          row[field.api_key] = nestedCompiled.dast;
+          mergeRowMaps(rowsByTable, nestedCompiled.rowsByTable);
+          continue;
+        }
+
+        // Handle nested rich_text inside blocks
+        if (field.field_type === "rich_text") {
+          if (!Array.isArray(value)) {
+            return yield* new ValidationError({
+              message: `Nested rich_text field '${field.api_key}' must be an array of block objects`,
+              field: field.api_key,
+            });
+          }
+          const nestedResult = yield* writeRichTextBlocks({
+            sql,
+            rootRecordId: params.rootRecordId,
+            rootFieldApiKey,
+            rootModelApiKey: params.rootModelApiKey,
+            seenBlockIds,
+            parentContainerModelApiKey: blockModel.apiKey,
+            parentBlockId: blockId,
+            parentFieldApiKey: field.api_key,
+            depth: 1,
+            fieldApiKey: field.api_key,
+            blocks: value as RichTextWriteBlock[],
+            allowedBlockTypes: getRichTextBlockWhitelist(field.validators) ?? [],
+          });
+          row[field.api_key] = nestedResult.blockIds;
+          mergeRowMaps(rowsByTable, nestedResult.rowsByTable);
+          continue;
+        }
+
+        if (isFieldType(field.field_type)) {
+          const fieldDef = getFieldTypeDef(field.field_type);
+          if (fieldDef.inputSchema) {
+            yield* Schema.decodeUnknown(fieldDef.inputSchema)(value).pipe(
+              Effect.mapError((e) => new ValidationError({
+                message: `Invalid ${field.field_type} for block field '${field.api_key}': ${e.message}`,
+                field: field.api_key,
+              }))
+            );
+          }
+        }
+
+        row[field.api_key] = value;
+      }
+
+      const tableName = `block_${blockModel.apiKey}`;
+      const rows = rowsByTable.get(tableName);
+      if (rows) rows.push(row);
+      else rowsByTable.set(tableName, [row]);
+    }
+
+    yield* insertCompiledRows(sql, rowsByTable);
+    return blockIds;
+  });
+}
+
+/** Internal recursive helper for nested rich_text inside blocks */
+function writeRichTextBlocks(params: {
+  sql: SqlClient.SqlClient;
+  rootRecordId: string;
+  rootFieldApiKey: string;
+  rootModelApiKey: string;
+  seenBlockIds: Set<string>;
+  parentContainerModelApiKey: string;
+  parentBlockId: string | null;
+  parentFieldApiKey: string;
+  depth: number;
+  fieldApiKey: string;
+  blocks: RichTextWriteBlock[];
+  allowedBlockTypes: string[];
+}): Effect.Effect<{ blockIds: string[]; rowsByTable: Map<string, DynamicRow[]> }, ValidationError | import("@effect/sql").SqlError.SqlError> {
+  return Effect.gen(function* () {
+    const { sql, fieldApiKey, blocks, allowedBlockTypes, seenBlockIds } = params;
+    const rowsByTable = new Map<string, DynamicRow[]>();
+    const blockIds: string[] = [];
+
+    for (let i = 0; i < blocks.length; i++) {
+      const block = blocks[i];
+      if (typeof block !== "object" || block === null || Array.isArray(block)) {
+        return yield* new ValidationError({
+          message: `rich_text block at index ${i} must be an object`,
+          field: fieldApiKey,
+        });
+      }
+      if (typeof block.block_type !== "string" || block.block_type.length === 0) {
+        return yield* new ValidationError({
+          message: `rich_text block at index ${i} must have a block_type property`,
+          field: fieldApiKey,
+        });
+      }
+      if (allowedBlockTypes.length > 0 && !allowedBlockTypes.includes(block.block_type)) {
+        return yield* new ValidationError({
+          message: `Block type '${block.block_type}' is not allowed in rich_text field '${fieldApiKey}'. Allowed: ${allowedBlockTypes.join(", ")}`,
+          field: fieldApiKey,
+        });
+      }
+
+      const blockId = typeof block.id === "string" && block.id.length > 0
+        ? block.id
+        : crypto.randomUUID();
+
+      if (seenBlockIds.has(blockId)) {
+        return yield* new ValidationError({
+          message: `Duplicate block id '${blockId}' in rich_text field '${fieldApiKey}'`,
+          field: fieldApiKey,
+        });
+      }
+      seenBlockIds.add(blockId);
+      blockIds.push(blockId);
+
+      const blockModel = yield* getBlockModelSchema(sql, block.block_type);
+      const row: DynamicRow = {
+        id: blockId,
+        _root_record_id: params.rootRecordId,
+        _root_field_api_key: params.rootFieldApiKey,
+        _parent_container_model_api_key: params.parentContainerModelApiKey,
+        _parent_block_id: params.parentBlockId,
+        _parent_field_api_key: params.parentFieldApiKey,
+        _depth: params.depth,
+      };
+
+      for (const field of blockModel.fields) {
+        const value = block[field.api_key];
+        if (value === undefined) continue;
+        if (value === null) {
+          row[field.api_key] = null;
+          continue;
+        }
+
+        if (field.field_type === "structured_text") {
+          const nestedInput = yield* decodeStructuredTextInput(field.api_key, value);
+          const nestedCompiled = yield* compileStructuredText(
+            {
+              sql,
+              rootRecordId: params.rootRecordId,
+              rootFieldApiKey: params.rootFieldApiKey,
+              rootModelApiKey: params.rootModelApiKey,
+              seenBlockIds,
+            },
+            {
+              parentContainerModelApiKey: blockModel.apiKey,
+              parentBlockId: blockId,
+              parentFieldApiKey: field.api_key,
+              depth: params.depth + 1,
+            },
+            {
+              fieldApiKey: field.api_key,
+              input: nestedInput,
+              allowedBlockTypes: getBlockWhitelist(field.validators) ?? [],
+              blocksOnly: getBlocksOnly(field.validators),
+            }
+          );
+          row[field.api_key] = nestedCompiled.dast;
+          mergeRowMaps(rowsByTable, nestedCompiled.rowsByTable);
+          continue;
+        }
+
+        if (field.field_type === "rich_text") {
+          if (!Array.isArray(value)) {
+            return yield* new ValidationError({
+              message: `Nested rich_text field '${field.api_key}' must be an array of block objects`,
+              field: field.api_key,
+            });
+          }
+          const nestedResult = yield* writeRichTextBlocks({
+            ...params,
+            parentContainerModelApiKey: blockModel.apiKey,
+            parentBlockId: blockId,
+            parentFieldApiKey: field.api_key,
+            depth: params.depth + 1,
+            fieldApiKey: field.api_key,
+            blocks: value as RichTextWriteBlock[],
+            allowedBlockTypes: getRichTextBlockWhitelist(field.validators) ?? [],
+          });
+          row[field.api_key] = nestedResult.blockIds;
+          mergeRowMaps(rowsByTable, nestedResult.rowsByTable);
+          continue;
+        }
+
+        if (isFieldType(field.field_type)) {
+          const fieldDef = getFieldTypeDef(field.field_type);
+          if (fieldDef.inputSchema) {
+            yield* Schema.decodeUnknown(fieldDef.inputSchema)(value).pipe(
+              Effect.mapError((e) => new ValidationError({
+                message: `Invalid ${field.field_type} for block field '${field.api_key}': ${e.message}`,
+                field: field.api_key,
+              }))
+            );
+          }
+        }
+
+        row[field.api_key] = value;
+      }
+
+      const tableName = `block_${blockModel.apiKey}`;
+      const rows = rowsByTable.get(tableName);
+      if (rows) rows.push(row);
+      else rowsByTable.set(tableName, [row]);
+    }
+
+    return { blockIds, rowsByTable };
+  });
+}
+
+/**
+ * Materialize a rich_text field value from stored block IDs + block tables.
+ * Returns an array of block objects [{_type, id, ...fields}, ...] in order.
+ */
+export function materializeRichTextValue(params: {
+  allowedBlockApiKeys?: readonly string[];
+  parentContainerModelApiKey: string;
+  parentBlockId: string | null;
+  parentFieldApiKey: string;
+  rootRecordId: string;
+  rootFieldApiKey: string;
+  rawValue: unknown;
+  materializeContext?: MaterializeContext;
+}): Effect.Effect<DynamicRow[] | null, unknown, SqlClient.SqlClient> {
+  return Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const parsed = decodeJsonIfString(params.rawValue);
+    if (!Array.isArray(parsed) || parsed.length === 0) return parsed === null ? null : [];
+
+    const blockIds = parsed.filter((id): id is string => typeof id === "string");
+    if (blockIds.length === 0) return [];
+
+    const materializeContext = params.materializeContext ?? {
+      blockModelSchemas: new Map<string, BlockModelSchema>(),
+      candidateBlockModels: new Map<string, ReadonlyArray<{ api_key: string }>>(),
+    };
+
+    const blockModels = yield* fetchBlockModelsCached(materializeContext, sql);
+    const candidateBlockModels = getCandidateBlockModelsCached(
+      materializeContext,
+      blockModels,
+      params.allowedBlockApiKeys ? [...params.allowedBlockApiKeys] : undefined
+    );
+
+    const blockModelSchemas = yield* Effect.all(
+      candidateBlockModels.map((model) => getBlockModelSchemaCached(materializeContext, sql, model.api_key)),
+      { concurrency: "unbounded" },
+    );
+
+    const blockIdSet = new Set(blockIds);
+    const blockModelByApiKey = new Map(blockModelSchemas.map((model) => [model.apiKey, model] as const));
+    const blockById = new Map<string, DynamicRow>();
+
+    // Fetch block rows
+    const rowGroups = yield* runHotBlockQueries<DynamicRow>(buildMaterializeQueries({
+      blockModels: blockModelSchemas,
+      rootRecordIds: [params.rootRecordId],
+      rootFieldApiKey: params.rootFieldApiKey,
+      parentContainerModelApiKey: params.parentContainerModelApiKey,
+      parentFieldApiKey: params.parentFieldApiKey,
+      parentBlockIds: params.parentBlockId ? [params.parentBlockId] : [],
+      blockIds,
+    }));
+
+    const nestedStRequests: MaterializeStructuredTextRequest[] = [];
+    const nestedStAssignments: Array<{ requestKey: string; target: DynamicRow; fieldApiKey: string }> = [];
+    const nestedRtAssignments: Array<{ target: DynamicRow; fieldApiKey: string; params: typeof params }> = [];
+
+    for (const rows of rowGroups) {
+      for (const row of rows) {
+        const rowId = String(row.id);
+        if (!blockIdSet.has(rowId)) continue;
+
+        const blockApiKey = typeof row.__block_api_key === "string" ? row.__block_api_key : null;
+        if (!blockApiKey) continue;
+        const blockModel = blockModelByApiKey.get(blockApiKey);
+        if (!blockModel) continue;
+
+        const rawPayload = decodeJsonIfString(row.__payload);
+        if (typeof rawPayload !== "object" || rawPayload === null || Array.isArray(rawPayload)) continue;
+
+        const payload: DynamicRow = { _type: blockApiKey, id: rowId };
+        for (const field of blockModel.fields) {
+          const rawValue = deserializeValue(Reflect.get(rawPayload, field.api_key));
+          if (rawValue === undefined) continue;
+
+          if (field.field_type === "structured_text" && rawValue !== null) {
+            const requestKey = `rt_nested_st:${nestedStAssignments.length}`;
+            nestedStRequests.push({
+              requestKey,
+              materializeContext,
+              allowedBlockApiKeys: blockModel.structuredTextAllowedBlockApiKeysByField.get(field.api_key) ?? [],
+              parentContainerModelApiKey: blockApiKey,
+              parentBlockId: rowId,
+              parentFieldApiKey: field.api_key,
+              rootRecordId: params.rootRecordId,
+              rootFieldApiKey: params.rootFieldApiKey,
+              rawValue,
+            });
+            nestedStAssignments.push({ requestKey, target: payload, fieldApiKey: field.api_key });
+            continue;
+          }
+
+          if (field.field_type === "rich_text" && rawValue !== null) {
+            nestedRtAssignments.push({
+              target: payload,
+              fieldApiKey: field.api_key,
+              params: {
+                allowedBlockApiKeys: getRichTextBlockWhitelist(field.validators) ?? [],
+                parentContainerModelApiKey: blockApiKey,
+                parentBlockId: rowId,
+                parentFieldApiKey: field.api_key,
+                rootRecordId: params.rootRecordId,
+                rootFieldApiKey: params.rootFieldApiKey,
+                rawValue,
+                materializeContext,
+              },
+            });
+            continue;
+          }
+
+          payload[field.api_key] = rawValue;
+        }
+
+        blockById.set(rowId, payload);
+      }
+    }
+
+    // Resolve nested structured_text
+    if (nestedStRequests.length > 0) {
+      const nestedResults = yield* materializeStructuredTextValues({
+        materializeContext,
+        requests: nestedStRequests,
+      });
+      for (const assignment of nestedStAssignments) {
+        assignment.target[assignment.fieldApiKey] = nestedResults.get(assignment.requestKey) ?? null;
+      }
+    }
+
+    // Resolve nested rich_text (recursive)
+    for (const assignment of nestedRtAssignments) {
+      const result = yield* materializeRichTextValue(assignment.params);
+      assignment.target[assignment.fieldApiKey] = result;
+    }
+
+    // Return blocks in original order
+    return blockIds.map((id) => blockById.get(id)).filter((b): b is DynamicRow => b != null);
+  });
+}
+
+/**
+ * Materialize all rich_text fields on a record (used by MCP get_record).
+ */
+export function materializeRecordRichTextFields(params: {
+  modelApiKey: string;
+  record: DynamicRow;
+  fields: ParsedFieldRow[];
+}): Effect.Effect<DynamicRow, unknown, SqlClient.SqlClient> {
+  return Effect.gen(function* () {
+    const materialized: DynamicRow = { ...params.record };
+    const materializeContext: MaterializeContext = {
+      blockModelSchemas: new Map<string, BlockModelSchema>(),
+      candidateBlockModels: new Map<string, ReadonlyArray<{ api_key: string }>>(),
+    };
+    for (const field of params.fields) {
+      if (field.field_type !== "rich_text") continue;
+      const rawValue = params.record[field.api_key];
+      if (rawValue === null || rawValue === undefined) continue;
+
+      if (field.localized) {
+        const localeMap = decodeJsonIfString(rawValue);
+        if (typeof localeMap !== "object" || localeMap === null || Array.isArray(localeMap)) continue;
+        const localized: Record<string, unknown> = {};
+        for (const [localeCode, localeValue] of Object.entries(localeMap as Record<string, unknown>)) {
+          if (localeValue === null || localeValue === undefined) {
+            localized[localeCode] = localeValue;
+            continue;
+          }
+          const blocks = yield* materializeRichTextValue({
+            allowedBlockApiKeys: getRichTextBlockWhitelist(field.validators) ?? [],
+            parentContainerModelApiKey: params.modelApiKey,
+            materializeContext,
+            parentBlockId: null,
+            parentFieldApiKey: field.api_key,
+            rootRecordId: String(params.record.id),
+            rootFieldApiKey: getStructuredTextStorageKey(field.api_key, localeCode),
+            rawValue: localeValue,
+          });
+          localized[localeCode] = blocks;
+        }
+        materialized[field.api_key] = localized;
+        continue;
+      }
+
+      const blocks = yield* materializeRichTextValue({
+        allowedBlockApiKeys: getRichTextBlockWhitelist(field.validators) ?? [],
+        parentContainerModelApiKey: params.modelApiKey,
+        materializeContext,
+        parentBlockId: null,
+        parentFieldApiKey: field.api_key,
+        rootRecordId: String(params.record.id),
+        rootFieldApiKey: field.api_key,
+        rawValue,
+      });
+      materialized[field.api_key] = blocks;
     }
     return materialized;
   });

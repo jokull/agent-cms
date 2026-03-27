@@ -317,6 +317,7 @@ Key validators by field type:
 - link: {"item_item_type": ["model_api_key"]} — target model
 - links: {"items_item_type": ["model_api_key"]} — target model
 - structured_text: {"structured_text_blocks": ["block_api_key"]} — allowed block types
+- rich_text: {"rich_text_blocks": ["block_api_key"]} — modular content (ordered array of blocks, no prose)
 - any field: {"required": true} — field is required (provide default_value for existing records)`, {
   modelId: Schema.String,
   ...CreateFieldInput.fields,
@@ -345,6 +346,9 @@ Field value formats:
   - Record links: [link text](itemLink:RECORD_ID)
   When using {markdown, blocks}, the blocks array/map provides block data and sentinels place them in the document.
   Those block field values are persisted by the same create_record/update_record call — you do not need a follow-up patch_blocks call just to save the initial block payload.
+- rich_text: array of block objects [{block_type:"hero_section",headline:"Welcome"},{block_type:"cta_block",label:"Sign Up"}]
+  Each object must have a block_type key matching an allowed block model api_key.
+  Unlike structured_text, rich_text is blocks-only (no prose, no DAST). Use for page-builder / modular content.
 - color: {"red":255,"green":0,"blue":0,"alpha":255}
 - lat_lon: {"latitude":64.13,"longitude":-21.89}`, CreateRecordInput.fields);
 const UpdateRecordTool = cmsTool("update_record", `Update record fields. For singletons, recordId can be omitted — the single record is found automatically.
@@ -684,6 +688,7 @@ Follow these steps:
    - Which fields need slug (add after the source field with slug_source validator)?
    - Which fields reference other models (link/links with item_item_type validator)?
    - Which fields need structured_text (with structured_text_blocks validator for allowed blocks)?
+   - Which fields need rich_text for modular/page-builder content (with rich_text_blocks validator)?
 3. Present your plan before executing — list models, fields, and relationships.
 4. Create models first, then fields in order (slug fields after their source).
 5. Create a few sample records to verify the schema works.

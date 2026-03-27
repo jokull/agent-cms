@@ -18,6 +18,7 @@ export const FIELD_TYPES = [
   "color",
   "lat_lon",
   "video",
+  "rich_text",
 ] as const;
 
 export type FieldType = (typeof FIELD_TYPES)[number];

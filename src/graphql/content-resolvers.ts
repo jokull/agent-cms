@@ -10,7 +10,8 @@ import { toTypeName, toCamelCase, fieldToSDL, getRegistryDef, deserializeRecord,
 import { resolveStructuredTextValue } from "./structured-text-resolver.js";
 import { loadLinkedRecords } from "./linked-record-loader.js";
 import { loadStructuredTextEnvelope } from "./structured-text-loader.js";
-import { getBlockWhitelist } from "../db/validators.js";
+import { getBlockWhitelist, getRichTextBlockWhitelist } from "../db/validators.js";
+import { materializeRichTextValue } from "../services/structured-text-service.js";
 import { decodeJsonIfString, decodeJsonStringOr } from "../json.js";
 import { mergeAssetWithMediaReference, parseMediaFieldReference, parseMediaGalleryReferences } from "../media-field.js";
 
@@ -71,7 +72,7 @@ export function buildContentModelResolvers(
   structuredTextFieldTypes: Map<string, string>
 ): ModelQueryMeta[] {
   const {
-    models, blockModels, fieldsByModelId, typeNames,
+    models, blockModels, fieldsByModelId, typeNames, blockTypeNames,
     resolvers, typeDefs, runSql, assetUrl, defaultLocale,
   } = ctx;
 
@@ -531,6 +532,37 @@ export function buildContentModelResolvers(
             linkedRecordCache: context.linkedRecordCache,
             context,
           });
+        };
+      }
+      // RichText resolver: return array of block objects
+      if (f.field_type === "rich_text") {
+        typeResolvers[gqlName] = async (parent: DynamicRow, _args: unknown, context: GqlContext) => {
+          const localized = f.localized
+            ? pickLocalizedEntry(parent[f.api_key], context, defaultLocale)
+            : { locale: null, value: parent[f.api_key] };
+          const raw = localized.value;
+          if (!raw) return [];
+          const resolvedLocale = f.localized ? localized.locale : null;
+          const rootFieldApiKey = f.localized
+            ? `${f.api_key}:${resolvedLocale ?? defaultLocale ?? ""}`.replace(/:$/, "")
+            : f.api_key;
+          const blocks = await runSql(
+            materializeRichTextValue({
+              allowedBlockApiKeys: getRichTextBlockWhitelist(f.validators) ?? [],
+              parentContainerModelApiKey: model.api_key,
+              parentBlockId: null,
+              parentFieldApiKey: f.api_key,
+              rootRecordId: String(parent.id),
+              rootFieldApiKey,
+              rawValue: raw,
+            })
+          );
+          if (!blocks) return [];
+          return blocks.map((block) => ({
+            ...block,
+            __typename: block._type ? (typeNames.get(block._type as string) ?? blockTypeNames.get(block._type as string) ?? block._type) : undefined,
+            _modelApiKey: block._type,
+          }));
         };
       }
     }

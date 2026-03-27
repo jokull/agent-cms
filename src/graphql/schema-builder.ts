@@ -127,7 +127,7 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
 
     typeDefs.push(BASE_TYPE_DEFS);
     if (locales.length > 0) {
-      typeDefs.push(`enum SiteLocale { ${locales.map((locale) => locale.code).join(" ")} }`);
+      typeDefs.push(`enum SiteLocale { ${locales.map((locale) => locale.code.replace(/-/g, "_")).join(" ")} }`);
     } else {
       typeDefs.push("scalar SiteLocale");
     }

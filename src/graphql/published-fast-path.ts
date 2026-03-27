@@ -265,6 +265,7 @@ function isSimpleScalarField(field: ParsedFieldRow): boolean {
     "link",
     "links",
     "structured_text",
+    "rich_text",
     "seo",
     "media",
     "media_gallery",
@@ -480,6 +481,7 @@ function pickLocalizedFastPathValue(
 function isSupportedPublishedFilterField(field: ParsedFieldRow): boolean {
   return !field.localized && ![
     "structured_text",
+    "rich_text",
     "seo",
     "video",
     "color",

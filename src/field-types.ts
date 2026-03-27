@@ -283,6 +283,16 @@ export const FIELD_TYPE_REGISTRY: Record<FieldType, FieldTypeDefinition> = {
     jsonStored: false,
     hasCustomResolver: true,
   },
+  rich_text: {
+    sqliteType: "TEXT",
+    graphqlType: null, // depends on validators (block whitelist) — resolved per-field like link/links
+    filterType: "ExistsFilter",
+    localizable: false,
+    multiLocaleType: "JsonMultiLocaleField",
+    inputSchema: null,
+    jsonStored: true,
+    hasCustomResolver: true,
+  },
 };
 
 /** Get the registry definition for a field type */
