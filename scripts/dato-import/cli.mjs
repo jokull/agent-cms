@@ -22,9 +22,12 @@ const cmsWriteKeyOption = Options.text("cms-write-key").pipe(
   Options.withDescription("agent-cms write key. Falls back to CMS_WRITE_KEY."),
   Options.withDefault(process.env.CMS_WRITE_KEY ?? ""),
 );
-const modelOption = Options.text("model").pipe(Options.withDescription("Root content model to import."));
+const modelOption = Options.text("model").pipe(
+  Options.withDescription("Root content model to import. Optional with --from-export to import all exported models."),
+  Options.withDefault(""),
+);
 const limitOption = Options.integer("limit").pipe(
-  Options.withDescription("Root record count. The importer expands dependencies beyond this."),
+  Options.withDescription("Root record count. The importer expands dependencies beyond this. Ignored for whole-export imports without --model."),
   Options.withDefault(5),
 );
 const skipOption = Options.integer("skip").pipe(
@@ -38,6 +41,26 @@ const localeOption = Options.text("locale").pipe(
 const outDirOption = Options.text("out-dir").pipe(
   Options.withDescription("Directory for findings, summaries, and resumable import output."),
   Options.withDefault(defaultOutDir),
+);
+const exportItemChunkSizeOption = Options.integer("item-chunk-size").pipe(
+  Options.withDescription("Records per exported item chunk file."),
+  Options.withDefault(300),
+);
+const exportUploadChunkSizeOption = Options.integer("upload-chunk-size").pipe(
+  Options.withDescription("Uploads per exported upload chunk file."),
+  Options.withDefault(1000),
+);
+const exportItemConcurrencyOption = Options.integer("item-page-concurrency").pipe(
+  Options.withDescription("Concurrent Dato nested item page requests during export."),
+  Options.withDefault(8),
+);
+const exportUploadConcurrencyOption = Options.integer("upload-page-concurrency").pipe(
+  Options.withDescription("Concurrent Dato upload page requests during export."),
+  Options.withDefault(4),
+);
+const fromExportOption = Options.text("from-export").pipe(
+  Options.withDescription("Path to a Dato export JSON snapshot. When set, import reads local JSON instead of CMA."),
+  Options.withDefault(""),
 );
 
 const inspectCommand = Command.make("inspect", { datoToken: tokenOption }).pipe(
@@ -95,14 +118,53 @@ const bootstrapCommand = Command.make("bootstrap", {
       console.log(`Generated schema: ${schema.models.length} models, ${schema.locales.length} locales`);
 
       // Import into agent-cms via schema_io
-      const cms = createAgentCmsClient({ baseUrl: cmsUrl, writeKey: cmsWriteKey });
-      const response = await cms.json("/api/schema", {
-        method: "POST",
-        body: JSON.stringify(schema),
-      });
+      const cms = createAgentCmsClient({ cmsUrl });
+      const response = await cms.json("POST", "/api/schema", schema);
       console.log(`Schema imported into ${cmsUrl}`);
       console.log(`  Created: ${JSON.stringify(response)}`);
     })),
+);
+
+const exportCommand = Command.make("export", {
+  datoToken: tokenOption,
+  outDir: outDirOption,
+  itemChunkSize: exportItemChunkSizeOption,
+  uploadChunkSize: exportUploadChunkSizeOption,
+  itemPageConcurrency: exportItemConcurrencyOption,
+  uploadPageConcurrency: exportUploadConcurrencyOption,
+}).pipe(
+  Command.withDescription("Export a whole Dato environment to local JSON using paginated nested item reads."),
+  Command.withHandler(({ datoToken, outDir, itemChunkSize, uploadChunkSize, itemPageConcurrency, uploadPageConcurrency }) =>
+    Effect.tryPromise(async () => {
+      if (!datoToken) throw new Error("Missing Dato token. Pass --dato-token or set DATOCMS_API_TOKEN.");
+      const { exportDatoEnvironment } = await import("./core/export-snapshot.mjs");
+      const { outPath, snapshot } = await exportDatoEnvironment({
+        token: datoToken,
+        outDir,
+        itemChunkSize,
+        uploadChunkSize,
+        itemPageConcurrency,
+        uploadPageConcurrency,
+      });
+      console.log("Dato export");
+      console.log(`  records: ${snapshot.counts.records}`);
+      console.log(`  models: ${snapshot.counts.models}`);
+      console.log(`  uploads: ${snapshot.counts.uploads}`);
+      console.log(`Saved ${outPath}`);
+    })),
+);
+
+const skipAssetUploadOption = Options.boolean("skip-asset-upload").pipe(
+  Options.withDescription("Skip R2 asset upload, register metadata only. Useful for dry runs."),
+  Options.withDefault(false),
+);
+const maxDepthOption = Options.integer("max-depth").pipe(
+  Options.withDescription("Max recursion depth for linked record crawling. Default 3."),
+  Options.withDefault(3),
+);
+const skipLinksOption = Options.text("skip-links").pipe(
+  Options.withDescription("Comma-separated field api_keys to skip crawling (e.g. similar_tours,nearby_places). IDs are preserved but targets are not imported."),
+  Options.withDefault(""),
 );
 
 const importCommand = Command.make("import", {
@@ -113,15 +175,23 @@ const importCommand = Command.make("import", {
   limit: limitOption,
   skip: skipOption,
   locale: localeOption,
+  skipAssetUpload: skipAssetUploadOption,
+  maxDepth: maxDepthOption,
+  skipLinks: skipLinksOption,
+  fromExport: fromExportOption,
 }).pipe(
-  Command.withDescription("Import a thin Dato root slice and expand it to a referentially intact local closure."),
-  Command.withHandler(({ cmsUrl, cmsWriteKey, datoToken, model, limit, skip, locale }) => {
-    if (!datoToken) {
+  Command.withDescription("Import either a thin live Dato slice or a whole pre-exported environment snapshot."),
+  Command.withHandler(({ cmsUrl, cmsWriteKey, datoToken, model, limit, skip, locale, skipAssetUpload, maxDepth, skipLinks, fromExport }) => {
+    if (!fromExport && !datoToken) {
       return Effect.fail(new Error("Missing Dato token. Pass --dato-token or set DATOCMS_API_TOKEN."));
     }
+    if (!fromExport && !model) {
+      return Effect.fail(new Error("Missing model. Pass --model for live imports."));
+    }
+    const skipLinksList = skipLinks ? skipLinks.split(",").map((s) => s.trim()).filter(Boolean) : [];
     return Effect.tryPromise(() => import("./core/generic-import.mjs")).pipe(
       Effect.flatMap(({ createImportProgram }) =>
-        createImportProgram({ cmsUrl, cmsWriteKey, datoToken, locale, model, limit, skip }),
+        createImportProgram({ cmsUrl, cmsWriteKey, datoToken, locale, model, limit, skip, skipAssetUpload, maxDepth, skipLinks: skipLinksList, fromExport }),
       ),
     );
   }),
@@ -171,7 +241,7 @@ const reportCommand = Command.make("report", { outDir: outDirOption }).pipe(
 
 const root = Command.make("dato-import").pipe(
   Command.withDescription("Import DatoCMS content into agent-cms. Auto-discovers schema, imports records with assets, links, and structured text."),
-  Command.withSubcommands([inspectCommand, codegenCommand, bootstrapCommand, importCommand, statusCommand, reportCommand]),
+  Command.withSubcommands([inspectCommand, codegenCommand, bootstrapCommand, exportCommand, importCommand, statusCommand, reportCommand]),
 );
 
 const helpText = buildHelp(process.argv.slice(2));
@@ -199,6 +269,7 @@ function buildHelp(args) {
   if (command === "inspect") return inspectHelp();
   if (command === "codegen") return codegenHelp();
   if (command === "bootstrap") return bootstrapHelp();
+  if (command === "export") return exportHelp();
   if (command === "import") return importHelp();
   if (command === "status") return statusHelp();
   if (command === "report") return reportHelp();
@@ -225,7 +296,8 @@ COMMANDS
   inspect      Inspect a Dato project via CMA and write a schema snapshot
   codegen      Auto-generate an agent-cms schema from a DatoCMS project
   bootstrap    Generate schema from Dato and import it into agent-cms
-  import       Import a thin root slice and expand to dependency closure
+  export       Export a whole Dato environment to local JSON
+  import       Import a live slice or a local export snapshot
   status       Show the latest output path for an import run
   report       Summarize the latest findings JSON
 
@@ -268,12 +340,24 @@ USAGE
 `;
 }
 
+function exportHelp() {
+  return `agent-cms dato-import export
+
+USAGE
+
+  npm run dato:import -- export [--dato-token <token>] [--out-dir <path>]
+    [--item-chunk-size <n>] [--upload-chunk-size <n>]
+    [--item-page-concurrency <n>] [--upload-page-concurrency <n>]
+`;
+}
+
 function importHelp() {
   return `agent-cms dato-import import
 
 USAGE
 
   npm run dato:import -- import --model <apiKey> [options]
+  npm run dato:import -- import --from-export <path> [--model <apiKey>] [options]
 `;
 }
 

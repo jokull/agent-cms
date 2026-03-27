@@ -12,7 +12,7 @@ import { join } from "path";
  * Uses ManagedRuntime to ensure the same database connection is shared
  * across all Effect.provide calls.
  */
-export function createTestApp() {
+export function createTestApp(options?: Parameters<typeof createWebHandler>[1]) {
   const tmpDir = mkdtempSync(join(tmpdir(), "agent-cms-test-"));
   const dbPath = join(tmpDir, "test.db");
 
@@ -22,7 +22,7 @@ export function createTestApp() {
   // Run embedded migrations (same as production auto-migration)
   Effect.runSync(ensureSchema().pipe(Effect.provide(sqlLayer)));
 
-  const webHandler = createWebHandler(sqlLayer);
+  const webHandler = createWebHandler(sqlLayer, options);
 
   return { handler: webHandler.fetch, sqlLayer };
 }

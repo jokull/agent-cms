@@ -9,6 +9,7 @@ import { Schema } from "effect";
 import {
   CreateAssetInput,
   CreateUploadUrlInput,
+  ImportAssetFromUrlInput,
   UpdateAssetMetadataInput,
 } from "../../services/input-schemas.js";
 
@@ -31,6 +32,12 @@ export const assetsGroup = HttpApiGroup.make("assets")
     HttpApiEndpoint.post("createAsset", "/assets")
       .annotate(OpenApi.Summary, "Create a new asset")
       .setPayload(CreateAssetInput)
+      .addSuccess(Schema.Unknown, { status: 201 }),
+  )
+  .add(
+    HttpApiEndpoint.post("importAssetFromUrl", "/assets/import-from-url")
+      .annotate(OpenApi.Summary, "Import a remote asset into R2 and register it")
+      .setPayload(ImportAssetFromUrlInput)
       .addSuccess(Schema.Unknown, { status: 201 }),
   )
   .add(

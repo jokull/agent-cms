@@ -21,7 +21,7 @@ export function createDatoClient({
   function requestJson(url, init) {
     return Effect.gen(function* () {
       const response = yield* Effect.tryPromise({
-        try: () => fetch(url, init),
+        try: () => fetch(url, { ...init, signal: AbortSignal.timeout(30_000) }),
         catch: (cause) => new DatoNetworkError({ message: `Dato request failed for ${url}`, cause }),
       }).pipe(Effect.retry({ times: 2 }));
       const body = yield* Effect.tryPromise({
@@ -134,6 +134,43 @@ export function createDatoClient({
     return body.data ?? [];
   }
 
+  async function* listItemsPagedIterator({
+    nested = false,
+    pageLimit = nested ? 30 : 500,
+    ...filters
+  } = {}) {
+    let offset = 0;
+
+    while (true) {
+      const body = await cmaRequest("/items", {
+        ...filters,
+        nested,
+        "page[limit]": pageLimit,
+        "page[offset]": offset,
+      });
+      const page = body.data ?? [];
+
+      for (const item of page) {
+        itemCache.set(item.id, item);
+        yield item;
+      }
+
+      if (page.length < pageLimit) {
+        break;
+      }
+
+      offset += page.length;
+    }
+  }
+
+  async function listAllItems(options = {}) {
+    const items = [];
+    for await (const item of listItemsPagedIterator(options)) {
+      items.push(item);
+    }
+    return items;
+  }
+
   async function getItem(id) {
     if (itemCache.has(id)) return itemCache.get(id);
     const body = await cmaRequest(`/items/${encodeURIComponent(id)}`);
@@ -193,6 +230,37 @@ export function createDatoClient({
     );
   }
 
+  async function* listUploadsPagedIterator({ pageLimit = 500 } = {}) {
+    let offset = 0;
+
+    while (true) {
+      const body = await cmaRequest("/uploads", {
+        "page[limit]": pageLimit,
+        "page[offset]": offset,
+      });
+      const page = body.data ?? [];
+
+      for (const upload of page) {
+        uploadCache.set(upload.id, upload);
+        yield upload;
+      }
+
+      if (page.length < pageLimit) {
+        break;
+      }
+
+      offset += page.length;
+    }
+  }
+
+  async function listAllUploads(options = {}) {
+    const uploads = [];
+    for await (const upload of listUploadsPagedIterator(options)) {
+      uploads.push(upload);
+    }
+    return uploads;
+  }
+
   async function getSite() {
     const body = await cmaRequest("/site");
     return body.data;
@@ -202,12 +270,16 @@ export function createDatoClient({
     query,
     cmaRequest,
     listItemsByType,
+    listItemsPagedIterator,
+    listAllItems,
     getItem,
     getItems,
     getItemTypes,
     getItemTypeApiKey,
     getUpload,
     getUploads,
+    listUploadsPagedIterator,
+    listAllUploads,
     getSite,
   };
 }

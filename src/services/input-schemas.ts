@@ -91,6 +91,8 @@ export const CreateRecordInput = Schema.Struct({
       firstPublishedAt: Schema.optional(Schema.String),
     })
   ),
+  /** Skip link/links reference validation (for bulk import with dangling refs) */
+  skipReferenceValidation: Schema.optional(Schema.Boolean),
 });
 export type CreateRecordInput = typeof CreateRecordInput.Type;
 
@@ -108,6 +110,8 @@ export const PatchRecordInput = Schema.Struct({
       firstPublishedAt: Schema.optional(Schema.String),
     })
   ),
+  /** Skip link/links reference validation (for bulk import with dangling refs) */
+  skipReferenceValidation: Schema.optional(Schema.Boolean),
 });
 export type PatchRecordInput = typeof PatchRecordInput.Type;
 
@@ -136,11 +140,18 @@ export const CreateAssetInput = Schema.Struct({
 export type CreateAssetInput = typeof CreateAssetInput.Type;
 
 export const ImportAssetFromUrlInput = Schema.Struct({
+  id: Schema.optional(Schema.String),
   url: HttpUrlString,
   filename: Schema.optional(Schema.String),
   mimeType: Schema.optional(Schema.String),
   alt: Schema.optional(Schema.String),
   title: Schema.optional(Schema.String),
+  r2Key: Schema.optional(Schema.String),
+  blurhash: Schema.optional(Schema.String),
+  colors: Schema.optional(Schema.Array(Schema.String).pipe(
+    Schema.filter((value) => value.length <= 16, { message: () => "colors must contain at most 16 entries" }),
+  )),
+  focalPoint: Schema.optional(Schema.Struct({ x: UnitIntervalNumber, y: UnitIntervalNumber })),
   tags: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
 });
 export type ImportAssetFromUrlInput = typeof ImportAssetFromUrlInput.Type;

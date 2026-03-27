@@ -120,12 +120,13 @@ export function createAgentCmsClient({ cmsUrl }) {
     return json("POST", `/api/models/${modelId}/fields`, definition);
   }
 
-  async function upsertRecord(modelApiKey, id, data, { publish = true, overrides } = {}) {
+  async function upsertRecord(modelApiKey, id, data, { publish = true, overrides, skipReferenceValidation = true } = {}) {
     const createResult = await request("POST", "/api/records", {
       id,
       modelApiKey,
       data,
       ...(overrides ? { overrides } : {}),
+      ...(skipReferenceValidation ? { skipReferenceValidation: true } : {}),
     });
 
     if (!createResult.ok && createResult.status !== 409) {
@@ -137,6 +138,7 @@ export function createAgentCmsClient({ cmsUrl }) {
         modelApiKey,
         data,
         ...(overrides ? { overrides } : {}),
+        ...(skipReferenceValidation ? { skipReferenceValidation: true } : {}),
       });
       if (!patchResult.ok) {
         throw new Error(`PATCH /api/records/${id} failed (${patchResult.status}): ${JSON.stringify(patchResult.body)}`);
@@ -169,6 +171,10 @@ export function createAgentCmsClient({ cmsUrl }) {
     }
   }
 
+  async function importAssetFromUrl(input) {
+    return json("POST", "/api/assets/import-from-url", input);
+  }
+
   return {
     request,
     requestEffect,
@@ -182,6 +188,7 @@ export function createAgentCmsClient({ cmsUrl }) {
     ensureLocale,
     ensureModel,
     ensureField,
+    importAssetFromUrl,
     upsertRecord,
     publishRecord,
     patchRecordOverrides,

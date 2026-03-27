@@ -6,6 +6,8 @@
  * block types, and link references.
  */
 import { describe, it, expect } from "vitest";
+import { Effect } from "effect";
+import { SqlClient } from "@effect/sql";
 import { createTestApp, jsonRequest, gqlQuery } from "./app-helpers.js";
 import type { SchemaExport } from "../src/services/schema-io.js";
 
@@ -131,6 +133,33 @@ describe("Schema import/export", () => {
     expect(result.data.allPosts).toHaveLength(1);
     expect(result.data.allPosts[0].title).toBe("Hello World");
     expect(result.data.allPosts[0].views).toBe(42);
+  });
+
+  it("schema import leaves content tables with actual field columns", async () => {
+    const { handler: h1 } = createTestApp();
+    const model = await createModel(h1, "Region", "region", { sortable: true });
+    await addField(h1, model.id, "Name", "name", "string", { localized: true });
+    await addField(h1, model.id, "Slug", "slug", "slug");
+    await addField(h1, model.id, "Accent", "accent", "color");
+
+    const exported = await (await h1(new Request("http://localhost/api/schema"))).json();
+
+    const { handler: h2, sqlLayer } = createTestApp();
+    const importRes = await jsonRequest(h2, "POST", "/api/schema", exported);
+    expect(importRes.status).toBe(201);
+
+    const columns = await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        return yield* sql.unsafe<{ name: string }>('PRAGMA table_info("content_region")');
+      }).pipe(Effect.provide(sqlLayer)),
+    );
+
+    const names = columns.map((column) => column.name);
+    expect(names).toContain("name");
+    expect(names).toContain("slug");
+    expect(names).toContain("accent");
+    expect(names).toContain("_position");
   });
 
   it("export on empty CMS returns empty schema", async () => {

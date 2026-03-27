@@ -10,13 +10,13 @@
  *   await Effect.runPromise(createImportProgram({ cmsUrl, datoToken, locale: "en", model: "article", limit: 10, skip: 0 }));
  */
 
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { Data, Effect } from "effect";
 
 import { createAgentCmsClient } from "./agent-cms.mjs";
 import { createDatoClient } from "./datocms.mjs";
-import { createLocalR2Client } from "./local-r2.mjs";
-import { readJson, writeJson } from "./runtime.mjs";
+import { fetchDatoSchemaMetadata } from "./dato-schema-metadata.mjs";
+import { readJson, readJsonFile, writeJson } from "./runtime.mjs";
 
 // ---------------------------------------------------------------------------
 // Dato → agent-cms field type mapping (mirrors schema-codegen.mjs)
@@ -39,7 +39,7 @@ const FIELD_TYPE_MAP = {
   link: "link",
   links: "links",
   structured_text: "structured_text",
-  rich_text: "structured_text",
+  rich_text: "rich_text",
   seo: "seo",
   lat_lon: "lat_lon",
   single_block: "single_block", // tracked but skipped during import
@@ -108,7 +108,9 @@ function mapDatoBlockType(typename) {
  */
 export function createImportProgram({
   cmsUrl,
+  cmsWriteKey,
   datoToken,
+  fromExport = "",
   locale = "en",
   model,
   limit = 20,
@@ -116,11 +118,17 @@ export function createImportProgram({
   outDir: outDirOption,
   r2PersistDir: r2PersistDirOption,
   wranglerConfig: wranglerConfigOption,
+  skipAssetUpload = false,
+  maxDepth = 3,
+  skipLinks = [],
 }) {
   // ---- mutable run state ----
+  let currentDepth = 0;
+  const skipLinksSet = new Set(skipLinks);
   let findings = [];
   let touchedRecords = new Map();    // modelApiKey → Set<id>
   let touchedOverrides = new Map();  // modelApiKey → Map<id, overrides>
+  let publishableRecords = new Map(); // modelApiKey → Set<id> — only records published in Dato
   let completedRootIds = new Set();
   const recordImportPromises = new Map(); // "model:id" → Promise
   const assetImportPromises = new Map();  // uploadId → Promise
@@ -132,25 +140,23 @@ export function createImportProgram({
 
   // ---- runtime configuration ----
   const IMPORT_LOCALE = locale;
-  const OUT_DIR = outDirOption ?? resolve(process.cwd(), `scripts/dato-import/out/generic-${model}`);
-  const DEFAULT_CMS_DIR = resolve(process.cwd(), "examples/trip-migration/cms");
-  const R2_PERSIST_DIR = r2PersistDirOption ?? process.env.R2_PERSIST_DIR ?? resolve(DEFAULT_CMS_DIR, ".wrangler/state-v3");
-  const WRANGLER_CONFIG = wranglerConfigOption ?? process.env.WRANGLER_CONFIG ?? resolve(DEFAULT_CMS_DIR, "wrangler.jsonc");
-
+  const IMPORT_SCOPE = model || "all";
+  const OUT_DIR = outDirOption ?? resolve(process.cwd(), `scripts/dato-import/out/generic-${IMPORT_SCOPE}`);
   // ---- clients ----
-  const datoClient = createDatoClient({ token: datoToken });
+  const datoClient = fromExport ? null : createDatoClient({ token: datoToken });
   const cms = createAgentCmsClient({ cmsUrl });
-  const localR2 = createLocalR2Client({
-    persistDir: R2_PERSIST_DIR,
-    wranglerConfigPath: WRANGLER_CONFIG,
-    bucketBindingName: "ASSETS",
-  });
-
   // ---- schema cache (populated in setup phase) ----
   // fieldMap: modelApiKey → [{ api_key, field_type, localized, validators }]
   let fieldMap = new Map();
   // itemTypeIdToApiKey: dato item-type id → api_key
   let itemTypeIdToApiKey = new Map();
+  let sourceSnapshot = null;
+  let sourceItemsById = new Map();
+  let sourceItemsByModel = new Map();
+  let sourceUploadsById = new Map();
+  let sourceModelOrder = [];
+  let sourceRecordIndex = new Map();
+  let sourceChunkCache = new Map();
 
   // =========================================================================
   // Findings
@@ -165,7 +171,7 @@ export function createImportProgram({
   // =========================================================================
 
   function checkpointFilename() {
-    return `checkpoint-generic-${model}-${skip}-${limit}-${IMPORT_LOCALE}.json`;
+    return `checkpoint-generic-${IMPORT_SCOPE}-${skip}-${limit}-${IMPORT_LOCALE}.json`;
   }
 
   function serializeTouchedRecords() {
@@ -184,7 +190,7 @@ export function createImportProgram({
     return {
       version: 1,
       adapter: "generic",
-      model,
+      model: IMPORT_SCOPE,
       skip,
       limit,
       locale: IMPORT_LOCALE,
@@ -221,9 +227,135 @@ export function createImportProgram({
 
   function writeFindingsEffect() {
     return promiseEffect(
-      () => writeJson(OUT_DIR, `findings-generic-${model}-${skip}-${limit}.json`, findings),
+      () => writeJson(OUT_DIR, `findings-generic-${IMPORT_SCOPE}-${skip}-${limit}.json`, findings),
       "write findings",
     );
+  }
+
+  function isInlineItem(value) {
+    return value != null && typeof value === "object" && !Array.isArray(value) && typeof value.id === "string";
+  }
+
+  function getItemId(value) {
+    if (typeof value === "string") return value;
+    if (isInlineItem(value)) return value.id;
+    return null;
+  }
+
+  function collectInlineBlockItems(node, items = []) {
+    if (!node || typeof node !== "object") return items;
+    if (Array.isArray(node)) {
+      for (const entry of node) collectInlineBlockItems(entry, items);
+      return items;
+    }
+    if ((node.type === "block" || node.type === "inlineBlock") && isInlineItem(node.item)) {
+      items.push(node.item);
+    }
+    for (const [key, value] of Object.entries(node)) {
+      if (key === "item") continue;
+      collectInlineBlockItems(value, items);
+    }
+    return items;
+  }
+
+  function resolveRecordModelApiKey(item) {
+    const itemTypeId = item?.relationships?.item_type?.data?.id;
+    return itemTypeId ? (itemTypeIdToApiKey.get(itemTypeId) ?? null) : null;
+  }
+
+  function loadSnapshot(snapshot) {
+    sourceSnapshot = snapshot;
+    fieldMap = new Map(Object.entries(snapshot.fieldMap ?? {}));
+    itemTypeIdToApiKey = new Map((snapshot.itemTypes ?? []).map((itemType) => [itemType.id, itemType.apiKey]));
+    sourceModelOrder = Array.isArray(snapshot.schema?.models)
+      ? snapshot.schema.models.filter((entry) => !entry.isBlock).map((entry) => entry.apiKey)
+      : Array.isArray(snapshot.models)
+        ? snapshot.models.map((entry) => entry.apiKey)
+        : Object.keys(snapshot.itemsByModel ?? {});
+    sourceItemsByModel = new Map();
+    sourceItemsById = new Map();
+    sourceRecordIndex = new Map();
+    sourceChunkCache = new Map();
+
+    if (snapshot.format === "chunked") {
+      for (const modelEntry of Array.isArray(snapshot.models) ? snapshot.models : []) {
+        sourceItemsByModel.set(modelEntry.apiKey, modelEntry.chunks ?? []);
+      }
+      for (const [recordId, location] of Object.entries(snapshot.recordIndex ?? {})) {
+        sourceRecordIndex.set(recordId, location);
+      }
+    } else {
+      for (const [modelApiKey, items] of Object.entries(snapshot.itemsByModel ?? {})) {
+        const normalizedItems = Array.isArray(items) ? items : [];
+        sourceItemsByModel.set(modelApiKey, normalizedItems);
+        for (const item of normalizedItems) {
+          if (item?.id) sourceItemsById.set(item.id, item);
+        }
+      }
+    }
+
+    const uploadList = Array.isArray(snapshot.uploads) ? snapshot.uploads : [];
+    sourceUploadsById = new Map(
+      uploadList.filter((upload) => upload?.id).map((upload) => [upload.id, upload]),
+    );
+  }
+
+  async function loadSnapshotIfNeeded() {
+    if (!fromExport) return;
+    if (sourceSnapshot) return;
+    const snapshot = await readJsonFile(fromExport);
+    if (!snapshot?.value) {
+      throw new Error(`Export snapshot not found: ${fromExport}`);
+    }
+    const loaded = snapshot.value;
+    if (loaded?.format === "chunked") {
+      const snapshotDir = dirname(snapshot.path);
+      const recordIndex = await readJsonFile(resolve(snapshotDir, loaded.recordIndexPath));
+      const uploads = [];
+      for (const uploadChunkPath of loaded.uploads?.chunks ?? []) {
+        const chunk = await readJsonFile(resolve(snapshotDir, uploadChunkPath));
+        uploads.push(...(Array.isArray(chunk?.value) ? chunk.value : []));
+      }
+      loadSnapshot({
+        ...loaded,
+        recordIndex: recordIndex?.value ?? {},
+        uploads,
+        _snapshotDir: snapshotDir,
+      });
+      return;
+    }
+    loadSnapshot(loaded);
+  }
+
+  async function readSourceChunk(chunkPath) {
+    const snapshotDir = sourceSnapshot?._snapshotDir ?? dirname(fromExport);
+    const absolutePath = resolve(snapshotDir, chunkPath);
+    if (sourceChunkCache.has(absolutePath)) {
+      return sourceChunkCache.get(absolutePath);
+    }
+    const chunk = await readJsonFile(absolutePath);
+    const items = Array.isArray(chunk?.value) ? chunk.value : [];
+    sourceChunkCache.set(absolutePath, items);
+    for (const item of items) {
+      if (item?.id) sourceItemsById.set(item.id, item);
+    }
+    return items;
+  }
+
+  async function loadModelItemsFromExport(modelApiKey) {
+    const stored = sourceItemsByModel.get(modelApiKey) ?? [];
+    if (!sourceSnapshot || sourceSnapshot.format !== "chunked") {
+      return stored;
+    }
+    if (stored.length === 0 || typeof stored[0] !== "string") {
+      return stored;
+    }
+    const items = [];
+    for (const chunkPath of stored) {
+      items.push(...await readSourceChunk(chunkPath));
+    }
+    sourceItemsByModel.set(modelApiKey, items);
+    return items;
   }
 
   // =========================================================================
@@ -262,9 +394,18 @@ export function createImportProgram({
   // Single-flight dedup
   // =========================================================================
 
+  const inFlightKeys = new Set();
+
   function singleFlight(cache, key, asyncFn) {
     if (cache.has(key)) return cache.get(key);
-    const promise = asyncFn().finally(() => cache.delete(key));
+    // Break circular references: if this key is already being imported
+    // up the call stack, return immediately to prevent deadlock.
+    if (inFlightKeys.has(key)) return Promise.resolve(null);
+    inFlightKeys.add(key);
+    const promise = asyncFn().finally(() => {
+      cache.delete(key);
+      inFlightKeys.delete(key);
+    });
     cache.set(key, promise);
     return promise;
   }
@@ -285,7 +426,9 @@ export function createImportProgram({
 
   async function ensureAsset(asset) {
     if (!asset?.id) return null;
-    const upload = await datoClient.getUpload(asset.id).catch(() => null);
+    const upload = fromExport
+      ? (sourceUploadsById.get(asset.id) ?? null)
+      : await datoClient.getUpload(asset.id).catch(() => null);
     const uploadMeta =
       upload?.attributes?.default_field_metadata?.[denormalizeCmsLocale(IMPORT_LOCALE)] ??
       upload?.attributes?.default_field_metadata?.en ??
@@ -307,44 +450,65 @@ export function createImportProgram({
       r2Key: `dato/${upload?.id ?? asset.id}/${upload?.attributes?.filename ?? asset.filename ?? "asset.bin"}`,
     };
 
-    let uploaded = false;
-    let reusedExisting = false;
-    let uploadError = null;
     const sourceUrl = upload?.attributes?.url ?? asset.url ?? null;
-    const existingObject = await localR2.headObject(metadata.r2Key).catch(() => null);
-    const expectedSize = typeof metadata.size === "number" ? metadata.size : null;
+    let uploaded = false;
+    let uploadError = null;
+    let reusedExisting = false;
 
-    if (existingObject && expectedSize != null && existingObject.size === expectedSize) {
-      reusedExisting = true;
+    if (skipAssetUpload || typeof sourceUrl !== "string" || sourceUrl.length === 0) {
+      const result = await cms.request("POST", "/api/assets", metadata);
+      const duplicateAsset =
+        result.status === 400 &&
+        typeof result.body?.error === "string" &&
+        result.body.error.includes("already exists");
+      if (!result.ok && result.status !== 409 && !duplicateAsset) {
+        throw new Error(`POST /api/assets failed (${result.status}): ${JSON.stringify(result.body)}`);
+      }
+      return {
+        uploaded: false,
+        metadataOnly: true,
+        uploadError: typeof sourceUrl === "string" && sourceUrl.length > 0 ? null : "Missing source asset URL",
+        reusedExisting: false,
+      };
+    }
+
+    try {
+      await cms.importAssetFromUrl({
+        id: metadata.id,
+        url: sourceUrl,
+        filename: metadata.filename,
+        mimeType: metadata.mimeType,
+        alt: metadata.alt,
+        title: metadata.title,
+        tags: [],
+        r2Key: metadata.r2Key,
+        blurhash: metadata.blurhash,
+        colors: metadata.colors,
+        focalPoint: metadata.focalPoint,
+      });
       uploaded = true;
-    } else if (typeof sourceUrl === "string" && sourceUrl.length > 0) {
-      try {
-        const assetResponse = await fetch(sourceUrl);
-        if (assetResponse.ok) {
-          const buffer = Buffer.from(await assetResponse.arrayBuffer());
-          await localR2.putObject(metadata.r2Key, buffer, metadata.mimeType);
-          const storedObject = await localR2.headObject(metadata.r2Key);
-          if (storedObject == null || storedObject.size !== buffer.byteLength) {
-            throw new Error(`Local R2 verification failed for ${metadata.r2Key}`);
-          }
-          uploaded = true;
-        } else {
-          uploadError = `Source asset fetch failed with status ${assetResponse.status}`;
-        }
-      } catch (error) {
-        uploaded = false;
-        uploadError = error instanceof Error ? error.message : String(error);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const duplicateAsset = message.includes("already exists");
+      if (duplicateAsset) {
+        uploaded = true;
+        reusedExisting = true;
+      } else {
+        uploadError = message;
       }
     }
 
-    const result = await cms.request("POST", "/api/assets", metadata);
-    const duplicateAsset =
-      result.status === 400 &&
-      typeof result.body?.error === "string" &&
-      result.body.error.includes("already exists");
-    if (!result.ok && result.status !== 409 && !duplicateAsset) {
-      throw new Error(`POST /api/assets failed (${result.status}): ${JSON.stringify(result.body)}`);
+    if (!uploaded) {
+      const result = await cms.request("POST", "/api/assets", metadata);
+      const duplicateAsset =
+        result.status === 400 &&
+        typeof result.body?.error === "string" &&
+        result.body.error.includes("already exists");
+      if (!result.ok && result.status !== 409 && !duplicateAsset) {
+        throw new Error(`POST /api/assets failed (${result.status}): ${JSON.stringify(result.body)}`);
+      }
     }
+
     return { uploaded, metadataOnly: !uploaded, uploadError, reusedExisting };
   }
 
@@ -375,27 +539,14 @@ export function createImportProgram({
   // =========================================================================
 
   async function fetchSchema() {
-    // 1. Get all item types
-    const itemTypes = await datoClient.getItemTypes();
-    itemTypeIdToApiKey = new Map(itemTypes.entries());
-
-    // 2. Fetch full item-type list with metadata
-    const itemTypesResponse = await datoClient.cmaRequest("/item-types", { "page[limit]": 200 });
-    const allItemTypes = itemTypesResponse.data ?? [];
-
-    // 3. For each item type, fetch fields
-    for (const itemType of allItemTypes) {
-      const fieldsResponse = await datoClient.cmaRequest(`/item-types/${itemType.id}/fields`);
-      const fields = (fieldsResponse.data ?? []).map((f) => ({
-        api_key: f.attributes.api_key,
-        field_type: f.attributes.field_type,
-        localized: f.attributes.localized ?? false,
-        validators: f.attributes.validators ?? {},
-        label: f.attributes.label,
-        position: f.attributes.position ?? 0,
-      }));
-      fieldMap.set(itemType.attributes.api_key, fields);
+    if (fromExport) {
+      await loadSnapshotIfNeeded();
+      return;
     }
+
+    const metadata = await fetchDatoSchemaMetadata(datoClient);
+    itemTypeIdToApiKey = metadata.itemTypeIdToApiKey;
+    fieldMap = metadata.fieldMap;
   }
 
   function getFieldDefs(modelApiKey) {
@@ -442,10 +593,14 @@ export function createImportProgram({
       for (const entry of node) collectBlockRefs(entry, refs);
       return refs;
     }
-    if ((node.type === "block" || node.type === "inlineBlock") && typeof node.item === "string") {
-      refs.add(node.item);
+    if ((node.type === "block" || node.type === "inlineBlock")) {
+      const itemId = getItemId(node.item);
+      if (itemId) {
+        refs.add(itemId);
+      }
     }
-    for (const value of Object.values(node)) {
+    for (const [key, value] of Object.entries(node)) {
+      if (key === "item") continue;
       collectBlockRefs(value, refs);
     }
     return refs;
@@ -462,13 +617,14 @@ export function createImportProgram({
     for (const [key, value] of Object.entries(node)) {
       copy[key] = key === "item" ? value : rewriteBlockRefs(value, idMap, context);
     }
-    if ((copy.type === "block" || copy.type === "inlineBlock") && typeof copy.item === "string") {
-      const mapped = idMap.get(copy.item);
+    if (copy.type === "block" || copy.type === "inlineBlock") {
+      const itemId = getItemId(copy.item);
+      const mapped = itemId ? idMap.get(itemId) : null;
       if (!mapped) {
         noteFinding({
           type: "accepted_regression",
           area: "unsupported_block_reference",
-          detail: `Dropped unsupported ${copy.type} reference '${copy.item}' while importing ${context}.`,
+          detail: `Dropped unsupported ${copy.type} reference '${itemId ?? "unknown"}' while importing ${context}.`,
         });
         return null;
       }
@@ -484,8 +640,17 @@ export function createImportProgram({
    */
   async function transformStructuredTextRaw(dast, scopeId) {
     if (!dast) return null;
-    const blockRefIds = [...collectBlockRefs(dast)];
-    const rawBlocks = await datoClient.getItems(blockRefIds);
+    const inlineBlocks = collectInlineBlockItems(dast, []);
+    if (fromExport && inlineBlocks.length === 0 && collectBlockRefs(dast).size > 0) {
+      noteFinding({
+        type: "skipped_block",
+        detail: `Structured text at '${scopeId}' contained block IDs instead of inline nested blocks in export mode.`,
+      });
+      return { value: rewriteBlockRefs(deepClone(dast), new Map(), scopeId), blocks: {} };
+    }
+    const rawBlocks = inlineBlocks.length > 0
+      ? inlineBlocks
+      : await datoClient.getItems([...collectBlockRefs(dast)]);
 
     const blocks = {};
     const idMap = new Map();
@@ -540,6 +705,11 @@ export function createImportProgram({
             val,
             `${scopeId}__${block.id}__${fieldDef.api_key}`,
           );
+        } else if (agentType === "rich_text") {
+          blockData[fieldDef.api_key] = await transformRichTextRaw(
+            val,
+            `${scopeId}__${block.id}__${fieldDef.api_key}`,
+          );
         } else if (agentType === "seo") {
           blockData[fieldDef.api_key] = seoValue(val);
         } else if (agentType === "lat_lon") {
@@ -559,6 +729,95 @@ export function createImportProgram({
       value: rewriteBlockRefs(deepClone(dast), idMap, scopeId),
       blocks,
     };
+  }
+
+  /**
+   * Transforms a raw rich_text (modular content) value from DatoCMS CMA.
+   * CMA returns an array of block item IDs — we fetch those blocks and
+   * convert them to [{block_type, ...fields}, ...] for agent-cms writeRichText.
+   */
+  async function transformRichTextRaw(blockIds, scopeId) {
+    if (!Array.isArray(blockIds) || blockIds.length === 0) return [];
+    const inlineBlocks = blockIds.filter((entry) => isInlineItem(entry));
+    if (fromExport && inlineBlocks.length === 0 && blockIds.some((entry) => typeof entry === "string")) {
+      noteFinding({
+        type: "skipped_block",
+        detail: `Rich text at '${scopeId}' contained block IDs instead of inline nested blocks in export mode.`,
+      });
+      return [];
+    }
+    const rawBlocks = inlineBlocks.length > 0
+      ? inlineBlocks
+      : await datoClient.getItems(blockIds.filter((id) => typeof id === "string"));
+    const result = [];
+
+    for (const block of rawBlocks) {
+      const blockTypeId = block.relationships?.item_type?.data?.id;
+      const blockModelApiKey = blockTypeId ? (itemTypeIdToApiKey.get(blockTypeId) ?? null) : null;
+
+      if (!blockModelApiKey) {
+        noteFinding({ type: "skipped_block", blockType: blockTypeId, detail: "Could not resolve block item type for rich_text." });
+        continue;
+      }
+
+      const blockFieldDefs = getFieldDefs(blockModelApiKey);
+      const blockData = { block_type: blockModelApiKey };
+
+      for (const fieldDef of blockFieldDefs) {
+        const rawVal = block.attributes[fieldDef.api_key];
+        if (rawVal === undefined || rawVal === null) continue;
+
+        const agentType = FIELD_TYPE_MAP[fieldDef.field_type];
+        const val = fieldDef.localized ? extractLocalizedValue(rawVal) : rawVal;
+
+        if (val === null || val === undefined) continue;
+
+        if (SCALAR_TYPES.has(agentType)) {
+          blockData[fieldDef.api_key] = val;
+        } else if (agentType === "media") {
+          const asset = assetFromUploadRef(val);
+          if (asset?.id) {
+            await importAssetRef(val);
+            blockData[fieldDef.api_key] = asset.id;
+          }
+        } else if (agentType === "media_gallery") {
+          const items = Array.isArray(val) ? val : [];
+          await importAssetRefs(...items);
+          blockData[fieldDef.api_key] = items.map((a) => a.upload_id).filter(Boolean);
+        } else if (agentType === "link") {
+          if (typeof val === "string") {
+            await importRecordByIdGeneric(val);
+            blockData[fieldDef.api_key] = val;
+          }
+        } else if (agentType === "links") {
+          const linkedIds = Array.isArray(val) ? val.filter((v) => typeof v === "string") : [];
+          for (const linkedId of linkedIds) await importRecordByIdGeneric(linkedId);
+          blockData[fieldDef.api_key] = linkedIds;
+        } else if (agentType === "structured_text") {
+          blockData[fieldDef.api_key] = await transformStructuredTextRaw(
+            val,
+            `${scopeId}__${block.id}__${fieldDef.api_key}`,
+          );
+        } else if (agentType === "rich_text") {
+          blockData[fieldDef.api_key] = await transformRichTextRaw(
+            val,
+            `${scopeId}__${block.id}__${fieldDef.api_key}`,
+          );
+        } else if (agentType === "seo") {
+          blockData[fieldDef.api_key] = seoValue(val);
+        } else if (agentType === "lat_lon") {
+          blockData[fieldDef.api_key] = latLonValue(val);
+        } else if (agentType === "color") {
+          blockData[fieldDef.api_key] = val;
+        } else if (agentType === "video") {
+          blockData[fieldDef.api_key] = typeof val === "object" ? (val.url ?? val) : val;
+        }
+      }
+
+      result.push(blockData);
+    }
+
+    return result;
   }
 
   // =========================================================================
@@ -600,29 +859,69 @@ export function createImportProgram({
    * Uses single-flight dedup to prevent duplicate imports.
    */
   async function importRecordByIdGeneric(recordId) {
+    if (currentDepth >= maxDepth) {
+      noteFinding({
+        type: "max_depth_reached",
+        recordId,
+        depth: currentDepth,
+        detail: `Skipped import of '${recordId}' — max depth ${maxDepth} reached.`,
+      });
+      return;
+    }
     const key = `generic:${recordId}`;
     return singleFlight(recordImportPromises, key, async () => {
-      const item = await datoClient.getItem(recordId);
-      const itemTypeId = item.relationships?.item_type?.data?.id;
-      const modelApiKey = itemTypeId ? (itemTypeIdToApiKey.get(itemTypeId) ?? null) : null;
+      currentDepth++;
+      try {
+        let item;
+        if (fromExport) {
+          item = sourceItemsById.get(recordId) ?? null;
+          if (!item && sourceSnapshot?.format === "chunked") {
+            const location = sourceRecordIndex.get(recordId);
+            if (location?.chunkPath) {
+              await readSourceChunk(location.chunkPath);
+              item = sourceItemsById.get(recordId) ?? null;
+            }
+          }
+        } else {
+          item = await datoClient.getItem(recordId);
+        }
 
-      if (!modelApiKey) {
-        noteFinding({
-          type: "skipped_record",
-          recordId,
-          detail: `Could not resolve item type '${itemTypeId}' to an api_key.`,
-        });
-        return;
+        if (!item) {
+          noteFinding({
+            type: "skipped_record",
+            recordId,
+            detail: fromExport
+              ? `Record '${recordId}' was not present in the export snapshot.`
+              : `Record '${recordId}' could not be loaded from Dato.`,
+          });
+          return;
+        }
+
+        const modelApiKey = resolveRecordModelApiKey(item);
+
+        if (!modelApiKey) {
+          noteFinding({
+            type: "skipped_record",
+            recordId,
+            detail: `Could not resolve the item type for record '${recordId}'.`,
+          });
+          return;
+        }
+
+        await importRecordFromCma(modelApiKey, item);
+      } finally {
+        currentDepth--;
       }
-
-      await importRecordFromCma(modelApiKey, item);
     });
   }
 
   /**
    * Transforms all fields of a CMA item and upserts it into agent-cms.
    */
+  let importedCount = 0;
   async function importRecordFromCma(modelApiKey, item) {
+    importedCount++;
+    if (importedCount % 10 === 1) console.log(`  [import #${importedCount}] ${modelApiKey}/${item.id}`);
     const fieldDefs = getFieldDefs(modelApiKey);
     const data = {};
 
@@ -653,6 +952,12 @@ export function createImportProgram({
 
     const overrides = toRecordOverrides(item.meta);
     await upsertImportedRecord(modelApiKey, item.id, data, overrides);
+
+    // Only publish records that were published in Dato
+    if (item.meta?.status === "published") {
+      if (!publishableRecords.has(modelApiKey)) publishableRecords.set(modelApiKey, new Set());
+      publishableRecords.get(modelApiKey).add(item.id);
+    }
   }
 
   /**
@@ -663,13 +968,26 @@ export function createImportProgram({
 
     // If it's an object with locale keys
     if (typeof rawVal === "object" && !Array.isArray(rawVal)) {
-      // For structured_text and seo, build a full locale map
+      // For structured_text, rich_text, and seo, build a full locale map
       if (agentType === "structured_text") {
         const result = {};
         for (const [loc, val] of Object.entries(rawVal)) {
           if (val == null) continue;
           const normalizedLoc = normalizeDatoLocale(loc);
           result[normalizedLoc] = await transformStructuredTextRaw(
+            val,
+            `${recordId}__${fieldDef.api_key}__${normalizedLoc}`,
+          );
+        }
+        return Object.keys(result).length > 0 ? result : undefined;
+      }
+
+      if (agentType === "rich_text") {
+        const result = {};
+        for (const [loc, val] of Object.entries(rawVal)) {
+          if (val == null) continue;
+          const normalizedLoc = normalizeDatoLocale(loc);
+          result[normalizedLoc] = await transformRichTextRaw(
             val,
             `${recordId}__${fieldDef.api_key}__${normalizedLoc}`,
           );
@@ -700,7 +1018,9 @@ export function createImportProgram({
       if (agentType === "link") {
         const val = extractLocalizedValue(rawVal);
         if (typeof val !== "string") return undefined;
-        await importRecordByIdGeneric(val);
+        if (!skipLinksSet.has(fieldDef.api_key)) {
+          await importRecordByIdGeneric(val);
+        }
         return wrapLocalized(val);
       }
 
@@ -708,7 +1028,9 @@ export function createImportProgram({
         const val = extractLocalizedValue(rawVal);
         if (!Array.isArray(val)) return undefined;
         const ids = val.filter((v) => typeof v === "string");
-        for (const id of ids) await importRecordByIdGeneric(id);
+        if (!skipLinksSet.has(fieldDef.api_key)) {
+          for (const id of ids) await importRecordByIdGeneric(id);
+        }
         return wrapLocalized(ids);
       }
 
@@ -769,7 +1091,9 @@ export function createImportProgram({
 
     if (agentType === "link") {
       if (typeof val === "string") {
-        await importRecordByIdGeneric(val);
+        if (!skipLinksSet.has(fieldApiKey)) {
+          await importRecordByIdGeneric(val);
+        }
         return val;
       }
       return undefined;
@@ -777,12 +1101,18 @@ export function createImportProgram({
 
     if (agentType === "links") {
       const ids = Array.isArray(val) ? val.filter((v) => typeof v === "string") : [];
-      for (const id of ids) await importRecordByIdGeneric(id);
+      if (!skipLinksSet.has(fieldApiKey)) {
+        for (const id of ids) await importRecordByIdGeneric(id);
+      }
       return ids.length > 0 ? ids : undefined;
     }
 
     if (agentType === "structured_text") {
       return transformStructuredTextRaw(val, `${recordId}__${fieldApiKey}`);
+    }
+
+    if (agentType === "rich_text") {
+      return transformRichTextRaw(val, `${recordId}__${fieldApiKey}`);
     }
 
     if (agentType === "seo") {
@@ -826,8 +1156,20 @@ export function createImportProgram({
     }
 
     for (const [modelApiKey, ids] of touchedRecords) {
+      const publishable = publishableRecords.get(modelApiKey);
       for (const id of ids) {
-        await cms.publishRecord(modelApiKey, id);
+        if (!publishable?.has(id)) continue; // draft in Dato → stays draft
+        try {
+          await cms.publishRecord(modelApiKey, id);
+        } catch (err) {
+          noteFinding({
+            type: "publish_failed",
+            model: modelApiKey,
+            recordId: id,
+            detail: err.message ?? String(err),
+          });
+          continue;
+        }
         const overrides = touchedOverrides.get(modelApiKey)?.get(id);
         if (overrides) {
           await cms.patchRecordOverrides(modelApiKey, id, overrides);
@@ -840,16 +1182,33 @@ export function createImportProgram({
   // Main Effect program
   // =========================================================================
 
+  function getRootImportModels() {
+    if (model) return [model];
+    return sourceModelOrder.length > 0 ? sourceModelOrder : [...sourceItemsByModel.keys()];
+  }
+
+  async function getRootItemsForModel(modelApiKey) {
+    if (fromExport) {
+      const items = await loadModelItemsFromExport(modelApiKey);
+      if (model) {
+        return items.slice(skip, skip + limit);
+      }
+      return items;
+    }
+
+    return datoClient.listItemsByType(modelApiKey, { limit, offset: skip });
+  }
+
   return Effect.gen(function* () {
     // Restore checkpoint if available
     const existingCheckpoint = yield* readCheckpointEffect();
     if (existingCheckpoint?.value?.status && existingCheckpoint.value.status !== "completed") {
       restoreCheckpoint(existingCheckpoint.value);
       yield* Effect.logInfo(
-        `Resuming generic import for ${model} (${IMPORT_LOCALE}) with ${completedRootIds.size} completed root record(s)`,
+        `Resuming generic import for ${IMPORT_SCOPE} (${IMPORT_LOCALE}) with ${completedRootIds.size} completed root record(s)`,
       );
     } else {
-      yield* Effect.logInfo(`Starting generic import for ${model} (${IMPORT_LOCALE})`);
+      yield* Effect.logInfo(`Starting generic import for ${IMPORT_SCOPE} (${IMPORT_LOCALE})`);
     }
 
     yield* saveCheckpointEffect("running");
@@ -858,8 +1217,7 @@ export function createImportProgram({
     yield* promiseEffect(() => fetchSchema(), "fetch Dato schema");
     yield* Effect.logInfo(`Loaded schema: ${fieldMap.size} models, ${[...fieldMap.values()].reduce((n, fs) => n + fs.length, 0)} fields`);
 
-    // Verify the requested model exists in Dato
-    if (!fieldMap.has(model)) {
+    if (model && !fieldMap.has(model)) {
       const available = [...fieldMap.keys()].join(", ");
       yield* Effect.fail(
         new ImportInfrastructureError({
@@ -869,44 +1227,50 @@ export function createImportProgram({
       );
     }
 
-    // List root records for the target model via CMA
-    const rootItems = yield* promiseEffect(
-      () => datoClient.listItemsByType(model, { limit, offset: skip }),
-      "list source records",
-      { model, skip, limit },
-    );
+    const rootModels = getRootImportModels();
+    let totalRootItems = 0;
+    let totalPendingItems = 0;
 
-    const pendingItems = rootItems.filter((item) => !completedRootIds.has(item.id));
-    yield* Effect.logInfo(`Found ${rootItems.length} root records, ${pendingItems.length} pending`);
+    for (const rootModel of rootModels) {
+      const rootItems = yield* promiseEffect(
+        () => getRootItemsForModel(rootModel),
+        "list source records",
+        { model: rootModel, skip, limit },
+      );
 
-    // Import each root record sequentially
-    yield* Effect.forEach(
-      pendingItems,
-      (item) =>
-        promiseEffect(
-          () => importRecordFromCma(model, item),
-          "import root record",
-          { model, recordId: item.id },
-        ).pipe(
-          Effect.zipRight(
-            Effect.sync(() => {
-              completedRootIds.add(item.id);
-            }),
-          ),
-          Effect.catchAll((error) =>
-            Effect.fail(
-              new ImportRootRecordError({
-                model,
-                recordId: item.id,
-                message: `Failed to import root ${model} record '${item.id}'`,
-                cause: error,
+      const pendingItems = rootItems.filter((item) => !completedRootIds.has(item.id));
+      totalRootItems += rootItems.length;
+      totalPendingItems += pendingItems.length;
+      yield* Effect.logInfo(`Found ${rootItems.length} root records for ${rootModel}, ${pendingItems.length} pending`);
+
+      yield* Effect.forEach(
+        pendingItems,
+        (item) =>
+          promiseEffect(
+            () => importRecordFromCma(rootModel, item),
+            "import root record",
+            { model: rootModel, recordId: item.id },
+          ).pipe(
+            Effect.zipRight(
+              Effect.sync(() => {
+                completedRootIds.add(item.id);
               }),
             ),
+            Effect.catchAll((error) =>
+              Effect.fail(
+                new ImportRootRecordError({
+                  model: rootModel,
+                  recordId: item.id,
+                  message: `Failed to import root ${rootModel} record '${item.id}'`,
+                  cause: error,
+                }),
+              ),
+            ),
+            Effect.zipRight(saveCheckpointEffect("running", { model: rootModel, recordId: item.id })),
           ),
-          Effect.zipRight(saveCheckpointEffect("running", { recordId: item.id })),
-        ),
-      { concurrency: 1 },
-    );
+        { concurrency: 1 },
+      );
+    }
 
     // Publish all touched records
     yield* promiseEffect(() => publishTouchedRecords(), "publish touched records");
@@ -918,7 +1282,7 @@ export function createImportProgram({
     if (fatalFindings.length > 0) {
       yield* Effect.fail(
         new ImportIntegrityError({
-          model,
+          model: IMPORT_SCOPE,
           findingsPath,
           violationCount: fatalFindings.length,
           message: `Import completed with ${fatalFindings.length} integrity violation(s). See ${findingsPath}`,
@@ -926,7 +1290,7 @@ export function createImportProgram({
       );
     }
 
-    yield* Effect.logInfo(`Imported ${pendingItems.length} ${model} record(s) from locale ${IMPORT_LOCALE}`);
+    yield* Effect.logInfo(`Imported ${totalPendingItems}/${totalRootItems} root record(s) from locale ${IMPORT_LOCALE}`);
     yield* Effect.logInfo(`Findings: ${findings.length} total`);
     yield* Effect.logInfo(`Saved ${findingsPath}`);
 
@@ -934,7 +1298,7 @@ export function createImportProgram({
 
     return {
       findingsPath,
-      recordsImported: pendingItems.length,
+      recordsImported: totalPendingItems,
       findingsCount: findings.length,
     };
   }).pipe(
@@ -944,6 +1308,5 @@ export function createImportProgram({
         lastErrorTag: error && typeof error === "object" && "_tag" in error ? error._tag : undefined,
       }).pipe(Effect.zipRight(Effect.fail(error))),
     ),
-    Effect.ensuring(promiseEffect(() => localR2.dispose(), "dispose local R2 context")),
   );
 }

@@ -370,7 +370,7 @@ export function importAssetFromUrl(input: ImportAssetFromUrlInput, actor?: Reque
     const url = yield* validateRemoteAssetUrl(input.url);
     const { response, resolvedUrl } = yield* fetchRemoteAsset(url, fetch);
     const filename = inferFilename({ ...input, url: resolvedUrl.toString() });
-    const id = generateId();
+    const id = input.id ?? generateId();
     if (!response.ok) {
       return yield* new ValidationError({
         message: `Failed to fetch asset URL: ${resolvedUrl} (${response.status})`,
@@ -379,7 +379,7 @@ export function importAssetFromUrl(input: ImportAssetFromUrlInput, actor?: Reque
 
     const mimeType = input.mimeType ?? response.headers.get("content-type")?.split(";")[0] ?? "application/octet-stream";
     const bytes = yield* readResponseBytes(response, resolvedUrl.toString());
-    const r2Key = `uploads/${id}/${filename}`;
+    const r2Key = input.r2Key ?? `uploads/${id}/${filename}`;
 
     yield* Effect.tryPromise({
       try: () => r2Bucket.put(r2Key, bytes, { httpMetadata: { contentType: mimeType } }),
@@ -394,6 +394,9 @@ export function importAssetFromUrl(input: ImportAssetFromUrlInput, actor?: Reque
       alt: input.alt,
       title: input.title,
       tags: input.tags,
+      blurhash: input.blurhash,
+      colors: input.colors,
+      focalPoint: input.focalPoint,
       r2Key,
     }, actor);
   }).pipe(

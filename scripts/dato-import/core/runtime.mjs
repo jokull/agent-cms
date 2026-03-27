@@ -1,5 +1,5 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 
 export function sleep(ms) {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
@@ -18,12 +18,21 @@ export async function ensureOutDir(outDir) {
 export async function writeJson(outDir, filename, value) {
   await ensureOutDir(outDir);
   const path = resolve(outDir, filename);
-  await writeFile(path, JSON.stringify(value, null, 2));
+  await writeJsonFile(path, value);
   return path;
+}
+
+export async function writeJsonFile(path, value) {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, JSON.stringify(value, null, 2));
 }
 
 export async function readJson(outDir, filename) {
   const path = resolve(outDir, filename);
+  return readJsonFile(path);
+}
+
+export async function readJsonFile(path) {
   try {
     const value = JSON.parse(await readFile(path, "utf8"));
     return { path, value };

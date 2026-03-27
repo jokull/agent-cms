@@ -14,10 +14,13 @@ Current proven commands:
 
 ```bash
 pnpm run dato:import -- inspect
-pnpm run dato:import -- bootstrap --adapter trip --cms-url http://127.0.0.1:8791
-pnpm run dato:import -- import --adapter trip --model article --limit 1 --locale en
-pnpm run dato:import -- status --out-dir scripts/dato-import/out/trip
-pnpm run dato:import -- report --out-dir scripts/dato-import/out/trip
+pnpm run dato:import -- codegen
+pnpm run dato:import -- bootstrap --cms-url http://127.0.0.1:8791
+pnpm run dato:import -- export --out-dir scripts/dato-import/out
+pnpm run dato:import -- import --model article --limit 1 --locale en
+pnpm run dato:import -- import --from-export scripts/dato-import/out/dato-export.json
+pnpm run dato:import -- status --out-dir scripts/dato-import/out
+pnpm run dato:import -- report --out-dir scripts/dato-import/out
 ```
 
 The runtime and CLI are generic. The built-in `trip` adapter is the first real-world validation wedge while broader automatic schema discovery and mapping are generalized.
@@ -55,6 +58,7 @@ Why:
 - assets come back as upload references
 - StructuredText block references can be resolved as raw block items
 - site-level metadata is available from the site API
+- whole-environment exports can be paginated locally once and replayed without live CMA reads during import
 
 Do not rely on Dato GraphQL delivery queries as the primary import source for multi-locale migration. Delivery queries are useful for parity checks, but they are the wrong abstraction for raw import because fallback semantics can hide whether a locale value is real or inherited.
 
@@ -70,6 +74,20 @@ The importer should:
 4. publish only after a batch is internally complete
 
 This keeps the import path aligned with normal CMS semantics instead of bypassing the application layer.
+
+## Export Snapshot Mode
+
+For wholesale environment migrations, prefer a two-phase flow:
+
+1. `dato-import export` reads the Dato environment once using paginated `nested=true` item reads and uploads pagination
+2. the export stores grouped top-level records, upload metadata, and schema metadata in a local JSON snapshot
+3. `dato-import import --from-export ...` replays that snapshot into agent-cms without further Dato CMA calls
+
+Rules:
+
+- modular block models are skipped from the export's top-level record groups because they are already embedded inline in their parents when using nested mode
+- uploads still preserve their original Dato metadata and source URLs for direct R2 copy
+- schema codegen/bootstrap can remain a separate one-time step
 
 ## Import Modes
 

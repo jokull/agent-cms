@@ -13,6 +13,8 @@ import * as FieldService from "./field-service.js";
 import * as LocaleService from "./locale-service.js";
 import type { ImportSchemaInput } from "./input-schemas.js";
 import { decodeJsonRecordStringOr } from "../json.js";
+import { migrateContentTable } from "../schema-engine/sql-ddl.js";
+import { isFieldType } from "../types.js";
 
 // ---------------------------------------------------------------------------
 // Export format (portable, no IDs)
@@ -193,6 +195,25 @@ export function importSchema(s: ImportSchemaInput) {
         });
         stats.fields++;
       }
+    }
+
+    // --- 4. Final table sync per model ---
+    // Remote D1 appears less reliable when schema import relies solely on the
+    // incremental field-level sync performed inside createField(). Reconcile each
+    // model table once against the full desired field list before returning.
+    for (const model of s.models) {
+      yield* migrateContentTable(
+        model.apiKey,
+        model.isBlock,
+        model.fields.map((field) => ({
+          apiKey: field.apiKey,
+          fieldType: isFieldType(field.fieldType) ? field.fieldType : "string",
+        })),
+        {
+          sortable: model.sortable,
+          tree: model.tree,
+        },
+      );
     }
 
     return stats;

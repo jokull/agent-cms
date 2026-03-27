@@ -12,6 +12,7 @@ import * as FieldService from "../services/field-service.js";
 import * as RecordService from "../services/record-service.js";
 import * as PublishService from "../services/publish-service.js";
 import * as AssetService from "../services/asset-service.js";
+import { AssetImportContext } from "../services/asset-service.js";
 import * as LocaleService from "../services/locale-service.js";
 import * as ScheduleService from "../services/schedule-service.js";
 import { isCmsError, errorToResponse } from "../errors.js";
@@ -21,6 +22,7 @@ import {
   CreateRecordInput, PatchRecordInput,
   PatchBlocksInput,
   CreateAssetInput,
+  ImportAssetFromUrlInput,
   SearchAssetsInput,
   UpdateAssetMetadataInput,
   CreateLocaleInput,
@@ -419,6 +421,16 @@ const assetsRouter = HttpRouter.empty.pipe(
     })
   ),
 
+  HttpRouter.post(
+    "/import-from-url",
+    Effect.gen(function* () {
+      const body = yield* readJsonBody();
+      const input = yield* decodeUnknownInput(ImportAssetFromUrlInput, body);
+      const actor = yield* currentActor();
+      return yield* handle(AssetService.importAssetFromUrl(input, actor), 201);
+    })
+  ),
+
   HttpRouter.get(
     "/:id",
     Effect.gen(function* () {
@@ -647,7 +659,11 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
     HooksContext,
     options?.hooks ? Option.some(options.hooks) : Option.none()
   );
-  const fullLayer = Layer.mergeAll(sqlLayer, vectorizeLayer, hooksLayer, Logger.json);
+  const assetImportLayer = Layer.succeed(AssetImportContext, {
+    r2Bucket: options?.r2Bucket,
+    fetch: options?.fetch ?? globalThis.fetch,
+  });
+  const fullLayer = Layer.mergeAll(sqlLayer, vectorizeLayer, hooksLayer, assetImportLayer, Logger.json);
 
   const runLoggedEffect = (effect: Effect.Effect<unknown, unknown>) => {
     Effect.runFork(effect.pipe(Effect.provide(fullLayer), Effect.orDie));

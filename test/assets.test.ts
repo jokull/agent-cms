@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createTestApp, jsonRequest } from "./app-helpers.js";
 
 describe("Asset REST API", () => {
@@ -56,6 +56,40 @@ describe("Asset REST API", () => {
         filename: "test.jpg",
       });
       expect(res.status).toBe(400);
+    });
+
+    it("imports a remote asset from URL while preserving an explicit asset ID", async () => {
+      const put = vi.fn(async () => null);
+      const fetchMock = vi.fn(async () => new Response(new Uint8Array([1, 2, 3, 4]), {
+        status: 200,
+        headers: {
+          "content-type": "image/png",
+          "content-length": "4",
+        },
+      }));
+      ({ handler } = createTestApp({
+        r2Bucket: { put } as R2Bucket,
+        fetch: fetchMock as typeof fetch,
+      }));
+
+      const res = await jsonRequest(handler, "POST", "/api/assets/import-from-url", {
+        id: "dato_asset_123",
+        url: "https://images.example.com/photo.png",
+        filename: "photo.png",
+        mimeType: "image/png",
+        alt: "Remote photo",
+      });
+
+      expect(res.status).toBe(201);
+      const asset = await res.json();
+      expect(asset.id).toBe("dato_asset_123");
+      expect(asset.r2Key).toBe("uploads/dato_asset_123/photo.png");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(put).toHaveBeenCalledWith(
+        "uploads/dato_asset_123/photo.png",
+        expect.any(Uint8Array),
+        { httpMetadata: { contentType: "image/png" } },
+      );
     });
   });
 
