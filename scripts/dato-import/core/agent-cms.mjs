@@ -175,6 +175,14 @@ export function createAgentCmsClient({ cmsUrl }) {
     return json("POST", "/api/assets/import-from-url", input);
   }
 
+  async function getAsset(id) {
+    return request("GET", `/api/assets/${id}`);
+  }
+
+  async function listRecords(modelApiKey) {
+    return json("GET", `/api/records?modelApiKey=${modelApiKey}`);
+  }
+
   return {
     request,
     requestEffect,
@@ -189,6 +197,8 @@ export function createAgentCmsClient({ cmsUrl }) {
     ensureModel,
     ensureField,
     importAssetFromUrl,
+    getAsset,
+    listRecords,
     upsertRecord,
     publishRecord,
     patchRecordOverrides,

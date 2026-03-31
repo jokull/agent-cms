@@ -7,7 +7,7 @@ import { Effect } from "effect";
 
 import { runInspect } from "./commands/inspect.mjs";
 import { readReport } from "./commands/report.mjs";
-import { readStatus } from "./commands/status.mjs";
+import { readProjectStatus, readStatus } from "./commands/status.mjs";
 
 const defaultOutDir = resolve(process.cwd(), "scripts/dato-import/out");
 const tokenOption = Options.text("dato-token").pipe(
@@ -61,6 +61,14 @@ const exportUploadConcurrencyOption = Options.integer("upload-page-concurrency")
 const fromExportOption = Options.text("from-export").pipe(
   Options.withDescription("Path to a Dato export JSON snapshot. When set, import reads local JSON instead of CMA."),
   Options.withDefault(""),
+);
+const projectOption = Options.text("project").pipe(
+  Options.withDescription("Dato project identifier for scoped import state."),
+  Options.withDefault(""),
+);
+const incrementalOption = Options.boolean("incremental").pipe(
+  Options.withDescription("Skip records unchanged since last import (compare updated_at)."),
+  Options.withDefault(false),
 );
 
 const inspectCommand = Command.make("inspect", { datoToken: tokenOption }).pipe(
@@ -179,9 +187,11 @@ const importCommand = Command.make("import", {
   maxDepth: maxDepthOption,
   skipLinks: skipLinksOption,
   fromExport: fromExportOption,
+  project: projectOption,
+  incremental: incrementalOption,
 }).pipe(
   Command.withDescription("Import either a thin live Dato slice or a whole pre-exported environment snapshot."),
-  Command.withHandler(({ cmsUrl, cmsWriteKey, datoToken, model, limit, skip, locale, skipAssetUpload, maxDepth, skipLinks, fromExport }) => {
+  Command.withHandler(({ cmsUrl, cmsWriteKey, datoToken, model, limit, skip, locale, skipAssetUpload, maxDepth, skipLinks, fromExport, project, incremental }) => {
     if (!fromExport && !datoToken) {
       return Effect.fail(new Error("Missing Dato token. Pass --dato-token or set DATOCMS_API_TOKEN."));
     }
@@ -191,16 +201,53 @@ const importCommand = Command.make("import", {
     const skipLinksList = skipLinks ? skipLinks.split(",").map((s) => s.trim()).filter(Boolean) : [];
     return Effect.tryPromise(() => import("./core/generic-import.mjs")).pipe(
       Effect.flatMap(({ createImportProgram }) =>
-        createImportProgram({ cmsUrl, cmsWriteKey, datoToken, locale, model, limit, skip, skipAssetUpload, maxDepth, skipLinks: skipLinksList, fromExport }),
+        createImportProgram({ cmsUrl, cmsWriteKey, datoToken, locale, model, limit, skip, skipAssetUpload, maxDepth, skipLinks: skipLinksList, fromExport, project, incremental }),
       ),
     );
   }),
 );
 
-const statusCommand = Command.make("status", { outDir: outDirOption }).pipe(
+const statusCommand = Command.make("status", { outDir: outDirOption, project: projectOption }).pipe(
   Command.withDescription("Show the latest import state snapshot and findings output."),
-  Command.withHandler(({ outDir }) =>
+  Command.withHandler(({ outDir, project }) =>
     Effect.tryPromise(async () => {
+      if (project) {
+        const { recordCounts, assetCounts, referencedPending, latestRun, activeRun } = readProjectStatus(outDir, project);
+
+        console.log(`Import State: ${project}`);
+
+        if (latestRun) {
+          const date = new Date(latestRun.started_at + "Z").toLocaleString();
+          const modelInfo = latestRun.model_api_key ? `, ${latestRun.model_api_key}` : "";
+          console.log(`Last run: ${date} (${latestRun.mode}${modelInfo})`);
+        } else {
+          console.log("Last run: none");
+        }
+
+        console.log("");
+
+        const rImported = fmt(recordCounts.imported ?? 0);
+        const rSkipped = fmt(recordCounts.skipped ?? 0);
+        const rPending = fmt(recordCounts.pending ?? 0);
+        const rFailed = fmt(recordCounts.failed ?? 0);
+        console.log(`Records:  ${rImported} imported / ${rSkipped} skipped / ${rPending} pending / ${rFailed} failed`);
+
+        const aImported = fmt(assetCounts.imported ?? 0);
+        const aSkipped = fmt(assetCounts.skipped ?? 0);
+        const aPending = fmt(assetCounts.pending ?? 0);
+        const aFailed = fmt(assetCounts.failed ?? 0);
+        console.log(`Assets:   ${aImported} imported / ${aSkipped} skipped / ${aPending} pending / ${aFailed} failed`);
+        console.log(`          Priority queue: ${fmt(referencedPending)} referenced by imported records`);
+
+        if (activeRun) {
+          console.log("");
+          console.log(`Active run: ${activeRun.mode} (started ${timeAgo(activeRun.started_at + "Z")})`);
+          console.log(`  Imported: ${fmt(activeRun.records_imported)} records, ${fmt(activeRun.assets_imported)} assets`);
+        }
+
+        return;
+      }
+
       const status = await readStatus(outDir);
       console.log(`Out dir: ${status.outDir}`);
       if (!status.latestCheckpoint && !status.latestFindings) {
@@ -221,6 +268,18 @@ const statusCommand = Command.make("status", { outDir: outDirOption }).pipe(
     })),
 );
 
+function fmt(n) {
+  return n.toLocaleString();
+}
+
+function timeAgo(isoStr) {
+  const diff = Date.now() - new Date(isoStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  return `${hours}h ${mins % 60}m ago`;
+}
+
 const reportCommand = Command.make("report", { outDir: outDirOption }).pipe(
   Command.withDescription("Summarize the latest findings JSON emitted by the importer."),
   Command.withHandler(({ outDir }) =>
@@ -239,9 +298,34 @@ const reportCommand = Command.make("report", { outDir: outDirOption }).pipe(
     })),
 );
 
+const assetImportCommand = Command.make("asset-import", {
+  cmsUrl: cmsUrlOption,
+  cmsWriteKey: cmsWriteKeyOption,
+  project: projectOption,
+  concurrency: Options.integer("concurrency").pipe(
+    Options.withDescription("Concurrent asset imports."),
+    Options.withDefault(6),
+  ),
+  dryRun: Options.boolean("dry-run").pipe(
+    Options.withDescription("Count pending assets without importing."),
+    Options.withDefault(false),
+  ),
+  outDir: outDirOption,
+}).pipe(
+  Command.withDescription("Import queued assets by priority. Run after record import to fill R2."),
+  Command.withHandler(({ cmsUrl, cmsWriteKey, project, concurrency, dryRun, outDir }) => {
+    if (!project) return Effect.fail(new Error("Missing --project. Required for asset import state."));
+    return Effect.tryPromise(() =>
+      import("./commands/asset-import.mjs").then(({ runAssetImport }) =>
+        runAssetImport({ cmsUrl, cmsWriteKey, project, concurrency, dryRun, outDir })
+      )
+    );
+  }),
+);
+
 const root = Command.make("dato-import").pipe(
   Command.withDescription("Import DatoCMS content into agent-cms. Auto-discovers schema, imports records with assets, links, and structured text."),
-  Command.withSubcommands([inspectCommand, codegenCommand, bootstrapCommand, exportCommand, importCommand, statusCommand, reportCommand]),
+  Command.withSubcommands([inspectCommand, codegenCommand, bootstrapCommand, exportCommand, importCommand, statusCommand, reportCommand, assetImportCommand]),
 );
 
 const helpText = buildHelp(process.argv.slice(2));
@@ -273,6 +357,7 @@ function buildHelp(args) {
   if (command === "import") return importHelp();
   if (command === "status") return statusHelp();
   if (command === "report") return reportHelp();
+  if (command === "asset-import") return assetImportHelp();
   return rootHelp();
 }
 
@@ -298,6 +383,7 @@ COMMANDS
   bootstrap    Generate schema from Dato and import it into agent-cms
   export       Export a whole Dato environment to local JSON
   import       Import a live slice or a local export snapshot
+  asset-import Import queued assets by priority (run after record import)
   status       Show the latest output path for an import run
   report       Summarize the latest findings JSON
 
@@ -358,6 +444,14 @@ USAGE
 
   npm run dato:import -- import --model <apiKey> [options]
   npm run dato:import -- import --from-export <path> [--model <apiKey>] [options]
+
+OPTIONS
+
+  --project <id>   Dato project identifier. When set, assets are enqueued in an
+                   SQLite priority queue instead of imported immediately.
+  --incremental    Skip records whose source updated_at hasn't changed since the
+                   last import. Compares against destination timestamps. Requires
+                   --project for tracking skipped records in state store.
 `;
 }
 
@@ -366,7 +460,12 @@ function statusHelp() {
 
 USAGE
 
-  npm run dato:import -- status [--out-dir <path>]
+  npm run dato:import -- status [--out-dir <path>] [--project <id>]
+
+OPTIONS
+
+  --project <id>   Show rich SQLite state (record/asset counts, active run) for a project.
+                   Without --project, falls back to file-based checkpoint output.
 `;
 }
 
@@ -376,5 +475,26 @@ function reportHelp() {
 USAGE
 
   npm run dato:import -- report [--out-dir <path>]
+`;
+}
+
+function assetImportHelp() {
+  return `agent-cms dato-import asset-import
+
+Import queued assets by priority. Run after record import to fill R2.
+Assets are checked for existence before importing (GET check skips already-imported).
+
+USAGE
+
+  npm run dato:import -- asset-import --project <id> [options]
+
+OPTIONS
+
+  --project <id>        Dato project identifier for scoped import state (required)
+  --cms-url <url>       agent-cms base URL (default: CMS_URL or http://127.0.0.1:8791)
+  --cms-write-key <key> agent-cms write key (default: CMS_WRITE_KEY)
+  --concurrency <n>     Concurrent asset imports (default: 6)
+  --dry-run             Count pending assets without importing
+  --out-dir <path>      Directory for import state (default: scripts/dato-import/out)
 `;
 }

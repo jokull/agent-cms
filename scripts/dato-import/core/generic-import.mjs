@@ -14,8 +14,10 @@ import { dirname, resolve } from "node:path";
 import { Data, Effect } from "effect";
 
 import { createAgentCmsClient } from "./agent-cms.mjs";
+import { assetFromUploadRef, buildAssetPayload } from "./asset-helpers.mjs";
 import { createDatoClient } from "./datocms.mjs";
 import { fetchDatoSchemaMetadata } from "./dato-schema-metadata.mjs";
+import { openState } from "./import-state.mjs";
 import { readJson, readJsonFile, writeJson } from "./runtime.mjs";
 
 // ---------------------------------------------------------------------------
@@ -70,6 +72,24 @@ function deepClone(value) {
   return value == null ? value : JSON.parse(JSON.stringify(value));
 }
 
+/** Sanitize DAST: unwrap link nodes with empty URLs to plain spans. */
+function sanitizeDast(node) {
+  if (!node || typeof node !== "object") return node;
+  if (Array.isArray(node.children)) {
+    const newChildren = [];
+    for (const child of node.children) {
+      if (child.type === "link" && (!child.url || child.url.length === 0)) {
+        // Unwrap: promote children (spans) to parent level
+        for (const span of child.children ?? []) newChildren.push(span);
+      } else {
+        newChildren.push(sanitizeDast(child));
+      }
+    }
+    node.children = newChildren;
+  }
+  return node;
+}
+
 function promiseEffect(thunk, label = "import operation", context = {}) {
   return Effect.tryPromise({
     try: thunk,
@@ -121,6 +141,8 @@ export function createImportProgram({
   skipAssetUpload = false,
   maxDepth = 3,
   skipLinks = [],
+  project = "",
+  incremental = false,
 }) {
   // ---- mutable run state ----
   let currentDepth = 0;
@@ -133,6 +155,8 @@ export function createImportProgram({
   const recordImportPromises = new Map(); // "model:id" → Promise
   const assetImportPromises = new Map();  // uploadId → Promise
   let runStartedAt = new Date().toISOString();
+  let destinationTimestamps = new Map(); // modelApiKey → Map<id, _updated_at>
+  let skippedCount = 0;
 
   const LINKED_IMPORT_CONCURRENCY = 4;
   const ASSET_IMPORT_CONCURRENCY = 6;
@@ -145,6 +169,13 @@ export function createImportProgram({
   // ---- clients ----
   const datoClient = fromExport ? null : createDatoClient({ token: datoToken });
   const cms = createAgentCmsClient({ cmsUrl });
+  // ---- import state (SQLite, optional) ----
+  const importState = project
+    ? openState(outDirOption ?? resolve(process.cwd(), "scripts/dato-import/out"), project)
+    : null;
+  // ---- current record context for asset enqueuing ----
+  let currentImportRecordId = null;
+  let currentImportFieldApiKey = null;
   // ---- schema cache (populated in setup phase) ----
   // fieldMap: modelApiKey → [{ api_key, field_type, localized, validators }]
   let fieldMap = new Map();
@@ -436,43 +467,36 @@ export function createImportProgram({
   // Asset handling
   // =========================================================================
 
-  function assetFromUploadRef(value) {
-    if (!value?.upload_id) return null;
-    return {
-      id: value.upload_id,
-      alt: value.alt ?? null,
-      title: value.title ?? null,
-      focalPoint: value.focal_point ?? null,
-    };
-  }
+  // assetFromUploadRef is imported from ./asset-helpers.mjs
 
-  async function ensureAsset(asset) {
+  async function ensureAsset(asset, { recordId = null, fieldApiKey = null } = {}) {
     if (!asset?.id) return null;
     const upload = fromExport
       ? (sourceUploadsById.get(asset.id) ?? null)
       : await datoClient.getUpload(asset.id).catch(() => null);
-    const uploadMeta =
-      upload?.attributes?.default_field_metadata?.[denormalizeCmsLocale(IMPORT_LOCALE)] ??
-      upload?.attributes?.default_field_metadata?.en ??
-      null;
-    const metadata = {
-      id: upload?.id ?? asset.id,
-      filename: upload?.attributes?.filename ?? asset.filename,
-      mimeType: upload?.attributes?.mime_type ?? asset.mimeType ?? "application/octet-stream",
-      size: upload?.attributes?.size ?? asset.size ?? 0,
-      ...(upload?.attributes?.width == null && asset.width == null ? {} : { width: upload?.attributes?.width ?? asset.width }),
-      ...(upload?.attributes?.height == null && asset.height == null ? {} : { height: upload?.attributes?.height ?? asset.height }),
-      ...(uploadMeta?.alt == null && asset.alt == null ? {} : { alt: uploadMeta?.alt ?? asset.alt }),
-      ...(uploadMeta?.title == null && asset.title == null ? {} : { title: uploadMeta?.title ?? asset.title }),
-      ...(upload?.attributes?.blurhash == null && asset.blurhash == null ? {} : { blurhash: upload?.attributes?.blurhash ?? asset.blurhash }),
-      ...(uploadMeta?.focal_point == null && asset.focalPoint == null ? {} : { focalPoint: uploadMeta?.focal_point ?? asset.focalPoint }),
-      ...(Array.isArray(upload?.attributes?.colors)
-        ? { colors: upload.attributes.colors.map((c) => `rgba(${c.red},${c.green},${c.blue},${c.alpha})`) }
-        : {}),
-      r2Key: `dato/${upload?.id ?? asset.id}/${upload?.attributes?.filename ?? asset.filename ?? "asset.bin"}`,
-    };
 
-    const sourceUrl = upload?.attributes?.url ?? asset.url ?? null;
+    const { metadata, sourceUrl } = buildAssetPayload(upload, asset, IMPORT_LOCALE);
+
+    // If state store is active, enqueue instead of importing
+    if (importState) {
+      importState.enqueueAsset(asset.id, recordId, fieldApiKey, {
+        sourceUrl,
+        filename: metadata.filename,
+        mimeType: metadata.mimeType,
+        size: metadata.size,
+      });
+      // Register metadata-only so the record can reference the asset ID
+      const result = await cms.request("POST", "/api/assets", metadata);
+      const duplicate =
+        (result.status === 400 && typeof result.body?.error === "string" && result.body.error.includes("already exists")) ||
+        result.status === 409;
+      if (!result.ok && !duplicate) {
+        throw new Error(`POST /api/assets failed (${result.status}): ${JSON.stringify(result.body)}`);
+      }
+      return { uploaded: false, metadataOnly: true, uploadError: null, reusedExisting: duplicate };
+    }
+
+    // Original import logic (when no state store)
     let uploaded = false;
     let uploadError = null;
     let reusedExisting = false;
@@ -534,16 +558,18 @@ export function createImportProgram({
     return { uploaded, metadataOnly: !uploaded, uploadError, reusedExisting };
   }
 
-  async function ensureAssetOnce(asset) {
+  async function ensureAssetOnce(asset, context = {}) {
     if (!asset?.id) return null;
-    return singleFlight(assetImportPromises, asset.id, () => ensureAsset(asset));
+    return singleFlight(assetImportPromises, asset.id, () => ensureAsset(asset, context));
   }
 
   async function importAssetRef(ref) {
     const asset = assetFromUploadRef(ref);
     if (!asset?.id) return;
-    const result = await ensureAssetOnce(asset);
-    if (result?.metadataOnly) {
+    const context = { recordId: currentImportRecordId, fieldApiKey: currentImportFieldApiKey };
+    const result = await ensureAssetOnce(asset, context);
+    // When importState is active, metadataOnly is expected (asset is enqueued)
+    if (result?.metadataOnly && !importState) {
       noteFinding({
         type: "asset_fallback",
         assetId: asset.id,
@@ -662,6 +688,7 @@ export function createImportProgram({
    */
   async function transformStructuredTextRaw(dast, scopeId) {
     if (!dast) return null;
+    if (dast.document) sanitizeDast(dast.document);
     const inlineBlocks = collectInlineBlockItems(dast, []);
     const blockRefIds = [...collectBlockRefs(dast)];
     const rawBlocks = inlineBlocks.length > 0
@@ -950,8 +977,30 @@ export function createImportProgram({
    */
   let importedCount = 0;
   async function importRecordFromCma(modelApiKey, item) {
+    // Incremental skip: if destination is already up to date, skip the upsert
+    if (incremental) {
+      const sourceUpdatedAt = item.meta?.updated_at ?? null;
+      const destTimestamps = destinationTimestamps.get(modelApiKey);
+      const destUpdatedAt = destTimestamps?.get(item.id) ?? null;
+      if (sourceUpdatedAt && destUpdatedAt && destUpdatedAt >= sourceUpdatedAt) {
+        skippedCount++;
+        // Still mark as touched so the publishing phase can publish if needed
+        markTouched(modelApiKey, item.id);
+        if (item.meta?.status === "published") {
+          if (!publishableRecords.has(modelApiKey)) publishableRecords.set(modelApiKey, new Set());
+          publishableRecords.get(modelApiKey).add(item.id);
+        }
+        if (importState) {
+          importState.upsertRecord(item.id, modelApiKey, sourceUpdatedAt, "skipped");
+        }
+        return;
+      }
+    }
+
     importedCount++;
     if (importedCount % 10 === 1) console.log(`  [import #${importedCount}] ${modelApiKey}/${item.id}`);
+    // Set context so ensureAsset can enqueue with the right record/field
+    currentImportRecordId = item.id;
     const fieldDefs = getFieldDefs(modelApiKey);
     const data = {};
 
@@ -963,6 +1012,9 @@ export function createImportProgram({
 
       const agentType = FIELD_TYPE_MAP[fieldDef.field_type];
       if (!agentType || agentType === "single_block") continue;
+
+      // Track current field so asset enqueuing can record the right field_api_key
+      currentImportFieldApiKey = fieldDef.api_key;
 
       if (fieldDef.localized) {
         // For localized fields, handle the value map
@@ -979,6 +1031,7 @@ export function createImportProgram({
         }
       }
     }
+    currentImportFieldApiKey = null;
 
     const overrides = toRecordOverrides(item.meta);
     await upsertImportedRecord(modelApiKey, item.id, data, overrides);
@@ -1247,6 +1300,26 @@ export function createImportProgram({
     yield* promiseEffect(() => fetchSchema(), "fetch Dato schema");
     yield* Effect.logInfo(`Loaded schema: ${fieldMap.size} models, ${[...fieldMap.values()].reduce((n, fs) => n + fs.length, 0)} fields`);
 
+    // Pre-fetch destination timestamps for incremental mode
+    if (incremental) {
+      yield* promiseEffect(async () => {
+        const modelsToCheck = model ? [model] : [...fieldMap.keys()];
+        for (const modelKey of modelsToCheck) {
+          try {
+            const records = await cms.listRecords(modelKey);
+            const timestamps = new Map();
+            for (const r of records) {
+              timestamps.set(r.id, r._updated_at ?? r._updatedAt ?? null);
+            }
+            destinationTimestamps.set(modelKey, timestamps);
+          } catch {
+            // Model might not have records yet — that's fine
+          }
+        }
+      }, "pre-fetch destination timestamps");
+      yield* Effect.logInfo(`Incremental mode: loaded timestamps for ${destinationTimestamps.size} model(s)`);
+    }
+
     if (model && !fieldMap.has(model)) {
       const available = [...fieldMap.keys()].join(", ");
       yield* Effect.fail(
@@ -1323,6 +1396,22 @@ export function createImportProgram({
     yield* Effect.logInfo(`Imported ${totalPendingItems}/${totalRootItems} root record(s) from locale ${IMPORT_LOCALE}`);
     yield* Effect.logInfo(`Findings: ${findings.length} total`);
     yield* Effect.logInfo(`Saved ${findingsPath}`);
+    if (incremental && skippedCount > 0) {
+      yield* Effect.logInfo(`Incremental: skipped ${skippedCount} unchanged record(s)`);
+    }
+
+    // Persist import tracking to SQLite state store if active
+    if (importState) {
+      yield* promiseEffect(async () => {
+        for (const [modelApiKey, ids] of touchedRecords) {
+          for (const id of ids) {
+            const overrides = touchedOverrides.get(modelApiKey)?.get(id);
+            importState.upsertRecord(id, modelApiKey, overrides?.updatedAt ?? null, "imported");
+          }
+        }
+        importState.close();
+      }, "persist import state");
+    }
 
     yield* saveCheckpointEffect("completed", { completedAt: new Date().toISOString(), findingsPath });
 
@@ -1336,7 +1425,14 @@ export function createImportProgram({
       saveCheckpointEffect("failed", {
         lastError: errorMessage(error),
         lastErrorTag: error && typeof error === "object" && "_tag" in error ? error._tag : undefined,
-      }).pipe(Effect.zipRight(Effect.fail(error))),
+      }).pipe(
+        Effect.tap(() => {
+          if (importState) {
+            try { importState.close(); } catch { /* ignore */ }
+          }
+        }),
+        Effect.zipRight(Effect.fail(error)),
+      ),
     ),
   );
 }
