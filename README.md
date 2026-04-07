@@ -11,7 +11,7 @@ Agent-first headless CMS. Runs as a Cloudflare Worker backed by D1 and R2 in you
 - **Automatic reverse references** — link model A to model B, and B gets a query field for all records in A that reference it, with full filtering, ordering, and pagination.
 - **Two MCP servers** — admin MCP (`/mcp`) for schema and content, editor MCP (`/mcp/editor`) scoped to content operations only. Create editor tokens with optional expiry.
 - **Multi-locale with fallback chains** — per-field opt-in. Locale A falls back to B falls back to C. The GraphQL resolver walks the chain.
-- **24 field types** — string, text, boolean, integer, float, date, date_time, slug (auto-generated), media (with focal point + blurhash), media_gallery, link, links, structured_text, seo (title + description + image + twitter card), json, color (RGBA), lat_lon, video. All validated with Effect schemas.
+- **19 field types** — string, text, boolean, integer, float, date, date_time, slug (auto-generated), media (with focal point + blurhash), media_gallery, link, links, structured_text, rich_text, seo (title + description + image + twitter card), json, color (RGBA), lat_lon, video. All validated with Effect schemas.
 - **Tree hierarchies and sortable collections** — parent-child nesting and explicit position ordering as first-class model properties.
 - **Dynamic SQL builder** — the query engine builds SQL at runtime from the content schema. No ORM, no generated client. The content schema is decoupled from your application schema — run this on the same D1 database as your site.
 - **Responsive images** — Cloudflare Image Resizing with focal points, blurhash for progressive loading, color palette extraction. R2 storage, no external service.
@@ -30,9 +30,37 @@ Copy the prompt from [`PROMPT.md`](./PROMPT.md) into Claude Code. It assesses yo
 
 MCP server with tools for schema management, content operations (CRUD, bulk insert, publish/unpublish, reorder), asset management, search, and schema import/export. Requires `writeKey`.
 
+When the `LOADER` binding is configured, `/mcp` serves **Code Mode** instead — a single `code` tool where the LLM writes JavaScript that chains multiple tool calls in a V8 sandbox. This reduces round-trips: instead of one MCP call per tool, the LLM generates a script that calls all the tools it needs in one shot.
+
+The sandbox exposes a `codemode` object with all admin tools as async methods:
+
+```js
+// The LLM writes this as the `code` argument:
+async () => {
+  const schema = await codemode.schema_info({ includeFieldDetails: true });
+  const record = await codemode.create_record({
+    modelApiKey: "blog_post",
+    data: { title: "Hello World", slug: "hello-world" }
+  });
+  return { schema, record };
+}
+```
+
+Tool names and argument shapes match the standard MCP tools exactly — `codemode.create_model(...)`, `codemode.create_field(...)`, etc. The `code` tool's description includes full type signatures for all available methods.
+
+Code Mode requires [Dynamic Workers](https://developers.cloudflare.com/dynamic-workers/) (Workers Paid plan). Add the binding to `wrangler.jsonc`:
+
+```jsonc
+"worker_loaders": [{ "binding": "LOADER" }]
+```
+
+Without the `LOADER` binding, `/mcp` serves the standard multi-tool MCP server.
+
 ### `/mcp/editor` — Editorial agent interface
 
 Reduced MCP server for content-authoring agents. Accepts either an editor token or `writeKey`. Exposes schema introspection, record CRUD, drafts, publish/unpublish, version restore, assets, site settings, and search. Does not expose schema mutation, token management, or admin operations.
+
+When `LOADER` is configured, `/mcp/editor` also serves Code Mode with the editor tool subset.
 
 ### `/graphql` — Content delivery
 
@@ -40,15 +68,15 @@ Read-only GraphQL API. Supports filtering, ordering, pagination, locale fallback
 
 ```graphql
 {
-  all_posts(
+  allPosts(
     filter: { _status: { eq: "published" } }
-    order_by: [_created_at_DESC]
+    orderBy: [_createdAt_DESC]
     first: 10
   ) {
     id
     title
     slug
-    cover_image {
+    coverImage {
       url
       width
       height
@@ -70,16 +98,16 @@ Read-only GraphQL API. Supports filtering, ordering, pagination, locale fallback
 
 #### Naming conventions
 
-Model `api_key` values (snake_case) map to GraphQL names:
+Model `api_key` values (snake_case) map to camelCase/PascalCase GraphQL names:
 
 | api_key | GraphQL type | Single query | List query | Meta query |
 |---------|-------------|-------------|------------|------------|
-| `blog_post` | `BlogPost` | `blog_post` | `all_blog_posts` | `_all_blog_posts_meta` |
-| `category` | `Category` | `category` | `all_categories` | `_all_categories_meta` |
+| `blog_post` | `BlogPostRecord` | `blogPost` | `allBlogPosts` | `_allBlogPostsMeta` |
+| `category` | `CategoryRecord` | `category` | `allCategories` | `_allCategoriesMeta` |
 
-Block types get a `Record` suffix: `code_block` → `CodeBlockRecord`.
+Block types also get a `Record` suffix: `code_block` → `CodeBlockRecord`.
 
-Field `api_key` values stay snake_case in queries: `cover_image`, `published_at`.
+Field `api_key` values become camelCase in queries: `cover_image` → `coverImage`, `published_at` → `publishedAt`.
 
 #### Performance model
 
@@ -142,19 +170,7 @@ If the agent has browser access, it can follow the link to visually verify conte
 
 ### Site integration
 
-The package exports `createPreviewHandler` for the common case (Astro, SvelteKit, generic Workers). For Next.js, use `draftMode().enable()` in your route handler alongside the CMS cookie — see the framework-specific notes below.
-
-```ts
-import { createPreviewHandler } from "agent-cms";
-
-const preview = createPreviewHandler({
-  cmsBaseUrl: "https://my-cms.workers.dev",
-});
-
-// Mount at /api/draft-mode/* in your site's router
-```
-
-The handler validates the token against the CMS, sets an `HttpOnly` cookie (`__agentcms_preview`) with the token, and redirects. The cookie's `Max-Age` matches the token's remaining TTL.
+Your site needs an enable route that validates the preview token against the CMS, sets an `HttpOnly` cookie (`__agentcms_preview`) with the token, and redirects to the content page. The cookie's `Max-Age` should match the token's remaining TTL. See [`examples/nextjs/`](./examples/nextjs/) and [`examples/blog/`](./examples/blog/) for complete implementations.
 
 In your GraphQL client, forward the cookie as a header when present:
 
@@ -167,13 +183,7 @@ if (previewToken) {
 }
 ```
 
-GraphQL responses in preview mode include `Cache-Control: private, no-store` and a `_preview` field:
-
-```graphql
-{ _preview { enabled expiresAt } }
-```
-
-Use this to render a preview banner — or include the `<agent-cms-preview-bar>` web component that shows "Draft Mode" with a disable link.
+GraphQL responses in preview mode include `Cache-Control: private, no-store`. Render a preview banner in your site to indicate draft mode — see the examples for Astro and Next.js implementations.
 
 ### Service bindings
 
@@ -192,7 +202,7 @@ No CORS, no cross-origin cookies, zero latency. This is the recommended path for
 
 ### Framework notes
 
-**Astro / SvelteKit / generic Workers** — use `createPreviewHandler` directly. Read the cookie in middleware and forward as `X-Preview-Token`.
+**Astro / SvelteKit / generic Workers** — build an enable route that validates the token and sets the cookie. Read the cookie in middleware and forward as `X-Preview-Token`.
 
 **Next.js** — your enable route must also call `draftMode().enable()` to integrate with Next.js ISR/caching. Set `SameSite=None; Secure` on the cookie for iframe compatibility. See the DatoCMS Next.js pattern — the same approach applies.
 
@@ -287,6 +297,7 @@ Only `DB` is required. Everything else is optional and degrades gracefully.
 | `CMS_WRITE_KEY` | Secret | Auth for writes, MCP, and publish. Without it, writes are open. |
 | `ASSET_BASE_URL` | Variable | Public URL prefix for assets and Image Resizing. Must be a custom domain for transforms. |
 | `SITE_URL` | Variable | Your site's public URL (e.g. `https://mysite.com`). Required for `get_preview_url` to generate fully assembled preview links. |
+| `LOADER` | Worker Loader | Code Mode — collapses MCP tools into a single `code` tool. Requires [Dynamic Workers](https://developers.cloudflare.com/dynamic-workers/) (Workers Paid plan). |
 
 ```jsonc
 {
@@ -294,6 +305,7 @@ Only `DB` is required. Everything else is optional and degrades gracefully.
   "r2_buckets": [{ "binding": "ASSETS", "bucket_name": "my-cms-assets" }],
   "vectorize": [{ "binding": "VECTORIZE", "index_name": "my-cms-content" }],
   "ai": { "binding": "AI" },
+  "worker_loaders": [{ "binding": "LOADER" }],
   "vars": { "ASSET_BASE_URL": "https://cms.example.com" }
 }
 ```

@@ -144,6 +144,8 @@ export const ImportAssetFromUrlInput = Schema.Struct({
   url: HttpUrlString,
   filename: Schema.optional(Schema.String),
   mimeType: Schema.optional(Schema.String),
+  width: Schema.optional(nonNegativeFiniteNumber("width")),
+  height: Schema.optional(nonNegativeFiniteNumber("height")),
   alt: Schema.optional(Schema.String),
   title: Schema.optional(Schema.String),
   r2Key: Schema.optional(Schema.String),
@@ -168,6 +170,8 @@ export type SearchAssetsInput = typeof SearchAssetsInput.Type;
 export const UpdateAssetMetadataInput = Schema.Struct({
   alt: Schema.optional(Schema.String),
   title: Schema.optional(Schema.String),
+  width: Schema.optional(Schema.Number.pipe(Schema.int(), Schema.positive())),
+  height: Schema.optional(Schema.Number.pipe(Schema.int(), Schema.positive())),
 });
 export type UpdateAssetMetadataInput = typeof UpdateAssetMetadataInput.Type;
 
