@@ -27,7 +27,7 @@ describe("Meta field filtering and ordering", () => {
     expect(result.data.allArticles[0]._modelApiKey).toBe("article");
   });
 
-  it("filters by _firstPublishedAt exists (Trip pattern)", async () => {
+  it("filters by _firstPublishedAt exists", async () => {
     // Create two records, publish only one
     const r1 = await (await jsonRequest(handler, "POST", "/api/records", {
       modelApiKey: "article", data: { title: "Published" },
@@ -48,7 +48,7 @@ describe("Meta field filtering and ordering", () => {
     expect(result.data.allArticles[0].title).toBe("Published");
   });
 
-  it("orders by _firstPublishedAt DESC (Trip pattern)", async () => {
+  it("orders by _firstPublishedAt DESC", async () => {
     const r1 = await (await jsonRequest(handler, "POST", "/api/records", {
       modelApiKey: "article", data: { title: "First Published" },
     })).json();

@@ -23,7 +23,7 @@ pnpm run dato:import -- status --out-dir scripts/dato-import/out
 pnpm run dato:import -- report --out-dir scripts/dato-import/out
 ```
 
-The runtime and CLI are generic. The built-in `trip` adapter is the first real-world validation wedge while broader automatic schema discovery and mapping are generalized.
+The runtime and CLI are generic. Schema discovery and field mapping are driven by the Dato CMA at runtime.
 
 ## Goals
 
@@ -129,14 +129,7 @@ Current guidance:
 
 Import by dependency order, leaves first, then inward toward the trunk.
 
-For the current built-in `trip` adapter, that means:
-
-1. `contributor`
-2. `location`
-3. `place`
-4. `tour`
-5. `article`
-6. `guide`
+The importer should resolve the dependency graph from the Dato schema at runtime and import leaf models first, working inward toward models with link fields.
 
 Block rows are not imported independently. They are materialized as part of StructuredText import.
 
@@ -300,8 +293,7 @@ Import runs should emit enough state to answer:
 
 The CLI output directory is currently:
 
-- generic runtime output: `scripts/dato-import/out`
-- built-in Trip adapter output: `scripts/dato-import/out/trip`
+- runtime output: `scripts/dato-import/out`
 
 See [`scripts/dato-import/PROMPT.md`](/Users/jokull/Code/agent-cms/scripts/dato-import/PROMPT.md) for the current agent workflow.
 

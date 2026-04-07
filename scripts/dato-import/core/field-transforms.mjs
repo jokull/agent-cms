@@ -1,7 +1,6 @@
 /**
  * Generic field value transformers for converting DatoCMS record field values
- * to agent-cms format. Extracted from the trip adapter to be reusable across
- * all DatoCMS import adapters.
+ * to agent-cms format. Reusable across all DatoCMS import adapters.
  */
 
 // ---------------------------------------------------------------------------

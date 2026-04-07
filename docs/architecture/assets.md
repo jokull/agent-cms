@@ -58,7 +58,7 @@ Why:
 - it avoids repeated `wrangler` subprocess churn
 - it is easier to make deterministic and resumable for bulk imports
 
-The trip migration harness now uses this direct Miniflare R2 path.
+The dato-import harness uses this direct Miniflare R2 path.
 
 ### Deployed Imports
 

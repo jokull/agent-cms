@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { summarizeFindings } from "../core/runtime.mjs";
 import { readLatestJsonMatching } from "./status.mjs";
 
-export async function readReport(outDir = resolve(process.cwd(), "scripts/dato-import/out/trip")) {
+export async function readReport(outDir = resolve(process.cwd(), "scripts/dato-import/out")) {
   const latest = await readLatestJsonMatching(outDir, (name) => name.startsWith("findings-"));
   if (!latest) {
     return { outDir, latest: null, summary: null };

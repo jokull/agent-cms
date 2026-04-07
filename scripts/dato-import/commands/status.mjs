@@ -34,7 +34,7 @@ export function readProjectStatus(outDir, project) {
   return { recordCounts, assetCounts, referencedPending, latestRun, activeRun };
 }
 
-export async function readStatus(outDir = resolve(process.cwd(), "scripts/dato-import/out/trip")) {
+export async function readStatus(outDir = resolve(process.cwd(), "scripts/dato-import/out")) {
   const latestCheckpoint = await readLatestJsonMatching(outDir, (name) => name.startsWith("checkpoint-"));
   const latestFindings = await readLatestJsonMatching(outDir, (name) => name.startsWith("findings-"));
   return { outDir, latestCheckpoint, latestFindings };

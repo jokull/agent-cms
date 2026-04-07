@@ -1,9 +1,9 @@
 /**
  * Generic DatoCMS → agent-cms record importer.
  *
- * Unlike the trip-specific adapter, this module reads field definitions from the
- * Dato CMA at runtime and dispatches field transforms dynamically — no hardcoded
- * model names, block extractors, or GraphQL fragments.
+ * Reads field definitions from the Dato CMA at runtime and dispatches field
+ * transforms dynamically — no hardcoded model names, block extractors, or
+ * GraphQL fragments.
  *
  * Usage:
  *   import { createImportProgram } from "./generic-import.mjs";
