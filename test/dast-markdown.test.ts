@@ -4,6 +4,8 @@ import {
   markdownToDast,
   dastToEditableMarkdown,
   editableMarkdownToDast,
+  dastToDastdown,
+  dastdownToDast,
 } from "../src/dast/markdown.js";
 import type { DastDocument } from "../src/dast/types.js";
 import type { PreservationMap } from "../src/dast/markdown.js";
@@ -17,10 +19,10 @@ function doc(children: DastDocument["document"]["children"]): DastDocument {
 const emptyPres: PreservationMap = { nodes: {}, links: {}, itemLinks: {} };
 
 // =========================================================================
-// Legacy API (dastToMarkdown / markdownToDast) — basic coverage
+// Plain Markdown projection API (dastToMarkdown / markdownToDast) — basic coverage
 // =========================================================================
 
-describe("dastToMarkdown (legacy)", () => {
+describe("dastToMarkdown projection", () => {
   it("converts a paragraph with plain text", () => {
     const md = dastToMarkdown(doc([
       { type: "paragraph", children: [{ type: "span", value: "Hello world" }] },
@@ -108,7 +110,42 @@ describe("dastToMarkdown (legacy)", () => {
   });
 });
 
-describe("markdownToDast (legacy)", () => {
+describe("Dato Dastdown wrappers", () => {
+  it("serializes Dato-compatible DAST with Dato reference syntax", () => {
+    const text = dastToDastdown(doc([
+      { type: "heading", level: 2, children: [{ type: "span", value: "Intro" }] },
+      { type: "block", item: "block_123" },
+      {
+        type: "paragraph",
+        children: [
+          { type: "span", value: "See " },
+          { type: "itemLink", item: "rec_123", children: [{ type: "span", value: "record" }] },
+          { type: "span", value: "." },
+        ],
+      },
+    ]));
+
+    expect(text).toContain("## Intro");
+    expect(text).toContain('<block id="block_123"/>');
+    expect(text).toContain("[record](dato:item/rec_123)");
+  });
+
+  it("parses Dato Dastdown back to valid DAST", () => {
+    const result = dastdownToDast([
+      "# Title",
+      "",
+      "A paragraph with **strong** text and [record](dato:item/rec_123).",
+      "",
+      '<block id="block_123"/>',
+    ].join("\n"));
+
+    expect(validateDast(result)).toEqual([]);
+    expect(result.document.children[0]).toMatchObject({ type: "heading", level: 1 });
+    expect(result.document.children[2]).toEqual({ type: "block", item: "block_123" });
+  });
+});
+
+describe("markdownToDast projection", () => {
   it("parses a paragraph", () => {
     const dast = markdownToDast("Hello world");
     expect(dast.document.children).toHaveLength(1);
@@ -701,10 +738,10 @@ describe("editable round-trip", () => {
 });
 
 // =========================================================================
-// Basic round-trip (legacy wrappers)
+// Basic round-trip for projection wrappers
 // =========================================================================
 
-describe("legacy round-trip", () => {
+describe("projection round-trip", () => {
   const cases: Array<{ name: string; dast: DastDocument }> = [
     {
       name: "plain paragraph",

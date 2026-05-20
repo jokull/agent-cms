@@ -17,15 +17,17 @@
  *   dastToEditableMarkdown(doc) → { markdown, preservation }
  *   editableMarkdownToDast(markdown, preservation) → DastDocument
  *
- * Legacy wrappers dastToMarkdown/markdownToDast are preserved for
- * non-editing use cases (export, display).
+ * Plain Markdown wrappers dastToMarkdown/markdownToDast exist for
+ * non-authoring use cases (export, display).
  */
 
 import { unified } from "unified";
 import remarkParse from "remark-parse";
 import remarkStringify from "remark-stringify";
 import remarkGfm from "remark-gfm";
+import { parse as parseDastdown, serialize as serializeDastdown, DastdownParseError } from "datocms-structured-text-dastdown";
 import type * as Mdast from "mdast";
+import type { Document as DatoDastDocument } from "datocms-structured-text-utils";
 import type {
   DastDocument,
   RootNode,
@@ -776,7 +778,7 @@ export function editableMarkdownToDast(markdown: string, preservation: Preservat
 }
 
 // ---------------------------------------------------------------------------
-// Legacy wrappers (non-editing use cases: export, display)
+// Plain Markdown projection wrappers (non-authoring use cases: export, display)
 // ---------------------------------------------------------------------------
 
 /** Convert a DAST document to a CommonMark markdown string (lossy export). */
@@ -787,4 +789,28 @@ export function dastToMarkdown(doc: DastDocument): string {
 /** Parse a CommonMark markdown string into a DAST document (no preservation). */
 export function markdownToDast(markdown: string): DastDocument {
   return editableMarkdownToDast(markdown, { nodes: {}, links: {}, itemLinks: {} });
+}
+
+// ---------------------------------------------------------------------------
+// Dato Dastdown wrappers
+// ---------------------------------------------------------------------------
+
+export { DastdownParseError };
+
+/**
+ * Serialize Dato-compatible DAST to Dastdown, DatoCMS' lossless plain-text
+ * format for structured text. Tables are not part of Dato's current DAST
+ * utility types, so callers should keep using the Markdown projection
+ * for table-bearing documents.
+ */
+export function dastToDastdown(doc: DastDocument): string {
+  return serializeDastdown(doc as unknown as DatoDastDocument);
+}
+
+/**
+ * Parse Dato Dastdown back into DAST. Block, inline block, inline item, and
+ * item link references use Dato's syntax, such as <block id="..."/>.
+ */
+export function dastdownToDast(dastdown: string): DastDocument {
+  return parseDastdown(dastdown) as unknown as DastDocument;
 }

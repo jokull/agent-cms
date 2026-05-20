@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { createTestApp } from "./app-helpers.js";
 import { createTestMcpClient, parseToolResult as parse } from "./mcp-helpers.js";
 
-describe("markdown block materialization after create_record", () => {
-  it("get_record returns persisted block fields after markdown+blocks create", async () => {
+describe("Agent Text block materialization after create_record", () => {
+  it("get_record returns persisted block fields after text+blocks create", async () => {
     const { sqlLayer } = createTestApp();
     const { client } = await createTestMcpClient(sqlLayer);
 
@@ -35,7 +35,7 @@ describe("markdown block materialization after create_record", () => {
         modelApiKey: "doc",
         data: {
           body: {
-            markdown: "Intro\n\n<!-- cms:block:snippet1 -->\n\nOutro",
+            text: "Intro\n\n[[block:snippet1]]\n\nOutro",
             blocks: {
               snippet1: {
                 _type: "code_snippet",

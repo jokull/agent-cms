@@ -3,14 +3,14 @@
  * { value: DastDocument, blocks: Record<string, unknown> } shape.
  *
  * Accepted input formats:
- * 1. String → markdown, converted via markdownToDast
- * 2. Array → typed nodes, converted to DAST children
- * 3. Object with "markdown" key → markdown + optional blocks
- * 4. Object with "nodes" key → typed nodes + optional blocks
- * 5. Object with "value" key containing { schema: "dast" } → pass through (canonical)
- * 6. Any other object → pass through unchanged
+ * 1. String → Agent Text, converted via agentTextToDast
+ * 2. Object with "text" key → Agent Text + optional blocks
+ * 3. Object with "agentText" key → explicit Agent Text + optional blocks
+ * 4. Object with "value" key containing { schema: "dast" } → pass through (internal canonical)
+ * 5. Any other object → pass through unchanged
  */
 
+import { agentTextToDast } from "./agent-text.js";
 import { markdownToDast } from "./markdown.js";
 
 /**
@@ -24,65 +24,6 @@ export function parseInlineSpans(text: string): readonly unknown[] {
     return first.children as readonly unknown[];
   }
   return [{ type: "span", value: text }];
-}
-
-/**
- * Convert an array of typed node objects to DAST block-level children.
- */
-function typedNodesToDastChildren(nodes: readonly unknown[]): unknown[] {
-  const children: unknown[] = [];
-  for (const node of nodes) {
-    if (node == null || typeof node !== "object") continue;
-    const n = node as Record<string, unknown>;
-    const type = n.type;
-    switch (type) {
-      case "paragraph":
-        children.push({
-          type: "paragraph",
-          children: parseInlineSpans(String(n.text ?? "")),
-        });
-        break;
-      case "heading":
-        children.push({
-          type: "heading",
-          level: n.level,
-          children: parseInlineSpans(String(n.text ?? "")),
-        });
-        break;
-      case "code":
-        children.push({
-          type: "code",
-          code: n.code,
-          ...(n.language ? { language: n.language } : {}),
-        });
-        break;
-      case "blockquote":
-        children.push({
-          type: "blockquote",
-          children: [{ type: "paragraph", children: parseInlineSpans(String(n.text ?? "")) }],
-        });
-        break;
-      case "list":
-        children.push({
-          type: "list",
-          style: n.style ?? "bulleted",
-          children: (Array.isArray(n.items) ? n.items : []).map((item: unknown) => ({
-            type: "listItem",
-            children: [{ type: "paragraph", children: parseInlineSpans(String(item ?? "")) }],
-          })),
-        });
-        break;
-      case "thematicBreak":
-        children.push({ type: "thematicBreak" });
-        break;
-      case "block":
-        children.push({ type: "block", item: n.ref });
-        break;
-      default:
-        break;
-    }
-  }
-  return children;
 }
 
 /**
@@ -147,40 +88,24 @@ function isRecord(v: unknown): v is Record<string, unknown> {
  * { value: DastDocument, blocks: Record<string, unknown> } shape.
  */
 export function expandStructuredTextShorthand(rawValue: unknown): unknown {
-  // 1. String → markdown mode
+  // 1. String → Agent Text mode
   if (typeof rawValue === "string") {
-    const doc = markdownToDast(rawValue);
+    const doc = agentTextToDast(rawValue);
     return { value: doc, blocks: {} };
-  }
-
-  // 2. Array → typed nodes mode
-  if (Array.isArray(rawValue)) {
-    const children = typedNodesToDastChildren(rawValue);
-    return {
-      value: { schema: "dast", document: { type: "root", children } },
-      blocks: {},
-    };
   }
 
   if (!isRecord(rawValue)) return rawValue;
 
-  // 3. Object with "markdown" key → markdown + optional blocks wrapper
-  if ("markdown" in rawValue && typeof rawValue.markdown === "string") {
-    const doc = markdownToDast(rawValue.markdown);
+  // 2 & 3. Object with "text" or "agentText" key → Agent Text + optional blocks wrapper
+  const agentText = typeof rawValue.text === "string"
+    ? rawValue.text
+    : (typeof rawValue.agentText === "string" ? rawValue.agentText : null);
+  if (agentText !== null) {
+    const doc = agentTextToDast(agentText);
     const blocks = normalizeBlocks(rawValue.blocks);
     return { value: doc, blocks };
   }
 
-  // 4. Object with "nodes" key → typed nodes + optional blocks wrapper
-  if ("nodes" in rawValue && Array.isArray(rawValue.nodes)) {
-    const children = typedNodesToDastChildren(rawValue.nodes);
-    const blocks = normalizeBlocks(rawValue.blocks);
-    return {
-      value: { schema: "dast", document: { type: "root", children } },
-      blocks,
-    };
-  }
-
-  // 5 & 6. Object with "value" key or anything else → pass through
+  // 4 & 5. Object with "value" key or anything else → pass through
   return rawValue;
 }
