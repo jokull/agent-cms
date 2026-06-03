@@ -14,7 +14,7 @@ import * as RecordService from "../services/record-service.js";
 import * as PublishService from "../services/publish-service.js";
 import * as ScheduleService from "../services/schedule-service.js";
 import * as AssetService from "../services/asset-service.js";
-import { AssetImportContext } from "../services/asset-service.js";
+import { AssetImportContext, type R2UploadCredentials } from "../services/asset-service.js";
 import * as VersionService from "../services/version-service.js";
 import * as SchemaLifecycle from "../services/schema-lifecycle.js";
 import * as SchemaIO from "../services/schema-io.js";
@@ -24,6 +24,7 @@ import * as TokenService from "../services/token-service.js";
 import * as PreviewService from "../services/preview-service.js";
 import {
   CreateAssetInput as AssetInput,
+  CreateUploadUrlInput,
   CreateFieldInput,
   CreateModelInput,
   CreateRecordInput,
@@ -409,6 +410,17 @@ Upload flow:
 1. Upload the original file to R2
 2. Call this tool with the r2Key, filename, mimeType, and image dimensions
 3. The asset metadata is registered and can be referenced in media fields by its ID`, AssetInput.fields);
+const CreateAssetUploadUrlTool = cmsTool("create_asset_upload_url", `Create a short-lived presigned R2 upload URL for a local/generated file.
+
+Use this when the asset exists in the agent environment and is not already available at a public URL.
+
+Flow:
+1. Call this tool with filename and mimeType
+2. Upload the raw file bytes with HTTP PUT to the returned uploadUrl using the same Content-Type
+3. Call upload_asset with the returned assetId as id, the returned r2Key, filename, mimeType, size, and dimensions
+4. Use the returned asset ID in media/media_gallery fields
+
+Requires the CMS instance to be configured with R2 S3-compatible signing credentials.`, CreateUploadUrlInput.fields);
 const ImportAssetFromUrlTool = cmsTool("import_asset_from_url", `Download an asset from a public URL, store it in R2, and register it in one step.
 
 Use this when you have an image URL and want an agent-friendly path.
@@ -477,6 +489,7 @@ const AdminTools = [
   ReorderRecordsTool,
   RemoveBlockTool,
   RemoveLocaleTool,
+  CreateAssetUploadUrlTool,
   UploadAssetTool,
   ImportAssetFromUrlTool,
   ListAssetsTool,
@@ -503,6 +516,7 @@ const EditorTools = [
   ScheduleTool,
   RecordVersionsTool,
   ReorderRecordsTool,
+  CreateAssetUploadUrlTool,
   UploadAssetTool,
   ImportAssetFromUrlTool,
   ListAssetsTool,
@@ -591,9 +605,10 @@ Asset upload flow:
   3. Use that returned asset ID in media/media_gallery fields
 
   Manual fallback:
-  1. Upload file to R2 out of band
-  2. Register with upload_asset tool (pass r2Key, filename, mimeType, dimensions)
-  3. Use returned asset ID in media/media_gallery fields
+  1. Call create_asset_upload_url for a local/generated file
+  2. PUT the raw bytes to the returned uploadUrl
+  3. Register with upload_asset tool (pass returned assetId as id, plus r2Key, filename, mimeType, size, dimensions)
+  4. Use returned asset ID in media/media_gallery fields
 
 Tool argument encoding:
   - Some MCP clients XML-encode tool arguments before they reach the server.
@@ -729,6 +744,7 @@ export interface CreateMcpLayerOptions {
   readonly mode?: "admin" | "editor";
   readonly path?: string;
   readonly r2Bucket?: R2Bucket;
+  readonly r2Credentials?: R2UploadCredentials;
   readonly fetch?: typeof globalThis.fetch;
   readonly actor?: RequestActor | null;
   readonly assetBaseUrl?: string;
@@ -747,6 +763,7 @@ export function createMcpLayer(
   const defaultHooksLayer: Layer.Layer<HooksContext> = Layer.succeed(HooksContext, Option.none());
   const defaultAssetImportLayer: Layer.Layer<AssetImportContext> = Layer.succeed(AssetImportContext, {
     r2Bucket: options?.r2Bucket,
+    r2Credentials: options?.r2Credentials,
     fetch: options?.fetch ?? globalThis.fetch,
   });
   const fullLayer: Layer.Layer<SqlClient.SqlClient | VectorizeContext | HooksContext | AssetImportContext> = Layer.merge(
@@ -930,6 +947,7 @@ export function createMcpLayer(
       return SchemaLifecycle.removeBlockType(blockApiKey);
     }),
     remove_locale: withDecoded(LocaleIdInput, ({ localeId }) => SchemaLifecycle.removeLocale(localeId)),
+    create_asset_upload_url: withDecoded(CreateUploadUrlInput, AssetService.createAssetUploadUrl),
     upload_asset: withDecoded(AssetInput, (input) =>
       AssetService.createAsset(input, options?.actor).pipe(Effect.map(withAssetUrl))),
     import_asset_from_url: withDecoded(ImportAssetFromUrlInput, (input) =>

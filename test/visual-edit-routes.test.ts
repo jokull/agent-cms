@@ -31,6 +31,33 @@ describe("visual edit routes", () => {
     await expect(res.json()).resolves.toEqual({ error: "Presigned uploads not configured" });
   });
 
+  it("creates presigned R2 upload URLs when credentials are configured", async () => {
+    const handler = createApp({
+      writeKey: "write-key",
+      r2Credentials: {
+        accessKeyId: "test-access-key",
+        secretAccessKey: "test-secret-key",
+        bucketName: "test-bucket",
+        accountId: "test-account",
+      },
+    });
+    const res = await handler(new Request("http://localhost/api/assets/upload-url", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer write-key",
+      },
+      body: JSON.stringify({ filename: "photo.jpg", mimeType: "image/jpeg" }),
+    }));
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as Record<string, unknown>;
+    expect(body.assetId).toEqual(expect.any(String));
+    expect(body.r2Key).toBe(`uploads/${body.assetId}/photo.jpg`);
+    expect(body.uploadUrl).toEqual(expect.stringContaining("https://test-bucket.test-account.r2.cloudflarestorage.com/"));
+    expect(body.uploadUrl).toEqual(expect.stringContaining("X-Amz-Signature="));
+  });
+
   it("returns 501 for direct binary upload when R2 bucket is not configured", async () => {
     const handler = createApp({ writeKey: "write-key" });
     const res = await handler(new Request("http://localhost/api/assets/test-asset/file", {

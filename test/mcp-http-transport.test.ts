@@ -88,7 +88,61 @@ describe("MCP HTTP transport", () => {
     expect(tools.tools.some((tool) => tool.name === "create_model")).toBe(false);
     expect(tools.tools.some((tool) => tool.name === "editor_tokens")).toBe(false);
     expect(tools.tools.some((tool) => tool.name === "reindex_search")).toBe(false);
+    expect(tools.tools.some((tool) => tool.name === "create_asset_upload_url")).toBe(true);
     expect(tools.tools.some((tool) => tool.name === "import_asset_from_url")).toBe(true);
+
+    await transport.close();
+  });
+
+  it("lets editor MCP create a presigned asset upload URL", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "agent-cms-mcp-editor-upload-url-"));
+    const dbPath = join(tmpDir, "test.db");
+    const sqlLayer = SqliteClient.layer({ filename: dbPath, disableWAL: true });
+
+    Effect.runSync(runMigrations().pipe(Effect.provide(sqlLayer)));
+
+    const editorToken = await Effect.runPromise(
+      TokenService.createEditorToken({ name: "editor" }).pipe(Effect.provide(sqlLayer))
+    );
+    const handler = createWebHandler(sqlLayer, {
+      writeKey: "write-key",
+      r2Credentials: {
+        accessKeyId: "test-access-key",
+        secretAccessKey: "test-secret-key",
+        bucketName: "test-bucket",
+        accountId: "test-account",
+      },
+    }).fetch;
+
+    const transport = new StreamableHTTPClientTransport(new URL("http://localhost/mcp/editor"), {
+      requestInit: { headers: { Authorization: `Bearer ${editorToken.token}` } },
+      fetch: (input, init) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        return handler(new Request(url, init));
+      },
+    });
+    const client = new Client({ name: "test-editor-upload-url-client", version: "1.0.0" });
+
+    await client.connect(transport);
+
+    const result = await client.callTool({
+      name: "create_asset_upload_url",
+      arguments: {
+        filename: "photo.jpg",
+        mimeType: "image/jpeg",
+      },
+    });
+    const body = JSON.parse(result.content[0]?.text ?? "{}") as Record<string, unknown>;
+
+    expect(body.assetId).toEqual(expect.any(String));
+    expect(body.r2Key).toBe(`uploads/${body.assetId}/photo.jpg`);
+    expect(body.uploadUrl).toEqual(expect.stringContaining("https://test-bucket.test-account.r2.cloudflarestorage.com/"));
+    expect(body.uploadUrl).toEqual(expect.stringContaining("X-Amz-Signature="));
 
     await transport.close();
   });

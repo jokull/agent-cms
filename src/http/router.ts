@@ -663,6 +663,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
   );
   const assetImportLayer = Layer.succeed(AssetImportContext, {
     r2Bucket: options?.r2Bucket,
+    r2Credentials: options?.r2Credentials,
     fetch: options?.fetch ?? globalThis.fetch,
   });
   const fullLayer = Layer.mergeAll(sqlLayer, vectorizeLayer, hooksLayer, assetImportLayer, Logger.json);
@@ -1008,6 +1009,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
             mode: "admin",
             path: "/mcp",
             r2Bucket: options.r2Bucket,
+            r2Credentials: options.r2Credentials,
             assetBaseUrl: options.assetBaseUrl,
             siteUrl: options.siteUrl,
             actor: { type: "admin", label: "admin" },
@@ -1030,6 +1032,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
               mode: "admin",
               path: "/mcp",
               r2Bucket: options?.r2Bucket,
+              r2Credentials: options?.r2Credentials,
               assetBaseUrl: options?.assetBaseUrl,
               siteUrl: options?.siteUrl,
               actor,
@@ -1038,6 +1041,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
               mode: "admin",
               path: "/mcp",
               r2Bucket: options?.r2Bucket,
+              r2Credentials: options?.r2Credentials,
               assetBaseUrl: options?.assetBaseUrl,
               siteUrl: options?.siteUrl,
               actor,
@@ -1054,6 +1058,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
             mode: "editor",
             path: "/mcp/editor",
             r2Bucket: options.r2Bucket,
+            r2Credentials: options.r2Credentials,
             assetBaseUrl: options.assetBaseUrl,
             siteUrl: options.siteUrl,
             actor: { type: "editor", label: "editor" },
@@ -1078,6 +1083,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
               mode: "editor",
               path: "/mcp/editor",
               r2Bucket: options?.r2Bucket,
+              r2Credentials: options?.r2Credentials,
               assetBaseUrl: options?.assetBaseUrl,
               siteUrl: options?.siteUrl,
               actor,
@@ -1086,6 +1092,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
               mode: "editor",
               path: "/mcp/editor",
               r2Bucket: options?.r2Bucket,
+              r2Credentials: options?.r2Credentials,
               assetBaseUrl: options?.assetBaseUrl,
               siteUrl: options?.siteUrl,
               actor,
@@ -1143,23 +1150,10 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
         }
         const body = await instrumentedRequest.json();
         const parsed = Schema.decodeUnknownSync(CreateUploadUrlInput)(body);
-        const { S3Client, PutObjectCommand } = await import("@aws-sdk/client-s3");
-        const { getSignedUrl } = await import("@aws-sdk/s3-request-presigner");
-        const creds = options.r2Credentials;
-        const assetId = crypto.randomUUID();
-        const r2Key = `uploads/${assetId}/${parsed.filename}`;
-        const s3 = new S3Client({
-          region: "auto",
-          endpoint: `https://${creds.accountId}.r2.cloudflarestorage.com`,
-          credentials: { accessKeyId: creds.accessKeyId, secretAccessKey: creds.secretAccessKey },
-        });
-        const command = new PutObjectCommand({
-          Bucket: creds.bucketName,
-          Key: r2Key,
-          ContentType: parsed.mimeType,
-        });
-        const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
-        return finish(new Response(JSON.stringify({ uploadUrl, r2Key, assetId }), {
+        const result = await Effect.runPromise(
+          AssetService.createAssetUploadUrl(parsed).pipe(Effect.provide(fullLayer))
+        );
+        return finish(new Response(JSON.stringify(result), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }));

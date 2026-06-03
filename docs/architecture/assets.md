@@ -73,20 +73,22 @@ Why:
 
 ### Editor / Agent Uploads
 
-The future editor-facing path is signed direct upload:
+The editor-facing path is signed direct upload:
 
 1. authenticated client asks agent-cms for an upload grant
 2. client uploads the original binary directly to R2
 3. client registers the asset metadata in agent-cms
 
-That keeps the same architecture while avoiding direct R2 credentials for editor agents.
+That keeps the same architecture while avoiding direct R2 credentials for editor agents. In REST this is `POST /api/assets/upload-url`; in MCP this is `create_asset_upload_url`, followed by `upload_asset` after the HTTP PUT succeeds.
 
 ## MCP / Agent Usage
 
 Agent tools should guide users through:
 
-1. putting the object into R2
-2. calling the asset registration tool with the resulting `r2Key`
+1. calling `import_asset_from_url` for public source URLs
+2. calling `create_asset_upload_url` for local/generated files
+3. putting the object into R2 with the returned signed URL
+4. calling the asset registration tool with the resulting `r2Key`
 
 ## Future Re-evaluation
 

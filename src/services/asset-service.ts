@@ -3,7 +3,7 @@ import { SqlClient } from "@effect/sql";
 import { generateId } from "../id.js";
 import { NotFoundError, ValidationError } from "../errors.js";
 import type { AssetRow } from "../db/row-types.js";
-import type { CreateAssetInput, ImportAssetFromUrlInput } from "./input-schemas.js";
+import type { CreateAssetInput, CreateUploadUrlInput, ImportAssetFromUrlInput } from "./input-schemas.js";
 import { encodeJson } from "../json.js";
 import type { RequestActor } from "../attribution.js";
 
@@ -11,9 +11,17 @@ export class AssetImportContext extends Context.Tag("AssetImportContext")<
   AssetImportContext,
   {
     readonly r2Bucket: R2Bucket | undefined;
+    readonly r2Credentials: R2UploadCredentials | undefined;
     readonly fetch: typeof globalThis.fetch;
   }
 >() {}
+
+export interface R2UploadCredentials {
+  accessKeyId: string;
+  secretAccessKey: string;
+  bucketName: string;
+  accountId: string;
+}
 
 const MAX_REMOTE_ASSET_BYTES = 25 * 1024 * 1024;
 const MAX_REMOTE_ASSET_REDIRECTS = 5;
@@ -426,6 +434,46 @@ export function deleteAsset(id: string) {
     if (rows.length === 0) return yield* new NotFoundError({ entity: "Asset", id });
     yield* sql.unsafe("DELETE FROM assets WHERE id = ?", [id]);
     return { deleted: true };
+  });
+}
+
+export function createAssetUploadUrl(input: CreateUploadUrlInput) {
+  return Effect.gen(function* () {
+    const { r2Credentials } = yield* AssetImportContext;
+    if (!r2Credentials) {
+      return yield* new ValidationError({ message: "Presigned uploads not configured" });
+    }
+
+    const { S3Client, PutObjectCommand } = yield* Effect.tryPromise({
+      try: () => import("@aws-sdk/client-s3"),
+      catch: () => new ValidationError({ message: "Failed to load R2 signing client" }),
+    });
+    const { getSignedUrl } = yield* Effect.tryPromise({
+      try: () => import("@aws-sdk/s3-request-presigner"),
+      catch: () => new ValidationError({ message: "Failed to load R2 signing helper" }),
+    });
+
+    const assetId = crypto.randomUUID();
+    const r2Key = `uploads/${assetId}/${input.filename}`;
+    const s3 = new S3Client({
+      region: "auto",
+      endpoint: `https://${r2Credentials.accountId}.r2.cloudflarestorage.com`,
+      credentials: {
+        accessKeyId: r2Credentials.accessKeyId,
+        secretAccessKey: r2Credentials.secretAccessKey,
+      },
+    });
+    const command = new PutObjectCommand({
+      Bucket: r2Credentials.bucketName,
+      Key: r2Key,
+      ContentType: input.mimeType,
+    });
+    const uploadUrl = yield* Effect.tryPromise({
+      try: () => getSignedUrl(s3, command, { expiresIn: 3600 }),
+      catch: () => new ValidationError({ message: "Failed to create R2 upload URL" }),
+    });
+
+    return { uploadUrl, r2Key, assetId };
   });
 }
 
