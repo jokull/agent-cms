@@ -136,7 +136,7 @@ describe("Schema Lifecycle — Advanced Operations", () => {
   });
 
   describe("P5.4: Inline structured_text shorthand in create_record", () => {
-    it("creates a record with typed nodes shorthand via MCP", async () => {
+    it("creates a record with Agent Text shorthand via MCP", async () => {
       const hero = parse(await agent.callTool({
         name: "create_model",
         arguments: { name: "Hero Section", apiKey: "hero_section", isBlock: true },
@@ -161,18 +161,14 @@ describe("Schema Lifecycle — Advanced Operations", () => {
         },
       }));
 
-      // Create record with inline { nodes, blocks } shorthand
+      // Create record with canonical { text, blocks } shorthand
       parse(await agent.callTool({
         name: "create_record",
         arguments: {
           modelApiKey: "page",
           data: {
             content: {
-              nodes: [
-                { type: "paragraph", text: "Intro with **bold** copy." },
-                { type: "block", ref: "hero-1" },
-                { type: "paragraph", text: "Closing line." },
-              ],
+              text: "Intro with **bold** copy.\n\n[[block:hero-1]]\n\nClosing line.",
               blocks: [
                 { id: "hero-1", type: "hero_section", data: { headline: "Hello from MCP" } },
               ],

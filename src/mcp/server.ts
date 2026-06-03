@@ -337,14 +337,14 @@ Field value formats:
 - link: record ID string
 - links: array of record ID strings
 - seo: {"title":"...","description":"...","image":"<asset_id>","twitterCard":"summary_large_image"}
-- structured_text: markdown string, typed nodes array, {markdown:"...",blocks:[...]}, {nodes:[...],blocks:[...]}, or full DAST envelope {"value":{"schema":"dast","document":{...}},"blocks":{...}}
-  Markdown mode is the easiest way to write prose. Standard inline formatting (**bold**, *italic*, \`code\`, ~~strikethrough~~, [links](url)) all work.
-  Special sentinels for CMS references in markdown:
-  - Block refs: <!-- cms:block:BLOCK_ID --> (on its own line)
-  - Inline items: <!-- cms:inlineItem:RECORD_ID -->
-  - Inline blocks: <!-- cms:inlineBlock:BLOCK_ID -->
-  - Record links: [link text](itemLink:RECORD_ID)
-  When using {markdown, blocks}, the blocks array/map provides block data and sentinels place them in the document.
+- structured_text: {text:"...",blocks:[...]} (canonical), Agent Text string, {agentText:"...",blocks:[...]}, or internal DAST envelope {"value":{"schema":"dast","document":{...}},"blocks":{...}}
+  Prefer {text, blocks} for agent-authored prose. It is Markdown plus opaque CMS handles:
+  - Block refs: [[block:BLOCK_ID]] on their own line
+  - Inline items: [[inline_item:RECORD_ID]]
+  - Inline blocks: [[inline_block:BLOCK_ID]]
+  - Record links: [[record:RECORD_ID|link text]]
+  When using {text, blocks}, the blocks array/map provides block data and the handles place references in the document.
+  Do not use DAST JSON, angle-bracket reference tags, Markdown-link record schemes, or HTML comments in agent-authored structured_text.
   Those block field values are persisted by the same create_record/update_record call — you do not need a follow-up patch_blocks call just to save the initial block payload.
 - rich_text: array of block objects [{block_type:"hero_section",headline:"Welcome"},{block_type:"cta_block",label:"Sign Up"}]
   Each object must have a block_type key matching an allowed block model api_key.
@@ -353,7 +353,7 @@ Field value formats:
 - lat_lon: {"latitude":64.13,"longitude":-21.89}`, CreateRecordInput.fields);
 const UpdateRecordTool = cmsTool("update_record", `Update record fields. For singletons, recordId can be omitted — the single record is found automatically.
 
-Accepts all the same field value formats as create_record, including markdown mode for structured_text. For editorial content edits, prefer markdown mode over hand-assembled DAST — it's simpler and less error-prone.`, UpdateRecordInput.fields);
+Accepts all the same field value formats as create_record, including canonical {text,blocks} mode for structured_text. For editorial content edits, prefer Agent Text handles over hand-assembled DAST.`, UpdateRecordInput.fields);
 const PatchBlocksTool = cmsTool("patch_blocks", `Partially update blocks in a structured text field without resending the entire content tree.
 
 You can target block IDs from either:
@@ -555,13 +555,13 @@ Field value formats (composite types):
   - link: record ID string
   - links: array of record ID strings
   - seo: {"title":"...","description":"...","image":"<asset_id>","twitterCard":"summary_large_image"}
-  - structured_text: markdown string, typed nodes array, {markdown:"...",blocks:[...]}, {nodes:[...],blocks:[...]}, or full DAST envelope {"value":{"schema":"dast","document":{...}},"blocks":{...}}
-    Prefer markdown mode for prose-heavy content. Inline formatting, links, and block placement all work. Initial block payloads are persisted by the same create_record/update_record call; patch_blocks is for later targeted edits, not for finishing initial block creation:
+  - structured_text: {text:"...",blocks:[...]} (canonical), Agent Text string, {agentText:"...",blocks:[...]}, or internal DAST envelope {"value":{"schema":"dast","document":{...}},"blocks":{...}}
+    Prefer Agent Text for prose-heavy content. Inline formatting, links, and block placement all work. Initial block payloads are persisted by the same create_record/update_record call; patch_blocks is for later targeted edits, not for finishing initial block creation:
     - Standard markdown: **bold**, *italic*, \`code\`, ~~strike~~, [links](url)
-    - Block refs: <!-- cms:block:BLOCK_ID --> (own line)
-    - Record links: [link text](itemLink:RECORD_ID)
-    - Inline items: <!-- cms:inlineItem:RECORD_ID -->
-    - Inline blocks: <!-- cms:inlineBlock:BLOCK_ID -->
+    - Block refs: [[block:BLOCK_ID]] (own line)
+    - Record links: [[record:RECORD_ID|link text]]
+    - Inline items: [[inline_item:RECORD_ID]]
+    - Inline blocks: [[inline_block:BLOCK_ID]]
   - color: {"red":255,"green":0,"blue":0,"alpha":255}
   - lat_lon: {"latitude":64.13,"longitude":-21.89}
 
@@ -626,10 +626,10 @@ Pluralization:
   Powered by standard English pluralization rules.
 
 Translation:
-  For translating structured_text fields, work with the markdown representation.
-  Translate the full markdown document — not field by field — to preserve context, tone, and flow.
-  Leave block sentinels (<!-- cms:block:ID -->), record links ([text](itemLink:ID)), and inline refs untouched.
-  The CMS reconstructs DAST from the translated markdown when you update the record.
+  For translating structured_text fields, work with the Agent Text representation.
+  Translate the full text document — not field by field — to preserve context, tone, and flow.
+  Leave CMS handles ([[block:ID]], [[inline_block:ID]], [[inline_item:ID]]) untouched. For record links, translate only the visible label in [[record:ID|label]] and keep the ID unchanged.
+  The CMS reconstructs DAST from Agent Text when you update the record.
   This gives full article context for fluid translations vs. isolated sentence-level machine translation.`),
   });
 }

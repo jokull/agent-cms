@@ -1,7 +1,5 @@
 export async function fetchDatoSchemaMetadata(datoClient) {
-  const itemTypesResponse = await datoClient.cmaRequest("/item-types", {
-    "page[limit]": 200,
-  });
+  const itemTypesResponse = await datoClient.listRawItemTypes();
   const allItemTypes = itemTypesResponse.data ?? [];
 
   const itemTypeIdToApiKey = new Map();
@@ -22,7 +20,7 @@ export async function fetchDatoSchemaMetadata(datoClient) {
   const fieldMap = new Map();
 
   for (const itemType of allItemTypes) {
-    const fieldsResponse = await datoClient.cmaRequest(`/item-types/${itemType.id}/fields`);
+    const fieldsResponse = await datoClient.listRawFields(itemType.id);
     const fields = (fieldsResponse.data ?? []).map((field) => ({
       api_key: field.attributes.api_key,
       field_type: field.attributes.field_type,

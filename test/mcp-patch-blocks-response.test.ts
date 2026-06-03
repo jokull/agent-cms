@@ -31,7 +31,7 @@ describe("MCP patch_blocks response", () => {
         modelApiKey: "page",
         data: {
           content: {
-            markdown: "Intro\n\n<!-- cms:block:n1 -->",
+            text: "Intro\n\n[[block:n1]]",
             blocks: { n1: { _type: "note_block", body: "Original" } },
           },
         },

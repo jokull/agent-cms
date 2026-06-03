@@ -3,7 +3,7 @@ import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
 import { createTestApp, jsonRequest } from "./app-helpers.js";
 
-describe("markdown + blocks persistence", () => {
+describe("Agent Text + blocks persistence", () => {
   it("persists inline block field data during create_record", async () => {
     const { handler, sqlLayer } = createTestApp();
 
@@ -40,7 +40,7 @@ describe("markdown + blocks persistence", () => {
       modelApiKey: "doc",
       data: {
         body: {
-          markdown: "Intro\n\n<!-- cms:block:snippet1 -->\n\nOutro",
+          text: "Intro\n\n[[block:snippet1]]\n\nOutro",
           blocks: {
             snippet1: {
               _type: "code_snippet",

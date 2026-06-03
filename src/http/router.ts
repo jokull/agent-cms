@@ -646,6 +646,8 @@ export interface WebHandlerOptions {
   siteUrl?: string;
   /** Worker Loader binding for Code Mode MCP (optional — enables /mcp/codemode) */
   loader?: unknown;
+  /** Fetch implementation for asset import helpers */
+  fetch?: typeof fetch;
 }
 
 export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, options?: WebHandlerOptions) {

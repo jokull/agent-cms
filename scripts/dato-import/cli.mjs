@@ -42,6 +42,10 @@ const outDirOption = Options.text("out-dir").pipe(
   Options.withDescription("Directory for findings, summaries, and resumable import output."),
   Options.withDefault(defaultOutDir),
 );
+const constantsOutOption = Options.text("constants-out").pipe(
+  Options.withDescription("Optional TypeScript path for generated schema API-key constants."),
+  Options.withDefault(""),
+);
 const exportItemChunkSizeOption = Options.integer("item-chunk-size").pipe(
   Options.withDescription("Records per exported item chunk file."),
   Options.withDefault(300),
@@ -88,18 +92,23 @@ const inspectCommand = Command.make("inspect", { datoToken: tokenOption }).pipe(
 const codegenCommand = Command.make("codegen", {
   datoToken: tokenOption,
   outDir: outDirOption,
+  constantsOut: constantsOutOption,
 }).pipe(
   Command.withDescription("Auto-generate an agent-cms schema from a DatoCMS project via CMA."),
-  Command.withHandler(({ datoToken, outDir }) =>
+  Command.withHandler(({ datoToken, outDir, constantsOut }) =>
     Effect.tryPromise(async () => {
       if (!datoToken) throw new Error("Missing Dato token. Pass --dato-token or set DATOCMS_API_TOKEN.");
       const { createDatoClient } = await import("./core/datocms.mjs");
-      const { generateSchema } = await import("./core/schema-codegen.mjs");
+      const { generateSchema, writeSchemaConstantsModule } = await import("./core/schema-codegen.mjs");
       const { ensureOutDir, writeJson } = await import("./core/runtime.mjs");
       const dato = createDatoClient({ token: datoToken });
       const schema = await generateSchema(dato);
       await ensureOutDir(outDir);
       const outPath = await writeJson(outDir, "generated-schema.json", schema);
+      if (constantsOut) {
+        const constantsPath = await writeSchemaConstantsModule(constantsOut, schema);
+        console.log(`Generated constants: ${constantsPath}`);
+      }
       console.log(`Generated schema: ${schema.models.length} models, ${schema.locales.length} locales`);
       console.log(`  Models: ${schema.models.filter((m) => !m.isBlock).map((m) => m.apiKey).join(", ")}`);
       console.log(`  Blocks: ${schema.models.filter((m) => m.isBlock).map((m) => m.apiKey).join(", ")}`);
@@ -412,6 +421,7 @@ Auto-generate an agent-cms ImportSchemaInput from a DatoCMS project.
 USAGE
 
   npm run dato:import -- codegen [--dato-token <token>] [--out-dir <path>]
+    [--constants-out <path>]
 `;
 }
 

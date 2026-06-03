@@ -9,9 +9,7 @@ export async function runInspect({
 } = {}) {
   const dato = createDatoClient({ token });
   const site = await dato.getSite();
-  const itemTypes = await dato.cmaRequest("/item-types", {
-    "page[limit]": 500,
-  });
+  const itemTypes = await dato.listRawItemTypes();
 
   const summary = {
     site: {

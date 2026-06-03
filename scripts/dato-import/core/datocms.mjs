@@ -1,4 +1,5 @@
 import { Data, Effect } from "effect";
+import { buildClient } from "@datocms/cma-client-node";
 
 class DatoNetworkError extends Data.TaggedError("DatoNetworkError") {}
 class DatoDecodeError extends Data.TaggedError("DatoDecodeError") {}
@@ -17,6 +18,12 @@ export function createDatoClient({
   const itemCache = new Map();
   const itemTypeCache = new Map();
   const uploadCache = new Map();
+  const cmaClient = buildClient({
+    apiToken: token,
+    baseUrl: cmaUrl,
+    requestTimeout: 30_000,
+    autoRetry: true,
+  });
 
   function requestJson(url, init) {
     return Effect.gen(function* () {
@@ -200,13 +207,19 @@ export function createDatoClient({
 
   async function getItemTypes() {
     if (itemTypeCache.size > 0) return itemTypeCache;
-    const body = await cmaRequest("/item-types", {
-      "page[limit]": 200,
-    });
+    const body = await listRawItemTypes();
     for (const itemType of body.data ?? []) {
       itemTypeCache.set(itemType.id, itemType.attributes.api_key);
     }
     return itemTypeCache;
+  }
+
+  async function listRawItemTypes() {
+    return cmaClient.itemTypes.rawList();
+  }
+
+  async function listRawFields(itemTypeId) {
+    return cmaClient.fields.rawList(itemTypeId);
   }
 
   async function getItemTypeApiKey(itemTypeId) {
@@ -262,7 +275,7 @@ export function createDatoClient({
   }
 
   async function getSite() {
-    const body = await cmaRequest("/site");
+    const body = await cmaClient.site.rawFind();
     return body.data;
   }
 
@@ -276,6 +289,8 @@ export function createDatoClient({
     getItems,
     getItemTypes,
     getItemTypeApiKey,
+    listRawItemTypes,
+    listRawFields,
     getUpload,
     getUploads,
     listUploadsPagedIterator,
