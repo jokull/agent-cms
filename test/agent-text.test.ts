@@ -58,4 +58,72 @@ describe("Agent Text structured text format", () => {
     const docWithHandles = agentTextToDast(source);
     expect(docWithHandles.document.children[1]).toEqual({ type: "block", item: "hero1" });
   });
+
+  it("keeps GFM tables available in Agent Text strings", () => {
+    const result = agentTextToDast([
+      "| Plan | Price |",
+      "| --- | --- |",
+      "| Basic | $9 |",
+    ].join("\n"));
+
+    expect(result.document.children[0]?.type).toBe("table");
+  });
+
+  it("does not rewrite handle-looking text inside code", () => {
+    const result = agentTextToDast([
+      "```",
+      "[[block:literal]]",
+      "```",
+      "",
+      "Use `[[record:rec1|literal]]` in examples.",
+    ].join("\n"));
+
+    expect(result.document.children[0]).toEqual({
+      type: "code",
+      code: "[[block:literal]]",
+    });
+    expect(result.document.children[1]).toEqual({
+      type: "paragraph",
+      children: [
+        { type: "span", value: "Use " },
+        { type: "span", value: "[[record:rec1|literal]]", marks: ["code"] },
+        { type: "span", value: " in examples." },
+      ],
+    });
+  });
+
+  it("serializes record labels with escaped brackets as Agent Text handles", () => {
+    const source = dastToAgentText({
+      schema: "dast",
+      document: {
+        type: "root",
+        children: [
+          {
+            type: "paragraph",
+            children: [
+              { type: "span", value: "See " },
+              {
+                type: "itemLink",
+                item: "rec1",
+                children: [{ type: "span", value: "record [A]" }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(source).toContain("[[record:rec1|record \\[A\\]]]");
+    expect(agentTextToDast(source).document.children[0]).toEqual({
+      type: "paragraph",
+      children: [
+        { type: "span", value: "See " },
+        {
+          type: "itemLink",
+          item: "rec1",
+          children: [{ type: "span", value: "record [A]" }],
+        },
+      ],
+    });
+  });
 });
