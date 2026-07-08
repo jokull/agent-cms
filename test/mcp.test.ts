@@ -329,7 +329,7 @@ describe("MCP Server", () => {
 
       const deleteRes = await client.callTool({
         name: "delete_record",
-        arguments: { recordId: record.id, modelApiKey: "post" },
+        arguments: { recordIds: [record.id], modelApiKey: "post" },
       });
       expect(getResult(deleteRes).deleted).toBe(true);
 

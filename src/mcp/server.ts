@@ -6,7 +6,7 @@ import * as McpServer from "@effect/ai/McpServer";
 import * as McpSchema from "@effect/ai/McpSchema";
 import * as AiTool from "@effect/ai/Tool";
 import * as Toolkit from "@effect/ai/Toolkit";
-import { Context, Effect, Layer, Option, Schema } from "effect";
+import { Context, Effect, Layer, Option, ParseResult, Schema } from "effect";
 import { SqlClient } from "@effect/sql";
 import * as ModelService from "../services/model-service.js";
 import * as FieldService from "../services/field-service.js";
@@ -83,8 +83,11 @@ const UpdateRecordInput = Schema.Struct({
 
 
 const DeleteRecordInput = Schema.Struct({
-  recordId: Schema.String,
   modelApiKey: Schema.String,
+  recordIds: Schema.Array(Schema.String).pipe(
+    Schema.filter((value) => value.length >= 1, { message: () => "recordIds must contain at least 1 entry" }),
+    Schema.filter((value) => value.length <= 1000, { message: () => "recordIds must contain at most 1000 entries" }),
+  ),
 });
 
 const QueryRecordsInput = Schema.Struct({
@@ -201,6 +204,27 @@ function cmsTool<Name extends string>(
 
 function toStructuredContent(value: unknown) {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value : undefined;
+}
+
+/**
+ * Turn a raw Effect Schema {@link ParseResult.ParseError} (produced when tool
+ * arguments fail to decode) into a friendly ValidationError with a readable,
+ * human-oriented message instead of dumping the internal ParseError tree to the
+ * MCP client. Non-ParseError failures pass through unchanged.
+ */
+function formatToolError(error: unknown): unknown {
+  if (
+    error !== null
+    && typeof error === "object"
+    && "_tag" in error
+    && (error as { _tag: unknown })._tag === "ParseError"
+  ) {
+    return {
+      _tag: "ValidationError",
+      message: ParseResult.TreeFormatter.formatErrorSync(error as ParseResult.ParseError),
+    };
+  }
+  return error;
 }
 
 function isToolPayload(value: unknown): value is Record<PropertyKey, unknown> {
@@ -380,7 +404,7 @@ Example — append a new block while patching an existing one:
 
 Example — reorder blocks on a blocks_only field:
 { order: ["block-3", "block-1", "block-2"], blocks: {} }`, PatchBlocksInput.fields);
-const DeleteRecordTool = cmsTool("delete_record", "Delete a record", DeleteRecordInput.fields);
+const DeleteRecordTool = cmsTool("delete_record", "Delete one or more records. Pass recordIds as an array, even for a single record (mirrors set_publish_status).", DeleteRecordInput.fields);
 const GetRecordTool = cmsTool("get_record", "Get a single record by modelApiKey + recordId. Useful after search_content when you need the full materialized record, including structured_text fields, before patch_blocks or update_record. This is a workspace/content-management read tool, not a substitute for final live verification via GraphQL or the site URL.", GetRecordInput.fields);
 const QueryRecordsTool = cmsTool("query_records", "List records for a model. Structured_text fields are materialized for inspection, including nested blocks inside parent block fields. Useful for finding record IDs before update_record, patch_blocks, set_publish_status, or record_versions. Use GraphQL or the site URL for final public/live verification after publishing.", QueryRecordsInput.fields);
 const BulkCreateRecordsTool = cmsTool("bulk_create_records", `Create multiple records in one operation (up to 1000). Much faster than calling create_record in a loop.
@@ -918,7 +942,10 @@ export function createMcpLayer(
         }),
       ),
     ),
-    delete_record: withDecoded(DeleteRecordInput, ({ recordId, modelApiKey }) => RecordService.removeRecord(modelApiKey, recordId)),
+    delete_record: withDecoded(DeleteRecordInput, ({ recordIds, modelApiKey }) =>
+      Effect.forEach(recordIds, (recordId) => RecordService.removeRecord(modelApiKey, recordId)).pipe(
+        Effect.map((results) => ({ deleted: true, count: results.length })),
+      )),
     get_record: withDecoded(GetRecordInput, ({ recordId, modelApiKey }) =>
       RecordService.getRecord(modelApiKey, recordId).pipe(Effect.flatMap((r) => addPreviewPath(modelApiKey, r)))),
     query_records: withDecoded(QueryRecordsInput, ({ modelApiKey }) =>
@@ -1033,12 +1060,14 @@ export function createMcpLayer(
           return built.handle(tool.name as never, params as never).pipe(
             Effect.provide(context),
             Effect.match({
-              onFailure: (error) =>
-                new McpSchema.CallToolResult({
+              onFailure: (rawError) => {
+                const error = formatToolError(rawError);
+                return new McpSchema.CallToolResult({
                   isError: true,
                   structuredContent: toStructuredContent(error),
                   content: [{ type: "text", text: encodeJson(error) }],
-                }),
+                });
+              },
               onSuccess: (result: { encodedResult: unknown }) =>
                 new McpSchema.CallToolResult({
                   isError: false,
