@@ -1,4 +1,5 @@
 import type { AssetObject, DynamicRow } from "./gql-types.js";
+import { isObjectRecord } from "../value-utils.js";
 
 function coerceStringListValue(value: unknown): string[] {
   if (Array.isArray(value)) {
@@ -33,7 +34,7 @@ export function normalizeImgixParams(raw: Record<string, unknown>): Record<strin
   if (raw.q != null) out.quality = raw.q;
   if (raw.quality != null) out.quality = raw.quality;
 
-  const fit = raw.fit as string | undefined;
+  const fit = typeof raw.fit === "string" ? raw.fit : undefined;
   if (fit === "facearea") {
     out.fit = "cover";
     out.gravity = "face";
@@ -77,25 +78,42 @@ export function buildResponsiveImage(
 ) {
   if (!asset.width || !asset.height) return null;
 
-  const rawParams = (args.transforms ?? args.cfImagesParams ?? args.imgixParams ?? {}) as Record<string, unknown>;
+  const rawParamsValue = args.transforms ?? args.cfImagesParams ?? args.imgixParams;
+  const rawParams = isObjectRecord(rawParamsValue) ? rawParamsValue : {};
   const params = args.imgixParams ? normalizeImgixParams(rawParams) : rawParams;
 
-  const requestedW = (params.width ?? params.w ?? asset.width) as number;
-  const requestedH = (params.height ?? params.h ?? null) as number | null;
-  const fit = (params.fit ?? "scale-down") as string;
-  const quality = (params.quality ?? params.q ?? null) as number | null;
-  const format = (params.format ?? params.auto ?? "auto") as string;
-  let gravity = (params.gravity ?? null) as string | null;
+  const requestedW = typeof params.width === "number"
+    ? params.width
+    : typeof params.w === "number"
+      ? params.w
+      : asset.width;
+  const requestedH = typeof params.height === "number"
+    ? params.height
+    : typeof params.h === "number"
+      ? params.h
+      : null;
+  const fit = typeof params.fit === "string" ? params.fit : "scale-down";
+  const quality = typeof params.quality === "number"
+    ? params.quality
+    : typeof params.q === "number"
+      ? params.q
+      : null;
+  const format = typeof params.format === "string"
+    ? params.format
+    : typeof params.auto === "string"
+      ? params.auto
+      : "auto";
+  let gravity = typeof params.gravity === "string" ? params.gravity : null;
   if (!gravity && asset.focalPoint) {
     gravity = `${asset.focalPoint.x}x${asset.focalPoint.y}`;
   }
-  const zoom = (params.zoom ?? null) as number | null;
-  const background = (params.background ?? null) as string | null;
-  const blur = (params.blur ?? null) as number | null;
-  const sharpen = (params.sharpen ?? null) as number | null;
-  const rotate = (params.rotate ?? null) as number | null;
-  const anim = (params.anim ?? null) as boolean | null;
-  const trim = (params.trim ?? null) as Record<string, unknown> | null;
+  const zoom = typeof params.zoom === "number" ? params.zoom : null;
+  const background = typeof params.background === "string" ? params.background : null;
+  const blur = typeof params.blur === "number" ? params.blur : null;
+  const sharpen = typeof params.sharpen === "number" ? params.sharpen : null;
+  const rotate = typeof params.rotate === "number" ? params.rotate : null;
+  const anim = typeof params.anim === "boolean" ? params.anim : null;
+  const trim = isObjectRecord(params.trim) ? params.trim : null;
 
   const origW = asset.width;
   const origH = asset.height;

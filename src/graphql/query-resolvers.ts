@@ -13,6 +13,7 @@ import { buildLinkPrefetchSpecs, collectSelectedFieldNames } from "./sqlite-json
 import { materializeStructuredTextValues } from "../services/structured-text-service.js";
 import { resolveStructuredTextValue } from "./structured-text-resolver.js";
 import { decodeJsonIfString } from "../json.js";
+import { isObjectRecord, stringArrayFrom } from "../value-utils.js";
 
 /**
  * Build filter/orderBy type defs and Query resolvers for each content model.
@@ -21,7 +22,7 @@ function pickLocalizedStructuredTextValue(rawValue: unknown, context: GqlContext
   if (rawValue === null || rawValue === undefined) return { locale: null, value: null };
 
   const localeMap = decodeJsonIfString(rawValue);
-  if (typeof localeMap !== "object" || localeMap === null || Array.isArray(localeMap)) {
+  if (!isObjectRecord(localeMap)) {
     return { locale: null, value: rawValue };
   }
 
@@ -29,28 +30,46 @@ function pickLocalizedStructuredTextValue(rawValue: unknown, context: GqlContext
   const fallbacks = context.fallbackLocales ?? [];
 
   if (locale) {
-    const localeValue = Reflect.get(localeMap, locale);
+    const localeValue = localeMap[locale];
     if (localeValue !== undefined && localeValue !== null && localeValue !== "") {
       return { locale, value: localeValue };
     }
   }
 
   for (const fallback of fallbacks) {
-    const fallbackValue = Reflect.get(localeMap, fallback);
+    const fallbackValue = localeMap[fallback];
     if (fallbackValue !== undefined && fallbackValue !== null && fallbackValue !== "") {
       return { locale: fallback, value: fallbackValue };
     }
   }
 
   if (defaultLocale) {
-    const defaultValue = Reflect.get(localeMap, defaultLocale);
+    const defaultValue = localeMap[defaultLocale];
     if (defaultValue !== undefined) {
       return { locale: defaultLocale, value: defaultValue };
     }
   }
 
-  const firstEntry = Object.entries(localeMap)[0];
-  return firstEntry ? { locale: firstEntry[0], value: firstEntry[1] } : { locale: null, value: null };
+  const entries = Object.entries(localeMap);
+  if (entries.length === 0) return { locale: null, value: null };
+  const firstEntry = entries[0];
+  return { locale: firstEntry[0], value: firstEntry[1] };
+}
+
+function readQueryArgs(args: DynamicRow) {
+  const orderBy = stringArrayFrom(args.orderBy);
+  return {
+    filter: isObjectRecord(args.filter) ? args.filter : undefined,
+    orderBy: orderBy.length > 0 ? orderBy : undefined,
+    first: typeof args.first === "number" ? args.first : undefined,
+    skip: typeof args.skip === "number" ? args.skip : undefined,
+  };
+}
+
+function applyLocaleArgs(args: DynamicRow, context: GqlContext) {
+  if (typeof args.locale === "string") context.locale = args.locale;
+  const fallbackLocales = stringArrayFrom(args.fallbackLocales);
+  if (fallbackLocales.length > 0) context.fallbackLocales = fallbackLocales;
 }
 
 export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: ModelQueryMeta[]): void {
@@ -222,22 +241,26 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
             : { locale: null, value: record[field.api_key] };
           const rawValue = selected.value;
           if (!rawValue) continue;
-          if (typeof rawValue === "object" && rawValue !== null && !Array.isArray(rawValue)
+          if (typeof rawValue === "object" && !Array.isArray(rawValue)
             && "value" in rawValue && "blocks" in rawValue) {
             continue;
           }
+          const recordId = typeof record.id === "string" || typeof record.id === "number"
+            ? String(record.id)
+            : null;
+          if (!recordId) continue;
 
           const rootFieldApiKey = field.localized
             ? `${field.api_key}:${selected.locale ?? defaultLocale ?? ""}`.replace(/:$/, "")
             : field.api_key;
-          const requestKey = `${field.api_key}:${selected.locale ?? ""}:${record.id}`;
+          const requestKey = `${field.api_key}:${selected.locale ?? ""}:${recordId}`;
           requests.push({
             requestKey,
             allowedBlockApiKeys,
             parentContainerModelApiKey: model.api_key,
             parentBlockId: null,
             parentFieldApiKey: field.api_key,
-            rootRecordId: String(record.id),
+            rootRecordId: recordId,
             rootFieldApiKey,
             rawValue,
           });
@@ -337,10 +360,9 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
         ? args.locale
         : (context.locale ?? defaultLocale ?? undefined);
       // Store locale for nested field resolvers (per-query, not shared across root fields)
-      if (args.locale) context.locale = args.locale as string;
-      if (args.fallbackLocales) context.fallbackLocales = args.fallbackLocales as string[];
+      applyLocaleArgs(args, context);
       let results = await queryWithFilter(
-        args as { filter?: DynamicRow; orderBy?: string[]; first?: number; skip?: number },
+        readQueryArgs(args),
         includeDrafts,
         locale,
         info
@@ -368,8 +390,7 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
       const locale = typeof args.locale === "string"
         ? args.locale
         : (context.locale ?? defaultLocale ?? undefined);
-      if (args.locale) context.locale = args.locale as string;
-      if (args.fallbackLocales) context.fallbackLocales = args.fallbackLocales as string[];
+      applyLocaleArgs(args, context);
       if (args.id) {
         return await runSql(
           Effect.gen(function* () {
@@ -394,7 +415,7 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
       }
       if (args.filter) {
         const records = await queryWithFilter(
-          { filter: args.filter as DynamicRow, first: 1 },
+          { filter: isObjectRecord(args.filter) ? args.filter : undefined, first: 1 },
           includeDrafts,
           locale,
           info
@@ -419,7 +440,7 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
       if (excludeInvalid) {
         // Need to fetch all records and filter in JS for accurate count
         const allRecords = await queryWithFilter(
-          { filter: args.filter as DynamicRow, first: 500 },
+          { filter: isObjectRecord(args.filter) ? args.filter : undefined, first: 500 },
           includeDrafts
         );
         const validity = await Promise.all(allRecords.map(async (record) => {
@@ -436,7 +457,7 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
         const validCount = validity.filter(Boolean).length;
         return { count: validCount };
       }
-      return { count: countWithFilter(args.filter as DynamicRow | undefined, includeDrafts) };
+      return { count: countWithFilter(isObjectRecord(args.filter) ? args.filter : undefined, includeDrafts) };
     };
   }
 }

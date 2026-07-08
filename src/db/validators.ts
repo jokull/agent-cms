@@ -2,15 +2,7 @@ import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
 import { decodeJsonRecordStringOr } from "../json.js";
 import { parseMediaFieldReference } from "../media-field.js";
-
-type SupportedFieldType =
-  | "string"
-  | "text"
-  | "slug"
-  | "integer"
-  | "float"
-  | "date"
-  | "date_time";
+import { isObjectRecord } from "../value-utils.js";
 
 /**
  * Typed access to field validator properties.
@@ -104,24 +96,23 @@ export function computeIsValid(
       // Localized field: check locale keys in JSON map
       let localeMap = value;
       if (typeof localeMap === "string") {
-        try { localeMap = JSON.parse(localeMap); } catch { missingFields.push(field.api_key); continue; }
+        localeMap = decodeJsonRecordStringOr(localeMap, {});
       }
-      if (typeof localeMap !== "object" || localeMap === null) {
+      if (!isObjectRecord(localeMap)) {
         missingFields.push(field.api_key);
         continue;
       }
-      const map = localeMap as Record<string, unknown>;
       // When allLocales is set, check every locale; otherwise just the default
       const localesToCheck = allLocales ?? [defaultLocale];
       for (const locale of localesToCheck) {
-        const locValue = map[locale];
-        if (!isValueValidForField(locValue, field.field_type as SupportedFieldType, field.validators)) {
+        const locValue = localeMap[locale];
+        if (!isValueValidForField(locValue, field.field_type, field.validators)) {
           fieldInvalid = true;
           break; // One missing locale is enough to mark the field invalid
         }
       }
     } else {
-      fieldInvalid = !isValueValidForField(value, field.field_type as SupportedFieldType, field.validators);
+      fieldInvalid = !isValueValidForField(value, field.field_type, field.validators);
     }
     if (fieldInvalid) {
       missingFields.push(field.api_key);
@@ -170,11 +161,10 @@ function passesEnumValidation(value: unknown, validators: Record<string, unknown
 function passesLengthValidation(value: unknown, fieldType: string, validators: Record<string, unknown>): boolean {
   if (!["string", "text", "slug"].includes(fieldType)) return true;
   const lengthConfig = validators.length;
-  if (typeof lengthConfig !== "object" || lengthConfig === null || Array.isArray(lengthConfig)) return true;
-  const length = lengthConfig as { min?: unknown; max?: unknown };
+  if (!isObjectRecord(lengthConfig)) return true;
   if (typeof value !== "string") return false;
-  const min = typeof length.min === "number" ? length.min : undefined;
-  const max = typeof length.max === "number" ? length.max : undefined;
+  const min = typeof lengthConfig.min === "number" ? lengthConfig.min : undefined;
+  const max = typeof lengthConfig.max === "number" ? lengthConfig.max : undefined;
   if (min !== undefined && value.length < min) return false;
   if (max !== undefined && value.length > max) return false;
   return true;
@@ -183,11 +173,10 @@ function passesLengthValidation(value: unknown, fieldType: string, validators: R
 function passesNumberRangeValidation(value: unknown, fieldType: string, validators: Record<string, unknown>): boolean {
   if (!["integer", "float"].includes(fieldType)) return true;
   const rangeConfig = validators.number_range;
-  if (typeof rangeConfig !== "object" || rangeConfig === null || Array.isArray(rangeConfig)) return true;
-  const range = rangeConfig as { min?: unknown; max?: unknown };
+  if (!isObjectRecord(rangeConfig)) return true;
   if (typeof value !== "number") return false;
-  const min = typeof range.min === "number" ? range.min : undefined;
-  const max = typeof range.max === "number" ? range.max : undefined;
+  const min = typeof rangeConfig.min === "number" ? rangeConfig.min : undefined;
+  const max = typeof rangeConfig.max === "number" ? rangeConfig.max : undefined;
   if (min !== undefined && value < min) return false;
   if (max !== undefined && value > max) return false;
   return true;
@@ -208,9 +197,9 @@ function passesFormatValidation(value: unknown, fieldType: string, validators: R
       return false;
     }
   }
-  if (typeof format === "object" && !Array.isArray(format) && typeof (format as { custom_pattern?: unknown }).custom_pattern === "string") {
+  if (isObjectRecord(format) && typeof format.custom_pattern === "string") {
     try {
-      return new RegExp((format as { custom_pattern: string }).custom_pattern).test(value);
+      return new RegExp(format.custom_pattern).test(value);
     } catch {
       return false;
     }
@@ -221,12 +210,11 @@ function passesFormatValidation(value: unknown, fieldType: string, validators: R
 function passesDateRangeValidation(value: unknown, fieldType: string, validators: Record<string, unknown>): boolean {
   if (!["date", "date_time"].includes(fieldType) || typeof value !== "string") return true;
   const rangeConfig = validators.date_range;
-  if (typeof rangeConfig !== "object" || rangeConfig === null || Array.isArray(rangeConfig)) return true;
-  const range = rangeConfig as { min?: unknown; max?: unknown };
+  if (!isObjectRecord(rangeConfig)) return true;
   const valueTime = parseDateValue(value);
   if (valueTime === null) return false;
-  const minTime = parseDateBoundary(range.min);
-  const maxTime = parseDateBoundary(range.max);
+  const minTime = parseDateBoundary(rangeConfig.min);
+  const maxTime = parseDateBoundary(rangeConfig.max);
   if (minTime !== null && valueTime < minTime) return false;
   if (maxTime !== null && valueTime > maxTime) return false;
   return true;
@@ -301,7 +289,7 @@ export function findUniqueConstraintViolations(options: {
 function parseLocaleMap(value: unknown): Record<string, unknown> {
   if (value === null || value === undefined) return {};
   const parsed = typeof value === "string" ? decodeJsonRecordStringOr(value, {}) : value;
-  return parsed as Record<string, unknown>;
+  return isObjectRecord(parsed) ? parsed : {};
 }
 
 function hasMeaningfulValue(value: unknown): boolean {

@@ -1608,7 +1608,7 @@ export function patchBlocksForField(body: PatchBlocksInput, actor?: RequestActor
       record: normalizeBooleanFields(updatedRecord, modelFields),
       fields: modelFields,
     });
-    if (materialized && appendedIds.length > 0) {
+    if (appendedIds.length > 0) {
       return { ...materialized, _appendedIds: appendedIds };
     }
     return materialized;

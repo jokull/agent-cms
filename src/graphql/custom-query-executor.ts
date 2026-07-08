@@ -587,19 +587,16 @@ function projectBlock(
       result[selection.responseKey] = projectStructuredText(nestedValue, selection, linkBuckets, localeOptions);
       continue;
     }
-    if (selection.kind === "link") {
-      const linkedId = Reflect.get(rawBlock, selection.field.api_key);
-      if (typeof linkedId !== "string") {
-        result[selection.responseKey] = null;
-        continue;
-      }
-      const bucket = linkBuckets.get(getLinkBucketKey(selection.field.api_key, selection.target.model.api_key));
-      const linkedRecord = bucket?.get(linkedId);
-      result[selection.responseKey] = linkedRecord
-        ? projectRow(linkedRecord, selection.target, selection.selections, linkBuckets, localeOptions)
-        : null;
+    const linkedId = Reflect.get(rawBlock, selection.field.api_key);
+    if (typeof linkedId !== "string") {
+      result[selection.responseKey] = null;
       continue;
     }
+    const bucket = linkBuckets.get(getLinkBucketKey(selection.field.api_key, selection.target.model.api_key));
+    const linkedRecord = bucket?.get(linkedId);
+    result[selection.responseKey] = linkedRecord
+      ? projectRow(linkedRecord, selection.target, selection.selections, linkBuckets, localeOptions)
+      : null;
   }
 
   return result;
@@ -650,15 +647,13 @@ function projectRow(
         : null;
       continue;
     }
-    if (selection.kind === "structured_text") {
-      const rawValue = row[selection.field.api_key];
-      const value = selection.field.localized
-        ? pickLocalizedValue(rawValue, localeOptions)
-        : rawValue;
-      result[selection.responseKey] = isStructuredTextEnvelope(value)
-        ? projectStructuredText(value, selection, linkBuckets, localeOptions)
-        : null;
-    }
+    const rawValue = row[selection.field.api_key];
+    const value = selection.field.localized
+      ? pickLocalizedValue(rawValue, localeOptions)
+      : rawValue;
+    result[selection.responseKey] = isStructuredTextEnvelope(value)
+      ? projectStructuredText(value, selection, linkBuckets, localeOptions)
+      : null;
   }
   return result;
 }

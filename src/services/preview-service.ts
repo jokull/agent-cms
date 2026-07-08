@@ -6,6 +6,7 @@ import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
 import { generateId } from "../id.js";
 import { ValidationError } from "../errors.js";
+import { stringifyTemplateValue } from "../value-utils.js";
 
 function hashToken(token: string) {
   return Effect.tryPromise({
@@ -87,8 +88,7 @@ export function resolvePreviewPath(
   recordData: Record<string, unknown>,
 ): string {
   return canonicalPathTemplate.replace(/\{([^}]+)\}/g, (_match, fieldName: string) => {
-    const value = recordData[fieldName];
-    if (value === undefined || value === null) return "";
-    return encodeURIComponent(String(value));
+    const value = stringifyTemplateValue(recordData[fieldName]);
+    return value === null ? "" : encodeURIComponent(value);
   });
 }

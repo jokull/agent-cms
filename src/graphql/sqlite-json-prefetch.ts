@@ -35,7 +35,7 @@ function collectSelectionField(
       return;
     case "FragmentSpread": {
       const fragment = info.fragments[selection.name.value];
-      collectSelectionSetFields(fragment?.selectionSet, info, names);
+      collectSelectionSetFields(fragment.selectionSet, info, names);
       return;
     }
   }
@@ -74,7 +74,7 @@ function collectImmediateSelectionMapFromNode(
       return;
     case "FragmentSpread": {
       const fragment = info.fragments[selection.name.value];
-      collectImmediateSelectionMapFromSet(fragment?.selectionSet, info, result);
+      collectImmediateSelectionMapFromSet(fragment.selectionSet, info, result);
       return;
     }
   }

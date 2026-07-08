@@ -474,8 +474,9 @@ function pickLocalizedFastPathValue(
     const defaultValue = Reflect.get(localeMap, defaultLocale);
     if (defaultValue !== undefined) return defaultValue;
   }
-  const firstEntry = Object.entries(localeMap)[0];
-  return firstEntry ? firstEntry[1] : null;
+  const entries = Object.entries(localeMap);
+  if (entries.length === 0) return null;
+  return entries[0][1];
 }
 
 function isSupportedPublishedFilterField(field: ParsedFieldRow): boolean {
@@ -1141,12 +1142,10 @@ function findFallbackReasonInSelectionSet(selectionSet: SelectionSetNode | undef
       if (nested) return nested;
       continue;
     }
-    if (selection.kind === Kind.INLINE_FRAGMENT || selection.kind === Kind.FRAGMENT_SPREAD) {
-      const nested = selection.kind === Kind.INLINE_FRAGMENT
-        ? findFallbackReasonInSelectionSet(selection.selectionSet)
-        : undefined;
-      if (nested) return nested;
-    }
+    const nested = selection.kind === Kind.INLINE_FRAGMENT
+      ? findFallbackReasonInSelectionSet(selection.selectionSet)
+      : undefined;
+    if (nested) return nested;
   }
   return undefined;
 }
@@ -1569,7 +1568,7 @@ async function preloadDependencies(
     });
   }
 
-  while (true) {
+  for (;;) {
     const uncachedAssetIds = [...pending.assetIds].filter((id) => !ctx.assetCache.has(id));
     const uncachedLinkRequests = [...pending.linkRequests.values()].map((request) => ({
       targetApiKeys: request.targetApiKeys,

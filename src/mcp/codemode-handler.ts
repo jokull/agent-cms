@@ -19,6 +19,7 @@ import { McpServer as SdkMcpServer } from "@modelcontextprotocol/sdk/server/mcp.
 import { DynamicWorkerExecutor } from "@cloudflare/codemode";
 import { codeMcpServer } from "@cloudflare/codemode/mcp";
 import { getToolMeta } from "./server.js";
+import { isObjectRecord } from "../value-utils.js";
 
 export interface CreateCodeModeHandlerOptions {
   /** WorkerLoader binding from wrangler worker_loaders config */
@@ -72,13 +73,14 @@ export async function createCodeModeMcpServer(
       options.mcpHandler,
       mcpPath,
       request.params.name,
-      (request.params.arguments ?? {}) as Record<string, unknown>,
+      request.params.arguments ?? {},
     );
     return result;
   });
 
   // Wrap with Code Mode
   const executor = new DynamicWorkerExecutor({
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- CodeMode loader binding is provided by Cloudflare at runtime but typed as opaque user input here.
     loader: options.loader as never,
   });
 
@@ -121,6 +123,18 @@ function parseToolCallResponse(
   text: string,
   contentType: string | null,
 ): { content: Array<{ type: "text"; text: string }>; isError?: boolean } {
+  function parseToolCallResult(value: unknown): { content: Array<{ type: "text"; text: string }>; isError?: boolean } | null {
+    if (!isObjectRecord(value) || !Array.isArray(value.content)) return null;
+    const content = value.content.filter((entry): entry is { type: "text"; text: string } =>
+      isObjectRecord(entry) && entry.type === "text" && typeof entry.text === "string"
+    );
+    if (content.length !== value.content.length) return null;
+    return {
+      content,
+      ...(typeof value.isError === "boolean" ? { isError: value.isError } : {}),
+    };
+  }
+
   // Helper to extract result from a parsed JSON-RPC response or array of responses
   function extractResult(parsed: unknown): { content: Array<{ type: "text"; text: string }>; isError?: boolean } | null {
     if (Array.isArray(parsed)) {
@@ -130,14 +144,13 @@ function parseToolCallResponse(
       }
       return null;
     }
-    if (typeof parsed === "object" && parsed !== null) {
-      const obj = parsed as Record<string, unknown>;
-      if (obj.id === requestId && obj.result !== undefined) {
-        return obj.result as { content: Array<{ type: "text"; text: string }>; isError?: boolean };
+    if (isObjectRecord(parsed)) {
+      if (parsed.id === requestId && parsed.result !== undefined) {
+        return parseToolCallResult(parsed.result);
       }
-      if (obj.id === requestId && obj.error) {
+      if (parsed.id === requestId && parsed.error) {
         return {
-          content: [{ type: "text", text: JSON.stringify(obj.error) }],
+          content: [{ type: "text", text: JSON.stringify(parsed.error) }],
           isError: true,
         };
       }
@@ -151,7 +164,7 @@ function parseToolCallResponse(
       const line = lines[i];
       if (line.startsWith("data: ")) {
         try {
-          const parsed = JSON.parse(line.slice(6));
+          const parsed: unknown = JSON.parse(line.slice(6));
           const result = extractResult(parsed);
           if (result) return result;
         } catch (e) {
@@ -164,7 +177,7 @@ function parseToolCallResponse(
 
   // Try plain JSON
   try {
-    const parsed = JSON.parse(text);
+    const parsed: unknown = JSON.parse(text);
     const result = extractResult(parsed);
     if (result) return result;
   } catch {

@@ -39,6 +39,7 @@ import type { ModelRow, FieldRow, LocaleRow } from "../db/row-types.js";
 import { VectorizeContext } from "../search/vectorize-context.js";
 import { HooksContext } from "../hooks.js";
 import { decodeJsonRecordStringOr, encodeJson } from "../json.js";
+import { isObjectRecord } from "../value-utils.js";
 
 import type { RequestActor } from "../attribution.js";
 
@@ -216,12 +217,10 @@ function compactPatchBlocksResponse(
   const envelope: Record<string, unknown> | null = (() => {
     if (fieldValue === null || fieldValue === undefined) return null;
     if (typeof fieldValue === "string") {
-      try { return JSON.parse(fieldValue) as Record<string, unknown>; } catch { return null; }
+      const parsed = decodeJsonRecordStringOr(fieldValue, {});
+      return Object.keys(parsed).length > 0 ? parsed : null;
     }
-    if (typeof fieldValue === "object" && !Array.isArray(fieldValue)) {
-      return fieldValue as Record<string, unknown>;
-    }
-    return null;
+    return isObjectRecord(fieldValue) ? fieldValue : null;
   })();
 
   if (!envelope) {
@@ -236,25 +235,24 @@ function compactPatchBlocksResponse(
     };
   }
 
-  const blocks = (typeof envelope.blocks === "object" && envelope.blocks !== null && !Array.isArray(envelope.blocks))
-    ? envelope.blocks as Record<string, unknown>
-    : {};
+  const blocks = isObjectRecord(envelope.blocks) ? envelope.blocks : {};
 
   // Extract block order from DAST traversal
   const blockOrder: string[] = [];
   function walkDast(node: unknown) {
-    if (typeof node !== "object" || node === null) return;
-    const n = node as Record<string, unknown>;
+    if (!isObjectRecord(node)) return;
+    const n = node;
     if (n.type === "block" && typeof n.item === "string") blockOrder.push(n.item);
-    if (Array.isArray(n.children)) (n.children as unknown[]).forEach(walkDast);
+    if (Array.isArray(n.children)) n.children.forEach(walkDast);
   }
   const value = envelope.value;
-  if (typeof value === "object" && value !== null) {
-    walkDast((value as Record<string, unknown>).document);
+  if (isObjectRecord(value)) {
+    walkDast(value.document);
   }
+  const recordId = typeof fullRecord.id === "string" ? fullRecord.id : "";
 
   return {
-    recordId: fullRecord.id as string,
+    recordId,
     status: fullRecord._status ?? null,
     fieldApiKey,
     field: envelope,
@@ -267,8 +265,7 @@ function compactPatchBlocksResponse(
 function parseValidators(value: unknown): Record<string, unknown> {
   if (value == null || value === "") return {};
   if (typeof value === "string") return decodeJsonRecordStringOr(value, {});
-  if (typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
-  return {};
+  return isObjectRecord(value) ? value : {};
 }
 
 function withDecoded<A, I, R, E, R2>(
@@ -278,12 +275,12 @@ function withDecoded<A, I, R, E, R2>(
   return (params: unknown) => Schema.decodeUnknown(schema)(params).pipe(Effect.flatMap(handler));
 }
 
-function toMcpInputSchema(tool: AiTool.Any) {
+function toMcpInputSchema(tool: AiTool.Any): Record<string, unknown> {
   // Effect AI's helper is typed against the concrete Tool model, while AiTool.Any is wider.
   // Runtime behavior is correct here because every entry in CmsToolkit is created via AiTool.make.
   // @ts-expect-error external type mismatch between Any and getJsonSchema helper
   const inputSchema = AiTool.getJsonSchema(tool);
-  return typeof inputSchema === "object"
+  return isObjectRecord(inputSchema)
     && "type" in inputSchema
     && inputSchema.type === "object"
     ? inputSchema
@@ -536,7 +533,7 @@ export function getToolMeta(mode: "admin" | "editor" = "admin") {
   return Object.values(toolkit.tools).map((tool: AiTool.Any) => ({
     name: tool.name,
     description: tool.description ?? "",
-    inputSchema: toMcpInputSchema(tool) as Record<string, unknown>,
+    inputSchema: toMcpInputSchema(tool),
   }));
 }
 
@@ -758,6 +755,7 @@ export function createMcpLayer(
   const mode = options?.mode ?? "admin";
   const path = options?.path ?? (mode === "editor" ? "/mcp/editor" : "/mcp");
   const toolkit = mode === "editor" ? EditorToolkit : CmsToolkit;
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- editor toolkit is a subset of the admin toolkit for shared MCP registration plumbing.
   const toolkitAny = toolkit as typeof CmsToolkit;
   const defaultVectorizeLayer: Layer.Layer<VectorizeContext> = Layer.succeed(VectorizeContext, Option.none());
   const defaultHooksLayer: Layer.Layer<HooksContext> = Layer.succeed(HooksContext, Option.none());
@@ -773,6 +771,7 @@ export function createMcpLayer(
   const serverLayer = McpServer.layerHttpRouter({
     name: mode === "editor" ? "agent-cms-editor" : "agent-cms",
     version: "0.1.0",
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Effect MCP path is typed as a route literal, but this server accepts a runtime-configured route.
     path: path as never,
   });
 
@@ -789,7 +788,7 @@ export function createMcpLayer(
   /** Look up canonical_path_template for a model and resolve _previewPath if set */
   function addPreviewPath(modelApiKey: string, record: unknown) {
     return Effect.gen(function* () {
-      if (typeof record !== "object" || record === null) return record;
+      if (!isObjectRecord(record)) return record;
       const sql = yield* SqlClient.SqlClient;
       const models = yield* sql.unsafe<{ canonical_path_template: string | null }>(
         "SELECT canonical_path_template FROM models WHERE api_key = ?",
@@ -797,7 +796,7 @@ export function createMcpLayer(
       );
       const template = models[0]?.canonical_path_template;
       if (!template) return record;
-      const previewPath = PreviewService.resolvePreviewPath(template, record as Record<string, unknown>);
+      const previewPath = PreviewService.resolvePreviewPath(template, record);
       return { ...record, _previewPath: previewPath };
     });
   }
@@ -805,16 +804,17 @@ export function createMcpLayer(
   function addPreviewPathToList(modelApiKey: string, records: unknown) {
     return Effect.gen(function* () {
       if (!Array.isArray(records)) return records;
+      const recordList: readonly unknown[] = records;
       const sql = yield* SqlClient.SqlClient;
       const models = yield* sql.unsafe<{ canonical_path_template: string | null }>(
         "SELECT canonical_path_template FROM models WHERE api_key = ?",
         [modelApiKey]
       );
       const template = models[0]?.canonical_path_template;
-      if (!template) return records;
-      return records.map((r: unknown) => {
-        if (typeof r !== "object" || r === null) return r;
-        const previewPath = PreviewService.resolvePreviewPath(template, r as Record<string, unknown>);
+      if (!template) return recordList;
+      return recordList.map((r) => {
+        if (!isObjectRecord(r)) return r;
+        const previewPath = PreviewService.resolvePreviewPath(template, r);
         return { ...r, _previewPath: previewPath };
       });
     });
@@ -903,11 +903,18 @@ export function createMcpLayer(
           const deletedIds = Object.entries(input.blocks)
             .filter(([, v]) => v === null)
             .map(([k]) => k);
-          return compactPatchBlocksResponse(
-            record as Record<string, unknown>,
-            input.fieldApiKey,
-            deletedIds,
-          );
+          if (!record) {
+            return {
+              recordId: null,
+              status: null,
+              fieldApiKey: input.fieldApiKey,
+              field: null,
+              blocks: {},
+              deleted: deletedIds,
+              blockOrder: [],
+            };
+          }
+          return compactPatchBlocksResponse(record, input.fieldApiKey, deletedIds);
         }),
       ),
     ),
@@ -975,8 +982,7 @@ export function createMcpLayer(
           return yield* Effect.fail({ _tag: "ValidationError", message: `Model '${modelApiKey}' has no canonicalPathTemplate configured` });
         }
         const record = yield* RecordService.getRecord(modelApiKey, recordId);
-        const recordData = typeof record === "object" && record !== null ? record as Record<string, unknown> : {};
-        const previewPath = PreviewService.resolvePreviewPath(model.canonical_path_template, recordData);
+        const previewPath = PreviewService.resolvePreviewPath(model.canonical_path_template, record);
         const { token, expiresAt } = yield* PreviewService.createPreviewToken();
         const siteUrl = options?.siteUrl;
         if (siteUrl) {
@@ -997,6 +1003,7 @@ export function createMcpLayer(
     }),
   } as const;
 
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Effect Toolkit.toLayer requires the exact generated handler map type.
   const toolkitHandlers = toolkitAny.toLayer(pickToolkitHandlers(toolkitAny, toolHandlers) as never);
 
   const toolkitRegistration = Layer.effectDiscard(Effect.gen(function* () {
@@ -1022,6 +1029,7 @@ export function createMcpLayer(
         tool: mcpTool,
         handle(payload) {
           const params = isToolPayload(payload) ? payload : {};
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- dynamic MCP registry dispatch crosses Effect Toolkit's generated tool-name/payload types.
           return built.handle(tool.name as never, params as never).pipe(
             Effect.provide(context),
             Effect.match({

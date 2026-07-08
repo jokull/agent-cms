@@ -2,6 +2,7 @@ import { SqlClient, SqlError } from "@effect/sql";
 import { Effect } from "effect";
 import type { D1Database } from "@cloudflare/workers-types";
 import { recordSqlMetrics } from "../graphql/sql-metrics.js";
+import { isObjectRecord } from "../value-utils.js";
 
 export interface BatchedQuery {
   readonly sql: string;
@@ -15,16 +16,16 @@ interface D1ClientLike {
 }
 
 function isD1Database(value: unknown): value is D1Database {
-  if (typeof value !== "object" || value === null) return false;
-  return typeof Reflect.get(value, "prepare") === "function"
-    && typeof Reflect.get(value, "batch") === "function";
+  if (!isObjectRecord(value)) return false;
+  return typeof value.prepare === "function"
+    && typeof value.batch === "function";
 }
 
 function isD1ClientLike(value: unknown): value is SqlClient.SqlClient & D1ClientLike {
-  if (typeof value !== "object" || value === null) return false;
-  const config = Reflect.get(value, "config");
-  if (typeof config !== "object" || config === null) return false;
-  return isD1Database(Reflect.get(config, "db"));
+  if (!isObjectRecord(value)) return false;
+  const { config } = value;
+  if (!isObjectRecord(config)) return false;
+  return isD1Database(config.db);
 }
 
 export function runBatchedQueries<T extends object>(

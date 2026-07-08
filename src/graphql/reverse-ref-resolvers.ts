@@ -10,6 +10,7 @@ import type { ModelRow, ParsedFieldRow } from "../db/row-types.js";
 import type { SchemaBuilderContext, ReverseRef, DynamicRow, GqlContext } from "./gql-types.js";
 import { toTypeName, toCamelCase } from "./gql-utils.js";
 import { loadReverseRefs } from "./reverse-ref-loader.js";
+import { isObjectRecord } from "../value-utils.js";
 
 /**
  * Build the reverse reference map: target model api_key -> array of incoming link/links refs.
@@ -53,13 +54,9 @@ export function buildReverseRefs(
 /**
  * Build reverse reference resolvers and extend target type SDL.
  */
-function isFilterObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function getThroughFieldApiKeys(through: unknown): readonly string[] | undefined {
-  if (typeof through !== "object" || through === null || Array.isArray(through)) return undefined;
-  const fields = Reflect.get(through, "fields");
+  if (!isObjectRecord(through)) return undefined;
+  const fields = through.fields;
   if (!Array.isArray(fields)) return undefined;
   return fields.filter((value): value is string => typeof value === "string");
 }
@@ -142,7 +139,7 @@ export function buildReverseRefResolvers(
           jsonArrayFields: sourceJsonArrayFields,
           locale: filterLocale ?? undefined,
         };
-        const filterArg = isFilterObject(args.filter) ? args.filter : undefined;
+        const filterArg = isObjectRecord(args.filter) ? args.filter : undefined;
         const orderByArg = Array.isArray(args.orderBy)
           ? args.orderBy.filter((value): value is string => typeof value === "string")
           : undefined;
@@ -204,7 +201,7 @@ export function buildReverseRefResolvers(
           jsonArrayFields: sourceJsonArrayFields,
           locale: filterLocale ?? undefined,
         };
-        const filterArg = isFilterObject(args.filter) ? args.filter : undefined;
+        const filterArg = isObjectRecord(args.filter) ? args.filter : undefined;
         const compiled = compileFilterToSql(filterArg, filterOpts);
         const parentId = typeof parent.id === "string" ? parent.id : String(parent.id);
 
@@ -237,8 +234,8 @@ export function buildReverseRefResolvers(
             return yield* sql.unsafe<{ count: number | string }>(query, queryParams);
           })
         );
-        const rawCount = rows[0]?.count;
-        return { count: typeof rawCount === "number" ? rawCount : Number(rawCount ?? 0) };
+        const rawCount = rows[0].count;
+        return { count: typeof rawCount === "number" ? rawCount : Number(rawCount) };
       };
     }
 

@@ -7,8 +7,9 @@ import type { ModelRow, FieldRow, VersionRow } from "../db/row-types.js";
 import { parseFieldValidators } from "../db/row-types.js";
 import { materializeRecordStructuredTextFields } from "./structured-text-service.js";
 import { fireHook } from "../hooks.js";
-import { decodeJsonString, encodeJson } from "../json.js";
+import { decodeJsonRecordStringOr, decodeJsonString, encodeJson } from "../json.js";
 import type { RequestActor, VersionAttribution } from "../attribution.js";
+import { isObjectRecord } from "../value-utils.js";
 
 /**
  * Create a version snapshot for a record.
@@ -143,7 +144,7 @@ export function restoreVersion(modelApiKey: string, recordId: string, versionId:
     const existingFieldKeys = new Set(fieldRows.map((f) => f.api_key));
 
     // Parse version snapshot and filter to fields that still exist
-    const versionSnapshot = decodeJsonString(version.snapshot) as Record<string, unknown>;
+    const versionSnapshot = decodeJsonRecordStringOr(version.snapshot, {});
     const updates: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(versionSnapshot)) {
       if (existingFieldKeys.has(key)) {
@@ -267,8 +268,11 @@ export function compareVersions(modelApiKey: string, recordId: string, leftVersi
       }
     }
 
-    const leftRecord = leftSnapshot as Record<string, unknown>;
-    const rightRecord = rightSnapshot as Record<string, unknown>;
+    if (!isObjectRecord(leftSnapshot) || !isObjectRecord(rightSnapshot)) {
+      return yield* new ValidationError({ message: "Both snapshots must be JSON objects to compare" });
+    }
+    const leftRecord = leftSnapshot;
+    const rightRecord = rightSnapshot;
     const allKeys = [...new Set([...Object.keys(leftRecord), ...Object.keys(rightRecord)])].sort();
     const changes = allKeys.flatMap((key) => {
       const leftValue = leftRecord[key] ?? null;

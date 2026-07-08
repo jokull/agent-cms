@@ -36,8 +36,8 @@ function getAssetFormat(filename: string, mimeType: string) {
   if (lastDot > 0 && lastDot < filename.length - 1) {
     return filename.slice(lastDot + 1).toLowerCase();
   }
-  const mimeSubtype = mimeType.split("/")[1];
-  return mimeSubtype?.toLowerCase() ?? "bin";
+  const mimeSubtype = mimeType.split("/")[1] ?? "bin";
+  return mimeSubtype.toLowerCase();
 }
 
 function normalizeHostname(hostname: string) {

@@ -12,27 +12,32 @@ import { decodeJsonIfString } from "../json.js";
 import { mergeAssetWithMediaReference } from "../media-field.js";
 import { buildResponsiveImage } from "./responsive-image.js";
 import { normalizeImgixParams } from "./responsive-image.js";
+import { isObjectRecord, stringArrayFrom } from "../value-utils.js";
 
 type RunSqlFn = SchemaBuilderContext["runSql"];
 
 function pickLocalizedSiteValue(rawValue: unknown, locale?: string | null, fallbackLocales: string[] = []) {
   if (rawValue == null) return null;
   const localeMap = decodeJsonIfString(rawValue);
-  if (typeof localeMap !== "object" || localeMap === null || Array.isArray(localeMap)) {
+  if (!isObjectRecord(localeMap)) {
     return rawValue;
   }
 
-  const values = localeMap as Record<string, unknown>;
-  if (locale && values[locale] !== undefined && values[locale] !== null && values[locale] !== "") {
-    return values[locale];
+  if (locale && localeMap[locale] !== undefined && localeMap[locale] !== null && localeMap[locale] !== "") {
+    return localeMap[locale];
   }
   for (const fallback of fallbackLocales) {
-    if (values[fallback] !== undefined && values[fallback] !== null && values[fallback] !== "") {
-      return values[fallback];
+    if (localeMap[fallback] !== undefined && localeMap[fallback] !== null && localeMap[fallback] !== "") {
+      return localeMap[fallback];
     }
   }
-  const [_, firstValue] = Object.entries(values)[0] ?? [null, null];
+  const [_, firstValue] = Object.entries(localeMap)[0] ?? [null, null];
   return firstValue ?? null;
+}
+
+function pickLocalizedSiteString(rawValue: unknown, locale?: string | null, fallbackLocales: string[] = []) {
+  const value = pickLocalizedSiteValue(rawValue, locale, fallbackLocales);
+  return typeof value === "string" ? value : null;
 }
 
 /** Generate favicon meta tags from a favicon asset */
@@ -81,8 +86,8 @@ function getAssetFormat(asset: AssetObject) {
   if (lastDot > 0 && lastDot < asset.filename.length - 1) {
     return asset.filename.slice(lastDot + 1).toLowerCase();
   }
-  const mimeSubtype = asset.mimeType.split("/")[1];
-  return mimeSubtype?.toLowerCase() ?? "bin";
+  const mimeSubtype = asset.mimeType.split("/")[1] ?? "bin";
+  return mimeSubtype.toLowerCase();
 }
 
 function buildAssetUrl(
@@ -90,15 +95,17 @@ function buildAssetUrl(
   args: DynamicRow,
   cfImageUrl: (assetPath: string, params: Record<string, string | number>) => string,
 ) {
-  const rawParams = (args.transforms ?? args.cfImagesParams ?? args.imgixParams) as Record<string, unknown> | undefined;
+  const rawParamsValue = args.transforms ?? args.cfImagesParams ?? args.imgixParams;
+  const rawParams = isObjectRecord(rawParamsValue) ? rawParamsValue : undefined;
   if (!rawParams || Object.keys(rawParams).length === 0) return asset.url;
 
   const params = args.imgixParams ? normalizeImgixParams(rawParams) : rawParams;
-  const queryParams = Object.fromEntries(
-    Object.entries(params)
-      .filter(([, value]) => typeof value === "string" || typeof value === "number")
-      .map(([key, value]) => [key, value as string | number]),
-  );
+  const queryParams: Record<string, string | number> = {};
+  for (const [key, value] of Object.entries(params)) {
+    if (typeof value === "string" || typeof value === "number") {
+      queryParams[key] = value;
+    }
+  }
 
   let assetPath: string;
   try {
@@ -133,18 +140,15 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
       })
     );
 
-    const locale = typeof args.locale === "string" ? args.locale : (context.locale as string | undefined) ?? null;
-    const fallbackLocales = Array.isArray(args.fallbackLocales)
-      ? (args.fallbackLocales as string[])
-      : Array.isArray(context.fallbackLocales)
-        ? (context.fallbackLocales as string[])
-        : [];
+    const locale = typeof args.locale === "string" ? args.locale : typeof context.locale === "string" ? context.locale : null;
+    const argFallbackLocales = stringArrayFrom(args.fallbackLocales);
+    const fallbackLocales = argFallbackLocales.length > 0 ? argFallbackLocales : stringArrayFrom(context.fallbackLocales);
     const fallbackSeo = settings
       ? {
-          title: pickLocalizedSiteValue(settings.fallback_seo_title, locale, fallbackLocales) as string | null,
-          description: pickLocalizedSiteValue(settings.fallback_seo_description, locale, fallbackLocales) as string | null,
-          twitterCard: pickLocalizedSiteValue(settings.fallback_seo_twitter_card, locale, fallbackLocales) as string | null,
-          image: pickLocalizedSiteValue(settings.fallback_seo_image_id, locale, fallbackLocales) as string | null,
+          title: pickLocalizedSiteString(settings.fallback_seo_title, locale, fallbackLocales),
+          description: pickLocalizedSiteString(settings.fallback_seo_description, locale, fallbackLocales),
+          twitterCard: pickLocalizedSiteString(settings.fallback_seo_twitter_card, locale, fallbackLocales),
+          image: pickLocalizedSiteString(settings.fallback_seo_image_id, locale, fallbackLocales),
         }
       : null;
     const hasFallbackSeo = fallbackSeo !== null
@@ -156,12 +160,12 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
     return {
       locales: locales.map((l) => l.code),
       noIndex: settings?.no_index === 1 || settings?.no_index === true || false,
-      faviconMetaTags: settings?.favicon_id ? await buildFaviconMetaTags(runSql, settings.favicon_id as string) : [],
+      faviconMetaTags: typeof settings?.favicon_id === "string" ? await buildFaviconMetaTags(runSql, settings.favicon_id) : [],
       globalSeo: settings ? {
-        siteName: pickLocalizedSiteValue(settings.site_name, locale, fallbackLocales) as string | null,
-        titleSuffix: pickLocalizedSiteValue(settings.title_suffix, locale, fallbackLocales) as string | null,
-        facebookPageUrl: pickLocalizedSiteValue(settings.facebook_page_url, locale, fallbackLocales) as string | null,
-        twitterAccount: pickLocalizedSiteValue(settings.twitter_account, locale, fallbackLocales) as string | null,
+        siteName: pickLocalizedSiteString(settings.site_name, locale, fallbackLocales),
+        titleSuffix: pickLocalizedSiteString(settings.title_suffix, locale, fallbackLocales),
+        facebookPageUrl: pickLocalizedSiteString(settings.facebook_page_url, locale, fallbackLocales),
+        twitterAccount: pickLocalizedSiteString(settings.twitter_account, locale, fallbackLocales),
         fallbackSeo: hasFallbackSeo ? fallbackSeo : null,
       } : null,
     };
@@ -179,13 +183,14 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
         const s = yield* SqlClient.SqlClient;
         let query = `SELECT * FROM assets`;
         let params: unknown[] = [];
-        const compiled = compileFilterToSql(args.filter as DynamicRow | undefined, { fieldNameMap: uploadFieldMap });
+        const compiled = compileFilterToSql(isObjectRecord(args.filter) ? args.filter : undefined, { fieldNameMap: uploadFieldMap });
         if (compiled) { query += ` WHERE ${compiled.where}`; params = compiled.params; }
-        const orderBy = compileOrderBy(args.orderBy as string[] | undefined, { fieldNameMap: uploadFieldMap });
+        const orderByArg = stringArrayFrom(args.orderBy);
+        const orderBy = compileOrderBy(orderByArg.length > 0 ? orderByArg : undefined, { fieldNameMap: uploadFieldMap });
         if (orderBy) query += ` ORDER BY ${orderBy}`;
-        const limit = Math.min((args.first as number | undefined) ?? 20, 500);
+        const limit = Math.min(typeof args.first === "number" ? args.first : 20, 500);
         query += ` LIMIT ?`; params.push(limit);
-        if (args.skip) { query += ` OFFSET ?`; params.push(args.skip); }
+        if (typeof args.skip === "number" && args.skip > 0) { query += ` OFFSET ?`; params.push(args.skip); }
         const rows = yield* s.unsafe<AssetRow>(query, params);
         return rows.map((a): AssetObject => ({
           ...mergeAssetWithMediaReference(a, null, assetUrl),
@@ -201,7 +206,7 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
           const s = yield* SqlClient.SqlClient;
           let query = `SELECT COUNT(*) as count FROM assets`;
           let params: unknown[] = [];
-          const compiled = compileFilterToSql(args.filter as DynamicRow | undefined, { fieldNameMap: uploadFieldMap });
+          const compiled = compileFilterToSql(isObjectRecord(args.filter) ? args.filter : undefined, { fieldNameMap: uploadFieldMap });
           if (compiled) { query += ` WHERE ${compiled.where}`; params = compiled.params; }
           const rows = yield* s.unsafe<{ count: number }>(query, params);
           return rows[0]?.count ?? 0;
@@ -240,9 +245,9 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
   // ColorField.hex resolver: compute hex from RGB
   resolvers.ColorField = {
     hex: (color: DynamicRow) => {
-      const r = (color.red ?? 0) as number;
-      const g = (color.green ?? 0) as number;
-      const b = (color.blue ?? 0) as number;
+      const r = typeof color.red === "number" ? color.red : 0;
+      const g = typeof color.green === "number" ? color.green : 0;
+      const b = typeof color.blue === "number" ? color.blue : 0;
       return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
     },
   };

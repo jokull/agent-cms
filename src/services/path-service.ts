@@ -15,8 +15,17 @@ import { NotFoundError, ValidationError } from "../errors.js";
 import type { ModelRow, FieldRow } from "../db/row-types.js";
 import { getLinkTargets } from "../db/validators.js";
 import { decodeJsonRecordStringOr } from "../json.js";
+import { stringifyTemplateValue } from "../value-utils.js";
 
 const MAX_DEPTH = 10;
+
+function rowId(row: Record<string, unknown>): string | null {
+  return typeof row.id === "string" ? row.id : null;
+}
+
+function timestampValue(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
 
 /** A parsed token from the template, e.g. {category.parent.slug} → ["category", "parent", "slug"] */
 interface TemplateToken {
@@ -97,7 +106,8 @@ export function resolveCanonicalPaths(modelApiKey: string) {
     // resolvedValues: Map<recordId, Map<tokenRaw, resolvedValue>>
     const resolvedValues = new Map<string, Map<string, string>>();
     for (const rec of records) {
-      resolvedValues.set(rec.id as string, new Map());
+      const id = rowId(rec);
+      if (id) resolvedValues.set(id, new Map());
     }
 
     // For single-segment tokens, resolve immediately from the record
@@ -105,9 +115,11 @@ export function resolveCanonicalPaths(modelApiKey: string) {
       if (token.segments.length === 1) {
         const fieldName = token.segments[0];
         for (const rec of records) {
-          const value = rec[fieldName];
-          if (value !== null && value !== undefined) {
-            resolvedValues.get(rec.id as string)!.set(token.raw, String(value));
+          const id = rowId(rec);
+          if (!id) continue;
+          const value = stringifyTemplateValue(rec[fieldName]);
+          if (value !== null) {
+            resolvedValues.get(id)?.set(token.raw, value);
           }
         }
       }
@@ -121,15 +133,16 @@ export function resolveCanonicalPaths(modelApiKey: string) {
     // 7. Substitute tokens into template
     const results: Array<{ id: string; path: string; lastmod: string }> = [];
     for (const rec of records) {
-      const recId = rec.id as string;
-      const values = resolvedValues.get(recId)!;
+      const recId = rowId(rec);
+      if (!recId) continue;
+      const values = resolvedValues.get(recId) ?? new Map<string, string>();
       const path = template.replace(/\{([^}]+)\}/g, (_match, tokenRaw: string) => {
         const resolved = values.get(tokenRaw);
         if (resolved !== undefined) return encodeURIComponent(resolved);
         return `{${tokenRaw}}`; // leave unreplaced
       });
-      const publishedAt = rec._published_at as string | null;
-      const updatedAt = rec._updated_at as string | null;
+      const publishedAt = timestampValue(rec._published_at);
+      const updatedAt = timestampValue(rec._updated_at);
       const lastmod = laterTimestamp(publishedAt, updatedAt) ?? new Date().toISOString();
       results.push({ id: recId, path, lastmod });
     }
@@ -177,7 +190,8 @@ function resolveLinkedTokens(
     for (const token of tokens) {
       const frontierMap = new Map<string, Frontier>();
       for (const rec of records) {
-        const recId = rec.id as string;
+        const recId = rowId(rec);
+        if (!recId) continue;
         const frontier = new Map<string, Record<string, unknown>>();
         frontier.set(recId, rec);
         frontierMap.set(recId, frontier);
@@ -193,7 +207,8 @@ function resolveLinkedTokens(
       let currentRecords = new Map<string, Record<string, unknown>>();
       // Map original record ID → current linked record
       for (const rec of records) {
-        currentRecords.set(rec.id as string, rec);
+        const id = rowId(rec);
+        if (id) currentRecords.set(id, rec);
       }
 
       // Current model's fields (start with the source model)
@@ -238,7 +253,8 @@ function resolveLinkedTokens(
               idsToFetch,
             );
             for (const row of rows) {
-              linkedRecords.set(row.id as string, row);
+              const id = rowId(row);
+              if (id) linkedRecords.set(id, row);
             }
           }
         }
@@ -278,9 +294,9 @@ function resolveLinkedTokens(
       if (hopsCompleted === hopsNeeded) {
         const leafField = segments[segments.length - 1];
         for (const [origId, linkedRec] of currentRecords) {
-          const value = linkedRec[leafField];
-          if (value !== null && value !== undefined) {
-            resolvedValues.get(origId)!.set(token.raw, String(value));
+          const value = stringifyTemplateValue(linkedRec[leafField]);
+          if (value !== null) {
+            resolvedValues.get(origId)!.set(token.raw, value);
           }
         }
       }

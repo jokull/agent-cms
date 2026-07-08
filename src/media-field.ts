@@ -1,6 +1,7 @@
 import { decodeJsonIfString, decodeJsonStringOr } from "./json.js";
 import type { AssetRow } from "./db/row-types.js";
 import type { AssetObject } from "./graphql/gql-types.js";
+import { isObjectRecord, stringArrayFrom } from "./value-utils.js";
 
 export interface MediaFieldReference {
   readonly uploadId: string;
@@ -15,8 +16,8 @@ export function parseMediaFieldReference(value: unknown): MediaFieldReference | 
   if (typeof parsed === "string") {
     return parsed.length > 0 ? { uploadId: parsed } : null;
   }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
-  const objectValue = parsed as Record<string, unknown>;
+  if (!isObjectRecord(parsed)) return null;
+  const objectValue = parsed;
   const uploadId = typeof objectValue.upload_id === "string" ? objectValue.upload_id : null;
   if (!uploadId) return null;
   return {
@@ -60,9 +61,7 @@ export function mergeAssetWithMediaReference(
     customData: isJsonRecord(reference?.customData)
       ? reference.customData
       : (isJsonRecord(defaultCustomData) ? defaultCustomData : null),
-    tags: Array.isArray(decodeJsonStringOr(asset.tags, []))
-      ? (decodeJsonStringOr(asset.tags, []) as unknown[]).filter((value): value is string => typeof value === "string")
-      : [],
+    tags: stringArrayFrom(decodeJsonStringOr(asset.tags, [])),
     url: assetUrl(asset.r2_key),
     _createdAt: asset.created_at,
     _updatedAt: asset.updated_at,
@@ -72,7 +71,7 @@ export function mergeAssetWithMediaReference(
 }
 
 function isJsonRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return isObjectRecord(value);
 }
 
 function isFocalPoint(value: unknown): value is { x: number; y: number } {

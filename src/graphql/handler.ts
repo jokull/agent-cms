@@ -163,7 +163,7 @@ function formatFastPathSqlBreakdown(
   },
 ) {
   return Object.entries(metrics.byCategory)
-    .map(([category, value]) => `${category}:${value?.statementCount ?? 0}/${value?.totalDurationMs.toFixed(3) ?? "0.000"}`)
+    .map(([category, value]) => `${category}:${value.statementCount}/${value.totalDurationMs.toFixed(3)}`)
     .join(",");
 }
 
@@ -449,7 +449,7 @@ export function createGraphQLHandler(
     if (unsupportedSelections.length > 0) {
       const unsupportedDocument = buildSubsetDocument(document, operation, unsupportedSelections);
       const unsupportedResult = await executeDocument(unsupportedDocument, variables, context);
-      if (unsupportedResult.data && typeof unsupportedResult.data === "object" && unsupportedResult.data !== null) {
+      if (unsupportedResult.data && typeof unsupportedResult.data === "object") {
         Object.assign(mergedData, unsupportedResult.data as Record<string, unknown>);
       }
       if (unsupportedResult.errors) {

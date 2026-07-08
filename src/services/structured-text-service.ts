@@ -651,7 +651,6 @@ export function materializeStructuredTextValues(params: {
 
     for (const requests of requestsByGroup.values()) {
       const sample = requests[0];
-      if (!sample) continue;
 
       const requestByParentKey = new Map<string, ParsedMaterializeStructuredTextRequest>();
       const requestBlockIds = new Map<string, ReadonlySet<string>>();
@@ -929,12 +928,6 @@ export function writeRichText(params: {
 
     for (let i = 0; i < blocks.length; i++) {
       const block = blocks[i];
-      if (typeof block !== "object" || block === null || Array.isArray(block)) {
-        return yield* new ValidationError({
-          message: `rich_text block at index ${i} must be an object`,
-          field: fieldApiKey,
-        });
-      }
       if (typeof block.block_type !== "string" || block.block_type.length === 0) {
         return yield* new ValidationError({
           message: `rich_text block at index ${i} must have a block_type property`,
@@ -1084,12 +1077,6 @@ function writeRichTextBlocks(params: {
 
     for (let i = 0; i < blocks.length; i++) {
       const block = blocks[i];
-      if (typeof block !== "object" || block === null || Array.isArray(block)) {
-        return yield* new ValidationError({
-          message: `rich_text block at index ${i} must be an object`,
-          field: fieldApiKey,
-        });
-      }
       if (typeof block.block_type !== "string" || block.block_type.length === 0) {
         return yield* new ValidationError({
           message: `rich_text block at index ${i} must have a block_type property`,
