@@ -8,6 +8,7 @@ import { NotFoundError, ValidationError } from "../errors.js";
 import type { ModelRow, FieldRow } from "../db/row-types.js";
 import { dropTableSql } from "../schema-engine/sql-ddl.js";
 import { decodeJsonIfString, decodeJsonRecordStringOr, encodeJson } from "../json.js";
+import { bumpSchemaVersion } from "./schema-version.js";
 
 /**
  * P4.4: Remove a block type — scans all StructuredText fields,
@@ -97,6 +98,8 @@ export function removeBlockType(blockApiKey: string) {
     // Delete the model
     yield* sql.unsafe("DELETE FROM models WHERE id = ?", [blockModel.id]);
 
+    yield* bumpSchemaVersion();
+
     return { deleted: true, affectedFields: affectedFields.length };
   });
 }
@@ -173,6 +176,8 @@ export function removeBlockFromWhitelist(params: {
     validators.structured_text_blocks = whitelist.filter((b: string) => b !== blockApiKey);
     yield* sql.unsafe("UPDATE fields SET validators = ? WHERE id = ?", [encodeJson(validators), fieldId]);
 
+    yield* bumpSchemaVersion();
+
     return { removed: blockApiKey, cleanedRecords, blocksDeleted: blockIdSet.size };
   });
 }
@@ -229,6 +234,8 @@ export function removeLocale(localeId: string) {
 
     // Delete the locale
     yield* sql.unsafe("DELETE FROM locales WHERE id = ?", [localeId]);
+
+    yield* bumpSchemaVersion();
 
     return { deleted: localeCode, updatedRecords, fieldsScanned: localizedFields.length };
   });

@@ -10,6 +10,7 @@ import type { CreateFieldInput, UpdateFieldInput } from "./input-schemas.js";
 import { deleteBlockSubtrees } from "./structured-text-service.js";
 import { isUnique, supportsUniqueValidation } from "../db/validators.js";
 import { decodeJsonRecordStringOr, encodeJson } from "../json.js";
+import { bumpSchemaVersion } from "./schema-version.js";
 
 const ALLOWED_FIELD_VALIDATOR_KEYS = new Set([
   "required",
@@ -416,6 +417,8 @@ export function createField(modelId: string, body: CreateFieldInput) {
       }
     }
 
+    yield* bumpSchemaVersion();
+
     return {
       id, modelId, label: body.label, apiKey: body.apiKey, fieldType: body.fieldType,
       position, localized: body.localized, validators: body.validators,
@@ -527,6 +530,8 @@ export function updateField(fieldId: string, body: UpdateFieldInput) {
 
     yield* sql.unsafe(`UPDATE fields SET ${sets.join(", ")} WHERE id = ?`, [...values, fieldId]);
 
+    yield* bumpSchemaVersion();
+
     const updated = yield* sql.unsafe<FieldRow>("SELECT * FROM fields WHERE id = ?", [fieldId]);
     return parseFieldValidators(updated[0]);
   });
@@ -610,6 +615,8 @@ export function deleteField(fieldId: string) {
 
     yield* sql.unsafe("DELETE FROM fields WHERE id = ?", [fieldId]);
     yield* syncTable(modelId);
+
+    yield* bumpSchemaVersion();
 
     return { deleted: true };
   });

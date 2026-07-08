@@ -13,6 +13,7 @@ import type { ModelRow, FieldRow } from "../db/row-types.js";
 import { parseFieldValidators } from "../db/row-types.js";
 import type { CreateModelInput, UpdateModelInput } from "./input-schemas.js";
 import { decodeJsonRecordStringOr, encodeJson } from "../json.js";
+import { bumpSchemaVersion } from "./schema-version.js";
 
 export function listModels() {
   return Effect.gen(function* () {
@@ -102,6 +103,8 @@ export function createModel(body: CreateModelInput) {
     if (!body.isBlock) {
       yield* SearchService.createFtsTable(body.apiKey).pipe(Effect.ignore);
     }
+
+    yield* bumpSchemaVersion();
 
     return {
       id, name: body.name, apiKey: body.apiKey,
@@ -199,6 +202,8 @@ export function updateModel(id: string, body: UpdateModelInput) {
       yield* SearchService.rebuildIndex(body.apiKey).pipe(Effect.ignore);
     }
 
+    yield* bumpSchemaVersion();
+
     const updated = yield* sql.unsafe<ModelRow>("SELECT * FROM models WHERE id = ?", [id]);
     return updated[0];
   });
@@ -278,6 +283,8 @@ export function deleteModel(id: string) {
     yield* dropTableSql(tableName);
     yield* SearchService.dropIndex(model.api_key).pipe(Effect.ignore);
     yield* sql.unsafe("DELETE FROM models WHERE id = ?", [id]);
+
+    yield* bumpSchemaVersion();
 
     return { deleted: true, recordsDestroyed };
   });

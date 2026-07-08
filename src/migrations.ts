@@ -134,6 +134,18 @@ const MIGRATIONS: readonly Migration[] = [
       `CREATE INDEX IF NOT EXISTS "idx_assets_format" ON "assets" ("format")`,
     ],
   },
+  {
+    version: 2,
+    statements: [
+      // Shared metadata KV. `schema_version` is bumped on every schema mutation
+      // so isolates can detect when their cached GraphQL schema went stale.
+      `CREATE TABLE IF NOT EXISTS "_cms_meta" (
+        "key" text PRIMARY KEY,
+        "value" integer NOT NULL DEFAULT 0
+      )`,
+      `INSERT OR IGNORE INTO "_cms_meta" ("key", "value") VALUES ('schema_version', 0)`,
+    ],
+  },
 ];
 
 /**

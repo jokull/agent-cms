@@ -5,6 +5,7 @@ import { DuplicateError } from "../errors.js";
 import type { LocaleRow } from "../db/row-types.js";
 import { removeLocale as removeLocaleWithCleanup } from "./schema-lifecycle.js";
 import type { CreateLocaleInput } from "./input-schemas.js";
+import { bumpSchemaVersion } from "./schema-version.js";
 
 export function listLocales() {
   return Effect.gen(function* () {
@@ -29,6 +30,8 @@ export function createLocale(body: CreateLocaleInput) {
       "INSERT INTO locales (id, code, position, fallback_locale_id) VALUES (?, ?, ?, ?)",
       [id, body.code, position, body.fallbackLocaleId ?? null]
     );
+
+    yield* bumpSchemaVersion();
 
     return { id, code: body.code, position, fallbackLocaleId: body.fallbackLocaleId ?? null };
   });
