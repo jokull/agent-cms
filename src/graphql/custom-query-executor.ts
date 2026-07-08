@@ -26,6 +26,7 @@ import { compileFilterToSql, compileOrderBy, type FilterCompilerOpts } from "./f
 import type { DynamicRow, DastDocInput } from "./gql-types.js";
 import { decodeSnapshot, deserializeRecord, pluralize, toCamelCase, toContentTypeName, toTypeName } from "./gql-utils.js";
 import { recordSqlMetrics } from "./sql-metrics.js";
+import { createVersionedCache } from "../services/schema-version.js";
 
 interface CustomQueryContext {
   readonly includeDrafts: boolean;
@@ -1266,20 +1267,18 @@ function buildRootLinkQueries(
 
 export function createCustomQueryExecutor(sqlLayer: Layer.Layer<SqlClient.SqlClient>) {
   const runSql = createRunSql(sqlLayer);
-  let metadataPromise: Promise<ExecutorMetadata> | null = null;
+
+  // Per-isolate metadata cache that self-invalidates against the shared D1
+  // schema_version so schema mutations handled by another isolate converge here
+  // within SCHEMA_VERSION_TTL_MS.
+  const metadataCache = createVersionedCache<ExecutorMetadata>(sqlLayer, () => fetchExecutorMetadata(runSql));
 
   function getMetadata() {
-    if (!metadataPromise) {
-      metadataPromise = fetchExecutorMetadata(runSql).catch((error) => {
-        metadataPromise = null;
-        throw error;
-      });
-    }
-    return metadataPromise;
+    return metadataCache.get();
   }
 
   function invalidate() {
-    metadataPromise = null;
+    metadataCache.invalidate();
   }
 
   async function tryExecute(params: {

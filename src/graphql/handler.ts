@@ -19,6 +19,7 @@ import { enforceQueryLimits } from "./query-limits.js";
 import { getSqlMetrics, withSqlMetrics } from "./sql-metrics.js";
 import { createPublishedFastPath } from "./published-fast-path.js";
 import { createCustomQueryExecutor } from "./custom-query-executor.js";
+import { createVersionedCache } from "../services/schema-version.js";
 
 export type CredentialType = "admin" | "editor" | null;
 
@@ -200,7 +201,6 @@ export function createGraphQLHandler(
 
   let schemaBuildCount = 0;
   let lastSchemaBuildMs = 0;
-  let schemaPromise: Promise<GraphQLSchema> | null = null;
 
   function buildSchema() {
     const buildStartedAt = performance.now();
@@ -224,23 +224,23 @@ export function createGraphQLHandler(
     );
   }
 
+  // Per-isolate schema cache that self-invalidates against the shared D1
+  // schema_version so stale schemas converge within SCHEMA_VERSION_TTL_MS even
+  // when a different isolate handled the schema mutation.
+  const schemaCache = createVersionedCache<GraphQLSchema>(sqlLayer, () => buildSchema());
+
   function getSchema() {
-    if (!schemaPromise) {
-      schemaPromise = buildSchema().catch((error) => {
-        schemaPromise = null;
-        throw error;
-      });
-    }
-    return schemaPromise;
+    return schemaCache.get();
   }
 
   async function getSchemaTiming(): Promise<SchemaTiming> {
-    const cacheHit = schemaPromise !== null;
     const startedAt = performance.now();
+    const buildCountBefore = schemaBuildCount;
     await getSchema();
+    const built = schemaBuildCount > buildCountBefore;
     return {
-      cacheHit,
-      buildMs: cacheHit ? 0 : lastSchemaBuildMs,
+      cacheHit: !built,
+      buildMs: built ? lastSchemaBuildMs : 0,
       waitMs: Number((performance.now() - startedAt).toFixed(3)),
     };
   }
@@ -282,8 +282,9 @@ export function createGraphQLHandler(
   });
 
   function invalidateSchema() {
-    schemaPromise = null;
+    schemaCache.invalidate();
     customQueryExecutor.invalidate();
+    publishedFastPath.invalidate();
     return Promise.resolve();
   }
 

@@ -23,6 +23,7 @@ import { mergeAssetWithMediaReference, parseMediaFieldReference, parseMediaGalle
 import type { AssetObject } from "./gql-types.js";
 import { getRegistryDef } from "./gql-utils.js";
 import { buildResponsiveImage } from "./responsive-image.js";
+import { createVersionedCache } from "../services/schema-version.js";
 
 interface GraphqlFastPathRequest {
   readonly query: string;
@@ -946,10 +947,6 @@ function buildJsonObjectSql(
   }
 
   return parts.length > 0 ? `json_object(${parts.join(", ")})` : null;
-}
-
-async function loadMetadata(sqlLayer: Layer.Layer<SqlClient.SqlClient>): Promise<PublishedFastPathMetadata> {
-  return loadMetadataWithMetrics(sqlLayer);
 }
 
 async function loadMetadataWithMetrics(
@@ -2028,19 +2025,23 @@ async function executePlan(
 }
 
 export function createPublishedFastPath(sqlLayer: Layer.Layer<SqlClient.SqlClient>, options?: PublishedFastPathOptions) {
-  let metadataPromise: Promise<PublishedFastPathMetadata> | null = null;
   const planCache = new Map<string, CompiledFastPathPlan | null>();
   const planCacheOrder: string[] = [];
 
-  function getMetadata() {
-    if (!metadataPromise) {
-      metadataPromise = loadMetadata(sqlLayer).catch((error) => {
-        metadataPromise = null;
-        throw error;
-      });
-    }
-    return metadataPromise;
+  function clearPlanCache() {
+    planCache.clear();
+    planCacheOrder.length = 0;
   }
+
+  // Per-isolate metadata cache that self-invalidates against the shared D1
+  // schema_version. A metadata rebuild also drops the plan cache, since a schema
+  // change can make a previously unsupported query supported (or vice versa) and
+  // invalidates any plan that referenced the old field/model shape.
+  const metadataCache = createVersionedCache<PublishedFastPathMetadata, FastPathSqlMetrics | undefined>(
+    sqlLayer,
+    (metrics) => loadMetadataWithMetrics(sqlLayer, metrics),
+    clearPlanCache,
+  );
 
   function rememberPlan(cacheKey: string, plan: CompiledFastPathPlan | null) {
     planCache.set(cacheKey, plan);
@@ -2051,44 +2052,32 @@ export function createPublishedFastPath(sqlLayer: Layer.Layer<SqlClient.SqlClien
     }
   }
 
-  async function compile(request: GraphqlFastPathRequest) {
+  function compile(request: GraphqlFastPathRequest, metadata: PublishedFastPathMetadata) {
     const cacheKey = `${request.operationName ?? ""}\n${request.query}`;
     if (planCache.has(cacheKey)) {
       return planCache.get(cacheKey) ?? null;
     }
-    const plan = compilePlan(request, await getMetadata());
+    const plan = compilePlan(request, metadata);
     rememberPlan(cacheKey, plan);
     return plan;
   }
 
   return {
     async analyze(request: GraphqlFastPathRequest, executionOptions: { includeDrafts: boolean; excludeInvalid: boolean }) {
-      const metadata = metadataPromise
-        ? await getMetadata()
-        : await loadMetadata(sqlLayer).then((loaded) => {
-          metadataPromise = Promise.resolve(loaded);
-          return loaded;
-        }).catch((error) => {
-          metadataPromise = null;
-          throw error;
-        });
+      const metadata = await metadataCache.get(undefined);
       return analyzeSupport(request, metadata, executionOptions);
     },
     async tryExecute(request: GraphqlFastPathRequest, executionOptions: { includeDrafts: boolean; excludeInvalid: boolean }) {
       if (executionOptions.includeDrafts || executionOptions.excludeInvalid) return null;
       const metrics = createFastPathSqlMetrics();
-      const metadata = metadataPromise
-        ? await getMetadata()
-        : await loadMetadataWithMetrics(sqlLayer, metrics).then((loaded) => {
-          metadataPromise = Promise.resolve(loaded);
-          return loaded;
-        }).catch((error) => {
-          metadataPromise = null;
-          throw error;
-        });
-      const plan = await compile(request);
+      const metadata = await metadataCache.get(metrics);
+      const plan = compile(request, metadata);
       if (!plan) return null;
       return executePlan(sqlLayer, metadata, plan, request.variables ?? {}, metrics, options);
+    },
+    invalidate() {
+      metadataCache.invalidate();
+      clearPlanCache();
     },
   };
 }
