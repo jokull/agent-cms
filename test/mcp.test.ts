@@ -392,4 +392,44 @@ describe("MCP Server", () => {
       expect(res.isError).toBe(true);
     });
   });
+
+  describe("Strict input validation (additionalProperties: false)", () => {
+    beforeEach(async () => {
+      await client.callTool({ name: "create_model", arguments: { name: "Article", apiKey: "article" } });
+      const modelId = parseToolResult(
+        await client.callTool({ name: "schema_info", arguments: { filterByName: "article" } }),
+      ).models[0].id;
+      await client.callTool({
+        name: "create_field",
+        arguments: { modelId, label: "Title", apiKey: "title", fieldType: "string" },
+      });
+    });
+
+    it("rejects an unknown top-level property instead of silently dropping it", async () => {
+      // The hour-eating footgun: `fields` instead of `data` used to succeed with
+      // an EMPTY record. It must now be a clear validation error.
+      const res = await client.callTool({
+        name: "create_record",
+        arguments: { modelApiKey: "article", fields: { title: "Hello" } },
+      });
+      expect(res.isError).toBe(true);
+      expect((res.content as any)[0]?.text ?? "").toMatch(/fields/i);
+
+      // And nothing was written.
+      const list = parseToolResult(
+        await client.callTool({ name: "query_records", arguments: { modelApiKey: "article" } }),
+      );
+      const count = Array.isArray(list) ? list.length : (list.records?.length ?? list.total ?? 0);
+      expect(count).toBe(0);
+    });
+
+    it("still accepts the correct `data` key", async () => {
+      const res = await client.callTool({
+        name: "create_record",
+        arguments: { modelApiKey: "article", data: { title: "Hello" } },
+      });
+      expect(res.isError).toBeFalsy();
+      expect(parseToolResult(res).title).toBe("Hello");
+    });
+  });
 });

@@ -231,6 +231,37 @@ function isToolPayload(value: unknown): value is Record<PropertyKey, unknown> {
   return value !== null && typeof value === "object";
 }
 
+/**
+ * Recursively collect "unexpected property" errors for a payload against a tool's
+ * JSON Schema, enforcing the `additionalProperties: false` we advertise. The
+ * @effect/ai Toolkit DECODES (and silently strips) excess keys before the tool
+ * handler runs, so a caller sending `fields` instead of `data` used to succeed
+ * with an empty record. We check the RAW payload here, before dispatch, so a
+ * wrong key becomes one clear ValidationError. Only closed objects are checked;
+ * open records (record `data`, `validators`) accept any keys.
+ */
+function collectExcessProperties(schema: unknown, value: unknown, path = ""): string[] {
+  if (!isObjectRecord(schema) || !isObjectRecord(value)) return [];
+  const props = isObjectRecord(schema.properties) ? schema.properties : {};
+  const errors: string[] = [];
+  if (schema.additionalProperties === false) {
+    const known = Object.keys(props);
+    for (const key of Object.keys(value)) {
+      if (!(key in props)) {
+        const where = path ? `${path}.${key}` : key;
+        const hint = known.length > 0 ? ` (accepted: ${known.join(", ")})` : "";
+        errors.push(`unexpected property \`${where}\`${hint}`);
+      }
+    }
+  }
+  for (const [key, sub] of Object.entries(props)) {
+    if (key in value) {
+      errors.push(...collectExcessProperties(sub, value[key], path ? `${path}.${key}` : key));
+    }
+  }
+  return errors;
+}
+
 function compactPatchBlocksResponse(
   fullRecord: Record<string, unknown>,
   fieldApiKey: string,
@@ -1056,6 +1087,22 @@ export function createMcpLayer(
         tool: mcpTool,
         handle(payload) {
           const params = isToolPayload(payload) ? payload : {};
+          // Enforce `additionalProperties: false` on the raw payload before the
+          // Toolkit decode silently strips unknown keys (see collectExcessProperties).
+          const excess = collectExcessProperties(mcpTool.inputSchema, params);
+          if (excess.length > 0) {
+            const error = {
+              _tag: "ValidationError",
+              message: `${excess.join("; ")}. Check the tool's inputSchema.`,
+            };
+            return Effect.succeed(
+              new McpSchema.CallToolResult({
+                isError: true,
+                structuredContent: toStructuredContent(error),
+                content: [{ type: "text", text: encodeJson(error) }],
+              }),
+            );
+          }
           // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- dynamic MCP registry dispatch crosses Effect Toolkit's generated tool-name/payload types.
           return built.handle(tool.name as never, params as never).pipe(
             Effect.provide(context),
