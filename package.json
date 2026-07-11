@@ -22,6 +22,7 @@
   ],
   "scripts": {
     "build": "tsdown",
+    "dev": "tsdown --watch",
     "test": "vitest",
     "test:run": "vitest run",
     "lint": "oxlint --type-check src/",

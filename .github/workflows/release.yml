@@ -1,0 +1,51 @@
+name: release
+
+# Publish agent-cms to npm when a version tag is pushed:
+#   pnpm version patch -m "Release v%s" && git push --follow-tags
+#
+# Uses npm Trusted Publishing (OIDC) — no NPM_TOKEN, no OTP. One-time setup on
+# npmjs.com: agent-cms → Settings → Trusted Publisher → GitHub Actions,
+# repo `jokull/agent-cms`, workflow `release.yml`. Provenance is attached
+# automatically from the OIDC identity.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  id-token: write # required for OIDC trusted publishing + provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - run: pnpm install --frozen-lockfile
+
+      # Gate the release on the same checks we run locally.
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test:run
+      - run: pnpm build
+
+      # Fail early if the tag doesn't match package.json (avoids a mismatched publish).
+      - name: Verify tag matches package.json version
+        run: |
+          PKG=$(node -p "require('./package.json').version")
+          TAG="${GITHUB_REF_NAME#v}"
+          if [ "$PKG" != "$TAG" ]; then
+            echo "::error::tag $TAG != package.json $PKG"; exit 1
+          fi
+
+      # OIDC trusted publishing: no token needed; npm >= 11.5 detects the id-token.
+      - run: npm publish --provenance --access public
