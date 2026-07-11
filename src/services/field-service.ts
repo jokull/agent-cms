@@ -29,6 +29,24 @@ const ALLOWED_FIELD_VALIDATOR_KEYS = new Set([
   "searchable",
 ]);
 
+const BOOLEAN_VALIDATOR_KEYS = new Set(["required", "unique", "searchable"]);
+
+/**
+ * Normalize DatoCMS-style boolean validators. DatoCMS enables `required` /
+ * `unique` / `searchable` with an empty object (`required: {}`), while we model
+ * them as booleans. Coerce a plain object to `true` so BOTH forms are accepted —
+ * agents fluent in DatoCMS reach for `{}` and used to hit "required validator
+ * must be a boolean".
+ */
+function normalizeBooleanValidators(validators: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...validators };
+  for (const key of BOOLEAN_VALIDATOR_KEYS) {
+    const v = out[key];
+    if (v !== null && typeof v === "object" && !Array.isArray(v)) out[key] = true;
+  }
+  return out;
+}
+
 function validateFieldValidators(
   fieldType: string,
   apiKey: string,
@@ -363,7 +381,7 @@ export function createField(modelId: string, body: CreateFieldInput) {
     const position = body.position ?? allFields.length;
 
     // Validate required field + defaultValue BEFORE any mutations
-    const parsedValidators = body.validators;
+    const parsedValidators = normalizeBooleanValidators(body.validators);
     yield* validateFieldValidators(body.fieldType, body.apiKey, parsedValidators);
     if (parsedValidators.required) {
       const modelInfo = yield* sql.unsafe<{ api_key: string; is_block: number }>(
@@ -385,7 +403,7 @@ export function createField(modelId: string, body: CreateFieldInput) {
 
     const now = new Date().toISOString();
     const id = generateId();
-    const validators = encodeJson(body.validators);
+    const validators = encodeJson(parsedValidators);
 
     yield* sql.unsafe(
       `INSERT INTO fields (id, model_id, label, api_key, field_type, position, localized, validators, default_value, appearance, hint, fieldset_id, created_at, updated_at)
@@ -421,7 +439,7 @@ export function createField(modelId: string, body: CreateFieldInput) {
 
     return {
       id, modelId, label: body.label, apiKey: body.apiKey, fieldType: body.fieldType,
-      position, localized: body.localized, validators: body.validators,
+      position, localized: body.localized, validators: parsedValidators,
       defaultValue: body.defaultValue ?? null, appearance: body.appearance ?? null,
       hint: body.hint ?? null, fieldsetId: body.fieldsetId ?? null,
       createdAt: now, updatedAt: now,
@@ -437,7 +455,9 @@ export function updateField(fieldId: string, body: UpdateFieldInput) {
 
     const field = fields[0];
     const nextFieldType = body.fieldType ?? field.field_type;
-    const nextValidators = body.validators ?? parseFieldValidators(field).validators;
+    const nextValidators = normalizeBooleanValidators(
+      body.validators ?? parseFieldValidators(field).validators,
+    );
     yield* validateFieldValidators(nextFieldType, field.api_key, nextValidators);
 
     // Reject field type changes if field has data
@@ -469,7 +489,7 @@ export function updateField(fieldId: string, body: UpdateFieldInput) {
     if (body.label !== undefined) { sets.push("label = ?"); values.push(body.label); }
     if (body.position !== undefined) { sets.push("position = ?"); values.push(body.position); }
     if (body.localized !== undefined) { sets.push("localized = ?"); values.push(body.localized ? 1 : 0); }
-    if (body.validators !== undefined) { sets.push("validators = ?"); values.push(encodeJson(body.validators)); }
+    if (body.validators !== undefined) { sets.push("validators = ?"); values.push(encodeJson(nextValidators)); }
     if (body.hint !== undefined) { sets.push("hint = ?"); values.push(body.hint); }
     if (body.appearance !== undefined) { sets.push("appearance = ?"); values.push(encodeJson(body.appearance)); }
 

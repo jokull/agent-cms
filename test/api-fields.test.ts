@@ -66,6 +66,17 @@ describe("Fields REST API", () => {
       expect(body.validators).toEqual({ required: true, length: { min: 1, max: 255 } });
     });
 
+    it("accepts DatoCMS-style boolean validators ({} means enabled)", async () => {
+      // DatoCMS habit: `required: {}`; we model it as a boolean. Both must work.
+      const res = await jsonRequest(handler, "POST", `/api/models/${modelId}/fields`, {
+        label: "Title", apiKey: "title", fieldType: "string",
+        validators: { required: {}, unique: {} },
+      });
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.validators).toEqual({ required: true, unique: true });
+    });
+
     it("rejects invalid validator shapes", async () => {
       const res = await jsonRequest(handler, "POST", `/api/models/${modelId}/fields`, {
         label: "Title", apiKey: "title", fieldType: "string",
