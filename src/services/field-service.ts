@@ -47,6 +47,39 @@ function normalizeBooleanValidators(validators: Record<string, unknown>): Record
   return out;
 }
 
+/**
+ * Normalize link/links target references to model API KEYS. DatoCMS-style
+ * `item_item_type` / `items_item_type` reference the target model by ID, but the
+ * GraphQL schema-builder + link resolvers key everything by api_key — a target
+ * left as an ID falls back to a scalar `JSON` field (relation unreadable). Resolve
+ * any entry that is a model ID to its api_key; leave already-api_key (or unknown)
+ * entries untouched.
+ */
+function normalizeLinkTargets(validators: Record<string, unknown>) {
+  return Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const out: Record<string, unknown> = { ...validators };
+    for (const key of ["item_item_type", "items_item_type"]) {
+      const v = out[key];
+      if (!Array.isArray(v)) continue;
+      const resolved: unknown[] = [];
+      for (const t of v) {
+        if (typeof t !== "string") {
+          resolved.push(t);
+          continue;
+        }
+        const rows = yield* sql.unsafe<{ api_key: string }>(
+          "SELECT api_key FROM models WHERE id = ? LIMIT 1",
+          [t],
+        );
+        resolved.push(rows.length > 0 ? rows[0].api_key : t);
+      }
+      out[key] = resolved;
+    }
+    return out;
+  });
+}
+
 function validateFieldValidators(
   fieldType: string,
   apiKey: string,
@@ -381,7 +414,7 @@ export function createField(modelId: string, body: CreateFieldInput) {
     const position = body.position ?? allFields.length;
 
     // Validate required field + defaultValue BEFORE any mutations
-    const parsedValidators = normalizeBooleanValidators(body.validators);
+    const parsedValidators = yield* normalizeLinkTargets(normalizeBooleanValidators(body.validators));
     yield* validateFieldValidators(body.fieldType, body.apiKey, parsedValidators);
     if (parsedValidators.required) {
       const modelInfo = yield* sql.unsafe<{ api_key: string; is_block: number }>(
@@ -455,8 +488,8 @@ export function updateField(fieldId: string, body: UpdateFieldInput) {
 
     const field = fields[0];
     const nextFieldType = body.fieldType ?? field.field_type;
-    const nextValidators = normalizeBooleanValidators(
-      body.validators ?? parseFieldValidators(field).validators,
+    const nextValidators = yield* normalizeLinkTargets(
+      normalizeBooleanValidators(body.validators ?? parseFieldValidators(field).validators),
     );
     yield* validateFieldValidators(nextFieldType, field.api_key, nextValidators);
 
