@@ -6,6 +6,8 @@ export type {
   SchemaDrift,
   ValidationFailed,
 } from "./errors.ts";
+export { assetUrl, assetSrcSet } from "./assets.ts";
+export type { AssetUrlLike, ImageTransform } from "./assets.ts";
 export { generate } from "./generate.ts";
 export type { GeneratedFiles } from "./generate.ts";
 export { parseSchemaExport } from "./schema-types.ts";

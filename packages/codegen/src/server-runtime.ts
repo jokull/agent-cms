@@ -169,11 +169,19 @@ function toPickerRow(row: PickerSearchRow): {
   id: string;
   title: string | null;
   image: string | null;
+  imageUrl: string | null;
   status: string | null;
   updatedAt: string | null;
 } {
   const str = (v: unknown): string | null => (v === undefined || v === null ? null : String(v));
-  return { id: row.id, title: str(row.title), image: row.image, status: str(row.status), updatedAt: str(row.updatedAt) };
+  return {
+    id: row.id,
+    title: str(row.title),
+    image: row.image,
+    imageUrl: row.imageUrl,
+    status: str(row.status),
+    updatedAt: str(row.updatedAt),
+  };
 }
 
 // --- output projection + drift decode ---

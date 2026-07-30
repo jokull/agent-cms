@@ -7,6 +7,7 @@ import { client, CmsShell } from "../client.js";
 import type { AssetRecord, AssetUsage } from "../cms/contract.js";
 import { cmsErrors } from "@agent-cms/codegen/errors";
 import { describeError } from "../lib/errors.js";
+import { Preview } from "../components/Thumb.js";
 
 const PAGE_SIZE = 24;
 
@@ -53,8 +54,7 @@ export function MediaPage() {
         {assets.map((asset) => (
           <li key={asset.id}>
             <button type="button" className="tile" onClick={() => setSelected(asset)}>
-              {/* r2_key is exposed but no public URL is — FRICTION.md #3. */}
-              <span className="tile__ph">{asset.format ?? asset.mime_type}</span>
+              <Preview src={asset.url} alt={asset.alt ?? asset.filename} width={300} />
               <span className="tile__name">{asset.filename}</span>
               <span className="muted">
                 {asset.width ?? "?"}×{asset.height ?? "?"} · {Math.round(asset.size / 1024)}kb
@@ -127,6 +127,11 @@ function AssetPanel({
             ×
           </button>
         </header>
+
+        <Preview src={asset.url} alt={asset.alt ?? asset.filename} width={640} />
+        <p className="muted">
+          <a href={asset.url} target="_blank" rel="noreferrer">{asset.url}</a>
+        </p>
 
         <label className="field__label">Alt</label>
         <input value={alt} onChange={(event) => setAlt(event.target.value)} />

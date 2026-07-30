@@ -91,6 +91,7 @@
     "unified": "^11.0.5"
   },
   "devDependencies": {
+    "@agent-cms/dast": "workspace:*",
     "@cloudflare/workers-types": "^4.20260317.1",
     "@effect/language-service": "^0.81.0",
     "@effect/sql-sqlite-node": "^0.52.0",

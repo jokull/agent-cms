@@ -125,7 +125,7 @@ between "a host list view renders generically" and "every host hand-writes it pe
 
 ---
 
-## #3 — S2 — there is no asset URL anywhere on the RPC surface
+## #3 — RESOLVED — there is no asset URL anywhere on the RPC surface
 
 **Tried.** Render a thumbnail in the record list, the media grid, the picker rows, and the block
 cards.
@@ -143,6 +143,25 @@ the most visible way the app fails to look like a real CMS.
 **Should have.** Either `deps.assets.baseUrl` fed into every asset-shaped output as a `url`
 field, or a documented `assetUrl(asset)` helper exported from the codegen runtime. Cloudflare
 Image Resizing (the project's stated image story) needs a real origin URL to transform.
+
+**RESOLUTION (BUILDOUT 4 / G1).** Canonical URLs now exist on the read surface, and the admin
+renders real images in the media grid, the list's preview column, the picker rows, the cover-image
+field and the DAST image block cards.
+
+- Every asset row carries `url`. Resolution order: configured `ASSET_BASE_URL` → `<base>/<r2_key>`
+  (identical to what GraphQL already emitted); else the caller's origin →
+  `<origin>/assets/<id>/<filename>`, the route the CMS Worker serves from R2; else that same path,
+  relative. Never null.
+- `media` and every `media_gallery` entry are read back as the reference merged with the asset
+  (`{ upload_id, url, filename, mime_type, size, width, height, alt, title, focal_point,
+  custom_data, blurhash }`); `seo` keeps `image` (the id) and gains `image_url`. Writes are
+  unchanged — an id or a descriptor — and the read-only keys are stripped again on write, so
+  read-modify-write is lossless. One batched `WHERE id IN (…)` per record set, block payloads
+  included.
+- `PickerRow` gained `imageUrl` alongside `image`.
+- Transforms: `assetUrl(asset, { width, height, fit, format, quality })` (plus `assetSrcSet`) from
+  `@agent-cms/codegen/assets`, composing Cloudflare Image Resizing `/cdn-cgi/image/...` URLs.
+- The host tells the CMS which of the two it is via `deps.assets.baseUrl` / `deps.assets.originUrl`.
 
 **Bears on.** ADR 0006 (presentation hints are pointless without a URL), ticket 04 (field types).
 

@@ -93,6 +93,9 @@ importers:
         specifier: ^11.0.5
         version: 11.0.5
     devDependencies:
+      '@agent-cms/dast':
+        specifier: workspace:*
+        version: link:packages/dast
       '@cloudflare/workers-types':
         specifier: ^4.20260317.1
         version: 4.20260317.1
@@ -141,6 +144,9 @@ importers:
       '@agent-cms/codegen':
         specifier: workspace:*
         version: link:../../packages/codegen
+      '@agent-cms/dast':
+        specifier: workspace:*
+        version: link:../../packages/dast
       '@agent-cms/editor-react':
         specifier: workspace:*
         version: link:../../packages/editor-react
@@ -224,6 +230,9 @@ importers:
 
   packages/codegen:
     dependencies:
+      '@agent-cms/dast':
+        specifier: workspace:*
+        version: link:../dast
       agent-cms:
         specifier: workspace:*
         version: link:../..
@@ -246,8 +255,20 @@ importers:
 
   packages/create-agent-cms: {}
 
+  packages/dast:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.0(@types/node@24.13.3)(jsdom@30.0.1)(yaml@2.8.2)
+
   packages/editor-react:
     dependencies:
+      '@agent-cms/dast':
+        specifier: workspace:*
+        version: link:../dast
       '@tiptap/core':
         specifier: 3.29.2
         version: 3.29.2(@tiptap/pm@3.29.2)

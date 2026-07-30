@@ -5,6 +5,7 @@
  */
 import { useEffect, useState } from "react";
 import type { PickerRow } from "../cms/contract.js";
+import { Thumb } from "./Thumb.js";
 
 export interface RecordPickerProps {
   readonly title: string;
@@ -56,7 +57,7 @@ export function RecordPicker({ title, search, onPick, onClose }: RecordPickerPro
           {rows.map((row) => (
             <li key={row.id}>
               <button type="button" onClick={() => onPick(row)}>
-                <span className="picker__thumb">{row.image ?? "—"}</span>
+                <Thumb src={row.imageUrl} alt={row.title} size={28} className="picker__thumb" />
                 <span className="picker__title">{row.title ?? row.id}</span>
                 <span className={`pill pill--${row.status ?? "draft"}`}>{row.status ?? "?"}</span>
               </button>

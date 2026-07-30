@@ -322,6 +322,27 @@ Asset binaries live in R2. Metadata in D1. Served from `/assets/:id/:filename`.
 
 Focal points, blurhash, and color palette are stored per-asset. Cloudflare Image Resizing generates responsive variants at the edge.
 
+### Canonical URLs
+
+Every asset a read returns carries an absolute `url`, resolved in this order:
+
+1. **`ASSET_BASE_URL` is set** → `<ASSET_BASE_URL>/<r2_key>`. The base must be a Cloudflare custom
+   domain serving the bucket (that is also what Image Resizing transforms require).
+2. **No base URL, but the origin is known** (any HTTP request to the CMS Worker, or a library host
+   passing `assets.originUrl`) → `<origin>/assets/<id>/<filename>`, the route above.
+3. **Neither** → the same-origin relative path `/assets/<id>/<filename>`.
+
+`media` and `media_gallery` values in record reads are enriched the same way — the stored
+reference merged with its asset row (`upload_id`, `url`, `filename`, `mime_type`, `size`, `width`,
+`height`, `alt`, `title`, `focal_point`, `custom_data`, `blurhash`) — and `seo` gains `image_url`
+beside its `image` id. Writes are unchanged (an asset id or an upload descriptor); the read-only
+keys are stripped on write, so read-modify-write round-trips exactly. Resolution costs one batched
+query per record set, block payloads included.
+
+Clients compose transforms with `assetUrl(asset, { width, height, fit, format, quality })` from
+`@agent-cms/codegen/assets`, which builds Cloudflare Image Resizing URLs
+(`<origin>/cdn-cgi/image/<options>/<path>`).
+
 ## Stack
 
 - **Runtime**: Cloudflare Workers

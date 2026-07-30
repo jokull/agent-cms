@@ -16,12 +16,23 @@
       "migrations_dir": "../blog/cms/migrations"
     }
   ],
+  // Same local R2 bucket as examples/blog/cms — the admin serves
+  // /assets/:id/:filename from it, which is exactly the fallback URL the CMS
+  // hands back when no ASSET_BASE_URL is configured (deliberately unset here).
+  "r2_buckets": [
+    {
+      "binding": "ASSETS",
+      "bucket_name": "test-blog-assets"
+    }
+  ],
   "assets": {
     "directory": "./dist",
     "binding": "STATIC",
     "not_found_handling": "single-page-application",
-    // /rpc must reach the Worker; everything else is the SPA.
-    "run_worker_first": ["/rpc"]
+    // /rpc, /assets/* (R2 files) and /cdn-cgi/* (the local Image Resizing
+    // shim) must reach the Worker; everything else is the SPA. The SPA's own
+    // bundle lives under /static (vite.config.ts sets assetsDir).
+    "run_worker_first": ["/rpc", "/assets/*", "/cdn-cgi/*"]
   },
   "vars": {
     "ENVIRONMENT": "development"

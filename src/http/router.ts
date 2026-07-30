@@ -12,7 +12,7 @@ import * as FieldService from "../services/field-service.js";
 import * as RecordService from "../services/record-service.js";
 import * as PublishService from "../services/publish-service.js";
 import * as AssetService from "../services/asset-service.js";
-import { AssetImportContext } from "../services/asset-service.js";
+import { AssetImportContext, AssetUrlContext, type AssetUrlConfig } from "../services/asset-service.js";
 import * as LocaleService from "../services/locale-service.js";
 import * as ScheduleService from "../services/schedule-service.js";
 import { isCmsError, errorToResponse } from "../errors.js";
@@ -834,7 +834,21 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
     r2Credentials: options?.r2Credentials,
     fetch: options?.fetch ?? globalThis.fetch,
   });
-  const fullLayer = Layer.mergeAll(sqlLayer, vectorizeLayer, hooksLayer, assetImportLayer, Logger.json);
+  /**
+   * Asset-URL config for every read on this handler. `baseUrl` is fixed at
+   * construction (`ASSET_BASE_URL`); `origin` is learned per request, because
+   * the layer is built once per Worker but only a request knows the host the
+   * CMS is reachable on. With neither, reads fall back to the relative
+   * `/assets/:id/:filename` path this router serves from R2.
+   */
+  const assetUrlConfig: { baseUrl: string | undefined; origin: string | undefined } = {
+    baseUrl: options?.assetBaseUrl,
+    origin: undefined,
+  };
+  const assetUrlLayer = Layer.succeed(AssetUrlContext, {
+    current: (): AssetUrlConfig => assetUrlConfig,
+  });
+  const fullLayer = Layer.mergeAll(sqlLayer, vectorizeLayer, hooksLayer, assetImportLayer, assetUrlLayer, Logger.json);
 
   const runLoggedEffect = (effect: Effect.Effect<unknown, unknown>) => {
     Effect.runFork(effect.pipe(Effect.provide(fullLayer), Effect.orDie));
@@ -1050,6 +1064,9 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
       }
 
       const url = new URL(instrumentedRequest.url);
+      // Fallback origin for asset URLs when no ASSET_BASE_URL is configured —
+      // reads then point at this Worker's own /assets/:id/:filename route.
+      assetUrlConfig.origin = url.origin;
 
       // /assets/{id}/{filename} — serve files from R2 (no auth, public, immutable cache)
       if (url.pathname.startsWith("/assets/") && options?.r2Bucket) {

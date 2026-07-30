@@ -184,18 +184,54 @@ input[type="checkbox"] {
   gap: 6px;
 }
 
+/* Real thumbnails: every read carries an asset url (see components/Thumb.tsx). */
 .thumb {
   display: inline-block;
-  min-width: 60px;
-  max-width: 120px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 3px 6px;
-  border: 1px dashed var(--line);
   border-radius: 4px;
+  border: 1px solid var(--line);
+  object-fit: cover;
+  background: var(--line);
+}
+
+.thumb--empty {
+  display: inline-grid;
+  place-items: center;
+  min-width: 40px;
+  height: 40px;
+  border: 1px dashed var(--line);
   color: var(--muted);
   font-size: 11px;
+}
+
+.preview {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 320px;
+  object-fit: contain;
+  border-radius: 6px;
+  background: var(--line);
+}
+
+.mediafield {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mediafield input {
+  flex: 1;
+}
+
+.blockcard__strip {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 6px 0;
+}
+
+.blockcard__thumb {
+  margin: 6px 0;
 }
 
 .pill {
@@ -532,12 +568,7 @@ input[type="checkbox"] {
 }
 
 .picker__thumb {
-  color: var(--muted);
-  font-size: 11px;
-  max-width: 90px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  flex: 0 0 auto;
 }
 
 /* --- media grid --- */
@@ -559,6 +590,7 @@ input[type="checkbox"] {
   padding: 10px;
 }
 
+/* Only shown when an asset row somehow has no file behind it. */
 .tile__ph {
   display: grid;
   place-items: center;
@@ -567,6 +599,11 @@ input[type="checkbox"] {
   border-radius: 6px;
   color: var(--muted);
   font-size: 11px;
+}
+
+.tile .preview {
+  height: 110px;
+  object-fit: cover;
 }
 
 .tile__name {

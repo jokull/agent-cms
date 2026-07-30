@@ -26,6 +26,7 @@ import type {
   TableCellNode,
   TableRowNode,
 } from "./dast-types.js";
+import { isMark } from "./dast-types.js";
 
 // ProseMirror JSON shapes. The strict forms are what dastToPm constructs
 // (assignable to Tiptap's Content under exactOptionalPropertyTypes); the
@@ -60,17 +61,8 @@ export class DastCodecError extends Error {
   }
 }
 
-const DEFAULT_MARKS: readonly Mark[] = [
-  "strong",
-  "emphasis",
-  "underline",
-  "strikethrough",
-  "code",
-  "highlight",
-];
-
 function isSpanMark(name: string): name is Mark {
-  return (DEFAULT_MARKS as readonly string[]).includes(name) || name.startsWith("customMark_");
+  return isMark(name);
 }
 
 // --- DAST → ProseMirror ---

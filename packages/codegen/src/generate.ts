@@ -64,102 +64,137 @@ function stringArrayValidator(field: SchemaExportField, key: string): string[] {
   return [];
 }
 
+const DAST_IMPORT = `import type {
+  BlockLevelNode as DastBlockLevelNode,
+  BlockNode as DastBlockRefNode,
+  BlockquoteNode as DastBlockquoteNode,
+  CodeNode as DastCodeNode,
+  CustomMark as DastCustomMark,
+  DastDocument,
+  DefaultMark as DastDefaultMark,
+  HeadingNode as DastHeadingNode,
+  InlineBlockNode as DastInlineBlockNode,
+  InlineItemNode as DastInlineItemNode,
+  InlineNode as DastInlineNode,
+  ItemLinkNode as DastItemLinkNode,
+  LinkNode as DastLinkNode,
+  ListItemNode as DastListItemNode,
+  ListNode as DastListNode,
+  Mark as DastMark,
+  ParagraphNode as DastParagraphNode,
+  RootNode as DastRootNode,
+  SpanNode as DastSpanNode,
+  TableCellNode as DastTableCellNode,
+  TableNode as DastTableNode,
+  TableRowNode as DastTableRowNode,
+  ThematicBreakNode as DastThematicBreakNode,
+} from "@agent-cms/dast";
+`;
+
 // --- static prelude emitted into every contract ---
 
-const PRELUDE = `// --- Shared value types (structurally identical to agent-cms's own) ---
+const PRELUDE = `// --- DAST (shared with the CMS and the editor) ---
+// Re-exported under the historical \`Dast*\` names so consumers can keep
+// importing them from this contract. The underlying import above is types-only
+// and therefore erased at build time: the contract stays browser-safe and
+// pulls in nothing from the CMS runtime. \`@agent-cms/dast\` has zero runtime
+// dependencies — add it to the host's dependencies.
+export type {
+  DastBlockLevelNode,
+  DastBlockRefNode,
+  DastBlockquoteNode,
+  DastCodeNode,
+  DastCustomMark,
+  DastDocument,
+  DastDefaultMark,
+  DastHeadingNode,
+  DastInlineBlockNode,
+  DastInlineItemNode,
+  DastInlineNode,
+  DastItemLinkNode,
+  DastLinkNode,
+  DastListItemNode,
+  DastListNode,
+  DastMark,
+  DastParagraphNode,
+  DastRootNode,
+  DastSpanNode,
+  DastTableCellNode,
+  DastTableNode,
+  DastTableRowNode,
+  DastThematicBreakNode,
+};
 
-export interface DastSpanNode {
-  type: "span";
-  value: string;
-  marks?: ReadonlyArray<"strong" | "emphasis" | "underline" | "strikethrough" | "code" | "highlight">;
-}
-export interface DastLinkNode {
-  type: "link";
-  url: string;
-  meta?: ReadonlyArray<{ id: string; value: string }>;
-  children: readonly DastSpanNode[];
-}
-export interface DastItemLinkNode {
-  type: "itemLink";
-  item: string;
-  meta?: ReadonlyArray<{ id: string; value: string }>;
-  children: readonly DastSpanNode[];
-}
-export interface DastInlineItemNode { type: "inlineItem"; item: string }
-export interface DastInlineBlockNode { type: "inlineBlock"; item: string }
-export type DastInlineNode =
-  | DastSpanNode | DastLinkNode | DastItemLinkNode | DastInlineItemNode | DastInlineBlockNode;
-export interface DastParagraphNode { type: "paragraph"; style?: string; children: readonly DastInlineNode[] }
-export interface DastHeadingNode {
-  type: "heading";
-  level: 1 | 2 | 3 | 4 | 5 | 6;
-  style?: string;
-  children: readonly DastInlineNode[];
-}
-export interface DastListNode {
-  type: "list";
-  style: "bulleted" | "numbered";
-  children: readonly DastListItemNode[];
-}
-export interface DastListItemNode {
-  type: "listItem";
-  children: ReadonlyArray<DastParagraphNode | DastListNode>;
-}
-export interface DastBlockquoteNode {
-  type: "blockquote";
-  attribution?: string;
-  children: readonly DastParagraphNode[];
-}
-export interface DastCodeNode {
-  type: "code";
-  code: string;
-  language?: string;
-  highlight?: readonly number[];
-}
-export interface DastThematicBreakNode { type: "thematicBreak" }
-export interface DastBlockRefNode { type: "block"; item: string }
-export interface DastTableCellNode {
-  type: "tableCell";
-  children: readonly [DastParagraphNode, ...DastParagraphNode[]];
-}
-export interface DastTableRowNode {
-  type: "tableRow";
-  children: readonly [DastTableCellNode, ...DastTableCellNode[]];
-}
-export interface DastTableNode {
-  type: "table";
-  children: readonly [DastTableRowNode, ...DastTableRowNode[]];
-}
-export type DastBlockLevelNode =
-  | DastParagraphNode | DastHeadingNode | DastListNode | DastBlockquoteNode
-  | DastCodeNode | DastThematicBreakNode | DastBlockRefNode | DastTableNode;
-export interface DastDocument {
-  schema: "dast";
-  document: { type: "root"; children: readonly DastBlockLevelNode[] };
-}
+// --- Shared value types (structurally identical to agent-cms's own) ---
 
-/** Asset reference as accepted/returned by REST: an asset id, or an upload descriptor. */
+/**
+ * Write shape of a media reference: an asset id, or an upload descriptor.
+ * The read-only keys a read adds (\`url\`, \`filename\`, …) are declared optional
+ * so a value read off a record can be written straight back — the CMS strips
+ * them before storing (read-modify-write is lossless).
+ */
 export type MediaValue =
   | string
   | {
       upload_id: string;
-      alt?: string;
-      title?: string;
-      focal_point?: { x: number; y: number };
-      custom_data?: Record<string, string>;
+      alt?: string | null;
+      title?: string | null;
+      focal_point?: { x: number; y: number } | null;
+      custom_data?: Record<string, unknown> | null;
+      url?: string;
+      filename?: string;
+      mime_type?: string;
+      size?: number;
+      width?: number | null;
+      height?: number | null;
+      blurhash?: string | null;
     };
+
+/**
+ * Read shape of a media reference: the stored reference merged with the asset
+ * it points at, including the canonical absolute \`url\`. Assignable to
+ * \`MediaValue\`, so reads can be edited and written back.
+ *
+ * Compose transforms with \`assetUrl(value, { width })\` from
+ * \`@agent-cms/codegen/assets\` (Cloudflare Image Resizing).
+ */
+export interface MediaRead {
+  upload_id: string;
+  url: string;
+  filename: string;
+  mime_type: string;
+  size: number;
+  width: number | null;
+  height: number | null;
+  alt: string | null;
+  title: string | null;
+  focal_point: { x: number; y: number } | null;
+  custom_data: Record<string, unknown> | null;
+  blurhash: string | null;
+}
 
 export interface SeoValue {
   title?: string;
   description?: string;
   image?: string;
   twitterCard?: string;
+  /** Read-only: the canonical URL of \`image\`, resolved by the CMS. */
+  image_url?: string | null;
 }
 
-/** Write shape for structured_text: the DAST value plus (optionally) new/updated block payloads. */
-export interface StructuredTextWrite {
+/**
+ * Write shape for structured_text: the DAST value plus (optionally) new/updated
+ * block payloads.
+ *
+ * \`TBlock\` defaults to a raw payload object, and every per-field write alias
+ * widens it to \`<the field's block union> | Record<string, unknown>\` so a value
+ * read back off a record (whose blocks are the concrete generated interfaces)
+ * is assignable straight into an update — read-modify-write compiles with no
+ * adapter.
+ */
+export interface StructuredTextWrite<TBlock = Record<string, unknown>> {
   value: DastDocument;
-  blocks?: Record<string, Record<string, unknown>>;
+  blocks?: Readonly<Record<string, TBlock>>;
 }
 `;
 
@@ -209,7 +244,7 @@ export interface RecordSyncState {
 export interface RecordBacklink { modelApiKey: string; recordId: string; fieldApiKey: string; }
 
 /** Picker-search presentation row. */
-export interface PickerRow { id: string; title: string | null; image: string | null; status: string | null; updatedAt: string | null; }
+export interface PickerRow { id: string; title: string | null; image: string | null; imageUrl: string | null; status: string | null; updatedAt: string | null; }
 
 /** Per-id result of a bulk publish/unpublish/delete (data, never a top-level failure). */
 export interface BulkResult { id: string; ok: boolean; error?: string; }
@@ -235,6 +270,8 @@ export interface AssetRecord {
   id: string; filename: string; basename: string | null; format: string | null;
   mime_type: string; size: number; width: number | null; height: number | null;
   alt: string | null; title: string | null; r2_key: string; blurhash: string | null;
+  /** Canonical absolute URL (ASSET_BASE_URL, else the CMS's own /assets route). */
+  url: string;
   colors: string | null; focal_point: string | null; tags: string; custom_data: string | null;
   created_at: string; updated_at: string; created_by: string | null; updated_by: string | null;
 }
@@ -252,15 +289,15 @@ export interface AssetUpdateInput { alt?: string; title?: string; width?: number
 export interface AssetUsage { modelApiKey: string; recordId: string; fieldApiKey: string; }
 export interface AssetCreateResult {
   id: string; filename: string; mimeType: string; size: number;
-  width?: number; height?: number; alt?: string; title?: string; r2Key: string;
+  width?: number; height?: number; alt?: string; title?: string; r2Key: string; url: string;
   createdAt: string; updatedAt: string; createdBy: string | null; updatedBy: string | null;
 }
 export interface AssetReplaceResult {
   id: string; filename: string; mimeType: string; size: number;
   width?: number; height?: number; alt: string | null; title: string | null;
-  r2Key: string; replaced: true; updatedAt: string; updatedBy: string | null;
+  r2Key: string; url: string; replaced: true; updatedAt: string; updatedBy: string | null;
 }
-export interface AssetUpdateResult { id: string; alt: string | null; title: string | null; width: number | null; height: number | null; updatedAt: string; updatedBy: string | null; }
+export interface AssetUpdateResult { id: string; alt: string | null; title: string | null; width: number | null; height: number | null; url: string; updatedAt: string; updatedBy: string | null; }
 export interface UploadUrlResult { uploadUrl: string; r2Key: string; assetId: string; }
 `;
 
@@ -273,7 +310,8 @@ const StatusInput = wire.union([wire.literal("draft"), wire.literal("published")
 const IdInput = wire.object({ id: wire.string });
 const IdsInput = wire.object({ ids: wire.array(wire.string) });
 export const PickerRowsCodec = wire.array(wire.object({
-  id: wire.string, title: nullableString, image: nullableString, status: nullableString, updatedAt: nullableString,
+  id: wire.string, title: nullableString, image: nullableString, imageUrl: nullableString,
+  status: nullableString, updatedAt: nullableString,
 }));
 export const BulkResultsCodec = wire.array(wire.object({ id: wire.string, ok: wire.boolean, error: wire.optional(wire.string) }));
 export const BacklinksCodec = wire.array(wire.object({ modelApiKey: wire.string, recordId: wire.string, fieldApiKey: wire.string }));
@@ -355,12 +393,18 @@ function fieldEmit(model: SchemaExportModel, field: SchemaExportField, ctx: Emit
     case "seo":
       return { outCodec: "wire.serializable<SeoValue>()", inCodec: "wire.serializable<SeoValue>()", declarations: [] };
     case "media":
-      return { outCodec: "wire.serializable<MediaValue>()", inCodec: "wire.serializable<MediaValue>()", declarations: [] };
+      return {
+        outCodec: "wire.serializable<MediaRead>()",
+        inCodec: "wire.serializable<MediaValue>()",
+        declarations: [],
+        comment: "read: asset + canonical url · write: asset id or descriptor",
+      };
     case "media_gallery":
       return {
-        outCodec: "wire.serializable<MediaValue[]>()",
+        outCodec: "wire.serializable<MediaRead[]>()",
         inCodec: "wire.serializable<MediaValue[]>()",
         declarations: [],
+        comment: "read: assets + canonical urls · write: asset ids or descriptors",
       };
     case "video":
       return { outCodec: "wire.serializable<unknown>()", inCodec: "wire.serializable<unknown>()", declarations: [] };
@@ -388,17 +432,24 @@ function fieldEmit(model: SchemaExportModel, field: SchemaExportField, ctx: Emit
         : null;
       const union = blockUnionFor(ctx, whitelist);
       const envelope = `${typeName}Envelope`;
+      const write = `${typeName}Write`;
       const declarations = [
-        `/** structured_text envelope for ${model.apiKey}.${field.apiKey}${whitelist === null ? " (no block whitelist — union of all block models)" : ""} */`,
-        `export interface ${envelope} {`,
-        `  value: DastDocument;`,
-        `  blocks: Record<string, ${union}>;`,
-        `}`,
+        [
+          `/** structured_text envelope for ${model.apiKey}.${field.apiKey}${whitelist === null ? " (no block whitelist — union of all block models)" : ""} */`,
+          `export interface ${envelope} {`,
+          `  value: DastDocument;`,
+          `  blocks: Record<string, ${union}>;`,
+          `}`,
+        ].join("\n"),
+        [
+          `/** Write shape for ${model.apiKey}.${field.apiKey}. ${envelope} (what a read returns) is assignable to it. */`,
+          `export type ${write} = StructuredTextWrite<${union === "never" ? "Record<string, unknown>" : `${union} | Record<string, unknown>`}>;`,
+        ].join("\n"),
       ];
       return {
         outCodec: `wire.serializable<${envelope}>()`,
-        inCodec: "wire.serializable<StructuredTextWrite>()",
-        declarations: [declarations.join("\n")],
+        inCodec: `wire.serializable<${write}>()`,
+        declarations,
       };
     }
     case "rich_text": {
@@ -446,9 +497,9 @@ function blockFieldTsType(field: SchemaExportField): string {
     case "seo":
       return "SeoValue";
     case "media":
-      return "MediaValue";
+      return "MediaRead";
     case "media_gallery":
-      return "MediaValue[]";
+      return "MediaRead[]";
     case "link":
       return "string";
     case "links":
@@ -842,6 +893,7 @@ export function generate(schema: SchemaExport): GeneratedFiles {
   push(`/* eslint-disable */`);
   push(`import { pickErrors, wire, type ErrorDefinitionMap, type InputOf, type RpcFactory } from "result-rpc";`);
   push(`import { cmsErrors } from "@agent-cms/codegen/errors";`);
+  push(DAST_IMPORT);
   push(``);
   push(`export type Locale = ${localeUnion};`);
   push(`/** Localized fields travel as locale-keyed maps. */`);
@@ -920,11 +972,15 @@ export function generate(schema: SchemaExport): GeneratedFiles {
     push(`});`);
     push(`export type Create${Model} = InputOf<typeof ${Model}CreateInput>;`);
     push(``);
+    // Update input: every field is optional AND nullable. Absent = leave
+    // unchanged; `null` = clear the stored value (per-locale for localized
+    // fields). This mirrors what RecordService.patchRecord already honours.
     push(`export const ${Model}UpdateInput = wire.object({`);
     for (const field of fields) {
       const emit = fieldEmit(model, field, ctx);
-      const inner = field.localized ? `wire.record(${emit.inCodec})` : emit.inCodec;
-      push(`  ${field.apiKey}: wire.optional(${inner}),`);
+      const nullable = `wire.union([${emit.inCodec}, wire.null] as const)`;
+      const inner = field.localized ? `wire.record(${nullable})` : nullable;
+      push(`  ${field.apiKey}: wire.optional(${field.localized ? `wire.union([${inner}, wire.null] as const)` : inner}),`);
     }
     push(`});`);
     push(`export type Update${Model} = InputOf<typeof ${Model}UpdateInput>;`);

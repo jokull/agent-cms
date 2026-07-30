@@ -6,7 +6,21 @@ import type { AssetRow, ModelRow } from "../db/row-types.js";
 import type { CreateAssetInput, CreateUploadUrlInput, ImportAssetFromUrlInput } from "./input-schemas.js";
 import { encodeJson, decodeJsonIfString } from "../json.js";
 import { isObjectRecord } from "../value-utils.js";
-import { parseMediaFieldReference, parseMediaGalleryReferences } from "../media-field.js";
+import {
+  assetUrlResolver,
+  parseMediaFieldReference,
+  parseMediaGalleryReferences,
+  withAssetUrl,
+  withAssetUrls,
+} from "../media-field.js";
+export {
+  AssetUrlContext,
+  resolveAssetUrl,
+  withAssetUrl,
+  withAssetUrls,
+  type AssetUrlConfig,
+  type AssetRowWithUrl,
+} from "../media-field.js";
 import type { RequestActor } from "../attribution.js";
 import { likeContains } from "../sql-util.js";
 
@@ -294,6 +308,9 @@ export function createAsset(body: CreateAssetInput, actor?: RequestActor | null)
       ]
     );
 
+    const r2Key = body.r2Key ?? `uploads/${id}/${body.filename}`;
+    const resolveUrl = yield* assetUrlResolver;
+
     return {
       id,
       filename: body.filename,
@@ -303,7 +320,8 @@ export function createAsset(body: CreateAssetInput, actor?: RequestActor | null)
       height: body.height,
       alt: body.alt,
       title: body.title,
-      r2Key: body.r2Key ?? `uploads/${id}/${body.filename}`,
+      r2Key,
+      url: resolveUrl({ id, filename: body.filename, r2_key: r2Key }),
       createdAt: now,
       updatedAt: now,
       createdBy: actor?.label ?? null,
@@ -376,7 +394,7 @@ export function listAssets(opts?: ListAssetsOptions) {
       `SELECT COUNT(*) as total FROM assets ${whereClause}`,
       whereParams
     );
-    return { assets: Array.from(assets), total: countRows[0]?.total ?? 0 };
+    return { assets: yield* withAssetUrls(assets), total: countRows[0]?.total ?? 0 };
   }).pipe(
     Effect.withSpan("asset.list"),
     Effect.annotateSpans({ query: opts?.query ?? "" }),
@@ -388,7 +406,7 @@ export function getAsset(id: string) {
     const sql = yield* SqlClient.SqlClient;
     const rows = yield* sql.unsafe<AssetRow>("SELECT * FROM assets WHERE id = ?", [id]);
     if (rows.length === 0) return yield* new NotFoundError({ entity: "Asset", id });
-    return rows[0];
+    return yield* withAssetUrl(rows[0]);
   });
 }
 
@@ -426,11 +444,14 @@ export function replaceAsset(id: string, body: CreateAssetInput, actor?: Request
       ]
     );
 
+    const resolveUrl = yield* assetUrlResolver;
+
     return {
       id, filename: body.filename, mimeType: body.mimeType, size: body.size,
       width: body.width, height: body.height,
       alt: body.alt ?? rows[0].alt, title: body.title ?? rows[0].title,
-      r2Key, replaced: true, updatedAt: now, updatedBy: actor?.label ?? null,
+      r2Key, url: resolveUrl({ id, filename: body.filename, r2_key: r2Key }),
+      replaced: true, updatedAt: now, updatedBy: actor?.label ?? null,
     };
   });
 }
@@ -453,7 +474,14 @@ export function updateAssetMetadata(id: string, body: { alt?: string; title?: st
       [alt, title, width, height, now, actor?.label ?? null, id]
     );
 
-    return { id, alt, title, width, height, updatedAt: now, updatedBy: actor?.label ?? null };
+    const resolveUrl = yield* assetUrlResolver;
+
+    return {
+      id, alt, title, width, height,
+      url: resolveUrl({ id, filename: rows[0].filename, r2_key: rows[0].r2_key }),
+      updatedAt: now,
+      updatedBy: actor?.label ?? null,
+    };
   });
 }
 

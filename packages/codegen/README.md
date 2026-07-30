@@ -24,6 +24,18 @@ Emits:
 - `procedures.ts` — server-only: `cmsProcedures(app, contract, deps)`, handlers
   that run agent-cms services in-process. Imports `agent-cms/lib`.
 
+### Peer packages the host must install
+
+| Package | Why |
+| --- | --- |
+| `result-rpc` | codecs + client/server runtime (value import) |
+| `@agent-cms/dast` | DAST node types. `contract.ts` does `import type … from "@agent-cms/dast"` — **types-only, erased at build**, zero runtime deps, so the contract stays browser-safe. The same package backs the CMS and `@agent-cms/editor-react`, so an editor document is assignable to a generated write input with no adapter. |
+| `agent-cms` | only `procedures.ts` needs it (server side) |
+
+```bash
+pnpm add result-rpc @agent-cms/dast
+```
+
 ## Wire it into your own app
 
 The host owns the `rpc.context`. Spread the CMS fragments into the host's own
@@ -159,6 +171,39 @@ Every output decoded against a codec carries `cms/schema-drift`.
 `deps.assets = { r2Bucket, r2Credentials }`. When it is absent those two
 procedures fail as `server/internal` incidents; the rest of the asset surface
 (metadata CRUD, list, usages) needs neither.
+
+**Asset URLs.** Every `AssetRecord` carries an absolute `url`, and every `media` /
+`media_gallery` value read off a record is the enriched `MediaRead` shape
+(`upload_id` + `url` + the asset's metadata); `SeoValue` gains `image_url`, and
+`PickerRow` gains `imageUrl`. Writes are unchanged — `MediaValue` is still an id
+or a descriptor, and `MediaRead` is assignable to it, so read-modify-write
+compiles (the CMS strips the read-only keys before storing). Tell the CMS how to
+resolve them:
+
+```ts
+cmsProcedures(app, cms, {
+  DB: env.DB,
+  // A bucket/CDN custom domain (`<baseUrl>/<r2_key>`) …
+  assets: { baseUrl: env.ASSET_BASE_URL },
+  // … or, with no base URL, the origin of a host that serves
+  // /assets/:id/:filename out of R2 itself.
+  // assets: { r2Bucket: env.ASSETS, originUrl: new URL(request.url).origin },
+});
+```
+
+Compose transforms in the browser with the zero-dependency helper — it imports
+nothing from the CMS:
+
+```ts
+import { assetUrl, assetSrcSet } from "@agent-cms/codegen/assets";
+
+assetUrl(post.cover_image, { width: 320, fit: "cover", format: "auto" });
+// → https://cdn.example.com/cdn-cgi/image/width=320,fit=cover,format=auto/uploads/…
+assetSrcSet(asset, [320, 640, 960], { format: "auto" });
+```
+
+It accepts a full asset row / media value or a bare URL string, keeps relative
+URLs relative, and returns the source untouched when no transform is asked for.
 
 ## Regenerate the checked-in example after changing the emitter
 

@@ -10,6 +10,7 @@ import { getBlockWhitelist, getBlocksOnly, getRichTextBlockWhitelist, getInlineB
 import { getFieldTypeDef } from "../field-types.js";
 import { isFieldType } from "../types.js";
 import { decodeJsonIfString, decodeJsonStringOr, encodeJson } from "../json.js";
+import { collectMediaSite, type MediaSite } from "../media-field.js";
 
 type DynamicRow = Record<string, unknown>;
 
@@ -44,6 +45,13 @@ interface MaterializeContext {
   blockModels?: ReadonlyArray<{ api_key: string }>;
   candidateBlockModels: Map<string, ReadonlyArray<{ api_key: string }>>;
   blockModelSchemas: Map<string, BlockModelSchema>;
+  /**
+   * Collector for media / media_gallery / seo values found in block payloads.
+   * When the caller supplies one, every such value is registered here instead
+   * of being resolved inline, so the whole record set can be enriched with a
+   * single batched asset query (`enrichMediaSites`). Absent → no enrichment.
+   */
+  mediaSites?: MediaSite[];
 }
 
 export interface StructuredTextEnvelope {
@@ -907,6 +915,9 @@ export function materializeStructuredTextValues(params: {
             continue;
           }
           payload[field.api_key] = rawValue;
+          // Media inside a block payload is enriched with the rest of the
+          // record set — register the site, never query per block.
+          collectMediaSite(materializeContext.mediaSites, payload, field.api_key, field.field_type);
         }
 
         const envelope = results.get(request.requestKey);
@@ -949,11 +960,18 @@ export function materializeRecordStructuredTextFields(params: {
   modelApiKey: string;
   record: DynamicRow;
   fields: ParsedFieldRow[];
+  /**
+   * Optional collector for the media values found in nested block payloads.
+   * Callers reading a whole record set share one array and resolve it once
+   * (`enrichMediaSites`); callers that pass nothing get today's behavior.
+   */
+  mediaSites?: MediaSite[];
 }): Effect.Effect<DynamicRow, unknown, SqlClient.SqlClient> {
   return Effect.gen(function* () {
     const materializeContext: MaterializeContext = {
       blockModelSchemas: new Map<string, BlockModelSchema>(),
       candidateBlockModels: new Map<string, ReadonlyArray<{ api_key: string }>>(),
+      mediaSites: params.mediaSites,
     };
     const materialized: DynamicRow = { ...params.record };
     for (const field of params.fields) {
@@ -1369,6 +1387,9 @@ export function materializeRichTextValue(params: {
           }
 
           payload[field.api_key] = rawValue;
+          // Media inside a block payload is enriched with the rest of the
+          // record set — register the site, never query per block.
+          collectMediaSite(materializeContext.mediaSites, payload, field.api_key, field.field_type);
         }
 
         blockById.set(rowId, payload);

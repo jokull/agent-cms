@@ -5,7 +5,7 @@
  */
 import type { BlockViewProps } from "@agent-cms/editor-react";
 import type { PostContentEnvelope } from "../cms/contract.js";
-import { mediaId } from "../lib/presentation.js";
+import { Thumb } from "./Thumb.js";
 import { useBlockEditing } from "./block-editing.js";
 
 export type PostBlock = PostContentEnvelope["blocks"][string];
@@ -44,7 +44,13 @@ export function PostBlockView({ id, block, inline, remove }: BlockViewProps<Post
           <p className="blockcard__headline">{block.headline}</p>
           {block.subheadline && <p className="muted">{block.subheadline}</p>}
           {block.background_image && (
-            <p className="muted">bg: {mediaId(block.background_image)}</p>
+            // The block payload's media value carries the asset's url.
+            <Thumb
+              src={block.background_image.url}
+              alt={block.background_image.alt}
+              size={56}
+              className="blockcard__thumb"
+            />
           )}
         </div>
       );
@@ -71,6 +77,11 @@ export function PostBlockView({ id, block, inline, remove }: BlockViewProps<Post
               ×
             </button>
           </header>
+          <div className="blockcard__strip">
+            {(block.images ?? []).map((image) => (
+              <Thumb key={image.upload_id} src={image.url} alt={image.alt} size={56} />
+            ))}
+          </div>
           <p className="muted">
             {(block.images ?? []).length} image(s){block.caption ? ` · ${block.caption}` : ""}
           </p>

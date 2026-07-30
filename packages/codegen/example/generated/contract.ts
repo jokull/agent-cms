@@ -2,105 +2,139 @@
 /* eslint-disable */
 import { pickErrors, wire, type ErrorDefinitionMap, type InputOf, type RpcFactory } from "result-rpc";
 import { cmsErrors } from "@agent-cms/codegen/errors";
+import type {
+  BlockLevelNode as DastBlockLevelNode,
+  BlockNode as DastBlockRefNode,
+  BlockquoteNode as DastBlockquoteNode,
+  CodeNode as DastCodeNode,
+  CustomMark as DastCustomMark,
+  DastDocument,
+  DefaultMark as DastDefaultMark,
+  HeadingNode as DastHeadingNode,
+  InlineBlockNode as DastInlineBlockNode,
+  InlineItemNode as DastInlineItemNode,
+  InlineNode as DastInlineNode,
+  ItemLinkNode as DastItemLinkNode,
+  LinkNode as DastLinkNode,
+  ListItemNode as DastListItemNode,
+  ListNode as DastListNode,
+  Mark as DastMark,
+  ParagraphNode as DastParagraphNode,
+  RootNode as DastRootNode,
+  SpanNode as DastSpanNode,
+  TableCellNode as DastTableCellNode,
+  TableNode as DastTableNode,
+  TableRowNode as DastTableRowNode,
+  ThematicBreakNode as DastThematicBreakNode,
+} from "@agent-cms/dast";
+
 
 export type Locale = "en" | "is";
 /** Localized fields travel as locale-keyed maps. */
 export type Localized<T> = Partial<Record<Locale, T>>;
 
+// --- DAST (shared with the CMS and the editor) ---
+// Re-exported under the historical `Dast*` names so consumers can keep
+// importing them from this contract. The underlying import above is types-only
+// and therefore erased at build time: the contract stays browser-safe and
+// pulls in nothing from the CMS runtime. `@agent-cms/dast` has zero runtime
+// dependencies — add it to the host's dependencies.
+export type {
+  DastBlockLevelNode,
+  DastBlockRefNode,
+  DastBlockquoteNode,
+  DastCodeNode,
+  DastCustomMark,
+  DastDocument,
+  DastDefaultMark,
+  DastHeadingNode,
+  DastInlineBlockNode,
+  DastInlineItemNode,
+  DastInlineNode,
+  DastItemLinkNode,
+  DastLinkNode,
+  DastListItemNode,
+  DastListNode,
+  DastMark,
+  DastParagraphNode,
+  DastRootNode,
+  DastSpanNode,
+  DastTableCellNode,
+  DastTableNode,
+  DastTableRowNode,
+  DastThematicBreakNode,
+};
+
 // --- Shared value types (structurally identical to agent-cms's own) ---
 
-export interface DastSpanNode {
-  type: "span";
-  value: string;
-  marks?: ReadonlyArray<"strong" | "emphasis" | "underline" | "strikethrough" | "code" | "highlight">;
-}
-export interface DastLinkNode {
-  type: "link";
-  url: string;
-  meta?: ReadonlyArray<{ id: string; value: string }>;
-  children: readonly DastSpanNode[];
-}
-export interface DastItemLinkNode {
-  type: "itemLink";
-  item: string;
-  meta?: ReadonlyArray<{ id: string; value: string }>;
-  children: readonly DastSpanNode[];
-}
-export interface DastInlineItemNode { type: "inlineItem"; item: string }
-export interface DastInlineBlockNode { type: "inlineBlock"; item: string }
-export type DastInlineNode =
-  | DastSpanNode | DastLinkNode | DastItemLinkNode | DastInlineItemNode | DastInlineBlockNode;
-export interface DastParagraphNode { type: "paragraph"; style?: string; children: readonly DastInlineNode[] }
-export interface DastHeadingNode {
-  type: "heading";
-  level: 1 | 2 | 3 | 4 | 5 | 6;
-  style?: string;
-  children: readonly DastInlineNode[];
-}
-export interface DastListNode {
-  type: "list";
-  style: "bulleted" | "numbered";
-  children: readonly DastListItemNode[];
-}
-export interface DastListItemNode {
-  type: "listItem";
-  children: ReadonlyArray<DastParagraphNode | DastListNode>;
-}
-export interface DastBlockquoteNode {
-  type: "blockquote";
-  attribution?: string;
-  children: readonly DastParagraphNode[];
-}
-export interface DastCodeNode {
-  type: "code";
-  code: string;
-  language?: string;
-  highlight?: readonly number[];
-}
-export interface DastThematicBreakNode { type: "thematicBreak" }
-export interface DastBlockRefNode { type: "block"; item: string }
-export interface DastTableCellNode {
-  type: "tableCell";
-  children: readonly [DastParagraphNode, ...DastParagraphNode[]];
-}
-export interface DastTableRowNode {
-  type: "tableRow";
-  children: readonly [DastTableCellNode, ...DastTableCellNode[]];
-}
-export interface DastTableNode {
-  type: "table";
-  children: readonly [DastTableRowNode, ...DastTableRowNode[]];
-}
-export type DastBlockLevelNode =
-  | DastParagraphNode | DastHeadingNode | DastListNode | DastBlockquoteNode
-  | DastCodeNode | DastThematicBreakNode | DastBlockRefNode | DastTableNode;
-export interface DastDocument {
-  schema: "dast";
-  document: { type: "root"; children: readonly DastBlockLevelNode[] };
-}
-
-/** Asset reference as accepted/returned by REST: an asset id, or an upload descriptor. */
+/**
+ * Write shape of a media reference: an asset id, or an upload descriptor.
+ * The read-only keys a read adds (`url`, `filename`, …) are declared optional
+ * so a value read off a record can be written straight back — the CMS strips
+ * them before storing (read-modify-write is lossless).
+ */
 export type MediaValue =
   | string
   | {
       upload_id: string;
-      alt?: string;
-      title?: string;
-      focal_point?: { x: number; y: number };
-      custom_data?: Record<string, string>;
+      alt?: string | null;
+      title?: string | null;
+      focal_point?: { x: number; y: number } | null;
+      custom_data?: Record<string, unknown> | null;
+      url?: string;
+      filename?: string;
+      mime_type?: string;
+      size?: number;
+      width?: number | null;
+      height?: number | null;
+      blurhash?: string | null;
     };
+
+/**
+ * Read shape of a media reference: the stored reference merged with the asset
+ * it points at, including the canonical absolute `url`. Assignable to
+ * `MediaValue`, so reads can be edited and written back.
+ *
+ * Compose transforms with `assetUrl(value, { width })` from
+ * `@agent-cms/codegen/assets` (Cloudflare Image Resizing).
+ */
+export interface MediaRead {
+  upload_id: string;
+  url: string;
+  filename: string;
+  mime_type: string;
+  size: number;
+  width: number | null;
+  height: number | null;
+  alt: string | null;
+  title: string | null;
+  focal_point: { x: number; y: number } | null;
+  custom_data: Record<string, unknown> | null;
+  blurhash: string | null;
+}
 
 export interface SeoValue {
   title?: string;
   description?: string;
   image?: string;
   twitterCard?: string;
+  /** Read-only: the canonical URL of `image`, resolved by the CMS. */
+  image_url?: string | null;
 }
 
-/** Write shape for structured_text: the DAST value plus (optionally) new/updated block payloads. */
-export interface StructuredTextWrite {
+/**
+ * Write shape for structured_text: the DAST value plus (optionally) new/updated
+ * block payloads.
+ *
+ * `TBlock` defaults to a raw payload object, and every per-field write alias
+ * widens it to `<the field's block union> | Record<string, unknown>` so a value
+ * read back off a record (whose blocks are the concrete generated interfaces)
+ * is assignable straight into an update — read-modify-write compiles with no
+ * adapter.
+ */
+export interface StructuredTextWrite<TBlock = Record<string, unknown>> {
   value: DastDocument;
-  blocks?: Record<string, Record<string, unknown>>;
+  blocks?: Readonly<Record<string, TBlock>>;
 }
 
 // --- Filter operator vocabulary (mirrors src/graphql/filter-compiler.ts) ---
@@ -147,7 +181,7 @@ export interface RecordSyncState {
 export interface RecordBacklink { modelApiKey: string; recordId: string; fieldApiKey: string; }
 
 /** Picker-search presentation row. */
-export interface PickerRow { id: string; title: string | null; image: string | null; status: string | null; updatedAt: string | null; }
+export interface PickerRow { id: string; title: string | null; image: string | null; imageUrl: string | null; status: string | null; updatedAt: string | null; }
 
 /** Per-id result of a bulk publish/unpublish/delete (data, never a top-level failure). */
 export interface BulkResult { id: string; ok: boolean; error?: string; }
@@ -173,6 +207,8 @@ export interface AssetRecord {
   id: string; filename: string; basename: string | null; format: string | null;
   mime_type: string; size: number; width: number | null; height: number | null;
   alt: string | null; title: string | null; r2_key: string; blurhash: string | null;
+  /** Canonical absolute URL (ASSET_BASE_URL, else the CMS's own /assets route). */
+  url: string;
   colors: string | null; focal_point: string | null; tags: string; custom_data: string | null;
   created_at: string; updated_at: string; created_by: string | null; updated_by: string | null;
 }
@@ -190,15 +226,15 @@ export interface AssetUpdateInput { alt?: string; title?: string; width?: number
 export interface AssetUsage { modelApiKey: string; recordId: string; fieldApiKey: string; }
 export interface AssetCreateResult {
   id: string; filename: string; mimeType: string; size: number;
-  width?: number; height?: number; alt?: string; title?: string; r2Key: string;
+  width?: number; height?: number; alt?: string; title?: string; r2Key: string; url: string;
   createdAt: string; updatedAt: string; createdBy: string | null; updatedBy: string | null;
 }
 export interface AssetReplaceResult {
   id: string; filename: string; mimeType: string; size: number;
   width?: number; height?: number; alt: string | null; title: string | null;
-  r2Key: string; replaced: true; updatedAt: string; updatedBy: string | null;
+  r2Key: string; url: string; replaced: true; updatedAt: string; updatedBy: string | null;
 }
-export interface AssetUpdateResult { id: string; alt: string | null; title: string | null; width: number | null; height: number | null; updatedAt: string; updatedBy: string | null; }
+export interface AssetUpdateResult { id: string; alt: string | null; title: string | null; width: number | null; height: number | null; url: string; updatedAt: string; updatedBy: string | null; }
 export interface UploadUrlResult { uploadUrl: string; r2Key: string; assetId: string; }
 
 // --- Shared reusable codecs (defined once, referenced by every model) ---
@@ -208,7 +244,8 @@ const StatusInput = wire.union([wire.literal("draft"), wire.literal("published")
 const IdInput = wire.object({ id: wire.string });
 const IdsInput = wire.object({ ids: wire.array(wire.string) });
 export const PickerRowsCodec = wire.array(wire.object({
-  id: wire.string, title: nullableString, image: nullableString, status: nullableString, updatedAt: nullableString,
+  id: wire.string, title: nullableString, image: nullableString, imageUrl: nullableString,
+  status: nullableString, updatedAt: nullableString,
 }));
 export const BulkResultsCodec = wire.array(wire.object({ id: wire.string, ok: wire.boolean, error: wire.optional(wire.string) }));
 export const BacklinksCodec = wire.array(wire.object({ modelApiKey: wire.string, recordId: wire.string, fieldApiKey: wire.string }));
@@ -231,7 +268,7 @@ export interface HeroSectionBlock {
   id: string;
   _type: "hero_section";
   heading: string;
-  image?: MediaValue;
+  image?: MediaRead;
 }
 
 /** Block model "CTA block" (cta_block) */
@@ -248,6 +285,9 @@ export interface PostContentEnvelope {
   blocks: Record<string, HeroSectionBlock | CtaBlockBlock>;
 }
 
+/** Write shape for post.content. PostContentEnvelope (what a read returns) is assignable to it. */
+export type PostContentWrite = StructuredTextWrite<HeroSectionBlock | CtaBlockBlock | Record<string, unknown>>;
+
 /** Post (post) */
 export const PostCodec = wire.object({
   id: wire.string,
@@ -263,7 +303,7 @@ export const PostCodec = wire.object({
   tier: wire.union([wire.union([wire.literal("free"), wire.literal("member"), wire.literal("premium")] as const), wire.null] as const),
   content: wire.union([wire.serializable<PostContentEnvelope>(), wire.null] as const),
   authors: wire.union([wire.array(wire.string), wire.null] as const), // record ids → author
-  cover: wire.union([wire.serializable<MediaValue>(), wire.null] as const),
+  cover: wire.union([wire.serializable<MediaRead>(), wire.null] as const), // read: asset + canonical url · write: asset id or descriptor
   seo: wire.union([wire.serializable<SeoValue>(), wire.null] as const),
 });
 export type Post = InputOf<typeof PostCodec>;
@@ -275,7 +315,7 @@ export const PostCreateInput = wire.object({
   featured: wire.optional(wire.boolean),
   published_at: wire.optional(wire.string),
   tier: wire.optional(wire.union([wire.literal("free"), wire.literal("member"), wire.literal("premium")] as const)),
-  content: wire.optional(wire.serializable<StructuredTextWrite>()),
+  content: wire.optional(wire.serializable<PostContentWrite>()),
   authors: wire.optional(wire.array(wire.string)),
   cover: wire.optional(wire.serializable<MediaValue>()),
   seo: wire.optional(wire.serializable<SeoValue>()),
@@ -283,16 +323,16 @@ export const PostCreateInput = wire.object({
 export type CreatePost = InputOf<typeof PostCreateInput>;
 
 export const PostUpdateInput = wire.object({
-  title: wire.optional(wire.string),
-  slug: wire.optional(wire.string),
-  excerpt: wire.optional(wire.record(wire.string)),
-  featured: wire.optional(wire.boolean),
-  published_at: wire.optional(wire.string),
-  tier: wire.optional(wire.union([wire.literal("free"), wire.literal("member"), wire.literal("premium")] as const)),
-  content: wire.optional(wire.serializable<StructuredTextWrite>()),
-  authors: wire.optional(wire.array(wire.string)),
-  cover: wire.optional(wire.serializable<MediaValue>()),
-  seo: wire.optional(wire.serializable<SeoValue>()),
+  title: wire.optional(wire.union([wire.string, wire.null] as const)),
+  slug: wire.optional(wire.union([wire.string, wire.null] as const)),
+  excerpt: wire.optional(wire.union([wire.record(wire.union([wire.string, wire.null] as const)), wire.null] as const)),
+  featured: wire.optional(wire.union([wire.boolean, wire.null] as const)),
+  published_at: wire.optional(wire.union([wire.string, wire.null] as const)),
+  tier: wire.optional(wire.union([wire.union([wire.literal("free"), wire.literal("member"), wire.literal("premium")] as const), wire.null] as const)),
+  content: wire.optional(wire.union([wire.serializable<PostContentWrite>(), wire.null] as const)),
+  authors: wire.optional(wire.union([wire.array(wire.string), wire.null] as const)),
+  cover: wire.optional(wire.union([wire.serializable<MediaValue>(), wire.null] as const)),
+  seo: wire.optional(wire.union([wire.serializable<SeoValue>(), wire.null] as const)),
 });
 export type UpdatePost = InputOf<typeof PostUpdateInput>;
 
@@ -332,7 +372,7 @@ export const AuthorCodec = wire.object({
   updatedAt: wire.union([wire.string, wire.null] as const),
   publishedAt: wire.union([wire.string, wire.null] as const),
   name: wire.string,
-  avatar: wire.union([wire.serializable<MediaValue>(), wire.null] as const),
+  avatar: wire.union([wire.serializable<MediaRead>(), wire.null] as const), // read: asset + canonical url · write: asset id or descriptor
 });
 export type Author = InputOf<typeof AuthorCodec>;
 
@@ -343,8 +383,8 @@ export const AuthorCreateInput = wire.object({
 export type CreateAuthor = InputOf<typeof AuthorCreateInput>;
 
 export const AuthorUpdateInput = wire.object({
-  name: wire.optional(wire.string),
-  avatar: wire.optional(wire.serializable<MediaValue>()),
+  name: wire.optional(wire.union([wire.string, wire.null] as const)),
+  avatar: wire.optional(wire.union([wire.serializable<MediaValue>(), wire.null] as const)),
 });
 export type UpdateAuthor = InputOf<typeof AuthorUpdateInput>;
 
@@ -377,7 +417,7 @@ export const SiteSettingsCodec = wire.object({
   updatedAt: wire.union([wire.string, wire.null] as const),
   publishedAt: wire.union([wire.string, wire.null] as const),
   site_title: wire.string,
-  logo: wire.union([wire.serializable<MediaValue>(), wire.null] as const),
+  logo: wire.union([wire.serializable<MediaRead>(), wire.null] as const), // read: asset + canonical url · write: asset id or descriptor
 });
 export type SiteSettings = InputOf<typeof SiteSettingsCodec>;
 
@@ -388,8 +428,8 @@ export const SiteSettingsCreateInput = wire.object({
 export type CreateSiteSettings = InputOf<typeof SiteSettingsCreateInput>;
 
 export const SiteSettingsUpdateInput = wire.object({
-  site_title: wire.optional(wire.string),
-  logo: wire.optional(wire.serializable<MediaValue>()),
+  site_title: wire.optional(wire.union([wire.string, wire.null] as const)),
+  logo: wire.optional(wire.union([wire.serializable<MediaValue>(), wire.null] as const)),
 });
 export type UpdateSiteSettings = InputOf<typeof SiteSettingsUpdateInput>;
 
@@ -417,8 +457,8 @@ export const NavItemCreateInput = wire.object({
 export type CreateNavItem = InputOf<typeof NavItemCreateInput>;
 
 export const NavItemUpdateInput = wire.object({
-  label: wire.optional(wire.string),
-  url: wire.optional(wire.string),
+  label: wire.optional(wire.union([wire.string, wire.null] as const)),
+  url: wire.optional(wire.union([wire.string, wire.null] as const)),
 });
 export type UpdateNavItem = InputOf<typeof NavItemUpdateInput>;
 

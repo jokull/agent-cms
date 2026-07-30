@@ -9,7 +9,8 @@ import { useResultQuery } from "result-rpc/react";
 import { client, CmsShell } from "../client.js";
 import type { PostFilter, PostOrderBy, RecordStatus } from "../cms/contract.js";
 import { describeError } from "../lib/errors.js";
-import { mediaId, postTitle } from "../lib/presentation.js";
+import { mediaUrl, postTitle } from "../lib/presentation.js";
+import { Thumb } from "../components/Thumb.js";
 import { navigate } from "../router.js";
 
 const PAGE_SIZE = 10;
@@ -197,8 +198,8 @@ export function PostListPage() {
                   />
                 </td>
                 <td>
-                  {/* No asset URL exists on the RPC surface — FRICTION.md #3. */}
-                  <span className="thumb">{mediaId(record.cover_image) ?? "—"}</span>
+                  {/* The read carries the asset's canonical url — was FRICTION.md #3. */}
+                  <Thumb src={mediaUrl(record.cover_image)} alt={postTitle(record)} />
                 </td>
                 <td>
                   <button type="button" className="link" onClick={() => navigate(`/posts/${record.id}`)}>

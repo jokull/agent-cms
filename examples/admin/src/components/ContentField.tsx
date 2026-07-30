@@ -11,7 +11,6 @@
 import { EditorContent } from "@tiptap/react";
 import { useDastEditor, useDastEditorState } from "@agent-cms/editor-react";
 import { useCallback, useMemo, useRef, useState } from "react";
-import { toContractDocument } from "../lib/dast-bridge.js";
 import { client } from "../client.js";
 import type { DastDocument as ContractDastDocument, PickerRow, PostContentEnvelope } from "../cms/contract.js";
 import { BlockEditingContext, type BlockEditing } from "./block-editing.js";
@@ -90,9 +89,10 @@ export function ContentField({ initial, onChange }: ContentFieldProps) {
     placeholder: "Write the post…",
     blockView: PostBlockView,
     onChange: (document) => {
-      const narrowed = toContractDocument(document);
-      docRef.current = narrowed;
-      emit(narrowed, liveBlocks.current);
+      // No adapter: the editor and the contract share @agent-cms/dast, so the
+      // hook's document IS the contract's document. (Was FRICTION.md #1.)
+      docRef.current = document;
+      emit(document, liveBlocks.current);
     },
   });
   const snapshot = useDastEditorState(handle);
@@ -104,7 +104,7 @@ export function ContentField({ initial, onChange }: ContentFieldProps) {
     setBlocks(next);
     // Order-sensitive: the payload MUST exist before the node does.
     handle.commands.insertBlock(id, "block");
-    emit(toContractDocument(handle.getValue()), next);
+    emit(handle.getValue(), next);
   };
 
   const editBlock = useCallback((id: string) => {
@@ -163,7 +163,7 @@ export function ContentField({ initial, onChange }: ContentFieldProps) {
     if (picker === "itemLink") handle.commands.setItemLink(row.id);
     if (picker === "inlineItem") handle.commands.insertInlineItem(row.id);
     setPicker(null);
-    emit(toContractDocument(handle.getValue()), liveBlocks.current);
+    emit(handle.getValue(), liveBlocks.current);
   };
 
   return (

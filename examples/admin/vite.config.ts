@@ -8,9 +8,17 @@ export default defineConfig({
   // hook throws "Cannot read properties of null (reading 'useState')".
   // FRICTION.md #14.
   resolve: { dedupe: ["react", "react-dom"] },
-  build: { outDir: "dist" },
+  // Bundle output goes to /static, NOT the default /assets: the Worker owns
+  // `/assets/:id/:filename` (the CMS's canonical asset URL) and must not have
+  // to disambiguate it from the SPA's own chunks.
+  build: { outDir: "dist", assetsDir: "static" },
   server: {
-    // `vite dev` for fast iteration; `wrangler dev` (port 8788) owns /rpc.
-    proxy: { "/rpc": "http://127.0.0.1:8788" },
+    // `vite dev` for fast iteration; `wrangler dev` (port 8788) owns /rpc,
+    // /assets/* (R2 files) and the local /cdn-cgi/image shim.
+    proxy: {
+      "/rpc": "http://127.0.0.1:8788",
+      "/assets": "http://127.0.0.1:8788",
+      "/cdn-cgi": "http://127.0.0.1:8788",
+    },
   },
 });

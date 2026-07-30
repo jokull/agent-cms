@@ -14,14 +14,23 @@ import {
 import { compileFilterToSql, compileOrderBy, type FilterCompilerOpts } from "../graphql/filter-compiler.js";
 import * as PublishService from "./publish-service.js";
 import { writeStructuredText, writeRichText, validateStructuredText, validateRichText, deleteBlocksForField, getStructuredTextStorageKey, materializeRecordStructuredTextFields, materializeStructuredTextValue, type RichTextWriteBlock } from "./structured-text-service.js";
-import type { ModelRow, FieldRow, ParsedFieldRow } from "../db/row-types.js";
+import type { AssetRow, ModelRow, FieldRow, ParsedFieldRow } from "../db/row-types.js";
 import { parseFieldValidators, isContentRow } from "../db/row-types.js";
 import { getSlugSource, getBlockWhitelist, getBlocksOnly, getRichTextBlockWhitelist, getInlineBlockWhitelist, getStructuredTextLinkModels, isRequired, findUniqueConstraintViolations, isUnique, getLinkTargets, getLinksTargets, collectValueValidationIssues } from "../db/validators.js";
 import * as SearchService from "../search/search-service.js";
 import type { CreateRecordInput, PatchRecordInput, BulkCreateRecordsInput, PatchBlocksInput } from "./input-schemas.js";
 import { getFieldTypeDef } from "../field-types.js";
 import { isFieldType } from "../types.js";
-import { parseMediaFieldReference, parseMediaGalleryReferences } from "../media-field.js";
+import {
+  assetUrlResolver,
+  collectMediaSite,
+  enrichMediaSites,
+  isAssetFieldType,
+  parseMediaFieldReference,
+  parseMediaGalleryReferences,
+  stripMediaEnrichment,
+  type MediaSite,
+} from "../media-field.js";
 import { StructuredTextWriteInput } from "../dast/schema.js";
 import { pruneBlockNodes, expandStructuredTextShorthand } from "../dast/index.js";
 import { fireHook } from "../hooks.js";
@@ -693,7 +702,10 @@ function processCreateLikeRecordFields({
       }
 
       if (data[field.api_key] !== undefined) {
-        record[field.api_key] = data[field.api_key];
+        // Reads enrich media values with resolved asset metadata; writing one
+        // straight back must not persist that (stale URL) — strip it here so
+        // read-modify-write round-trips to exactly what was stored.
+        record[field.api_key] = stripMediaEnrichment(field.field_type, data[field.api_key]);
       }
       });
 
@@ -821,7 +833,17 @@ export function createRecord(body: CreateRecordInput, actor?: RequestActor | nul
     yield* SearchService.indexRecord(body.modelApiKey, id, record, modelFields).pipe(Effect.ignore);
     yield* fireHook("onRecordCreate", { modelApiKey: body.modelApiKey, recordId: id });
 
-    return normalizeBooleanFields({ id, ...record }, modelFields);
+    // Same projection as getRecord/patchRecord — a mutation result is shaped
+    // like a read, structured_text envelopes and asset URLs included.
+    const createMediaSites: MediaSite[] = [];
+    const createMaterialized = yield* materializeRecordStructuredTextFields({
+      modelApiKey: model.api_key,
+      record: normalizeBooleanFields({ id, ...record }, modelFields),
+      fields: modelFields,
+      mediaSites: createMediaSites,
+    });
+    yield* enrichRecordSetMedia([createMaterialized], modelFields, createMediaSites);
+    return createMaterialized;
   }).pipe(
     Effect.withSpan("record.create"),
     Effect.annotateSpans({
@@ -829,6 +851,32 @@ export function createRecord(body: CreateRecordInput, actor?: RequestActor | nul
       actorType: actor?.type ?? "anonymous",
     }),
   );
+}
+
+/**
+ * Attach canonical asset URLs to every media / media_gallery / seo value in a
+ * materialized record set — the top-level fields plus every media field of
+ * every block payload nested in a structured_text / rich_text envelope (those
+ * sites are collected during materialization, see
+ * `materializeRecordStructuredTextFields`'s `mediaSites`).
+ *
+ * ONE batched `WHERE id IN (...)` query for the whole set: no per-record and no
+ * per-field lookup. See `enrichMediaSites`.
+ */
+function enrichRecordSetMedia(
+  records: ReadonlyArray<Record<string, unknown>>,
+  fields: ReadonlyArray<ParsedFieldRow>,
+  nestedSites: MediaSite[],
+) {
+  const sites: MediaSite[] = [...nestedSites];
+  for (const record of records) {
+    for (const field of fields) {
+      if (isAssetFieldType(field.field_type)) {
+        collectMediaSite(sites, record, field.api_key, field.field_type);
+      }
+    }
+  }
+  return enrichMediaSites(sites);
 }
 
 export function listRecords(modelApiKey: string) {
@@ -839,14 +887,18 @@ export function listRecords(modelApiKey: string) {
     if (!model) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
     const records = yield* selectAll(`content_${model.api_key}`);
     const fields = yield* getModelFields(model.id);
-    return yield* Effect.all(
+    const mediaSites: MediaSite[] = [];
+    const materialized = yield* Effect.all(
       records.map((record) => materializeRecordStructuredTextFields({
         modelApiKey: model.api_key,
         record: normalizeBooleanFields(record, fields),
         fields,
+        mediaSites,
       })),
       { concurrency: "unbounded" }
     );
+    yield* enrichRecordSetMedia(materialized, fields, mediaSites);
+    return materialized;
   });
 }
 
@@ -859,11 +911,15 @@ export function getRecord(modelApiKey: string, id: string) {
     const record = yield* selectById(`content_${model.api_key}`, id);
     if (!record) return yield* new NotFoundError({ entity: "Record", id });
     const fields = yield* getModelFields(model.id);
-    return yield* materializeRecordStructuredTextFields({
+    const mediaSites: MediaSite[] = [];
+    const materialized = yield* materializeRecordStructuredTextFields({
       modelApiKey: model.api_key,
       record: normalizeBooleanFields(record, fields),
       fields,
+      mediaSites,
     });
+    yield* enrichRecordSetMedia([materialized], fields, mediaSites);
+    return materialized;
   });
 }
 
@@ -1207,7 +1263,8 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
       }
 
       if (data[field.api_key] !== undefined) {
-        updates[field.api_key] = data[field.api_key];
+        // See the same strip in the create path: enrichment keys are read-only.
+        updates[field.api_key] = stripMediaEnrichment(field.field_type, data[field.api_key]);
       }
       });
 
@@ -1260,7 +1317,19 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
     yield* SearchService.reindexRecord(body.modelApiKey, id, modelFields).pipe(Effect.ignore);
     yield* fireHook("onRecordUpdate", { modelApiKey: body.modelApiKey, recordId: id });
     const updated = yield* selectById(tableName, id);
-    return updated ? normalizeBooleanFields(updated, modelFields) : null;
+    if (!updated) return null;
+    // Project structured_text/rich_text exactly like the read path: a mutation
+    // result must be the same shape as getRecord's, or callers that refresh
+    // from the mutation response get raw DAST where the envelope is declared.
+    const patchMediaSites: MediaSite[] = [];
+    const patchMaterialized = yield* materializeRecordStructuredTextFields({
+      modelApiKey: model.api_key,
+      record: normalizeBooleanFields(updated, modelFields),
+      fields: modelFields,
+      mediaSites: patchMediaSites,
+    });
+    yield* enrichRecordSetMedia([patchMaterialized], modelFields, patchMediaSites);
+    return patchMaterialized;
   }).pipe(
     Effect.withSpan("record.patch"),
     Effect.annotateSpans({
@@ -1900,14 +1969,17 @@ export function queryRecords(modelApiKey: string, opts: QueryRecordsOptions) {
     query += ` LIMIT ? OFFSET ?`;
 
     const rawRows = yield* sql.unsafe<Record<string, unknown>>(query, [...whereParams, limit, offset]);
+    const mediaSites: MediaSite[] = [];
     const records = yield* Effect.all(
       rawRows.map((row) => materializeRecordStructuredTextFields({
         modelApiKey: model.api_key,
         record: normalizeBooleanFields(deserializeRow(row), fields),
         fields,
+        mediaSites,
       })),
       { concurrency: "unbounded" },
     );
+    yield* enrichRecordSetMedia(records, fields, mediaSites);
 
     return { records, total };
   }).pipe(
@@ -1945,7 +2017,10 @@ function resolveImageFieldKey(model: ModelRow, fields: readonly ParsedFieldRow[]
 export interface PickerSearchRow {
   id: string;
   title: unknown;
+  /** The preview asset's id (unchanged — pickers key on it). */
   image: string | null;
+  /** The preview asset's canonical URL, so a picker row can render a thumbnail. */
+  imageUrl: string | null;
   status: unknown;
   updatedAt: unknown;
 }
@@ -1992,7 +2067,7 @@ export function searchRecords(modelApiKey: string, q: string, page?: PickerSearc
       [...params, limit, offset],
     );
 
-    const rows: PickerSearchRow[] = rawRows.map((raw) => {
+    const partial = rawRows.map((raw) => {
       const row = deserializeRow(raw);
       const image = imageKey ? (parseMediaFieldReference(row[imageKey])?.uploadId ?? null) : null;
       return {
@@ -2003,6 +2078,23 @@ export function searchRecords(modelApiKey: string, q: string, page?: PickerSearc
         updatedAt: row._updated_at,
       };
     });
+
+    // One batched asset lookup for the whole page — never one per row.
+    const imageIds = Array.from(new Set(partial.map((row) => row.image).filter((id): id is string => id !== null)));
+    const urlById = new Map<string, string>();
+    if (imageIds.length > 0) {
+      const resolveUrl = yield* assetUrlResolver;
+      const assetRows = yield* sql.unsafe<AssetRow>(
+        `SELECT * FROM assets WHERE id IN (${imageIds.map(() => "?").join(", ")})`,
+        imageIds,
+      );
+      for (const asset of assetRows) urlById.set(asset.id, resolveUrl(asset));
+    }
+
+    const rows: PickerSearchRow[] = partial.map((row) => ({
+      ...row,
+      imageUrl: row.image ? (urlById.get(row.image) ?? null) : null,
+    }));
 
     return rows;
   }).pipe(

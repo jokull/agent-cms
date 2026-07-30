@@ -40,6 +40,13 @@ building this are the actual deliverable.
 - **Media** (`pages/MediaPage.tsx`) — `assets.list` grid with search + pagination,
   `assets.update` metadata, `assets.usages`, and `assets.delete` showing the reference-conflict
   guard and the `force: true` override.
+- **Real thumbnails everywhere** (`components/Thumb.tsx`) — every read carries the asset's
+  canonical `url` (asset rows, `media` / `media_gallery` values, picker rows), and
+  `assetUrl(value, { width, fit, format })` from `@agent-cms/codegen/assets` composes the
+  Cloudflare Image Resizing URL. The app never learns the bucket, the base URL or the r2_key.
+  This Worker configures **no** `ASSET_BASE_URL`, so the CMS resolves
+  `<origin>/assets/<id>/<filename>` — the route `worker/index.ts` serves from R2. (Was
+  FRICTION.md #3.)
 - `cmsShellClaims` mounted as a boundary shell so `cms/schema-drift` never reaches a component.
 
 ## Running it
@@ -76,16 +83,17 @@ the live `/api/schema` of the seeded CMS.
 
 ```bash
 pnpm build          # Vite → dist/ (the Worker's assets binding serves it)
-pnpm exec wrangler dev --persist-to ../blog/cms/.wrangler/state --port 8788
+pnpm exec wrangler dev --persist-to ../blog/cms/.wrangler/state --port 8788 --local
 open http://127.0.0.1:8788/
 ```
 
-`--persist-to` points the admin Worker at the **same local D1** the blog CMS seeded.
+`--persist-to` points the admin Worker at the **same local D1 and R2** the blog CMS seeded.
 
-Optionally give the Media page something to show (the blog seed creates no assets):
+Give the media grid something to show (the blog seed creates no assets) — this generates real
+PNGs locally and pushes them through the CMS Worker into R2:
 
 ```bash
-pnpm exec tsx seed-assets.mts
+node --experimental-strip-types seed-assets.mts   # needs the blog CMS on :8787
 ```
 
 For faster UI iteration, `pnpm dev` runs Vite on :5173 and proxies `/rpc` to the Worker on :8788.
@@ -107,13 +115,13 @@ src/client.ts            browser client, boundary shells, CmsShell (claims cms/s
 src/cms/                 GENERATED — do not edit
 src/pages/               PostListPage · PostEditorPage · MediaPage
 src/components/          ContentField (DAST) · EditorToolbar · PostBlockView · RecordPicker · Fields
-src/lib/                 errors (message catalog) · presentation (hand-rolled hints) · dast-bridge
+src/components/Thumb.tsx real thumbnails via assetUrl (CF Image Resizing)
+src/lib/                 errors (message catalog) · presentation (hand-rolled hints)
 src/app.css              all of the styling, hand-written
 ```
 
 ## Known gaps (all documented in FRICTION.md)
 
-- No image thumbnails anywhere — there is no asset URL on the RPC surface (#3).
 - No asset upload — `createUploadUrl` needs R2 deps this Worker does not configure (#19).
 - "Clear field" buttons stop sending the field; they cannot unset it (#5).
 - Nested structured_text inside block payloads is displayed as a count, not edited (#12).

@@ -6,6 +6,7 @@
  */
 import { useEditorState, type Editor } from "@tiptap/react";
 import type { CustomMark, DefaultMark, HeadingNode, ListNode } from "./bridge/dast-types.js";
+import { DEFAULT_MARKS, isCustomMark } from "./bridge/dast-types.js";
 
 export type ActiveBlock =
   | "paragraph"
@@ -29,19 +30,6 @@ export interface DastEditorSnapshot {
   activeItemLink: { item: string } | null;
   canUndo: boolean;
   canRedo: boolean;
-}
-
-const DEFAULT_MARKS: readonly DefaultMark[] = [
-  "strong",
-  "emphasis",
-  "underline",
-  "strikethrough",
-  "code",
-  "highlight",
-];
-
-function isCustomMark(name: string): name is CustomMark {
-  return name.startsWith("customMark_");
 }
 
 function snapshot(editor: Editor): DastEditorSnapshot {

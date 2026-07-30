@@ -40,6 +40,10 @@ async function main() {
     await writeFile(join(outDir, name), content);
     console.log(`wrote ${join(outDir, name)}`);
   }
+  console.log(
+    "contract.ts imports DAST types from @agent-cms/dast (types-only, erased at build).\n" +
+      "  If it is not installed yet: pnpm add result-rpc @agent-cms/dast"
+  );
 }
 
 main().catch((error) => {

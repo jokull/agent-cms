@@ -10,38 +10,31 @@ import type { PickerRow, Post, PostContentEnvelope, UpdatePost } from "../cms/co
 import { ContentField } from "../components/ContentField.js";
 import { BoolInput, Field, RefChip, TextInput } from "../components/Fields.js";
 import { RecordPicker } from "../components/RecordPicker.js";
-import type { PostBlock } from "../components/PostBlockView.js";
 import { describeError, issuesByField, issuesOf, type FieldIssue } from "../lib/errors.js";
-import { mediaId } from "../lib/presentation.js";
+import { mediaId, mediaUrl } from "../lib/presentation.js";
+import { Thumb } from "../components/Thumb.js";
 import { navigate } from "../router.js";
 
 const VALIDATE_DEBOUNCE_MS = 350;
 
 /**
- * The write shape wants `Record<string, Record<string, unknown>>` while the
- * read envelope is a typed union of block interfaces. An interface is not
- * assignable to `Record<string, unknown>` (no index signature), and the repo
- * bans `as`, so the payloads are rebuilt through Object.entries. FRICTION.md #8.
+ * A read drops straight into the update input: nulls are accepted (they clear)
+ * and the block payload union is assignable to the write shape, so there is no
+ * rebuilding and no null-stripping. (Was FRICTION.md #5 + #8.)
  */
-function toWriteBlocks(blocks: Record<string, PostBlock>): Record<string, Record<string, unknown>> {
-  return Object.fromEntries(
-    Object.entries(blocks).map(([id, block]) => [id, Object.fromEntries(Object.entries(block))]),
-  );
-}
-
 function draftFrom(record: Post): UpdatePost {
   return {
     title: record.title,
-    ...(record.slug === null ? {} : { slug: record.slug }),
-    ...(record.excerpt === null ? {} : { excerpt: record.excerpt }),
-    ...(record.cover_image === null ? {} : { cover_image: record.cover_image }),
-    ...(record.author === null ? {} : { author: record.author }),
-    ...(record.category === null ? {} : { category: record.category }),
-    ...(record.related_posts === null ? {} : { related_posts: record.related_posts }),
-    ...(record.published_date === null ? {} : { published_date: record.published_date }),
-    ...(record.seo_field === null ? {} : { seo_field: record.seo_field }),
-    ...(record.reading_time === null ? {} : { reading_time: record.reading_time }),
-    ...(record.featured === null ? {} : { featured: record.featured }),
+    slug: record.slug,
+    excerpt: record.excerpt,
+    cover_image: record.cover_image,
+    author: record.author,
+    category: record.category,
+    related_posts: record.related_posts,
+    published_date: record.published_date,
+    seo_field: record.seo_field,
+    reading_time: record.reading_time,
+    featured: record.featured,
   };
 }
 
@@ -69,24 +62,17 @@ function PostForm({ record, recordId }: { readonly record: Post; readonly record
 
   const patch = (next: Partial<UpdatePost>) => setDraft((prev) => ({ ...prev, ...next }));
   /**
-   * Clearing a field means DELETING the key, not setting `undefined`: the
-   * generated inputs are `?: T`, not `?: T | undefined`, and there is no null
-   * on the wire at all — so "clear this field" is not expressible. This only
-   * stops sending the field. FRICTION.md #5.
+   * `null` clears the stored value; an absent key leaves it unchanged. Both are
+   * expressible now that the update codecs are `optional(union([T, null]))`.
+   * (Was FRICTION.md #5.)
    */
-  const clear = (key: keyof UpdatePost) =>
-    setDraft((prev) => {
-      const next = { ...prev };
-      delete next[key];
-      return next;
-    });
+  const clear = (key: keyof UpdatePost) => setDraft((prev) => ({ ...prev, [key]: null }));
 
   const writeData = useMemo<UpdatePost>(
     () => ({
       ...draft,
-      ...(envelope
-        ? { content: { value: envelope.value, blocks: toWriteBlocks(envelope.blocks) } }
-        : {}),
+      // The read envelope is assignable to the write shape as-is.
+      ...(envelope ? { content: envelope } : {}),
     }),
     [draft, envelope],
   );
@@ -173,11 +159,14 @@ function PostForm({ record, recordId }: { readonly record: Post; readonly record
           <TextInput multiline value={draft.excerpt ?? ""} onChange={(excerpt) => patch({ excerpt })} />
         </Field>
 
-        <Field label="Cover image (asset id)" issues={at("cover_image")} hint="No asset URL exists on the RPC surface — FRICTION.md #3">
-          <TextInput
-            value={mediaId(draft.cover_image) ?? ""}
-            onChange={(next) => (next.length === 0 ? clear("cover_image") : patch({ cover_image: next }))}
-          />
+        <Field label="Cover image (asset id)" issues={at("cover_image")} hint="Reads carry the asset's canonical url — no base URL needed here">
+          <div className="mediafield">
+            <Thumb src={mediaUrl(draft.cover_image)} alt="cover" size={56} />
+            <TextInput
+              value={mediaId(draft.cover_image) ?? ""}
+              onChange={(next) => (next.length === 0 ? clear("cover_image") : patch({ cover_image: next }))}
+            />
+          </div>
         </Field>
 
         <Field label="Author" issues={at("author")}>

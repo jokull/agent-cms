@@ -6,6 +6,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./assets": "./src/assets.ts",
     "./errors": "./src/errors.ts",
     "./server-runtime": "./src/server-runtime.ts"
   },
@@ -18,8 +19,9 @@
     "generate:example": "node --experimental-strip-types src/cli.ts --schema test/fixtures/blog-schema.json --out-dir example/generated"
   },
   "dependencies": {
-    "result-rpc": "link:../../../result-rpc",
-    "agent-cms": "workspace:*"
+    "@agent-cms/dast": "workspace:*",
+    "agent-cms": "workspace:*",
+    "result-rpc": "link:../../../result-rpc"
   },
   "devDependencies": {
     "typescript": "^5.9.3",

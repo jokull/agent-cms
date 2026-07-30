@@ -16,6 +16,7 @@
     "react": ">=18"
   },
   "dependencies": {
+    "@agent-cms/dast": "workspace:*",
     "@tiptap/core": "3.29.2",
     "@tiptap/extensions": "3.29.2",
     "@tiptap/pm": "3.29.2",

@@ -128,4 +128,51 @@ describe("generate", () => {
     // localized wraps in wire.record
     expect(files["contract.ts"]).toContain("excerpt: wire.union([wire.record(wire.string), wire.null] as const)");
   });
+
+  it("imports DAST from @agent-cms/dast instead of inlining a fourth copy", () => {
+    const contract = generate(parseSchemaExport(fixture))["contract.ts"];
+    expect(contract).toContain('} from "@agent-cms/dast";');
+    expect(contract).toContain("  BlockLevelNode as DastBlockLevelNode,");
+    expect(contract).toContain("  BlockNode as DastBlockRefNode,");
+    // the old vendored declarations are gone…
+    expect(contract).not.toContain("export interface DastSpanNode {");
+    expect(contract).not.toContain("export interface DastDocument {");
+    // …but the historical names are still exported for consumers.
+    expect(contract).toContain("export type {");
+    expect(contract).toContain("  DastDocument,");
+    // browser-safety: the only value imports are result-rpc + the errors module.
+    const valueImports = contract.match(/^import (?!type )[^\n]*$/gm) ?? [];
+    expect(valueImports).toEqual([
+      'import { pickErrors, wire, type ErrorDefinitionMap, type InputOf, type RpcFactory } from "result-rpc";',
+      'import { cmsErrors } from "@agent-cms/codegen/errors";',
+    ]);
+    expect(contract).not.toContain('from "agent-cms');
+  });
+
+  it("emits a per-field structured_text write alias the read envelope satisfies", () => {
+    const contract = generate(parseSchemaExport(fixture))["contract.ts"];
+    expect(contract).toContain(
+      "export type PostContentWrite = StructuredTextWrite<HeroSectionBlock | CtaBlockBlock | Record<string, unknown>>;"
+    );
+    expect(contract).toContain("export interface StructuredTextWrite<TBlock = Record<string, unknown>> {");
+    expect(contract).toContain("  blocks?: Readonly<Record<string, TBlock>>;");
+    expect(contract).toContain("content: wire.optional(wire.union([wire.serializable<PostContentWrite>(), wire.null] as const)),");
+  });
+
+  it("makes every update field nullable (null clears, absent leaves unchanged)", () => {
+    const contract = generate(parseSchemaExport(fixture))["contract.ts"];
+    const update = contract.slice(
+      contract.indexOf("export const PostUpdateInput = wire.object({"),
+      contract.indexOf("export type UpdatePost =")
+    );
+    // required-on-create `title` is still nullable on update
+    expect(update).toContain("title: wire.optional(wire.union([wire.string, wire.null] as const)),");
+    expect(update).toContain("authors: wire.optional(wire.union([wire.array(wire.string), wire.null] as const)),");
+    // localized fields are nullable per locale AND as a whole
+    expect(update).toContain(
+      "excerpt: wire.optional(wire.union([wire.record(wire.union([wire.string, wire.null] as const)), wire.null] as const)),"
+    );
+    // create inputs are unchanged: optional, not nullable
+    expect(contract).toContain("export const PostCreateInput = wire.object({\n  title: wire.string,");
+  });
 });

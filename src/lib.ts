@@ -14,6 +14,7 @@ import { VectorizeContext } from "./search/vectorize-context.js";
 import { HooksContext } from "./hooks.js";
 import {
   AssetImportContext,
+  AssetUrlContext,
   createAsset,
   replaceAsset,
   importAssetFromUrl,
@@ -93,7 +94,8 @@ export type CmsServices =
   | SqlClient.SqlClient
   | VectorizeContext
   | HooksContext
-  | AssetImportContext;
+  | AssetImportContext
+  | AssetUrlContext;
 
 /** A pre-built SqlClient layer (D1 in production, SQLite in tests). */
 export type CmsSqlLayer = Layer.Layer<SqlClient.SqlClient>;
@@ -117,6 +119,18 @@ export interface CmsAssetConfig {
   readonly r2Bucket?: CmsR2Bucket;
   readonly r2Credentials?: R2UploadCredentials;
   readonly fetch?: typeof globalThis.fetch;
+  /**
+   * Public asset base (`ASSET_BASE_URL`) — a bucket/CDN host serving R2 objects
+   * at their key path. Every asset row and every media value read through this
+   * runtime carries `<baseUrl>/<r2_key>` as its `url`.
+   */
+  readonly baseUrl?: string;
+  /**
+   * Fallback origin used when `baseUrl` is absent: asset URLs become
+   * `<origin>/assets/<id>/<filename>`, the route the CMS Worker serves from R2.
+   * With neither set, URLs are the same-origin relative path.
+   */
+  readonly originUrl?: string;
 }
 
 /**
@@ -135,6 +149,9 @@ export function cmsRuntimeLayer(sqlLayer: CmsSqlLayer, assets?: CmsAssetConfig):
       r2Bucket: assets?.r2Bucket,
       r2Credentials: assets?.r2Credentials,
       fetch: assets?.fetch ?? globalThis.fetch,
+    }),
+    Layer.succeed(AssetUrlContext, {
+      current: () => ({ baseUrl: assets?.baseUrl, origin: assets?.originUrl }),
     }),
   );
 }

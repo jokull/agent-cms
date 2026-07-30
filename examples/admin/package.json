@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@agent-cms/codegen": "workspace:*",
+    "@agent-cms/dast": "workspace:*",
     "@agent-cms/editor-react": "workspace:*",
     "@tiptap/react": "3.29.2",
     "agent-cms": "workspace:*",

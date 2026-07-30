@@ -1,6 +1,19 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { createTestApp, jsonRequest } from "./app-helpers.js";
 
+/**
+ * Mutation results are now projected exactly like reads (FRICTION #15), so a
+ * structured_text value arrives as the `{ value, blocks }` envelope rather than
+ * the raw DAST document. These tests are about the DAST itself — unwrap first.
+ */
+function dastOf(value: unknown): any {
+  const decoded = typeof value === "string" ? JSON.parse(value) : value;
+  if (decoded && typeof decoded === "object" && "value" in decoded && !("schema" in decoded)) {
+    return (decoded as { value: unknown }).value;
+  }
+  return decoded;
+}
+
 describe("Inline structured_text shorthand", () => {
   let handler: (req: Request) => Promise<Response>;
   let sqlLayer: any;
@@ -46,7 +59,7 @@ describe("Inline structured_text shorthand", () => {
     const record = await res.json();
     expect(record.title).toBe("Agent Text Article");
     // Verify DAST was produced
-    const body = typeof record.body === "string" ? JSON.parse(record.body) : record.body;
+    const body = dastOf(record.body);
     expect(body.schema).toBe("dast");
     expect(body.document.type).toBe("root");
     // Should have heading + paragraph
@@ -73,7 +86,7 @@ describe("Inline structured_text shorthand", () => {
 
     expect(res.status).toBe(201);
     const record = await res.json();
-    const body = typeof record.body === "string" ? JSON.parse(record.body) : record.body;
+    const body = dastOf(record.body);
     expect(body.schema).toBe("dast");
     // Should have paragraph, block, paragraph
     const children = body.document.children;
@@ -106,7 +119,7 @@ describe("Inline structured_text shorthand", () => {
 
     expect(res.status).toBe(201);
     const record = await res.json();
-    const body = typeof record.body === "string" ? JSON.parse(record.body) : record.body;
+    const body = dastOf(record.body);
     expect(body.schema).toBe("dast");
     const children = body.document.children;
     expect(children.length).toBe(3);
@@ -130,7 +143,7 @@ describe("Inline structured_text shorthand", () => {
 
     expect(res.status).toBe(201);
     const record = await res.json();
-    const body = typeof record.body === "string" ? JSON.parse(record.body) : record.body;
+    const body = dastOf(record.body);
     expect(body.document.children[1]).toEqual({ type: "block", item: "c1" });
   });
 
@@ -147,7 +160,7 @@ describe("Inline structured_text shorthand", () => {
 
     expect(res.status).toBe(201);
     const record = await res.json();
-    const body = typeof record.body === "string" ? JSON.parse(record.body) : record.body;
+    const body = dastOf(record.body);
     expect(body.schema).toBe("dast");
     expect(body.document.children[0].children[1]).toEqual({
       type: "itemLink",
@@ -188,7 +201,7 @@ describe("Inline structured_text shorthand", () => {
 
     expect(res.status).toBe(201);
     const record = await res.json();
-    const body = typeof record.body === "string" ? JSON.parse(record.body) : record.body;
+    const body = dastOf(record.body);
     expect(body.schema).toBe("dast");
     expect(body.document.children.length).toBe(2);
     expect(body.document.children[0].type).toBe("paragraph");
@@ -206,7 +219,7 @@ describe("Inline structured_text shorthand", () => {
 
     expect(res.status).toBe(201);
     const record = await res.json();
-    const body = typeof record.body === "string" ? JSON.parse(record.body) : record.body;
+    const body = dastOf(record.body);
     const para = body.document.children[0];
     expect(para.type).toBe("paragraph");
     // Should have inline children with marks
@@ -240,7 +253,7 @@ describe("Inline structured_text shorthand", () => {
 
     expect(res.status).toBe(201);
     const record = await res.json();
-    const body = typeof record.body === "string" ? JSON.parse(record.body) : record.body;
+    const body = dastOf(record.body);
     const children = body.document.children;
     expect(children[0].type).toBe("paragraph");
     expect(children[1].type).toBe("block");
@@ -266,7 +279,7 @@ describe("Inline structured_text shorthand", () => {
     });
     expect(updateRes.status).toBe(200);
     const updated = await updateRes.json();
-    const body = typeof updated.body === "string" ? JSON.parse(updated.body) : updated.body;
+    const body = dastOf(updated.body);
     expect(body.schema).toBe("dast");
     expect(body.document.children[0].type).toBe("heading");
     expect(body.document.children[1].type).toBe("paragraph");
@@ -294,7 +307,7 @@ describe("Inline structured_text shorthand", () => {
 
     expect(res.status).toBe(201);
     const record = await res.json();
-    const body = typeof record.body === "string" ? JSON.parse(record.body) : record.body;
+    const body = dastOf(record.body);
     const children = body.document.children;
     expect(children[0].type).toBe("blockquote");
     expect(children[1].type).toBe("list");
