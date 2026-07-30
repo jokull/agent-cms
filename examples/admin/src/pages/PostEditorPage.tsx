@@ -128,6 +128,7 @@ function PostForm({ record, recordId }: { readonly record: Post; readonly record
       <div className="editor__main">
         <div className="page__head">
           <h1>{draft.title || record.id}</h1>
+          <DirtyBadge recordId={record.id} />
           <button type="button" className="link" onClick={() => navigate("/posts")}>
             ← all posts
           </button>
@@ -320,6 +321,28 @@ function PostForm({ record, recordId }: { readonly record: Post; readonly record
   );
 }
 
+/**
+ * A real "differs from published" indicator. `syncState.changedFields` used to
+ * be `["content"]` on every record with a structured_text field — permanently
+ * dirty, so no honest affordance was possible (FRICTION.md #18). The CMS now
+ * compares structured_text like-for-like, so this line means what it says.
+ */
+function DirtyBadge({ recordId }: { readonly recordId: string }) {
+  const sync = CmsShell.useQuery(client.cms.post.syncState, { id: recordId });
+  if (sync.state !== "success") return null;
+  const { status, changedFields } = sync.value;
+  if (status !== "published" && status !== "updated") {
+    return <span className="pill pill--draft">never published</span>;
+  }
+  return changedFields.length === 0 ? (
+    <span className="pill pill--published">in sync with published</span>
+  ) : (
+    <span className="pill pill--updated">
+      unpublished changes: {changedFields.join(", ")}
+    </span>
+  );
+}
+
 function Sidebar({
   recordId,
   onNotice,
@@ -349,6 +372,7 @@ function Sidebar({
             <dd>{sync.value.scheduledPublishAt ?? "—"}</dd>
             <dt>changed fields</dt>
             <dd>
+              {/* Honest since the structured_text comparison fix — FRICTION #18. */}
               {sync.value.changedFields.length === 0 ? "none" : sync.value.changedFields.join(", ")}
             </dd>
           </dl>

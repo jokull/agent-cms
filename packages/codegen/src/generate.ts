@@ -246,6 +246,81 @@ export interface RecordBacklink { modelApiKey: string; recordId: string; fieldAp
 /** Picker-search presentation row. */
 export interface PickerRow { id: string; title: string | null; image: string | null; imageUrl: string | null; status: string | null; updatedAt: string | null; }
 
+// --- Presentation hints (ADR 0006) ---
+
+/**
+ * Which of a model's fields title and illustrate a row. Emitted per model as
+ * \`<MODEL>_PRESENTATION\` with the guess resolved AT GENERATION TIME, so the
+ * fallback is deterministic and visible in this artifact:
+ *
+ * - \`title\`: the model's \`title_field\` hint → else a field named
+ *   title/name/heading/label → else the first required string/text/slug field →
+ *   else the first string/text/slug field → else \`null\` ("no title field —
+ *   use the record id", which is what picker rows do).
+ * - \`image\`: the model's \`image_preview_field\` hint → else the first \`media\`
+ *   field → else \`null\`.
+ */
+export interface ModelPresentation {
+  /** The model's api_key. */
+  readonly model: string;
+  /** Field api_key whose value titles a row, or null (fall back to the id). */
+  readonly title: string | null;
+  /** Field api_key holding the row's preview image, or null. */
+  readonly image: string | null;
+}
+
+/** The media-ish shape presentRecord can pull a preview out of. */
+function presentationMedia(value: unknown): { uploadId: string; url: string | null } | null {
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const first = presentationMedia(entry);
+      if (first) return first;
+    }
+    return null;
+  }
+  if (typeof value === "string") return value.length > 0 ? { uploadId: value, url: null } : null;
+  if (typeof value !== "object" || value === null) return null;
+  const uploadId = Reflect.get(value, "upload_id");
+  if (typeof uploadId !== "string") return null;
+  const url = Reflect.get(value, "url");
+  return { uploadId, url: typeof url === "string" ? url : null };
+}
+
+/**
+ * Render any record as the row shape the \`search\` procedure returns, using the
+ * model's presentation descriptor — so a list view, a picker and a link chip
+ * can share one row component:
+ *
+ *   presentRecord(post, POST_PRESENTATION)  // → { id, title, image, imageUrl, … }
+ *
+ * Same semantics as server-side picker rows: \`title\` falls back to the record
+ * id when the model has no title field, \`image\` is the asset id and
+ * \`imageUrl\` its canonical URL (null until the record round-trips through a
+ * read). Localized fields carry locale maps — pick a locale before presenting.
+ */
+export function presentRecord<T extends { id: string }>(
+  record: T,
+  presentation: ModelPresentation,
+): PickerRow {
+  const rawTitle = presentation.title === null ? null : Reflect.get(record, presentation.title);
+  const media = presentation.image === null ? null : presentationMedia(Reflect.get(record, presentation.image));
+  const status = Reflect.get(record, "status");
+  const updatedAt = Reflect.get(record, "updatedAt");
+  return {
+    id: record.id,
+    title:
+      presentation.title === null
+        ? record.id
+        : typeof rawTitle === "string" && rawTitle.length > 0
+          ? rawTitle
+          : null,
+    image: media === null ? null : media.uploadId,
+    imageUrl: media === null ? null : media.url,
+    status: typeof status === "string" ? status : null,
+    updatedAt: typeof updatedAt === "string" ? updatedAt : null,
+  };
+}
+
 /** Per-id result of a bulk publish/unpublish/delete (data, never a top-level failure). */
 export interface BulkResult { id: string; ok: boolean; error?: string; }
 
@@ -509,6 +584,60 @@ function blockFieldTsType(field: SchemaExportField): string {
     default:
       return "unknown";
   }
+}
+
+// --- presentation hints (resolved at generation time) ---
+
+/** Field api_keys conventionally holding a record's title, in preference order. */
+const TITLE_FIELD_NAMES: readonly string[] = ["title", "name", "heading", "label"];
+const TITLE_FIELD_TYPES: ReadonlySet<string> = new Set(["string", "text", "slug"]);
+
+export interface ResolvedPresentation {
+  title: string | null;
+  image: string | null;
+}
+
+/**
+ * Resolve a model's presentation fields. Mirrors RecordService's picker-row
+ * resolution (src/services/record-service.ts) so a generated row and a picker
+ * row title the same record identically — the difference is only *when* it runs:
+ * here, once, into the artifact.
+ */
+export function resolvePresentation(model: SchemaExportModel): ResolvedPresentation {
+  const fields = [...model.fields].sort((a, b) => a.position - b.position);
+  const has = (apiKey: string | null | undefined): apiKey is string =>
+    typeof apiKey === "string" && fields.some((f) => f.apiKey === apiKey);
+
+  const titleFromName = TITLE_FIELD_NAMES.map((name) =>
+    fields.find((f) => f.apiKey === name),
+  ).find((f) => f !== undefined);
+  const strings = fields.filter((f) => TITLE_FIELD_TYPES.has(f.fieldType));
+  const title = has(model.titleField)
+    ? model.titleField
+    : (titleFromName?.apiKey ??
+      strings.find((f) => isRequired(f))?.apiKey ??
+      strings[0]?.apiKey ??
+      null);
+
+  const image = has(model.imagePreviewField)
+    ? model.imagePreviewField
+    : (fields.find((f) => f.fieldType === "media")?.apiKey ?? null);
+
+  return { title, image };
+}
+
+function emitPresentation(model: SchemaExportModel): string {
+  const { title, image } = resolvePresentation(model);
+  const source = (hint: string | null | undefined, resolved: string | null): string =>
+    hint != null && hint === resolved ? "explicit hint" : resolved === null ? "no candidate" : "generation-time fallback";
+  return [
+    `/** Presentation for ${model.apiKey}: title = ${source(model.titleField, title)}, image = ${source(model.imagePreviewField, image)}. */`,
+    `export const ${pascal(model.apiKey).toUpperCase()}_PRESENTATION = {`,
+    `  model: ${JSON.stringify(model.apiKey)},`,
+    `  title: ${title === null ? "null" : JSON.stringify(title)},`,
+    `  image: ${image === null ? "null" : JSON.stringify(image)},`,
+    `} as const satisfies ModelPresentation;`,
+  ].join("\n");
 }
 
 // --- filter / orderBy typing (per-model, from the field registry) ---
@@ -916,6 +1045,22 @@ export function generate(schema: SchemaExport): GeneratedFiles {
     push(`}`);
     push(``);
   }
+
+  // Presentation descriptors — every model (records AND blocks: a block card is
+  // a row too), plus a registry keyed by api_key for generic lookup.
+  push(`// --- Presentation descriptors (ADR 0006; fallbacks resolved at generation time) ---`);
+  push(``);
+  for (const model of schema.models) {
+    push(emitPresentation(model));
+    push(``);
+  }
+  push(`/** Every model's presentation descriptor, keyed by api_key. */`);
+  push(`export const PRESENTATION = {`);
+  for (const model of schema.models) {
+    push(`  ${JSON.stringify(model.apiKey)}: ${pascal(model.apiKey).toUpperCase()}_PRESENTATION,`);
+  }
+  push(`} as const satisfies Record<string, ModelPresentation>;`);
+  push(``);
 
   const contractEntries: string[] = [];
   const procedureEntries: string[] = [];

@@ -205,6 +205,49 @@ assetSrcSet(asset, [320, 640, 960], { format: "auto" });
 It accepts a full asset row / media value or a bare URL string, keeps relative
 URLs relative, and returns the source untouched when no transform is asked for.
 
+**Presentation hints (ADR 0006).** Every model emits a `ModelPresentation`
+descriptor naming the field that titles a row and the field that illustrates it,
+so a list view, a picker and a link chip can render "image + title" without the
+host hard-coding field names per model:
+
+```ts
+export const POST_PRESENTATION = {
+  model: "post",
+  title: "title",        // field api_key, or null → use the record id
+  image: "cover_image",  // field api_key, or null → no preview
+} as const satisfies ModelPresentation;
+
+export const PRESENTATION = { post: POST_PRESENTATION, … };  // keyed by api_key
+```
+
+Blocks get one too (a block card is a row). The **fallback is resolved at
+generation time**, so it is deterministic and readable in the artifact:
+
+| | order |
+|---|---|
+| `title` | the model's `title_field` hint → a field named `title`/`name`/`heading`/`label` → the first **required** string/text/slug field → the first string/text/slug field → `null` |
+| `image` | the model's `image_preview_field` hint → the first `media` field → `null` |
+
+A hint naming a field that no longer exists is ignored (the guess runs instead).
+This is the same order `RecordService` uses server-side for picker rows, so both
+halves title a record identically.
+
+Render with the emitted helper, which returns exactly the `PickerRow` shape the
+`search` procedure returns — one row component serves lists, pickers and chips:
+
+```ts
+import { presentRecord, POST_PRESENTATION, PRESENTATION } from "./cms/contract.js";
+
+const row = presentRecord(post, POST_PRESENTATION);
+// { id, title, image, imageUrl, status, updatedAt }
+presentRecord(record, PRESENTATION[modelApiKey]);   // fully generic
+```
+
+`title` falls back to the record id when the model has no title field (matching
+picker rows); `image` is the asset id and `imageUrl` its canonical URL — null
+until the value has been read back from the CMS. Localized fields carry
+locale-keyed maps: pick a locale before presenting.
+
 ## Regenerate the checked-in example after changing the emitter
 
 ```bash

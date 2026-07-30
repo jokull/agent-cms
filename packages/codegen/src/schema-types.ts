@@ -29,6 +29,10 @@ export interface SchemaExportModel {
   hasDraft: boolean;
   ordering: string | null;
   canonicalPathTemplate: string | null;
+  /** Presentation hint: the field api_key that titles a row (null = guess). */
+  titleField?: string | null;
+  /** Presentation hint: the media field api_key previewing a row (null = guess). */
+  imagePreviewField?: string | null;
   fields: SchemaExportField[];
 }
 

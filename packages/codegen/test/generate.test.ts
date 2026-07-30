@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { generate } from "../src/generate.ts";
+import { generate, resolvePresentation } from "../src/generate.ts";
 import { parseSchemaExport } from "../src/schema-types.ts";
 import fixture from "./fixtures/blog-schema.json" with { type: "json" };
 
@@ -22,7 +22,9 @@ describe("generate", () => {
     expect(files["contract.ts"]).toContain(
       "export function cmsContract<C, MErrors extends ErrorDefinitionMap>("
     );
-    expect(files["contract.ts"]).toContain("return { post, author, siteSettings, navItem, assets };");
+    expect(files["contract.ts"]).toContain(
+      "return { post, author, siteSettings, navItem, landingPage, pressMention, metricSample, assets };",
+    );
     expect(files["contract.ts"]).not.toContain("rpc.context");
     // procedures are a factory the host spreads into its own router.
     expect(files["procedures.ts"]).toContain("export function cmsProcedures<C,");
@@ -157,6 +159,86 @@ describe("generate", () => {
     expect(contract).toContain("export interface StructuredTextWrite<TBlock = Record<string, unknown>> {");
     expect(contract).toContain("  blocks?: Readonly<Record<string, TBlock>>;");
     expect(contract).toContain("content: wire.optional(wire.union([wire.serializable<PostContentWrite>(), wire.null] as const)),");
+  });
+
+  describe("presentation descriptors (ADR 0006 / FRICTION #2)", () => {
+    const contract = generate(parseSchemaExport(fixture))["contract.ts"];
+
+    it("emits a typed descriptor per model plus an api_key-keyed registry", () => {
+      expect(contract).toContain("export interface ModelPresentation {");
+      expect(contract).toContain("export function presentRecord<T extends { id: string }>(");
+      expect(contract).toContain(
+        'export const POST_PRESENTATION = {\n  model: "post",\n  title: "title",\n  image: "cover",\n} as const satisfies ModelPresentation;',
+      );
+      expect(contract).toContain("export const PRESENTATION = {");
+      expect(contract).toContain('  "post": POST_PRESENTATION,');
+      // Blocks get one too — a block card is a row.
+      expect(contract).toContain('  "hero_section": HEROSECTION_PRESENTATION,');
+    });
+
+    it("prefers the model's explicit hints over any guess", () => {
+      // landing_page has a `title` field and a `hero_shot` media field, but
+      // declares title_field=seo_label / image_preview_field=secondary_shot.
+      expect(contract).toContain(
+        'export const LANDINGPAGE_PRESENTATION = {\n  model: "landing_page",\n  title: "seo_label",\n  image: "secondary_shot",\n} as const satisfies ModelPresentation;',
+      );
+    });
+
+    it("falls back in a fixed order when the model carries no hints", () => {
+      const byKey = new Map(
+        parseSchemaExport(fixture).models.map((model) => [model.apiKey, resolvePresentation(model)]),
+      );
+      // conventional name wins over field order (post.title, author.name, nav_item.label)
+      expect(byKey.get("post")).toEqual({ title: "title", image: "cover" });
+      expect(byKey.get("author")).toEqual({ title: "name", image: "avatar" });
+      // no conventional name → first REQUIRED string (subject), not the first string (code)
+      expect(byKey.get("press_mention")).toEqual({ title: "subject", image: "photo" });
+      // site_settings has neither a conventional name nor a required-string race:
+      // its only string field is required, so it is both.
+      expect(byKey.get("site_settings")).toEqual({ title: "site_title", image: "logo" });
+      // no string field at all → null title; no media field → null image
+      expect(byKey.get("metric_sample")).toEqual({ title: null, image: null });
+      expect(byKey.get("nav_item")).toEqual({ title: "label", image: null });
+    });
+
+    it("falls back to the first string field when none is required", () => {
+      const model = {
+        name: "Loose",
+        apiKey: "loose",
+        isBlock: false,
+        singleton: false,
+        sortable: false,
+        tree: false,
+        hasDraft: true,
+        ordering: null,
+        canonicalPathTemplate: null,
+        fields: [
+          { label: "Note", apiKey: "note", fieldType: "text", position: 2, localized: false, validators: {}, hint: null },
+          { label: "Ref", apiKey: "ref", fieldType: "slug", position: 1, localized: false, validators: {}, hint: null },
+        ],
+      };
+      expect(resolvePresentation(model)).toEqual({ title: "ref", image: null });
+    });
+
+    it("ignores a hint naming a field that does not exist", () => {
+      const model = {
+        name: "Stale",
+        apiKey: "stale",
+        isBlock: false,
+        singleton: false,
+        sortable: false,
+        tree: false,
+        hasDraft: true,
+        ordering: null,
+        canonicalPathTemplate: null,
+        titleField: "gone",
+        imagePreviewField: "also_gone",
+        fields: [
+          { label: "Name", apiKey: "name", fieldType: "string", position: 1, localized: false, validators: {}, hint: null },
+        ],
+      };
+      expect(resolvePresentation(model)).toEqual({ title: "name", image: null });
+    });
   });
 
   it("makes every update field nullable (null clears, absent leaves unchanged)", () => {

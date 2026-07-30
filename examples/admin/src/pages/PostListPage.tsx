@@ -7,9 +7,9 @@
 import { useMemo, useState } from "react";
 import { useResultQuery } from "result-rpc/react";
 import { client, CmsShell } from "../client.js";
+import { POST_PRESENTATION, presentRecord } from "../cms/contract.js";
 import type { PostFilter, PostOrderBy, RecordStatus } from "../cms/contract.js";
 import { describeError } from "../lib/errors.js";
-import { mediaUrl, postTitle } from "../lib/presentation.js";
 import { Thumb } from "../components/Thumb.js";
 import { navigate } from "../router.js";
 
@@ -188,6 +188,10 @@ export function PostListPage() {
         <tbody>
           {records.map((record) => {
             const stock = record.slug ? inventoryBySlug.get(record.slug) : undefined;
+            // Generic row rendering: which field is the title and which one is
+            // the preview comes from the generated descriptor, not from this
+            // file. Same shape the picker rows use. (Was FRICTION.md #2.)
+            const row = presentRecord(record, POST_PRESENTATION);
             return (
               <tr key={record.id}>
                 <td>
@@ -199,17 +203,17 @@ export function PostListPage() {
                 </td>
                 <td>
                   {/* The read carries the asset's canonical url — was FRICTION.md #3. */}
-                  <Thumb src={mediaUrl(record.cover_image)} alt={postTitle(record)} />
+                  <Thumb src={row.imageUrl} alt={row.title} />
                 </td>
                 <td>
                   <button type="button" className="link" onClick={() => navigate(`/posts/${record.id}`)}>
-                    {postTitle(record)}
+                    {row.title ?? row.id}
                   </button>
                 </td>
                 <td>
                   <span className={`pill pill--${record.status}`}>{record.status}</span>
                 </td>
-                <td>{record.updatedAt?.slice(0, 16).replace("T", " ") ?? "—"}</td>
+                <td>{row.updatedAt?.slice(0, 16).replace("T", " ") ?? "—"}</td>
                 <td>{stock ? `${stock.seatsLeft} · ¥${stock.priceJpy.toLocaleString()}` : "—"}</td>
                 <td className="rowactions">
                   <button

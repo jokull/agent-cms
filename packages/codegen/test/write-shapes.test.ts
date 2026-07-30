@@ -9,8 +9,16 @@
  * tsconfig compiles.
  */
 import { describe, expect, it } from "vitest";
+import {
+  METRICSAMPLE_PRESENTATION,
+  POST_PRESENTATION,
+  PRESENTATION,
+  presentRecord,
+} from "../example/generated/contract.ts";
 import type {
   DastDocument,
+  MetricSample,
+  PickerRow,
   HeroSectionBlock,
   Post,
   PostContentEnvelope,
@@ -85,5 +93,80 @@ describe("update inputs accept null to clear a field", () => {
   it("a localized field can be cleared per locale", () => {
     const perLocale: UpdatePost = { excerpt: { en: null, is: "hallo" } };
     expect(perLocale.excerpt).toEqual({ en: null, is: "hallo" });
+  });
+});
+
+describe("presentRecord renders a row generically from the descriptor", () => {
+  const record: Post = {
+    id: "rec_1",
+    status: "published",
+    createdAt: null,
+    updatedAt: "2026-07-30T10:00:00.000Z",
+    publishedAt: null,
+    title: "Hello world",
+    slug: "hello-world",
+    excerpt: null,
+    featured: null,
+    published_at: null,
+    tier: null,
+    content: null,
+    authors: null,
+    cover: {
+      upload_id: "asset_1",
+      url: "https://cdn.example.com/a.jpg",
+      filename: "a.jpg",
+      mime_type: "image/jpeg",
+      size: 10,
+      width: 1,
+      height: 1,
+      alt: null,
+      title: null,
+      focal_point: null,
+      custom_data: null,
+      blurhash: null,
+    },
+    seo: null,
+  };
+
+  it("produces the same row shape picker search returns", () => {
+    const row: PickerRow = presentRecord(record, POST_PRESENTATION);
+    expect(row).toEqual({
+      id: "rec_1",
+      title: "Hello world",
+      image: "asset_1",
+      imageUrl: "https://cdn.example.com/a.jpg",
+      status: "published",
+      updatedAt: "2026-07-30T10:00:00.000Z",
+    });
+  });
+
+  it("falls back to the record id when the model has no title field", () => {
+    const sample: MetricSample = {
+      id: "m_1",
+      status: "draft",
+      createdAt: null,
+      updatedAt: null,
+      publishedAt: null,
+      value: 1.5,
+      captured_at: null,
+    };
+    expect(presentRecord(sample, METRICSAMPLE_PRESENTATION)).toEqual({
+      id: "m_1",
+      title: "m_1",
+      image: null,
+      imageUrl: null,
+      status: "draft",
+      updatedAt: null,
+    });
+  });
+
+  it("reads the registry by api_key and takes the first image of a gallery", () => {
+    expect(PRESENTATION.press_mention.title).toBe("subject");
+    const gallery = [
+      { upload_id: "g1", url: "https://cdn.example.com/g1.jpg" },
+      { upload_id: "g2", url: "https://cdn.example.com/g2.jpg" },
+    ];
+    const row = presentRecord({ id: "p_1", subject: "Bang", photo: gallery }, PRESENTATION.press_mention);
+    expect([row.image, row.imageUrl]).toEqual(["g1", "https://cdn.example.com/g1.jpg"]);
   });
 });

@@ -75,9 +75,10 @@ cd examples/admin
 pnpm codegen        # → src/cms/{contract,procedures}.ts from http://127.0.0.1:8787/api/schema
 ```
 
-The generated files are **checked in**. `examples/blog/schema.json` is a stale export (it
-predates the `feature_card` / `feature_grid` block models the seed creates), so generate from
-the live `/api/schema` of the seeded CMS.
+The generated files are **checked in**. `examples/blog/schema.json` is a current export of the
+seeded CMS (refreshed 2026-07-30), so `--schema ../blog/schema.json` regenerates the same files
+offline; `pnpm codegen` against the live `/api/schema` stays the source of truth after any schema
+change.
 
 ### 3. Run the admin
 

@@ -5,14 +5,31 @@
  * selection or document changes.
  */
 import { useEditorState, type Editor } from "@tiptap/react";
-import type { CustomMark, DefaultMark, HeadingNode, ListNode } from "./bridge/dast-types.js";
+import type { CustomMark, DefaultMark, HeadingNode, ListNode, Mark } from "./bridge/dast-types.js";
 import { DEFAULT_MARKS, isCustomMark } from "./bridge/dast-types.js";
+import { buildCan } from "./commands.js";
 
 export type ActiveBlock =
   | "paragraph"
   | `heading${HeadingNode["level"]}`
   | "codeBlock"
   | "other";
+
+/**
+ * The reactive form of `DastCan`: every "is this possible right now" boolean a
+ * toolbar needs, recomputed with the snapshot so disabled states are honest.
+ * `handle.can()` remains for imperative, point-in-time checks.
+ */
+export interface DastCanSnapshot {
+  undo: boolean;
+  redo: boolean;
+  /** An embedded block atom can be inserted at the selection. */
+  insertBlock: boolean;
+  /** The selection sits in a table cell, so the row/column commands apply. */
+  tableActions: boolean;
+  /** Per-mark, for every default mark and every custom mark this field declares. */
+  toggleMark: Readonly<Record<Mark, boolean>>;
+}
 
 export interface DastEditorSnapshot {
   isEmpty: boolean;
@@ -28,8 +45,28 @@ export interface DastEditorSnapshot {
   inTable: boolean;
   activeLink: { url: string } | null;
   activeItemLink: { item: string } | null;
+  /** @deprecated use `can.undo` — kept because it predates the `can` cluster. */
   canUndo: boolean;
+  /** @deprecated use `can.redo`. */
   canRedo: boolean;
+  /** Reactive `DastCan`: what the editor can do at this selection. */
+  can: DastCanSnapshot;
+}
+
+function canToggleMarks(editor: Editor): Readonly<Record<Mark, boolean>> {
+  const custom: Record<string, boolean> = {};
+  for (const name of Object.keys(editor.schema.marks)) {
+    if (isCustomMark(name)) custom[name] = editor.can().toggleMark(name);
+  }
+  return {
+    strong: editor.can().toggleMark("strong"),
+    emphasis: editor.can().toggleMark("emphasis"),
+    underline: editor.can().toggleMark("underline"),
+    strikethrough: editor.can().toggleMark("strikethrough"),
+    code: editor.can().toggleMark("code"),
+    highlight: editor.can().toggleMark("highlight"),
+    ...custom,
+  };
 }
 
 function snapshot(editor: Editor): DastEditorSnapshot {
@@ -52,6 +89,9 @@ function snapshot(editor: Editor): DastEditorSnapshot {
       }
     }
   }
+
+  // One source of truth with the imperative `handle.can()`.
+  const can = buildCan(editor);
 
   const linkAttrs = editor.isActive("link") ? editor.getAttributes("link") : null;
   const itemLinkAttrs = editor.isActive("itemLink") ? editor.getAttributes("itemLink") : null;
@@ -80,8 +120,15 @@ function snapshot(editor: Editor): DastEditorSnapshot {
       linkAttrs && typeof linkAttrs.url === "string" ? { url: linkAttrs.url } : null,
     activeItemLink:
       itemLinkAttrs && typeof itemLinkAttrs.item === "string" ? { item: itemLinkAttrs.item } : null,
-    canUndo: editor.can().undo(),
-    canRedo: editor.can().redo(),
+    canUndo: can.undo,
+    canRedo: can.redo,
+    can: {
+      undo: can.undo,
+      redo: can.redo,
+      insertBlock: can.insertBlock,
+      tableActions: can.tableActions,
+      toggleMark: canToggleMarks(editor),
+    },
   };
 }
 
@@ -93,6 +140,8 @@ export function useDastEditorState(source: { editor: Editor | null } | Editor | 
   const editor = source === null ? null : "editor" in source ? source.editor : source;
   return useEditorState({
     editor,
-    selector: (ctx) => (ctx.editor ? snapshot(ctx.editor) : null),
+    // A destroyed editor still notifies subscribers once (React can re-render a
+    // tree that is on its way out); it has no schema left to read.
+    selector: (ctx) => (ctx.editor && !ctx.editor.isDestroyed ? snapshot(ctx.editor) : null),
   });
 }

@@ -30,6 +30,18 @@ import {
   NAVITEM_FIELD_KEYS,
   NavItemVersionCodec,
   NavItemVersionListCodec,
+  LandingPageCodec,
+  LANDINGPAGE_FIELD_KEYS,
+  LandingPageVersionCodec,
+  LandingPageVersionListCodec,
+  PressMentionCodec,
+  PRESSMENTION_FIELD_KEYS,
+  PressMentionVersionCodec,
+  PressMentionVersionListCodec,
+  MetricSampleCodec,
+  METRICSAMPLE_FIELD_KEYS,
+  MetricSampleVersionCodec,
+  MetricSampleVersionListCodec,
   SyncStateCodec,
   AssetListCodec,
   AssetRecordCodec,
@@ -341,6 +353,252 @@ export function cmsProcedures<C, MErrors extends ErrorDefinitionMap = ErrorDefin
         return decodeRecord(NavItemCodec, NAVITEM_FIELD_KEYS, "navItem.clearSchedule", r.value);
       }),
       reorder: mutation(contract.navItem.reorder).handler(async ({ input, context }) => cms.reorder("nav_item", input.ids, actorFor(context))),
+    },
+    landingPage: {
+      list: app.implement(contract.landingPage.list).handler(async ({ input }) => {
+        const r = await cms.query("landing_page", toQueryOptions(input));
+        if (!r.ok) return r;
+        return decodeRecordPage(LandingPageCodec, LANDINGPAGE_FIELD_KEYS, "landingPage.list", r.value);
+      }),
+      byId: app.implement(contract.landingPage.byId).handler(async ({ input }) => {
+        const r = await cms.byId("landing_page", input.id);
+        if (!r.ok) return r;
+        return decodeRecord(LandingPageCodec, LANDINGPAGE_FIELD_KEYS, "landingPage.byId", r.value);
+      }),
+      search: app.implement(contract.landingPage.search).handler(async ({ input }) => cms.search("landing_page", input.q, input.page ?? undefined)),
+      create: mutation(contract.landingPage.create).handler(async ({ input, context }) => {
+        const r = await cms.create("landing_page", toRecord(input.data), actorFor(context));
+        if (!r.ok) return r;
+        return decodeRecord(LandingPageCodec, LANDINGPAGE_FIELD_KEYS, "landingPage.create", r.value);
+      }),
+      update: mutation(contract.landingPage.update).handler(async ({ input, context }) => {
+        const r = await cms.update("landing_page", input.id, toRecord(input.data), actorFor(context));
+        if (!r.ok) return r;
+        return decodeRecord(LandingPageCodec, LANDINGPAGE_FIELD_KEYS, "landingPage.update", r.value);
+      }),
+      delete: mutation(contract.landingPage.delete).handler(async ({ input }) => cms.remove("landing_page", input.id)),
+      duplicate: mutation(contract.landingPage.duplicate).handler(async ({ input, context }) => {
+        const r = await cms.duplicate("landing_page", input.id, actorFor(context));
+        if (!r.ok) return r;
+        return decodeRecord(LandingPageCodec, LANDINGPAGE_FIELD_KEYS, "landingPage.duplicate", r.value);
+      }),
+      publish: mutation(contract.landingPage.publish).handler(async ({ input, context }) => {
+        const r = await cms.publish("landing_page", input.id, actorFor(context));
+        if (!r.ok) return r;
+        return decodeRecord(LandingPageCodec, LANDINGPAGE_FIELD_KEYS, "landingPage.publish", r.value);
+      }),
+      unpublish: mutation(contract.landingPage.unpublish).handler(async ({ input, context }) => {
+        const r = await cms.unpublish("landing_page", input.id, actorFor(context));
+        if (!r.ok) return r;
+        return decodeRecord(LandingPageCodec, LANDINGPAGE_FIELD_KEYS, "landingPage.unpublish", r.value);
+      }),
+      publishMany: mutation(contract.landingPage.publishMany).handler(async ({ input, context }) => cms.publishMany("landing_page", input.ids, actorFor(context))),
+      unpublishMany: mutation(contract.landingPage.unpublishMany).handler(async ({ input, context }) => cms.unpublishMany("landing_page", input.ids, actorFor(context))),
+      deleteMany: mutation(contract.landingPage.deleteMany).handler(async ({ input, context }) => cms.deleteMany("landing_page", input.ids, actorFor(context))),
+      links: app.implement(contract.landingPage.links).handler(async ({ input }) => cms.links("landing_page", input.id)),
+      validate: app.implement(contract.landingPage.validate).handler(async ({ input }) => cms.validate("landing_page", toRecord(input.data))),
+      validateUpdate: app.implement(contract.landingPage.validateUpdate).handler(async ({ input }) => cms.validateUpdate("landing_page", input.id, toRecord(input.data))),
+      syncState: app.implement(contract.landingPage.syncState).handler(async ({ input }) => {
+        const r = await cms.syncState("landing_page", input.id);
+        if (!r.ok) return r;
+        return decodeOutput(SyncStateCodec, "landingPage.syncState", r.value);
+      }),
+      versions: {
+        list: app.implement(contract.landingPage.versions.list).handler(async ({ input }) => {
+          const r = await cms.versionsList("landing_page", input.id);
+          if (!r.ok) return r;
+          return decodeOutput(LandingPageVersionListCodec, "landingPage.versions.list", r.value);
+        }),
+        get: app.implement(contract.landingPage.versions.get).handler(async ({ input }) => {
+          const r = await cms.versionsGet("landing_page", input.id, input.versionId);
+          if (!r.ok) return r;
+          return decodeOutput(LandingPageVersionCodec, "landingPage.versions.get", r.value);
+        }),
+        restore: mutation(contract.landingPage.versions.restore).handler(async ({ input, context }) => {
+          const r = await cms.versionsRestore("landing_page", input.id, input.versionId, actorFor(context));
+          if (!r.ok) return r;
+          return decodeRecord(LandingPageCodec, LANDINGPAGE_FIELD_KEYS, "landingPage.versions.restore", r.value);
+        }),
+      },
+      schedulePublish: mutation(contract.landingPage.schedulePublish).handler(async ({ input, context }) => {
+        const r = await cms.schedulePublish("landing_page", input.id, input.at, actorFor(context));
+        if (!r.ok) return r;
+        return decodeRecord(LandingPageCodec, LANDINGPAGE_FIELD_KEYS, "landingPage.schedulePublish", r.value);
+      }),
+      scheduleUnpublish: mutation(contract.landingPage.scheduleUnpublish).handler(async ({ input, context }) => {
+        const r = await cms.scheduleUnpublish("landing_page", input.id, input.at, actorFor(context));
+        if (!r.ok) return r;
+        return decodeRecord(LandingPageCodec, LANDINGPAGE_FIELD_KEYS, "landingPage.scheduleUnpublish", r.value);
+      }),
+      clearSchedule: mutation(contract.landingPage.clearSchedule).handler(async ({ input, context }) => {
+        const r = await cms.clearSchedule("landing_page", input.id, actorFor(context));
+        if (!r.ok) return r;
+        return decodeRecord(LandingPageCodec, LANDINGPAGE_FIELD_KEYS, "landingPage.clearSchedule", r.value);
+      }),
+    },
+    pressMention: {
+      list: app.implement(contract.pressMention.list).handler(async ({ input }) => {
+        const r = await cms.query("press_mention", toQueryOptions(input));
+        if (!r.ok) return r;
+        return decodeRecordPage(PressMentionCodec, PRESSMENTION_FIELD_KEYS, "pressMention.list", r.value);
+      }),
+      byId: app.implement(contract.pressMention.byId).handler(async ({ input }) => {
+        const r = await cms.byId("press_mention", input.id);
+        if (!r.ok) return r;
+        return decodeRecord(PressMentionCodec, PRESSMENTION_FIELD_KEYS, "pressMention.byId", r.value);
+      }),
+      search: app.implement(contract.pressMention.search).handler(async ({ input }) => cms.search("press_mention", input.q, input.page ?? undefined)),
+      create: mutation(contract.pressMention.create).handler(async ({ input, context }) => {
+        const r = await cms.create("press_mention", toRecord(input.data), actorFor(context));
+        if (!r.ok) return r;
+        return decodeRecord(PressMentionCodec, PRESSMENTION_FIELD_KEYS, "pressMention.create", r.value);
+      }),
+      update: mutation(contract.pressMention.update).handler(async ({ input, context }) => {
+        const r = await cms.update("press_mention", input.id, toRecord(input.data), actorFor(context));
+        if (!r.ok) return r;
+        return decodeRecord(PressMentionCodec, PRESSMENTION_FIELD_KEYS, "pressMention.update", r.value);
+      }),
+      delete: mutation(contract.pressMention.delete).handler(async ({ input }) => cms.remove("press_mention", input.id)),
+      duplicate: mutation(contract.pressMention.duplicate).handler(async ({ input, context }) => {
+        const r = await cms.duplicate("press_mention", input.id, actorFor(context));
+        if (!r.ok) return r;
+        return decodeRecord(PressMentionCodec, PRESSMENTION_FIELD_KEYS, "pressMention.duplicate", r.value);
+      }),
+      publish: mutation(contract.pressMention.publish).handler(async ({ input, context }) => {
+        const r = await cms.publish("press_mention", input.id, actorFor(context));
+        if (!r.ok) return r;
+        return decodeRecord(PressMentionCodec, PRESSMENTION_FIELD_KEYS, "pressMention.publish", r.value);
+      }),
+      unpublish: mutation(contract.pressMention.unpublish).handler(async ({ input, context }) => {
+        const r = await cms.unpublish("press_mention", input.id, actorFor(context));
+        if (!r.ok) return r;
+        return decodeRecord(PressMentionCodec, PRESSMENTION_FIELD_KEYS, "pressMention.unpublish", r.value);
+      }),
+      publishMany: mutation(contract.pressMention.publishMany).handler(async ({ input, context }) => cms.publishMany("press_mention", input.ids, actorFor(context))),
+      unpublishMany: mutation(contract.pressMention.unpublishMany).handler(async ({ input, context }) => cms.unpublishMany("press_mention", input.ids, actorFor(context))),
+      deleteMany: mutation(contract.pressMention.deleteMany).handler(async ({ input, context }) => cms.deleteMany("press_mention", input.ids, actorFor(context))),
+      links: app.implement(contract.pressMention.links).handler(async ({ input }) => cms.links("press_mention", input.id)),
+      validate: app.implement(contract.pressMention.validate).handler(async ({ input }) => cms.validate("press_mention", toRecord(input.data))),
+      validateUpdate: app.implement(contract.pressMention.validateUpdate).handler(async ({ input }) => cms.validateUpdate("press_mention", input.id, toRecord(input.data))),
+      syncState: app.implement(contract.pressMention.syncState).handler(async ({ input }) => {
+        const r = await cms.syncState("press_mention", input.id);
+        if (!r.ok) return r;
+        return decodeOutput(SyncStateCodec, "pressMention.syncState", r.value);
+      }),
+      versions: {
+        list: app.implement(contract.pressMention.versions.list).handler(async ({ input }) => {
+          const r = await cms.versionsList("press_mention", input.id);
+          if (!r.ok) return r;
+          return decodeOutput(PressMentionVersionListCodec, "pressMention.versions.list", r.value);
+        }),
+        get: app.implement(contract.pressMention.versions.get).handler(async ({ input }) => {
+          const r = await cms.versionsGet("press_mention", input.id, input.versionId);
+          if (!r.ok) return r;
+          return decodeOutput(PressMentionVersionCodec, "pressMention.versions.get", r.value);
+        }),
+        restore: mutation(contract.pressMention.versions.restore).handler(async ({ input, context }) => {
+          const r = await cms.versionsRestore("press_mention", input.id, input.versionId, actorFor(context));
+          if (!r.ok) return r;
+          return decodeRecord(PressMentionCodec, PRESSMENTION_FIELD_KEYS, "pressMention.versions.restore", r.value);
+        }),
+      },
+      schedulePublish: mutation(contract.pressMention.schedulePublish).handler(async ({ input, context }) => {
+        const r = await cms.schedulePublish("press_mention", input.id, input.at, actorFor(context));
+        if (!r.ok) return r;
+        return decodeRecord(PressMentionCodec, PRESSMENTION_FIELD_KEYS, "pressMention.schedulePublish", r.value);
+      }),
+      scheduleUnpublish: mutation(contract.pressMention.scheduleUnpublish).handler(async ({ input, context }) => {
+        const r = await cms.scheduleUnpublish("press_mention", input.id, input.at, actorFor(context));
+        if (!r.ok) return r;
+        return decodeRecord(PressMentionCodec, PRESSMENTION_FIELD_KEYS, "pressMention.scheduleUnpublish", r.value);
+      }),
+      clearSchedule: mutation(contract.pressMention.clearSchedule).handler(async ({ input, context }) => {
+        const r = await cms.clearSchedule("press_mention", input.id, actorFor(context));
+        if (!r.ok) return r;
+        return decodeRecord(PressMentionCodec, PRESSMENTION_FIELD_KEYS, "pressMention.clearSchedule", r.value);
+      }),
+    },
+    metricSample: {
+      list: app.implement(contract.metricSample.list).handler(async ({ input }) => {
+        const r = await cms.query("metric_sample", toQueryOptions(input));
+        if (!r.ok) return r;
+        return decodeRecordPage(MetricSampleCodec, METRICSAMPLE_FIELD_KEYS, "metricSample.list", r.value);
+      }),
+      byId: app.implement(contract.metricSample.byId).handler(async ({ input }) => {
+        const r = await cms.byId("metric_sample", input.id);
+        if (!r.ok) return r;
+        return decodeRecord(MetricSampleCodec, METRICSAMPLE_FIELD_KEYS, "metricSample.byId", r.value);
+      }),
+      search: app.implement(contract.metricSample.search).handler(async ({ input }) => cms.search("metric_sample", input.q, input.page ?? undefined)),
+      create: mutation(contract.metricSample.create).handler(async ({ input, context }) => {
+        const r = await cms.create("metric_sample", toRecord(input.data), actorFor(context));
+        if (!r.ok) return r;
+        return decodeRecord(MetricSampleCodec, METRICSAMPLE_FIELD_KEYS, "metricSample.create", r.value);
+      }),
+      update: mutation(contract.metricSample.update).handler(async ({ input, context }) => {
+        const r = await cms.update("metric_sample", input.id, toRecord(input.data), actorFor(context));
+        if (!r.ok) return r;
+        return decodeRecord(MetricSampleCodec, METRICSAMPLE_FIELD_KEYS, "metricSample.update", r.value);
+      }),
+      delete: mutation(contract.metricSample.delete).handler(async ({ input }) => cms.remove("metric_sample", input.id)),
+      duplicate: mutation(contract.metricSample.duplicate).handler(async ({ input, context }) => {
+        const r = await cms.duplicate("metric_sample", input.id, actorFor(context));
+        if (!r.ok) return r;
+        return decodeRecord(MetricSampleCodec, METRICSAMPLE_FIELD_KEYS, "metricSample.duplicate", r.value);
+      }),
+      publish: mutation(contract.metricSample.publish).handler(async ({ input, context }) => {
+        const r = await cms.publish("metric_sample", input.id, actorFor(context));
+        if (!r.ok) return r;
+        return decodeRecord(MetricSampleCodec, METRICSAMPLE_FIELD_KEYS, "metricSample.publish", r.value);
+      }),
+      unpublish: mutation(contract.metricSample.unpublish).handler(async ({ input, context }) => {
+        const r = await cms.unpublish("metric_sample", input.id, actorFor(context));
+        if (!r.ok) return r;
+        return decodeRecord(MetricSampleCodec, METRICSAMPLE_FIELD_KEYS, "metricSample.unpublish", r.value);
+      }),
+      publishMany: mutation(contract.metricSample.publishMany).handler(async ({ input, context }) => cms.publishMany("metric_sample", input.ids, actorFor(context))),
+      unpublishMany: mutation(contract.metricSample.unpublishMany).handler(async ({ input, context }) => cms.unpublishMany("metric_sample", input.ids, actorFor(context))),
+      deleteMany: mutation(contract.metricSample.deleteMany).handler(async ({ input, context }) => cms.deleteMany("metric_sample", input.ids, actorFor(context))),
+      links: app.implement(contract.metricSample.links).handler(async ({ input }) => cms.links("metric_sample", input.id)),
+      validate: app.implement(contract.metricSample.validate).handler(async ({ input }) => cms.validate("metric_sample", toRecord(input.data))),
+      validateUpdate: app.implement(contract.metricSample.validateUpdate).handler(async ({ input }) => cms.validateUpdate("metric_sample", input.id, toRecord(input.data))),
+      syncState: app.implement(contract.metricSample.syncState).handler(async ({ input }) => {
+        const r = await cms.syncState("metric_sample", input.id);
+        if (!r.ok) return r;
+        return decodeOutput(SyncStateCodec, "metricSample.syncState", r.value);
+      }),
+      versions: {
+        list: app.implement(contract.metricSample.versions.list).handler(async ({ input }) => {
+          const r = await cms.versionsList("metric_sample", input.id);
+          if (!r.ok) return r;
+          return decodeOutput(MetricSampleVersionListCodec, "metricSample.versions.list", r.value);
+        }),
+        get: app.implement(contract.metricSample.versions.get).handler(async ({ input }) => {
+          const r = await cms.versionsGet("metric_sample", input.id, input.versionId);
+          if (!r.ok) return r;
+          return decodeOutput(MetricSampleVersionCodec, "metricSample.versions.get", r.value);
+        }),
+        restore: mutation(contract.metricSample.versions.restore).handler(async ({ input, context }) => {
+          const r = await cms.versionsRestore("metric_sample", input.id, input.versionId, actorFor(context));
+          if (!r.ok) return r;
+          return decodeRecord(MetricSampleCodec, METRICSAMPLE_FIELD_KEYS, "metricSample.versions.restore", r.value);
+        }),
+      },
+      schedulePublish: mutation(contract.metricSample.schedulePublish).handler(async ({ input, context }) => {
+        const r = await cms.schedulePublish("metric_sample", input.id, input.at, actorFor(context));
+        if (!r.ok) return r;
+        return decodeRecord(MetricSampleCodec, METRICSAMPLE_FIELD_KEYS, "metricSample.schedulePublish", r.value);
+      }),
+      scheduleUnpublish: mutation(contract.metricSample.scheduleUnpublish).handler(async ({ input, context }) => {
+        const r = await cms.scheduleUnpublish("metric_sample", input.id, input.at, actorFor(context));
+        if (!r.ok) return r;
+        return decodeRecord(MetricSampleCodec, METRICSAMPLE_FIELD_KEYS, "metricSample.scheduleUnpublish", r.value);
+      }),
+      clearSchedule: mutation(contract.metricSample.clearSchedule).handler(async ({ input, context }) => {
+        const r = await cms.clearSchedule("metric_sample", input.id, actorFor(context));
+        if (!r.ok) return r;
+        return decodeRecord(MetricSampleCodec, METRICSAMPLE_FIELD_KEYS, "metricSample.clearSchedule", r.value);
+      }),
     },
     assets: {
       list: app.implement(contract.assets.list).handler(async ({ input }) => {

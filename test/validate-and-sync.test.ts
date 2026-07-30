@@ -191,6 +191,82 @@ describe("Validation dry-run + sync state", () => {
       expect(state.changedFields).toEqual(["title"]);
     });
 
+    it("does not report an untouched structured_text field as changed (FRICTION #18)", async () => {
+      const rec = await (await jsonRequest(handler, "POST", "/api/records", {
+        modelApiKey: "post",
+        data: {
+          title: "Original",
+          category: "news",
+          body: {
+            value: {
+              schema: "dast",
+              document: {
+                type: "root",
+                children: [
+                  { type: "paragraph", children: [{ type: "span", value: "hello" }] },
+                  { type: "block", item: "b1" },
+                ],
+              },
+            },
+            blocks: { b1: { _type: "callout", text: "Careful" } },
+          },
+        },
+      })).json();
+
+      expect((await jsonRequest(handler, "POST", `/api/records/${rec.id}/publish?modelApiKey=post`)).status).toBe(200);
+
+      // Freshly published, nothing touched: no field differs from the snapshot.
+      const clean = await (
+        await handler(new Request(`http://localhost/api/records/${rec.id}/sync-state?modelApiKey=post`))
+      ).json();
+      expect(clean.changedFields).toEqual([]);
+
+      // Edit the title only — exactly one field is dirty.
+      await jsonRequest(handler, "PATCH", `/api/records/${rec.id}`, {
+        modelApiKey: "post",
+        data: { title: "Edited" },
+      });
+      const dirty = await (
+        await handler(new Request(`http://localhost/api/records/${rec.id}/sync-state?modelApiKey=post`))
+      ).json();
+      expect(dirty.changedFields).toEqual(["title"]);
+    });
+
+    it("reports a structured_text field whose block payload changed", async () => {
+      const rec = await (await jsonRequest(handler, "POST", "/api/records", {
+        modelApiKey: "post",
+        data: {
+          title: "Blocky",
+          body: {
+            value: {
+              schema: "dast",
+              document: { type: "root", children: [{ type: "block", item: "b1" }] },
+            },
+            blocks: { b1: { _type: "callout", text: "Before" } },
+          },
+        },
+      })).json();
+      await jsonRequest(handler, "POST", `/api/records/${rec.id}/publish?modelApiKey=post`);
+
+      await jsonRequest(handler, "PATCH", `/api/records/${rec.id}`, {
+        modelApiKey: "post",
+        data: {
+          body: {
+            value: {
+              schema: "dast",
+              document: { type: "root", children: [{ type: "block", item: "b1" }] },
+            },
+            blocks: { b1: { _type: "callout", text: "After" } },
+          },
+        },
+      });
+
+      const state = await (
+        await handler(new Request(`http://localhost/api/records/${rec.id}/sync-state?modelApiKey=post`))
+      ).json();
+      expect(state.changedFields).toEqual(["body"]);
+    });
+
     it("surfaces scheduled publish/unpublish timestamps", async () => {
       const publishAt = "2099-01-01T00:00:00.000Z";
       const unpublishAt = "2099-06-01T00:00:00.000Z";

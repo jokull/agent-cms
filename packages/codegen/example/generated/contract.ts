@@ -183,6 +183,81 @@ export interface RecordBacklink { modelApiKey: string; recordId: string; fieldAp
 /** Picker-search presentation row. */
 export interface PickerRow { id: string; title: string | null; image: string | null; imageUrl: string | null; status: string | null; updatedAt: string | null; }
 
+// --- Presentation hints (ADR 0006) ---
+
+/**
+ * Which of a model's fields title and illustrate a row. Emitted per model as
+ * `<MODEL>_PRESENTATION` with the guess resolved AT GENERATION TIME, so the
+ * fallback is deterministic and visible in this artifact:
+ *
+ * - `title`: the model's `title_field` hint → else a field named
+ *   title/name/heading/label → else the first required string/text/slug field →
+ *   else the first string/text/slug field → else `null` ("no title field —
+ *   use the record id", which is what picker rows do).
+ * - `image`: the model's `image_preview_field` hint → else the first `media`
+ *   field → else `null`.
+ */
+export interface ModelPresentation {
+  /** The model's api_key. */
+  readonly model: string;
+  /** Field api_key whose value titles a row, or null (fall back to the id). */
+  readonly title: string | null;
+  /** Field api_key holding the row's preview image, or null. */
+  readonly image: string | null;
+}
+
+/** The media-ish shape presentRecord can pull a preview out of. */
+function presentationMedia(value: unknown): { uploadId: string; url: string | null } | null {
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const first = presentationMedia(entry);
+      if (first) return first;
+    }
+    return null;
+  }
+  if (typeof value === "string") return value.length > 0 ? { uploadId: value, url: null } : null;
+  if (typeof value !== "object" || value === null) return null;
+  const uploadId = Reflect.get(value, "upload_id");
+  if (typeof uploadId !== "string") return null;
+  const url = Reflect.get(value, "url");
+  return { uploadId, url: typeof url === "string" ? url : null };
+}
+
+/**
+ * Render any record as the row shape the `search` procedure returns, using the
+ * model's presentation descriptor — so a list view, a picker and a link chip
+ * can share one row component:
+ *
+ *   presentRecord(post, POST_PRESENTATION)  // → { id, title, image, imageUrl, … }
+ *
+ * Same semantics as server-side picker rows: `title` falls back to the record
+ * id when the model has no title field, `image` is the asset id and
+ * `imageUrl` its canonical URL (null until the record round-trips through a
+ * read). Localized fields carry locale maps — pick a locale before presenting.
+ */
+export function presentRecord<T extends { id: string }>(
+  record: T,
+  presentation: ModelPresentation,
+): PickerRow {
+  const rawTitle = presentation.title === null ? null : Reflect.get(record, presentation.title);
+  const media = presentation.image === null ? null : presentationMedia(Reflect.get(record, presentation.image));
+  const status = Reflect.get(record, "status");
+  const updatedAt = Reflect.get(record, "updatedAt");
+  return {
+    id: record.id,
+    title:
+      presentation.title === null
+        ? record.id
+        : typeof rawTitle === "string" && rawTitle.length > 0
+          ? rawTitle
+          : null,
+    image: media === null ? null : media.uploadId,
+    imageUrl: media === null ? null : media.url,
+    status: typeof status === "string" ? status : null,
+    updatedAt: typeof updatedAt === "string" ? updatedAt : null,
+  };
+}
+
 /** Per-id result of a bulk publish/unpublish/delete (data, never a top-level failure). */
 export interface BulkResult { id: string; ok: boolean; error?: string; }
 
@@ -278,6 +353,84 @@ export interface CtaBlockBlock {
   label: string;
   url: string;
 }
+
+// --- Presentation descriptors (ADR 0006; fallbacks resolved at generation time) ---
+
+/** Presentation for post: title = generation-time fallback, image = generation-time fallback. */
+export const POST_PRESENTATION = {
+  model: "post",
+  title: "title",
+  image: "cover",
+} as const satisfies ModelPresentation;
+
+/** Presentation for author: title = generation-time fallback, image = generation-time fallback. */
+export const AUTHOR_PRESENTATION = {
+  model: "author",
+  title: "name",
+  image: "avatar",
+} as const satisfies ModelPresentation;
+
+/** Presentation for site_settings: title = generation-time fallback, image = generation-time fallback. */
+export const SITESETTINGS_PRESENTATION = {
+  model: "site_settings",
+  title: "site_title",
+  image: "logo",
+} as const satisfies ModelPresentation;
+
+/** Presentation for nav_item: title = generation-time fallback, image = no candidate. */
+export const NAVITEM_PRESENTATION = {
+  model: "nav_item",
+  title: "label",
+  image: null,
+} as const satisfies ModelPresentation;
+
+/** Presentation for landing_page: title = explicit hint, image = explicit hint. */
+export const LANDINGPAGE_PRESENTATION = {
+  model: "landing_page",
+  title: "seo_label",
+  image: "secondary_shot",
+} as const satisfies ModelPresentation;
+
+/** Presentation for press_mention: title = generation-time fallback, image = generation-time fallback. */
+export const PRESSMENTION_PRESENTATION = {
+  model: "press_mention",
+  title: "subject",
+  image: "photo",
+} as const satisfies ModelPresentation;
+
+/** Presentation for metric_sample: title = no candidate, image = no candidate. */
+export const METRICSAMPLE_PRESENTATION = {
+  model: "metric_sample",
+  title: null,
+  image: null,
+} as const satisfies ModelPresentation;
+
+/** Presentation for hero_section: title = generation-time fallback, image = generation-time fallback. */
+export const HEROSECTION_PRESENTATION = {
+  model: "hero_section",
+  title: "heading",
+  image: "image",
+} as const satisfies ModelPresentation;
+
+/** Presentation for cta_block: title = generation-time fallback, image = no candidate. */
+export const CTABLOCK_PRESENTATION = {
+  model: "cta_block",
+  title: "label",
+  image: null,
+} as const satisfies ModelPresentation;
+
+/** Every model's presentation descriptor, keyed by api_key. */
+export const PRESENTATION = {
+  "post": POST_PRESENTATION,
+  "author": AUTHOR_PRESENTATION,
+  "site_settings": SITESETTINGS_PRESENTATION,
+  "nav_item": NAVITEM_PRESENTATION,
+  "landing_page": LANDINGPAGE_PRESENTATION,
+  "press_mention": PRESSMENTION_PRESENTATION,
+  "metric_sample": METRICSAMPLE_PRESENTATION,
+  "hero_section": HEROSECTION_PRESENTATION,
+  "cta_block": CTABLOCK_PRESENTATION,
+} as const satisfies Record<string, ModelPresentation>;
 
 /** structured_text envelope for post.content */
 export interface PostContentEnvelope {
@@ -483,6 +636,153 @@ export interface NavItemFilter {
 
 export type NavItemOrderBy = "label_ASC" | "label_DESC" | "url_ASC" | "url_DESC" | "id_ASC" | "id_DESC" | "_status_ASC" | "_status_DESC" | "_position_ASC" | "_position_DESC" | "_createdAt_ASC" | "_createdAt_DESC" | "_updatedAt_ASC" | "_updatedAt_DESC" | "_publishedAt_ASC" | "_publishedAt_DESC" | "_firstPublishedAt_ASC" | "_firstPublishedAt_DESC";
 
+/** Landing page (landing_page) */
+export const LandingPageCodec = wire.object({
+  id: wire.string,
+  status: wire.string,
+  createdAt: wire.union([wire.string, wire.null] as const),
+  updatedAt: wire.union([wire.string, wire.null] as const),
+  publishedAt: wire.union([wire.string, wire.null] as const),
+  title: wire.string,
+  seo_label: wire.union([wire.string, wire.null] as const),
+  hero_shot: wire.union([wire.serializable<MediaRead>(), wire.null] as const), // read: asset + canonical url · write: asset id or descriptor
+  secondary_shot: wire.union([wire.serializable<MediaRead>(), wire.null] as const), // read: asset + canonical url · write: asset id or descriptor
+});
+export type LandingPage = InputOf<typeof LandingPageCodec>;
+
+export const LandingPageCreateInput = wire.object({
+  title: wire.string,
+  seo_label: wire.optional(wire.string),
+  hero_shot: wire.optional(wire.serializable<MediaValue>()),
+  secondary_shot: wire.optional(wire.serializable<MediaValue>()),
+});
+export type CreateLandingPage = InputOf<typeof LandingPageCreateInput>;
+
+export const LandingPageUpdateInput = wire.object({
+  title: wire.optional(wire.union([wire.string, wire.null] as const)),
+  seo_label: wire.optional(wire.union([wire.string, wire.null] as const)),
+  hero_shot: wire.optional(wire.union([wire.serializable<MediaValue>(), wire.null] as const)),
+  secondary_shot: wire.optional(wire.union([wire.serializable<MediaValue>(), wire.null] as const)),
+});
+export type UpdateLandingPage = InputOf<typeof LandingPageUpdateInput>;
+
+export const LANDINGPAGE_FIELD_KEYS = ["title", "seo_label", "hero_shot", "secondary_shot"] as const;
+
+export const LandingPageVersionCodec = wire.serializable<VersionOf<LandingPage>>();
+export const LandingPageVersionListCodec = wire.array(LandingPageVersionCodec);
+
+export interface LandingPageFilter {
+  id?: StringFilter;
+  title?: StringFilter;
+  seo_label?: StringFilter;
+  hero_shot?: MediaFilter;
+  secondary_shot?: MediaFilter;
+  _status?: StatusFilter;
+  _createdAt?: DateFilter;
+  _updatedAt?: DateFilter;
+  _publishedAt?: DateFilter;
+  _firstPublishedAt?: DateFilter;
+  _position?: NumberFilter;
+  AND?: readonly LandingPageFilter[];
+  OR?: readonly LandingPageFilter[];
+}
+
+export type LandingPageOrderBy = "title_ASC" | "title_DESC" | "seo_label_ASC" | "seo_label_DESC" | "id_ASC" | "id_DESC" | "_status_ASC" | "_status_DESC" | "_position_ASC" | "_position_DESC" | "_createdAt_ASC" | "_createdAt_DESC" | "_updatedAt_ASC" | "_updatedAt_DESC" | "_publishedAt_ASC" | "_publishedAt_DESC" | "_firstPublishedAt_ASC" | "_firstPublishedAt_DESC";
+
+/** Press mention (press_mention) */
+export const PressMentionCodec = wire.object({
+  id: wire.string,
+  status: wire.string,
+  createdAt: wire.union([wire.string, wire.null] as const),
+  updatedAt: wire.union([wire.string, wire.null] as const),
+  publishedAt: wire.union([wire.string, wire.null] as const),
+  code: wire.union([wire.string, wire.null] as const),
+  subject: wire.string,
+  photo: wire.union([wire.serializable<MediaRead>(), wire.null] as const), // read: asset + canonical url · write: asset id or descriptor
+});
+export type PressMention = InputOf<typeof PressMentionCodec>;
+
+export const PressMentionCreateInput = wire.object({
+  code: wire.optional(wire.string),
+  subject: wire.string,
+  photo: wire.optional(wire.serializable<MediaValue>()),
+});
+export type CreatePressMention = InputOf<typeof PressMentionCreateInput>;
+
+export const PressMentionUpdateInput = wire.object({
+  code: wire.optional(wire.union([wire.string, wire.null] as const)),
+  subject: wire.optional(wire.union([wire.string, wire.null] as const)),
+  photo: wire.optional(wire.union([wire.serializable<MediaValue>(), wire.null] as const)),
+});
+export type UpdatePressMention = InputOf<typeof PressMentionUpdateInput>;
+
+export const PRESSMENTION_FIELD_KEYS = ["code", "subject", "photo"] as const;
+
+export const PressMentionVersionCodec = wire.serializable<VersionOf<PressMention>>();
+export const PressMentionVersionListCodec = wire.array(PressMentionVersionCodec);
+
+export interface PressMentionFilter {
+  id?: StringFilter;
+  code?: StringFilter;
+  subject?: StringFilter;
+  photo?: MediaFilter;
+  _status?: StatusFilter;
+  _createdAt?: DateFilter;
+  _updatedAt?: DateFilter;
+  _publishedAt?: DateFilter;
+  _firstPublishedAt?: DateFilter;
+  _position?: NumberFilter;
+  AND?: readonly PressMentionFilter[];
+  OR?: readonly PressMentionFilter[];
+}
+
+export type PressMentionOrderBy = "code_ASC" | "code_DESC" | "subject_ASC" | "subject_DESC" | "id_ASC" | "id_DESC" | "_status_ASC" | "_status_DESC" | "_position_ASC" | "_position_DESC" | "_createdAt_ASC" | "_createdAt_DESC" | "_updatedAt_ASC" | "_updatedAt_DESC" | "_publishedAt_ASC" | "_publishedAt_DESC" | "_firstPublishedAt_ASC" | "_firstPublishedAt_DESC";
+
+/** Metric sample (metric_sample) */
+export const MetricSampleCodec = wire.object({
+  id: wire.string,
+  status: wire.string,
+  createdAt: wire.union([wire.string, wire.null] as const),
+  updatedAt: wire.union([wire.string, wire.null] as const),
+  publishedAt: wire.union([wire.string, wire.null] as const),
+  value: wire.finiteNumber,
+  captured_at: wire.union([wire.string, wire.null] as const), // ISO datetime
+});
+export type MetricSample = InputOf<typeof MetricSampleCodec>;
+
+export const MetricSampleCreateInput = wire.object({
+  value: wire.finiteNumber,
+  captured_at: wire.optional(wire.string),
+});
+export type CreateMetricSample = InputOf<typeof MetricSampleCreateInput>;
+
+export const MetricSampleUpdateInput = wire.object({
+  value: wire.optional(wire.union([wire.finiteNumber, wire.null] as const)),
+  captured_at: wire.optional(wire.union([wire.string, wire.null] as const)),
+});
+export type UpdateMetricSample = InputOf<typeof MetricSampleUpdateInput>;
+
+export const METRICSAMPLE_FIELD_KEYS = ["value", "captured_at"] as const;
+
+export const MetricSampleVersionCodec = wire.serializable<VersionOf<MetricSample>>();
+export const MetricSampleVersionListCodec = wire.array(MetricSampleVersionCodec);
+
+export interface MetricSampleFilter {
+  id?: StringFilter;
+  value?: NumberFilter;
+  captured_at?: DateFilter;
+  _status?: StatusFilter;
+  _createdAt?: DateFilter;
+  _updatedAt?: DateFilter;
+  _publishedAt?: DateFilter;
+  _firstPublishedAt?: DateFilter;
+  _position?: NumberFilter;
+  AND?: readonly MetricSampleFilter[];
+  OR?: readonly MetricSampleFilter[];
+}
+
+export type MetricSampleOrderBy = "value_ASC" | "value_DESC" | "captured_at_ASC" | "captured_at_DESC" | "id_ASC" | "id_DESC" | "_status_ASC" | "_status_DESC" | "_position_ASC" | "_position_DESC" | "_createdAt_ASC" | "_createdAt_DESC" | "_updatedAt_ASC" | "_updatedAt_DESC" | "_publishedAt_ASC" | "_publishedAt_DESC" | "_firstPublishedAt_ASC" | "_firstPublishedAt_DESC";
+
 /**
  * Contract fragment. Spread into the host's own contract:
  *   app.contract({ ...cmsContract(app, { mutationErrors: {} }), ...hostProcedures })
@@ -665,6 +965,159 @@ export function cmsContract<C, MErrors extends ErrorDefinitionMap>(
       reorder: app.procedure().input(IdsInput).output(wire.object({ reordered: wire.integer() }))
         .errors(pickErrors(cmsErrors, "schemaDrift")).errors(mutationErrors).affects(navItemList).mutation(),
     };
+    const landingPageList = app.procedure().input(wire.object({
+      filter: wire.optional(wire.serializable<LandingPageFilter>()),
+      orderBy: wire.optional(wire.array(wire.serializable<LandingPageOrderBy>())),
+      page: wire.optional(PageInput),
+      status: wire.optional(StatusInput),
+    })).output(wire.object({ records: wire.array(LandingPageCodec), total: wire.integer() }))
+      .errors(pickErrors(cmsErrors, "schemaDrift")).query();
+    const landingPage = {
+      list: landingPageList,
+      byId: app.procedure().input(IdInput).output(LandingPageCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "schemaDrift")).query(),
+      search: app.procedure().input(wire.object({ q: wire.string, page: wire.optional(PageInput) })).output(PickerRowsCodec)
+        .errors(pickErrors(cmsErrors, "schemaDrift")).query(),
+      create: app.procedure().input(wire.object({ data: LandingPageCreateInput })).output(LandingPageCodec)
+        .errors(pickErrors(cmsErrors, "validationFailed", "duplicate", "schemaDrift")).errors(mutationErrors).affects(landingPageList).mutation(),
+      update: app.procedure().input(wire.object({ id: wire.string, data: LandingPageUpdateInput })).output(LandingPageCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "validationFailed", "duplicate", "schemaDrift")).errors(mutationErrors).affects(landingPageList).mutation(),
+      delete: app.procedure().input(IdInput).output(wire.object({ id: wire.string }))
+        .errors(pickErrors(cmsErrors, "recordNotFound", "referenceConflict", "schemaDrift")).errors(mutationErrors).affects(landingPageList).mutation(),
+      duplicate: app.procedure().input(IdInput).output(LandingPageCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "schemaDrift")).errors(mutationErrors).affects(landingPageList).mutation(),
+      publish: app.procedure().input(IdInput).output(LandingPageCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "validationFailed", "schemaDrift")).errors(mutationErrors).affects(landingPageList).mutation(),
+      unpublish: app.procedure().input(IdInput).output(LandingPageCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "validationFailed", "schemaDrift")).errors(mutationErrors).affects(landingPageList).mutation(),
+      publishMany: app.procedure().input(IdsInput).output(BulkResultsCodec).errors(mutationErrors).affects(landingPageList).mutation(),
+      unpublishMany: app.procedure().input(IdsInput).output(BulkResultsCodec).errors(mutationErrors).affects(landingPageList).mutation(),
+      deleteMany: app.procedure().input(IdsInput).output(BulkResultsCodec).errors(mutationErrors).affects(landingPageList).mutation(),
+      links: app.procedure().input(IdInput).output(BacklinksCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "schemaDrift")).query(),
+      validate: app.procedure().input(wire.object({ data: wire.serializable<Partial<CreateLandingPage>>() })).output(ValidCodec)
+        .errors(pickErrors(cmsErrors, "validationFailed", "schemaDrift")).query(),
+      validateUpdate: app.procedure().input(wire.object({ id: wire.string, data: LandingPageUpdateInput })).output(ValidCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "validationFailed", "schemaDrift")).query(),
+      syncState: app.procedure().input(IdInput).output(SyncStateCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "schemaDrift")).query(),
+      versions: {
+        list: app.procedure().input(IdInput).output(LandingPageVersionListCodec)
+          .errors(pickErrors(cmsErrors, "recordNotFound", "schemaDrift")).query(),
+        get: app.procedure().input(wire.object({ id: wire.string, versionId: wire.string })).output(LandingPageVersionCodec)
+          .errors(pickErrors(cmsErrors, "recordNotFound", "schemaDrift")).query(),
+        restore: app.procedure().input(wire.object({ id: wire.string, versionId: wire.string })).output(LandingPageCodec)
+          .errors(pickErrors(cmsErrors, "recordNotFound", "schemaDrift")).errors(mutationErrors).affects(landingPageList).mutation(),
+      },
+      schedulePublish: app.procedure().input(wire.object({ id: wire.string, at: wire.string })).output(LandingPageCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "validationFailed", "schemaDrift")).errors(mutationErrors).affects(landingPageList).mutation(),
+      scheduleUnpublish: app.procedure().input(wire.object({ id: wire.string, at: wire.string })).output(LandingPageCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "validationFailed", "schemaDrift")).errors(mutationErrors).affects(landingPageList).mutation(),
+      clearSchedule: app.procedure().input(IdInput).output(LandingPageCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "schemaDrift")).errors(mutationErrors).affects(landingPageList).mutation(),
+    };
+    const pressMentionList = app.procedure().input(wire.object({
+      filter: wire.optional(wire.serializable<PressMentionFilter>()),
+      orderBy: wire.optional(wire.array(wire.serializable<PressMentionOrderBy>())),
+      page: wire.optional(PageInput),
+      status: wire.optional(StatusInput),
+    })).output(wire.object({ records: wire.array(PressMentionCodec), total: wire.integer() }))
+      .errors(pickErrors(cmsErrors, "schemaDrift")).query();
+    const pressMention = {
+      list: pressMentionList,
+      byId: app.procedure().input(IdInput).output(PressMentionCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "schemaDrift")).query(),
+      search: app.procedure().input(wire.object({ q: wire.string, page: wire.optional(PageInput) })).output(PickerRowsCodec)
+        .errors(pickErrors(cmsErrors, "schemaDrift")).query(),
+      create: app.procedure().input(wire.object({ data: PressMentionCreateInput })).output(PressMentionCodec)
+        .errors(pickErrors(cmsErrors, "validationFailed", "duplicate", "schemaDrift")).errors(mutationErrors).affects(pressMentionList).mutation(),
+      update: app.procedure().input(wire.object({ id: wire.string, data: PressMentionUpdateInput })).output(PressMentionCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "validationFailed", "duplicate", "schemaDrift")).errors(mutationErrors).affects(pressMentionList).mutation(),
+      delete: app.procedure().input(IdInput).output(wire.object({ id: wire.string }))
+        .errors(pickErrors(cmsErrors, "recordNotFound", "referenceConflict", "schemaDrift")).errors(mutationErrors).affects(pressMentionList).mutation(),
+      duplicate: app.procedure().input(IdInput).output(PressMentionCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "schemaDrift")).errors(mutationErrors).affects(pressMentionList).mutation(),
+      publish: app.procedure().input(IdInput).output(PressMentionCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "validationFailed", "schemaDrift")).errors(mutationErrors).affects(pressMentionList).mutation(),
+      unpublish: app.procedure().input(IdInput).output(PressMentionCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "validationFailed", "schemaDrift")).errors(mutationErrors).affects(pressMentionList).mutation(),
+      publishMany: app.procedure().input(IdsInput).output(BulkResultsCodec).errors(mutationErrors).affects(pressMentionList).mutation(),
+      unpublishMany: app.procedure().input(IdsInput).output(BulkResultsCodec).errors(mutationErrors).affects(pressMentionList).mutation(),
+      deleteMany: app.procedure().input(IdsInput).output(BulkResultsCodec).errors(mutationErrors).affects(pressMentionList).mutation(),
+      links: app.procedure().input(IdInput).output(BacklinksCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "schemaDrift")).query(),
+      validate: app.procedure().input(wire.object({ data: wire.serializable<Partial<CreatePressMention>>() })).output(ValidCodec)
+        .errors(pickErrors(cmsErrors, "validationFailed", "schemaDrift")).query(),
+      validateUpdate: app.procedure().input(wire.object({ id: wire.string, data: PressMentionUpdateInput })).output(ValidCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "validationFailed", "schemaDrift")).query(),
+      syncState: app.procedure().input(IdInput).output(SyncStateCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "schemaDrift")).query(),
+      versions: {
+        list: app.procedure().input(IdInput).output(PressMentionVersionListCodec)
+          .errors(pickErrors(cmsErrors, "recordNotFound", "schemaDrift")).query(),
+        get: app.procedure().input(wire.object({ id: wire.string, versionId: wire.string })).output(PressMentionVersionCodec)
+          .errors(pickErrors(cmsErrors, "recordNotFound", "schemaDrift")).query(),
+        restore: app.procedure().input(wire.object({ id: wire.string, versionId: wire.string })).output(PressMentionCodec)
+          .errors(pickErrors(cmsErrors, "recordNotFound", "schemaDrift")).errors(mutationErrors).affects(pressMentionList).mutation(),
+      },
+      schedulePublish: app.procedure().input(wire.object({ id: wire.string, at: wire.string })).output(PressMentionCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "validationFailed", "schemaDrift")).errors(mutationErrors).affects(pressMentionList).mutation(),
+      scheduleUnpublish: app.procedure().input(wire.object({ id: wire.string, at: wire.string })).output(PressMentionCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "validationFailed", "schemaDrift")).errors(mutationErrors).affects(pressMentionList).mutation(),
+      clearSchedule: app.procedure().input(IdInput).output(PressMentionCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "schemaDrift")).errors(mutationErrors).affects(pressMentionList).mutation(),
+    };
+    const metricSampleList = app.procedure().input(wire.object({
+      filter: wire.optional(wire.serializable<MetricSampleFilter>()),
+      orderBy: wire.optional(wire.array(wire.serializable<MetricSampleOrderBy>())),
+      page: wire.optional(PageInput),
+      status: wire.optional(StatusInput),
+    })).output(wire.object({ records: wire.array(MetricSampleCodec), total: wire.integer() }))
+      .errors(pickErrors(cmsErrors, "schemaDrift")).query();
+    const metricSample = {
+      list: metricSampleList,
+      byId: app.procedure().input(IdInput).output(MetricSampleCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "schemaDrift")).query(),
+      search: app.procedure().input(wire.object({ q: wire.string, page: wire.optional(PageInput) })).output(PickerRowsCodec)
+        .errors(pickErrors(cmsErrors, "schemaDrift")).query(),
+      create: app.procedure().input(wire.object({ data: MetricSampleCreateInput })).output(MetricSampleCodec)
+        .errors(pickErrors(cmsErrors, "validationFailed", "duplicate", "schemaDrift")).errors(mutationErrors).affects(metricSampleList).mutation(),
+      update: app.procedure().input(wire.object({ id: wire.string, data: MetricSampleUpdateInput })).output(MetricSampleCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "validationFailed", "duplicate", "schemaDrift")).errors(mutationErrors).affects(metricSampleList).mutation(),
+      delete: app.procedure().input(IdInput).output(wire.object({ id: wire.string }))
+        .errors(pickErrors(cmsErrors, "recordNotFound", "referenceConflict", "schemaDrift")).errors(mutationErrors).affects(metricSampleList).mutation(),
+      duplicate: app.procedure().input(IdInput).output(MetricSampleCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "schemaDrift")).errors(mutationErrors).affects(metricSampleList).mutation(),
+      publish: app.procedure().input(IdInput).output(MetricSampleCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "validationFailed", "schemaDrift")).errors(mutationErrors).affects(metricSampleList).mutation(),
+      unpublish: app.procedure().input(IdInput).output(MetricSampleCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "validationFailed", "schemaDrift")).errors(mutationErrors).affects(metricSampleList).mutation(),
+      publishMany: app.procedure().input(IdsInput).output(BulkResultsCodec).errors(mutationErrors).affects(metricSampleList).mutation(),
+      unpublishMany: app.procedure().input(IdsInput).output(BulkResultsCodec).errors(mutationErrors).affects(metricSampleList).mutation(),
+      deleteMany: app.procedure().input(IdsInput).output(BulkResultsCodec).errors(mutationErrors).affects(metricSampleList).mutation(),
+      links: app.procedure().input(IdInput).output(BacklinksCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "schemaDrift")).query(),
+      validate: app.procedure().input(wire.object({ data: wire.serializable<Partial<CreateMetricSample>>() })).output(ValidCodec)
+        .errors(pickErrors(cmsErrors, "validationFailed", "schemaDrift")).query(),
+      validateUpdate: app.procedure().input(wire.object({ id: wire.string, data: MetricSampleUpdateInput })).output(ValidCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "validationFailed", "schemaDrift")).query(),
+      syncState: app.procedure().input(IdInput).output(SyncStateCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "schemaDrift")).query(),
+      versions: {
+        list: app.procedure().input(IdInput).output(MetricSampleVersionListCodec)
+          .errors(pickErrors(cmsErrors, "recordNotFound", "schemaDrift")).query(),
+        get: app.procedure().input(wire.object({ id: wire.string, versionId: wire.string })).output(MetricSampleVersionCodec)
+          .errors(pickErrors(cmsErrors, "recordNotFound", "schemaDrift")).query(),
+        restore: app.procedure().input(wire.object({ id: wire.string, versionId: wire.string })).output(MetricSampleCodec)
+          .errors(pickErrors(cmsErrors, "recordNotFound", "schemaDrift")).errors(mutationErrors).affects(metricSampleList).mutation(),
+      },
+      schedulePublish: app.procedure().input(wire.object({ id: wire.string, at: wire.string })).output(MetricSampleCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "validationFailed", "schemaDrift")).errors(mutationErrors).affects(metricSampleList).mutation(),
+      scheduleUnpublish: app.procedure().input(wire.object({ id: wire.string, at: wire.string })).output(MetricSampleCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "validationFailed", "schemaDrift")).errors(mutationErrors).affects(metricSampleList).mutation(),
+      clearSchedule: app.procedure().input(IdInput).output(MetricSampleCodec)
+        .errors(pickErrors(cmsErrors, "recordNotFound", "schemaDrift")).errors(mutationErrors).affects(metricSampleList).mutation(),
+    };
     const assetsList = app.procedure()
       .input(wire.object({ q: wire.optional(wire.string), page: wire.optional(PageInput), orderBy: wire.optional(wire.array(wire.string)) }))
       .output(AssetListCodec).errors(pickErrors(cmsErrors, "schemaDrift")).query();
@@ -687,5 +1140,5 @@ export function cmsContract<C, MErrors extends ErrorDefinitionMap>(
       usages: app.procedure().input(IdInput).output(AssetUsagesCodec)
         .errors(pickErrors(cmsErrors, "recordNotFound")).query(),
     };
-  return { post, author, siteSettings, navItem, assets };
+  return { post, author, siteSettings, navItem, landingPage, pressMention, metricSample, assets };
 }

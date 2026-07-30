@@ -183,6 +183,81 @@ export interface RecordBacklink { modelApiKey: string; recordId: string; fieldAp
 /** Picker-search presentation row. */
 export interface PickerRow { id: string; title: string | null; image: string | null; imageUrl: string | null; status: string | null; updatedAt: string | null; }
 
+// --- Presentation hints (ADR 0006) ---
+
+/**
+ * Which of a model's fields title and illustrate a row. Emitted per model as
+ * `<MODEL>_PRESENTATION` with the guess resolved AT GENERATION TIME, so the
+ * fallback is deterministic and visible in this artifact:
+ *
+ * - `title`: the model's `title_field` hint → else a field named
+ *   title/name/heading/label → else the first required string/text/slug field →
+ *   else the first string/text/slug field → else `null` ("no title field —
+ *   use the record id", which is what picker rows do).
+ * - `image`: the model's `image_preview_field` hint → else the first `media`
+ *   field → else `null`.
+ */
+export interface ModelPresentation {
+  /** The model's api_key. */
+  readonly model: string;
+  /** Field api_key whose value titles a row, or null (fall back to the id). */
+  readonly title: string | null;
+  /** Field api_key holding the row's preview image, or null. */
+  readonly image: string | null;
+}
+
+/** The media-ish shape presentRecord can pull a preview out of. */
+function presentationMedia(value: unknown): { uploadId: string; url: string | null } | null {
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const first = presentationMedia(entry);
+      if (first) return first;
+    }
+    return null;
+  }
+  if (typeof value === "string") return value.length > 0 ? { uploadId: value, url: null } : null;
+  if (typeof value !== "object" || value === null) return null;
+  const uploadId = Reflect.get(value, "upload_id");
+  if (typeof uploadId !== "string") return null;
+  const url = Reflect.get(value, "url");
+  return { uploadId, url: typeof url === "string" ? url : null };
+}
+
+/**
+ * Render any record as the row shape the `search` procedure returns, using the
+ * model's presentation descriptor — so a list view, a picker and a link chip
+ * can share one row component:
+ *
+ *   presentRecord(post, POST_PRESENTATION)  // → { id, title, image, imageUrl, … }
+ *
+ * Same semantics as server-side picker rows: `title` falls back to the record
+ * id when the model has no title field, `image` is the asset id and
+ * `imageUrl` its canonical URL (null until the record round-trips through a
+ * read). Localized fields carry locale maps — pick a locale before presenting.
+ */
+export function presentRecord<T extends { id: string }>(
+  record: T,
+  presentation: ModelPresentation,
+): PickerRow {
+  const rawTitle = presentation.title === null ? null : Reflect.get(record, presentation.title);
+  const media = presentation.image === null ? null : presentationMedia(Reflect.get(record, presentation.image));
+  const status = Reflect.get(record, "status");
+  const updatedAt = Reflect.get(record, "updatedAt");
+  return {
+    id: record.id,
+    title:
+      presentation.title === null
+        ? record.id
+        : typeof rawTitle === "string" && rawTitle.length > 0
+          ? rawTitle
+          : null,
+    image: media === null ? null : media.uploadId,
+    imageUrl: media === null ? null : media.url,
+    status: typeof status === "string" ? status : null,
+    updatedAt: typeof updatedAt === "string" ? updatedAt : null,
+  };
+}
+
 /** Per-id result of a bulk publish/unpublish/delete (data, never a top-level failure). */
 export interface BulkResult { id: string; ok: boolean; error?: string; }
 
@@ -308,6 +383,84 @@ export interface FeatureGridBlock {
   heading: string;
   features?: { value: DastDocument; blocks: Record<string, unknown> };
 }
+
+// --- Presentation descriptors (ADR 0006; fallbacks resolved at generation time) ---
+
+/** Presentation for site_settings: title = generation-time fallback, image = generation-time fallback. */
+export const SITESETTINGS_PRESENTATION = {
+  model: "site_settings",
+  title: "site_name",
+  image: "logo",
+} as const satisfies ModelPresentation;
+
+/** Presentation for author: title = generation-time fallback, image = generation-time fallback. */
+export const AUTHOR_PRESENTATION = {
+  model: "author",
+  title: "name",
+  image: "headshot",
+} as const satisfies ModelPresentation;
+
+/** Presentation for category: title = generation-time fallback, image = generation-time fallback. */
+export const CATEGORY_PRESENTATION = {
+  model: "category",
+  title: "name",
+  image: "cover_image",
+} as const satisfies ModelPresentation;
+
+/** Presentation for post: title = generation-time fallback, image = generation-time fallback. */
+export const POST_PRESENTATION = {
+  model: "post",
+  title: "title",
+  image: "cover_image",
+} as const satisfies ModelPresentation;
+
+/** Presentation for hero_section: title = generation-time fallback, image = generation-time fallback. */
+export const HEROSECTION_PRESENTATION = {
+  model: "hero_section",
+  title: "headline",
+  image: "background_image",
+} as const satisfies ModelPresentation;
+
+/** Presentation for code_block: title = generation-time fallback, image = no candidate. */
+export const CODEBLOCK_PRESENTATION = {
+  model: "code_block",
+  title: "code",
+  image: null,
+} as const satisfies ModelPresentation;
+
+/** Presentation for image_gallery: title = generation-time fallback, image = no candidate. */
+export const IMAGEGALLERY_PRESENTATION = {
+  model: "image_gallery",
+  title: "caption",
+  image: null,
+} as const satisfies ModelPresentation;
+
+/** Presentation for feature_card: title = generation-time fallback, image = no candidate. */
+export const FEATURECARD_PRESENTATION = {
+  model: "feature_card",
+  title: "title",
+  image: null,
+} as const satisfies ModelPresentation;
+
+/** Presentation for feature_grid: title = generation-time fallback, image = no candidate. */
+export const FEATUREGRID_PRESENTATION = {
+  model: "feature_grid",
+  title: "heading",
+  image: null,
+} as const satisfies ModelPresentation;
+
+/** Every model's presentation descriptor, keyed by api_key. */
+export const PRESENTATION = {
+  "site_settings": SITESETTINGS_PRESENTATION,
+  "author": AUTHOR_PRESENTATION,
+  "category": CATEGORY_PRESENTATION,
+  "post": POST_PRESENTATION,
+  "hero_section": HEROSECTION_PRESENTATION,
+  "code_block": CODEBLOCK_PRESENTATION,
+  "image_gallery": IMAGEGALLERY_PRESENTATION,
+  "feature_card": FEATURECARD_PRESENTATION,
+  "feature_grid": FEATUREGRID_PRESENTATION,
+} as const satisfies Record<string, ModelPresentation>;
 
 /** Site Settings (site_settings) */
 export const SiteSettingsCodec = wire.object({

@@ -1995,14 +1995,23 @@ export function queryRecords(modelApiKey: string, opts: QueryRecordsOptions) {
 const TITLE_FIELD_NAMES: ReadonlySet<string> = new Set(["title", "name", "heading", "label"]);
 const STRING_FIELD_TYPES: ReadonlySet<string> = new Set(["string", "text", "slug"]);
 
+/**
+ * Same order codegen bakes into each model's `<MODEL>_PRESENTATION`
+ * (packages/codegen/src/generate.ts `resolvePresentation`), so a generated row
+ * and a picker row title the same record identically: explicit hint → a field
+ * named title/name/heading/label → the first required string → the first
+ * string → the record id (codegen emits `null` there, meaning "use the id").
+ */
 function resolveTitleFieldKey(model: ModelRow, fields: readonly ParsedFieldRow[]): string {
   if (model.title_field && fields.some((f) => f.api_key === model.title_field)) {
     return model.title_field;
   }
   const named = fields.find((f) => TITLE_FIELD_NAMES.has(f.api_key));
   if (named) return named.api_key;
-  const stringField = fields.find((f) => STRING_FIELD_TYPES.has(f.field_type));
-  if (stringField) return stringField.api_key;
+  const strings = fields.filter((f) => STRING_FIELD_TYPES.has(f.field_type));
+  const requiredString = strings.find((f) => isRequired(f.validators));
+  if (requiredString) return requiredString.api_key;
+  if (strings.length > 0) return strings[0].api_key;
   return "id";
 }
 
@@ -2616,11 +2625,12 @@ export interface RecordSyncState {
  * never published (no snapshot) reports every field that currently holds a
  * meaningful value.
  *
- * Boundary note: the published snapshot stores *materialized* structured_text /
- * rich_text (block content inlined) whereas the live column stores the raw
- * DAST / block-id list, so those two field types can read as "changed" even when
- * their content is unchanged. Scalar fields diff exactly. This mirrors how the
- * snapshot is built at publish time and is a known, documented limitation.
+ * structured_text / rich_text are compared like-for-like: the published
+ * snapshot stores those fields *materialized* (block payloads inlined) while the
+ * live column stores raw DAST plus block ids, so the record is materialized with
+ * the very function publish uses before diffing. Without it every record with a
+ * structured_text field read as permanently changed (examples/admin FRICTION #18).
+ * The extra work is skipped entirely for models with no such field.
  */
 export function getSyncState(modelApiKey: string, id: string) {
   return Effect.gen(function* () {
@@ -2637,9 +2647,22 @@ export function getSyncState(modelApiKey: string, id: string) {
     const decodedSnapshot = snapshotComparable(existing._published_snapshot);
     const snapshotRecord = isJsonRecord(decodedSnapshot) ? decodedSnapshot : null;
 
+    // Compare like-for-like: the snapshot holds materialized structured_text /
+    // rich_text, so materialize the live row the same way before diffing.
+    const hasMaterializedField = modelFields.some(
+      (field) => field.field_type === "structured_text" || field.field_type === "rich_text",
+    );
+    const comparableRow = hasMaterializedField
+      ? yield* materializeRecordStructuredTextFields({
+          modelApiKey,
+          record: existing,
+          fields: modelFields,
+        })
+      : existing;
+
     const changedFields: string[] = [];
     for (const field of modelFields) {
-      const current = snapshotComparable(existing[field.api_key]);
+      const current = snapshotComparable(comparableRow[field.api_key]);
       if (snapshotRecord === null) {
         if (current !== null && current !== "") changedFields.push(field.api_key);
       } else {

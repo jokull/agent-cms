@@ -236,6 +236,134 @@
       ]
     },
     {
+      "name": "Landing page",
+      "apiKey": "landing_page",
+      "isBlock": false,
+      "singleton": false,
+      "sortable": false,
+      "tree": false,
+      "hasDraft": true,
+      "ordering": null,
+      "canonicalPathTemplate": null,
+      "titleField": "seo_label",
+      "imagePreviewField": "secondary_shot",
+      "fields": [
+        {
+          "label": "Title",
+          "apiKey": "title",
+          "fieldType": "string",
+          "position": 1,
+          "localized": false,
+          "validators": {
+            "required": {}
+          },
+          "hint": null
+        },
+        {
+          "label": "Seo label",
+          "apiKey": "seo_label",
+          "fieldType": "string",
+          "position": 2,
+          "localized": false,
+          "validators": {},
+          "hint": null
+        },
+        {
+          "label": "Hero shot",
+          "apiKey": "hero_shot",
+          "fieldType": "media",
+          "position": 3,
+          "localized": false,
+          "validators": {},
+          "hint": null
+        },
+        {
+          "label": "Secondary shot",
+          "apiKey": "secondary_shot",
+          "fieldType": "media",
+          "position": 4,
+          "localized": false,
+          "validators": {},
+          "hint": null
+        }
+      ]
+    },
+    {
+      "name": "Press mention",
+      "apiKey": "press_mention",
+      "isBlock": false,
+      "singleton": false,
+      "sortable": false,
+      "tree": false,
+      "hasDraft": true,
+      "ordering": null,
+      "canonicalPathTemplate": null,
+      "fields": [
+        {
+          "label": "Code",
+          "apiKey": "code",
+          "fieldType": "string",
+          "position": 1,
+          "localized": false,
+          "validators": {},
+          "hint": null
+        },
+        {
+          "label": "Subject",
+          "apiKey": "subject",
+          "fieldType": "string",
+          "position": 2,
+          "localized": false,
+          "validators": {
+            "required": {}
+          },
+          "hint": null
+        },
+        {
+          "label": "Photo",
+          "apiKey": "photo",
+          "fieldType": "media",
+          "position": 3,
+          "localized": false,
+          "validators": {},
+          "hint": null
+        }
+      ]
+    },
+    {
+      "name": "Metric sample",
+      "apiKey": "metric_sample",
+      "isBlock": false,
+      "singleton": false,
+      "sortable": false,
+      "tree": false,
+      "hasDraft": true,
+      "ordering": null,
+      "canonicalPathTemplate": null,
+      "fields": [
+        {
+          "label": "Value",
+          "apiKey": "value",
+          "fieldType": "float",
+          "position": 1,
+          "localized": false,
+          "validators": {
+            "required": {}
+          },
+          "hint": null
+        },
+        {
+          "label": "Captured at",
+          "apiKey": "captured_at",
+          "fieldType": "date_time",
+          "position": 2,
+          "localized": false,
+          "validators": {},
+          "hint": null
+        }
+      ]
+    },
+    {
       "name": "Hero section",
       "apiKey": "hero_section",
       "isBlock": true,

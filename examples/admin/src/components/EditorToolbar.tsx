@@ -2,6 +2,11 @@
  * Host toolbar, built only from `handle.commands` + `useDastEditorState`.
  * Lifted from examples/editor and extended with block insertion and the
  * record-link/inline-record seams.
+ *
+ * Every disabled state comes from the snapshot's reactive `can` cluster, so a
+ * control is greyed out exactly when the command would fail — the mark buttons,
+ * the block-insert buttons and the table actions included. (Was FRICTION.md #20:
+ * `can()` was imperative, so the buttons were always enabled.)
  */
 import type { DastCommands, DastEditorSnapshot, DefaultMark, HeadingNode } from "@agent-cms/editor-react";
 
@@ -61,6 +66,7 @@ export function EditorToolbar({
             key={mark}
             type="button"
             className={s?.marks[mark] ? "is-active" : ""}
+            disabled={s ? !s.can.toggleMark[mark] : true}
             onClick={() => commands.toggleMark(mark)}
           >
             {label}
@@ -136,13 +142,25 @@ export function EditorToolbar({
       </div>
 
       <div className="toolbar__group">
-        <button type="button" onClick={() => onInsertBlock("hero_section")}>
+        <button
+          type="button"
+          disabled={!s?.can.insertBlock}
+          onClick={() => onInsertBlock("hero_section")}
+        >
           + hero
         </button>
-        <button type="button" onClick={() => onInsertBlock("code_block")}>
+        <button
+          type="button"
+          disabled={!s?.can.insertBlock}
+          onClick={() => onInsertBlock("code_block")}
+        >
           + code
         </button>
-        <button type="button" onClick={() => onInsertBlock("image_gallery")}>
+        <button
+          type="button"
+          disabled={!s?.can.insertBlock}
+          onClick={() => onInsertBlock("image_gallery")}
+        >
           + gallery
         </button>
       </div>
@@ -151,19 +169,19 @@ export function EditorToolbar({
         <button type="button" onClick={() => commands.insertTable(2, 2)}>
           Table
         </button>
-        <button type="button" disabled={!s?.inTable} onClick={() => commands.addRowAfter()}>
+        <button type="button" disabled={!s?.can.tableActions} onClick={() => commands.addRowAfter()}>
           +Row
         </button>
-        <button type="button" disabled={!s?.inTable} onClick={() => commands.deleteRow()}>
+        <button type="button" disabled={!s?.can.tableActions} onClick={() => commands.deleteRow()}>
           −Row
         </button>
       </div>
 
       <div className="toolbar__group">
-        <button type="button" disabled={!s?.canUndo} onClick={() => commands.undo()}>
+        <button type="button" disabled={!s?.can.undo} onClick={() => commands.undo()}>
           Undo
         </button>
-        <button type="button" disabled={!s?.canRedo} onClick={() => commands.redo()}>
+        <button type="button" disabled={!s?.can.redo} onClick={() => commands.redo()}>
           Redo
         </button>
       </div>

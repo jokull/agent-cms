@@ -104,7 +104,7 @@ marks — data loss that only doesn't bite here because this field declares none
 
 ---
 
-## #2 — S3 — codegen emits no presentation hints, so a record list cannot render generically
+## #2 — RESOLVED — codegen emits no presentation hints, so a record list cannot render generically
 
 **Tried.** ADR 0006: *"Models carry presentation hints (`title_field`, `image_preview_field`) …
 so record lists, pickers, and link chips can render 'image + title' rows generically. Codegen
@@ -120,6 +120,14 @@ returns full typed records with no indication of which field is the title.
 between "a host list view renders generically" and "every host hand-writes it per model".
 
 **Workaround.** `src/lib/presentation.ts`, hard-coded per model.
+
+**RESOLUTION (BUILDOUT 4 / G3).** Codegen emits `<MODEL>_PRESENTATION`
+(`{ model, title, image }` field api_keys, `satisfies ModelPresentation`) for every model plus a
+`PRESENTATION` registry keyed by api_key, with the fallback resolved at generation time (hint →
+title/name/heading/label → first required string → first string → null; image hint → first media
+field → null) and a `presentRecord(record, presentation)` helper returning the same `PickerRow`
+shape `search` returns. `PostListPage` renders its rows through it; the hand-rolled
+`postTitle`/per-model map is gone.
 
 **Bears on.** ADR 0006, ticket 06 (entity models).
 
@@ -220,7 +228,7 @@ has in `PostListPage.tsx`.
 
 ---
 
-## #7 — S2 — block insertion is order-sensitive BYO state, and the ordering is subtle
+## #7 — RESOLVED — block insertion is order-sensitive BYO state, and the ordering is subtle
 
 **Tried.** `insertBlock` from a toolbar button: create an id, put the payload in React state,
 call `handle.commands.insertBlock(id)`.
@@ -236,6 +244,14 @@ API says so.
 **Should have.** `handle.commands.insertBlock(payload)` taking the payload and owning the map
 (the toolkit already owns the map for reads), or at minimum
 `handle.setBlocks(next)` so the ref update is explicit and synchronous.
+
+**RESOLUTION (BUILDOUT 4 / G3).** `commands.insertBlock(draft)` takes the payload: the toolkit
+mints the id (or reuses `draft.id`), registers the payload in the map node views read *before*
+inserting the atom, then calls the new `onBlockCreate(id, draft)`. The host's `setState` can land
+whenever React gets to it — the ordering bug is impossible by construction, and the second
+`liveBlocks` ref is gone from `ContentField`. Proven by
+`packages/editor-react/test/hook.test.tsx` ("renders the payload on the first frame…"), which
+asserts no render ever saw an unresolved payload.
 
 **Bears on.** Ticket 13, PLAN.md's own "block insertion is order-sensitive BYO-state".
 
@@ -265,7 +281,7 @@ for the read side one screen earlier in the same file.
 
 ---
 
-## #9 — S2 — `blockView` cannot receive a single host prop
+## #9 — RESOLVED — `blockView` cannot receive a single host prop
 
 **Tried.** An "edit" button on each block card that opens the host's payload editor.
 
@@ -279,6 +295,12 @@ the current locale, a drag handle — must travel through React context.
 
 **Should have.** `blockView: (props: BlockViewProps<Block>) => ReactNode` invoked as a function
 (no identity/memo hazard), or a `blockViewProps` passthrough.
+
+**RESOLUTION (BUILDOUT 4 / G3).** `useDastEditor({ blockView, blockViewProps })`:
+`BlockViewProps<Block, Props>` gained `props`, delivered through a ref so a fresh object every
+render neither rebuilds the extensions nor remounts a node view (tested). `PostBlockView` takes
+`props.edit` directly and `src/components/block-editing.ts` — the context that existed only to
+smuggle one callback — is deleted.
 
 **Bears on.** Ticket 13/15 — this is the "one irreducible component" ADR 0006 promises, and it
 is the one place the host cannot inject anything.
@@ -449,7 +471,7 @@ don't build a "History" panel expecting save history.
 
 ---
 
-## #18 — S2 — `syncState.changedFields` is unusable as shipped
+## #18 — RESOLVED — `syncState.changedFields` is unusable as shipped
 
 **Tried.** A "changed fields" sidebar line and a dirty indicator.
 
@@ -462,6 +484,13 @@ record with any structured_text field is *permanently* dirty, so the field canno
 **Should have.** Compare normalized DAST (or hash the envelope) rather than the serialized
 column. Until then `changedFields` should omit structured_text fields rather than always
 including them — a wrong answer is worse than no answer.
+
+**RESOLUTION (BUILDOUT 4 / G3).** `RecordService.getSyncState` now compares like-for-like: the
+published snapshot stores *materialized* structured_text / rich_text, so the live row is run
+through the same `materializeRecordStructuredTextFields` publish uses before the canonical-JSON
+diff (skipped entirely for models with no such field). A freshly published record reports
+`changedFields: []`; editing the title reports exactly `["title"]`; editing a block payload
+reports the structured_text field. The admin shows a real dirty badge in the editor head.
 
 **Bears on.** ADR 0006, ticket 13.
 
@@ -490,7 +519,7 @@ a defect), ADR 0004.
 
 ---
 
-## #20 — S3 — `can()` is non-reactive and absent from the snapshot
+## #20 — RESOLVED — `can()` is non-reactive and absent from the snapshot
 
 **Tried.** Disable the block-insert buttons when insertion is impossible (the DX shown in
 PLAN.md: `disabled={!s.can.insertBlock}`).
@@ -500,6 +529,13 @@ PLAN.md: `disabled={!s.can.insertBlock}`).
 is not implementable. This app's block buttons are always enabled, which is honest-but-wrong.
 
 **Should have.** Fold `DastCan` into the reactive snapshot.
+
+**RESOLUTION (BUILDOUT 4 / G3).** `useDastEditorState`'s snapshot carries a `can` cluster —
+`undo`, `redo`, `insertBlock`, `tableActions`, and `toggleMark[mark]` for every default and
+declared custom mark — built from the same `buildCan` the imperative `handle.can()` uses
+(`canUndo`/`canRedo` remain as deprecated aliases). `EditorToolbar` disables the mark buttons,
+the three block-insert buttons and the table actions from it; PLAN.md's
+`disabled={!s.can.insertBlock}` example is now literally what this app does.
 
 **Bears on.** Ticket 13, PLAN.md.
 

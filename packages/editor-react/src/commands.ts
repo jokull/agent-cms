@@ -12,7 +12,7 @@ import type { Editor } from "@tiptap/core";
 import type { Node as PmNode, ResolvedPos } from "@tiptap/pm/model";
 import type { HeadingNode, ListNode, Mark } from "./bridge/dast-types.js";
 
-export interface DastCommands {
+export interface DastCommands<Block = unknown> {
   focus(): void;
   undo(): boolean;
   redo(): boolean;
@@ -30,8 +30,19 @@ export interface DastCommands {
   unsetItemLink(): boolean;
   /** Insert an inline record reference at the cursor. */
   insertInlineItem(recordId: string): boolean;
-  /** Insert an embedded block atom referencing a block id from the envelope. */
-  insertBlock(item: string, position?: "block" | "inline"): boolean;
+  /**
+   * Insert an embedded block atom.
+   *
+   * - `insertBlock(id)` — reference a block already in the envelope's map.
+   * - `insertBlock(draft)` — hand the toolkit a payload object. It mints an id
+   *   (or reuses `draft.id` when the payload already carries one), registers
+   *   the payload in the map the node views read BEFORE the atom exists, and
+   *   only then notifies the host via `onBlockCreate(id, draft)`. That ordering
+   *   is what makes the host's state update order irrelevant.
+   *
+   * A string argument is always an existing id, never a payload.
+   */
+  insertBlock(item: string | Block, position?: "block" | "inline"): boolean;
   insertThematicBreak(): boolean;
   insertTable(rows?: number, cols?: number): boolean;
   addRowAfter(): boolean;
@@ -82,7 +93,15 @@ function tableJson(rows: number, cols: number) {
   };
 }
 
-export function buildCommands(editor: Editor): DastCommands {
+/**
+ * @param registerBlock Called for `insertBlock(draft)` with the payload; returns
+ * the id the atom should reference. Omitted (e.g. a host with no block map) →
+ * draft insertion is a no-op returning false.
+ */
+export function buildCommands<Block = unknown>(
+  editor: Editor,
+  registerBlock?: (draft: Block) => string,
+): DastCommands<Block> {
   const chain = () => editor.chain().focus();
 
   return {
@@ -105,13 +124,16 @@ export function buildCommands(editor: Editor): DastCommands {
     unsetItemLink: () => chain().extendMarkRange("itemLink").unsetMark("itemLink").run(),
     insertInlineItem: (recordId) =>
       chain().insertContent({ type: "inlineItem", attrs: { item: recordId } }).run(),
-    insertBlock: (item, position = "block") =>
-      chain()
+    insertBlock: (item, position = "block") => {
+      const id = typeof item === "string" ? item : registerBlock ? registerBlock(item) : null;
+      if (id === null || id.length === 0) return false;
+      return chain()
         .insertContent({
           type: position === "inline" ? "inlineBlock" : "blockNode",
-          attrs: { item },
+          attrs: { item: id },
         })
-        .run(),
+        .run();
+    },
     insertThematicBreak: () => chain().insertContent({ type: "thematicBreak" }).run(),
     insertTable: (rows = 2, cols = 2) =>
       chain().insertContent(tableJson(Math.max(1, rows), Math.max(1, cols))).run(),

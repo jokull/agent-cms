@@ -6,15 +6,25 @@
 import type { BlockViewProps } from "@agent-cms/editor-react";
 import type { PostContentEnvelope } from "../cms/contract.js";
 import { Thumb } from "./Thumb.js";
-import { useBlockEditing } from "./block-editing.js";
 
 export type PostBlock = PostContentEnvelope["blocks"][string];
 
-export function PostBlockView({ id, block, inline, remove }: BlockViewProps<PostBlock>) {
-  // The only channel for host props into a blockView — see FRICTION.md #9.
-  const editing = useBlockEditing();
+/** Host props this card needs beyond {id, block, inline, remove}. */
+export interface BlockEditing {
+  readonly edit: (id: string) => void;
+}
+
+export function PostBlockView({
+  id,
+  block,
+  inline,
+  remove,
+  props,
+}: BlockViewProps<PostBlock, BlockEditing>) {
+  // Host props arrive as `props` — no React context to smuggle them through.
+  // (Was FRICTION.md #9.)
   const editButton = (
-    <button type="button" onClick={() => editing.edit(id)}>
+    <button type="button" onClick={() => props?.edit(id)}>
       edit
     </button>
   );
