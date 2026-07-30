@@ -1,0 +1,22 @@
+{
+  // Worker half. `exactOptionalPropertyTypes` must be OFF: the generated
+  // procedures.ts and @agent-cms/codegen's server-runtime.ts both build
+  // `{ key: value | undefined }` objects for exact-optional targets.
+  // `allowImportingTsExtensions` is required because the generated
+  // procedures.ts imports "./contract.ts" with the extension. FRICTION.md #4/#13.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "verbatimModuleSyntax": true,
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "types": ["@cloudflare/workers-types/2023-07-01"]
+  },
+  "include": ["worker", "src/contract.ts", "src/cms"]
+}

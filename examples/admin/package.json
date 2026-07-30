@@ -1,0 +1,33 @@
+{
+  "name": "admin-proof",
+  "version": "0.0.1",
+  "private": true,
+  "description": "THE PROOF — a real content admin built only from the generated result-rpc client, the headless DAST editor, and its own components.",
+  "type": "module",
+  "scripts": {
+    "codegen": "node --experimental-strip-types ../../packages/codegen/src/cli.ts --schema http://127.0.0.1:8787/api/schema --out-dir src/cms",
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.worker.json --noEmit",
+    "worker:dry-run": "wrangler deploy --dry-run --outdir .wrangler/dry-run",
+    "worker:dev": "wrangler dev"
+  },
+  "dependencies": {
+    "@agent-cms/codegen": "workspace:*",
+    "@agent-cms/editor-react": "workspace:*",
+    "@tiptap/react": "3.29.2",
+    "agent-cms": "workspace:*",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "result-rpc": "link:../../../result-rpc"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260317.1",
+    "@types/react": "^19.2.4",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.5",
+    "wrangler": "^4.73.0"
+  }
+}

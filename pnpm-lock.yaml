@@ -136,6 +136,52 @@ importers:
         specifier: ^4.76.0
         version: 4.76.0(@cloudflare/workers-types@4.20260317.1)
 
+  examples/admin:
+    dependencies:
+      '@agent-cms/codegen':
+        specifier: workspace:*
+        version: link:../../packages/codegen
+      '@agent-cms/editor-react':
+        specifier: workspace:*
+        version: link:../../packages/editor-react
+      '@tiptap/react':
+        specifier: 3.29.2
+        version: 3.29.2(@floating-ui/dom@1.8.0)(@tiptap/core@3.29.2(@tiptap/pm@3.29.2))(@tiptap/pm@3.29.2)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      agent-cms:
+        specifier: workspace:*
+        version: link:../..
+      react:
+        specifier: ^19.2.4
+        version: 19.2.8
+      react-dom:
+        specifier: ^19.2.4
+        version: 19.2.8(react@19.2.8)
+      result-rpc:
+        specifier: link:../../../result-rpc
+        version: link:../../../result-rpc
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^4.20260317.1
+        version: 4.20260317.1
+      '@types/react':
+        specifier: ^19.2.4
+        version: 19.2.17
+      '@types/react-dom':
+        specifier: ^19.2.3
+        version: 19.2.3(@types/react@19.2.17)
+      '@vitejs/plugin-react':
+        specifier: ^5.0.0
+        version: 5.2.0(vite@7.3.6(@types/node@24.13.3)(yaml@2.8.2))
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vite:
+        specifier: ^7.1.5
+        version: 7.3.6(@types/node@24.13.3)(yaml@2.8.2)
+      wrangler:
+        specifier: ^4.73.0
+        version: 4.76.0(@cloudflare/workers-types@4.20260317.1)
+
   examples/blog/cms:
     dependencies:
       agent-cms:
