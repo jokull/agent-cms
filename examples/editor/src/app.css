@@ -1,0 +1,266 @@
+/*
+ * Deliberately generic, hand-written CSS — no Tailwind, no design tokens, no
+ * agent-cms component classes. This is meant to look like "some random React
+ * app", not the CMS admin.
+ */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  background: #f4f1ea;
+  color: #2b2b2b;
+}
+
+.page {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.page__header h1 {
+  margin: 0 0 4px;
+  font-size: 28px;
+}
+
+.page__header p {
+  margin: 0 0 20px;
+  color: #555;
+  max-width: 70ch;
+}
+
+.page__header code {
+  background: #e8e2d4;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: 24px;
+  align-items: start;
+}
+
+@media (max-width: 860px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.editor-pane {
+  border: 1px solid #cfc7b3;
+  background: #fffdf8;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px;
+  border-bottom: 1px solid #cfc7b3;
+  background: #ece6d6;
+}
+
+.toolbar__group {
+  display: flex;
+  gap: 4px;
+  padding-right: 8px;
+  border-right: 1px solid #cfc7b3;
+}
+
+.toolbar__group:last-child {
+  border-right: none;
+}
+
+.toolbar button,
+.toolbar select {
+  font-family: inherit;
+  font-size: 13px;
+  padding: 4px 8px;
+  border: 1px solid #b8ae90;
+  background: #fffdf8;
+  color: #2b2b2b;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.toolbar button:hover:not(:disabled) {
+  background: #f0e9d6;
+}
+
+.toolbar button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.toolbar button.is-active {
+  background: #2b6cb0;
+  border-color: #2b6cb0;
+  color: #fff;
+}
+
+.block-insert-row {
+  display: flex;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #cfc7b3;
+  background: #f7f3e8;
+}
+
+.block-insert-row button {
+  font-family: inherit;
+  font-size: 13px;
+  padding: 4px 10px;
+  border: 1px dashed #8a8264;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.editor-surface {
+  padding: 16px 20px;
+  min-height: 400px;
+}
+
+.editor-surface .ProseMirror {
+  outline: none;
+  line-height: 1.6;
+}
+
+.editor-surface .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  color: #999;
+  pointer-events: none;
+}
+
+.editor-surface table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 12px 0;
+}
+
+.editor-surface td {
+  border: 1px solid #cfc7b3;
+  padding: 6px 8px;
+}
+
+.editor-surface blockquote {
+  margin: 12px 0;
+  padding: 4px 16px;
+  border-left: 3px solid #b8ae90;
+  color: #555;
+  font-style: italic;
+}
+
+.editor-surface pre {
+  background: #2b2b2b;
+  color: #f4f1ea;
+  padding: 12px;
+  overflow-x: auto;
+  border-radius: 4px;
+}
+
+.editor-surface [data-mark="customMark_kbd"] {
+  font-family: "Courier New", monospace;
+  background: #333;
+  color: #fff;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+
+.block-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #b8ae90;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.block-card--hero {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  margin: 12px 0;
+  overflow: hidden;
+}
+
+.block-card--hero img {
+  width: 100%;
+  max-height: 180px;
+  object-fit: cover;
+  display: block;
+}
+
+.block-card__body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+}
+
+.block-card--cta {
+  padding: 2px 4px 2px 10px;
+  background: #2b6cb0;
+  color: #fff;
+  border-radius: 999px;
+  font-size: 0.9em;
+}
+
+.block-card--inline {
+  vertical-align: middle;
+}
+
+.block-card--missing {
+  padding: 4px 10px;
+  color: #a33;
+  border-color: #a33;
+}
+
+.block-card button {
+  font-family: inherit;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: inherit;
+  opacity: 0.7;
+}
+
+.block-card button:hover {
+  opacity: 1;
+}
+
+.inspector {
+  border: 1px solid #cfc7b3;
+  background: #232323;
+  color: #d7d2c4;
+  max-height: 80vh;
+  overflow: auto;
+  position: sticky;
+  top: 24px;
+}
+
+.inspector h2 {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 14px;
+  border-bottom: 1px solid #444;
+  background: #1a1a1a;
+  font-family: Georgia, serif;
+}
+
+.inspector pre {
+  margin: 0;
+  padding: 12px;
+  font-size: 12px;
+  font-family: "Courier New", monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

@@ -1,0 +1,31 @@
+{
+  "name": "@agent-cms/editor-react",
+  "version": "0.0.1",
+  "private": true,
+  "description": "PROTOTYPE — headless React hooks and DAST bridge for the agent-cms block editor (Tiptap 3 / ProseMirror). See .wayfinder/prototype/NOTES.md.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./bridge": "./src/bridge/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "dependencies": {
+    "@tiptap/core": "3.29.2",
+    "@tiptap/extensions": "3.29.2",
+    "@tiptap/pm": "3.29.2",
+    "@tiptap/react": "3.29.2"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "jsdom": "^30.0.1",
+    "react": "^19.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
+  }
+}

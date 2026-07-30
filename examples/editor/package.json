@@ -1,0 +1,26 @@
+{
+  "name": "editor-demo",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Proof that @agent-cms/editor-react drops into any React app — plain CSS, zero agent-cms chrome.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@agent-cms/editor-react": "workspace:*",
+    "@tiptap/react": "3.29.2",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.4",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.5"
+  }
+}
