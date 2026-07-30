@@ -3,11 +3,17 @@
  * Comprehensive recursive schemas for full validation of DAST nodes.
  */
 import { Schema } from "effect";
+import { DEFAULT_MARKS } from "./types.js";
 
 // --- Marks ---
-export const MarkSchema = Schema.Literal(
-  "strong", "emphasis", "underline", "strikethrough", "code", "highlight"
-);
+/** The six marks every project gets for free. */
+const DefaultMarkSchema = Schema.Literal(...DEFAULT_MARKS);
+/**
+ * Project-defined marks, e.g. `customMark_kbd`. DatoCMS' CMA lets a project
+ * register arbitrary custom marks; only the `customMark_` prefix is fixed.
+ */
+const CustomMarkSchema = Schema.TemplateLiteral("customMark_", Schema.String);
+export const MarkSchema = Schema.Union(DefaultMarkSchema, CustomMarkSchema);
 
 // --- Link meta ---
 const LinkMetaEntry = Schema.Struct({
@@ -132,7 +138,10 @@ export const BlockRefNodeSchema = Schema.Struct({
 // --- Table schemas ---
 export const TableCellNodeSchema = Schema.Struct({
   type: Schema.Literal("tableCell"),
-  children: Schema.Array(Schema.Union(ParagraphNodeSchema, InlineNodeSchema)),
+  // paragraph+ — inline nodes must be wrapped in a paragraph. Mixing block and
+  // inline siblings is unrepresentable in every structured editor (ProseMirror
+  // rejects it, Slate silently destroys it), so the grammar forbids it.
+  children: Schema.NonEmptyArray(ParagraphNodeSchema),
 });
 
 export const TableRowNodeSchema = Schema.Struct({

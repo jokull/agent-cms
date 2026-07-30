@@ -4,7 +4,19 @@
  */
 
 // --- Mark types ---
-export type Mark = "strong" | "emphasis" | "underline" | "strikethrough" | "code" | "highlight";
+/** The six marks every DatoCMS project supports out of the box. */
+export type DefaultMark = "strong" | "emphasis" | "underline" | "strikethrough" | "code" | "highlight";
+/** Ordered list of the default marks, shared by the schema and the markdown projection. */
+export const DEFAULT_MARKS: readonly DefaultMark[] = [
+  "strong", "emphasis", "underline", "strikethrough", "code", "highlight",
+];
+/**
+ * Project-defined marks. DatoCMS' CMA lets a project register custom marks
+ * (e.g. `customMark_kbd`) that render however the receiving app likes; the
+ * DAST spec only constrains the naming convention, not the suffix.
+ */
+export type CustomMark = `customMark_${string}`;
+export type Mark = DefaultMark | CustomMark;
 
 // --- Inline nodes ---
 export interface SpanNode {
@@ -88,7 +100,7 @@ export interface BlockNode {
 
 export interface TableCellNode {
   type: "tableCell";
-  children: readonly (ParagraphNode | InlineNode)[];
+  children: readonly [ParagraphNode, ...ParagraphNode[]];
 }
 
 export interface TableRowNode {

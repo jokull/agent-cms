@@ -47,6 +47,24 @@ describe("DAST Validation", () => {
       expect(validateDast(doc)).toEqual([]);
     });
 
+    it("validates spans with a custom mark (customMark_*)", () => {
+      const doc = {
+        schema: "dast",
+        document: {
+          type: "root",
+          children: [
+            {
+              type: "paragraph",
+              children: [
+                { type: "span", value: "shortcut", marks: ["strong", "customMark_kbd"] },
+              ],
+            },
+          ],
+        },
+      };
+      expect(validateDast(doc)).toEqual([]);
+    });
+
     it("validates headings", () => {
       const doc = {
         schema: "dast",
@@ -233,6 +251,66 @@ describe("DAST Validation", () => {
           type: "root",
           children: [
             { type: "paragraph", children: [{ type: "span", value: "x", marks: ["invalid_mark"] }] },
+          ],
+        },
+      });
+      expect(errors.length).toBeGreaterThan(0);
+    });
+
+    it("rejects unknown marks that aren't customMark_-prefixed", () => {
+      const errors = validateDast({
+        schema: "dast",
+        document: {
+          type: "root",
+          children: [
+            { type: "paragraph", children: [{ type: "span", value: "x", marks: ["sparkle"] }] },
+          ],
+        },
+      });
+      expect(errors.length).toBeGreaterThan(0);
+    });
+
+    it("rejects tableCell with inline nodes as direct children", () => {
+      const errors = validateDast({
+        schema: "dast",
+        document: {
+          type: "root",
+          children: [
+            {
+              type: "table",
+              children: [
+                {
+                  type: "tableRow",
+                  children: [
+                    {
+                      type: "tableCell",
+                      children: [
+                        { type: "paragraph", children: [{ type: "span", value: "ok" }] },
+                        { type: "span", value: "bare inline sibling" },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      });
+      expect(errors.length).toBeGreaterThan(0);
+    });
+
+    it("rejects tableCell with no children", () => {
+      const errors = validateDast({
+        schema: "dast",
+        document: {
+          type: "root",
+          children: [
+            {
+              type: "table",
+              children: [
+                { type: "tableRow", children: [{ type: "tableCell", children: [] }] },
+              ],
+            },
           ],
         },
       });

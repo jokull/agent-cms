@@ -126,4 +126,35 @@ describe("Agent Text structured text format", () => {
       ],
     });
   });
+
+  it("round-trips a custom mark (customMark_*) through Agent Text", () => {
+    // dastToAgentText serializes via dastdown, which emits `<m k="...">` for
+    // any non-default mark. agentTextToDast reparses via the markdown
+    // projection (not dastdown), so without matching <m k="..."> support
+    // there this would silently corrupt the round-trip into literal text
+    // rather than losing just the mark.
+    const source = dastToAgentText({
+      schema: "dast",
+      document: {
+        type: "root",
+        children: [
+          {
+            type: "paragraph",
+            children: [{ type: "span", value: "shortcut", marks: ["strong", "customMark_kbd"] }],
+          },
+        ],
+      },
+    });
+
+    expect(source).toContain('<m k="customMark_kbd">');
+
+    const result = agentTextToDast(source);
+    const paragraph = result.document.children[0];
+    if (paragraph.type !== "paragraph") throw new Error("expected a paragraph");
+    const span = paragraph.children[0];
+    if (span.type !== "span") throw new Error("expected a span");
+    expect(span.value).toBe("shortcut");
+    expect(span.marks).toContain("strong");
+    expect(span.marks).toContain("customMark_kbd");
+  });
 });

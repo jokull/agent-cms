@@ -60,6 +60,29 @@ describe("dastToMarkdown projection", () => {
     expect(md).toContain("`mono`");
   });
 
+  it("preserves a custom mark (customMark_*) via a generic <m k=\"...\"> tag", () => {
+    // Markdown has no native syntax for project-defined marks, so they're
+    // carried as a generic HTML tag (mirroring datocms-structured-text-dastdown's
+    // own `<m k="...">` encoding) rather than silently dropped.
+    const md = dastToMarkdown(doc([
+      {
+        type: "paragraph",
+        children: [
+          { type: "span", value: "kbd", marks: ["strong", "customMark_kbd"] },
+        ],
+      },
+    ]));
+    expect(md).toContain('<m k="customMark_kbd">');
+
+    const back = markdownToDast(md);
+    const paragraph = back.document.children[0];
+    if (paragraph.type !== "paragraph") throw new Error("expected a paragraph");
+    const span = paragraph.children[0];
+    if (span.type !== "span") throw new Error("expected a span");
+    expect(span.marks).toContain("strong");
+    expect(span.marks).toContain("customMark_kbd");
+  });
+
   it("converts links", () => {
     const md = dastToMarkdown(doc([
       {
@@ -143,6 +166,30 @@ describe("Dato Dastdown wrappers", () => {
     expect(result.document.children[0]).toMatchObject({ type: "heading", level: 1 });
     expect(result.document.children[2]).toEqual({ type: "block", item: "block_123" });
   });
+
+  it("round-trips a custom mark (customMark_*) losslessly", () => {
+    const original = doc([
+      {
+        type: "paragraph",
+        children: [
+          { type: "span", value: "shortcut", marks: ["customMark_kbd"] },
+        ],
+      },
+    ]);
+
+    const text = dastToDastdown(original);
+    expect(text).toContain('<m k="customMark_kbd">shortcut</m>');
+
+    const result = dastdownToDast(text);
+    expect(validateDast(result)).toEqual([]);
+    const paragraph = result.document.children[0];
+    if (paragraph.type !== "paragraph") throw new Error("expected a paragraph");
+    expect(paragraph.children[0]).toEqual({
+      type: "span",
+      value: "shortcut",
+      marks: ["customMark_kbd"],
+    });
+  });
 });
 
 describe("markdownToDast projection", () => {
@@ -160,6 +207,15 @@ describe("markdownToDast projection", () => {
       "# Hello\n\n**bold** and *italic* and [link](https://x.com)\n\n- item\n\n> quote\n\n```ts\ncode\n```\n\n---"
     );
     expect(validateDast(dast)).toEqual([]);
+  });
+
+  it("represents an empty table cell as an empty paragraph, not an empty span", () => {
+    const dast = markdownToDast("| a | b |\n| --- | --- |\n| x |  |");
+    expect(validateDast(dast)).toEqual([]);
+    const table = dast.document.children.find((n) => n.type === "table");
+    if (table?.type !== "table") throw new Error("expected a table");
+    const emptyCell = table.children[1].children[1];
+    expect(emptyCell.children).toEqual([{ type: "paragraph", children: [] }]);
   });
 });
 
@@ -461,6 +517,32 @@ describe("editableMarkdownToDast", () => {
     const { markdown, preservation } = dastToEditableMarkdown(original);
     const result = editableMarkdownToDast(markdown, preservation);
     expect(result).toEqual(original);
+  });
+
+  it("round-trips a custom mark (customMark_*) through the editable projection", () => {
+    // Custom marks have no CommonMark equivalent, so they travel as a
+    // generic <m k="..."> HTML tag (see the "converts inline marks" test in
+    // dastToMarkdown projection above) rather than being silently dropped —
+    // this is what keeps editable round-tripping lossless for them.
+    const original = doc([
+      {
+        type: "paragraph",
+        children: [
+          { type: "span", value: "hello ", marks: ["strong"] },
+          { type: "span", value: "world", marks: ["customMark_kbd", "emphasis"] },
+        ],
+      },
+    ]);
+
+    const { markdown, preservation } = dastToEditableMarkdown(original);
+    const result = editableMarkdownToDast(markdown, preservation);
+    const paragraph = result.document.children[0];
+    if (paragraph.type !== "paragraph") throw new Error("expected a paragraph");
+    const span = paragraph.children.find((c) => c.type === "span" && c.value === "world");
+    if (span?.type !== "span") throw new Error("expected the marked span to survive");
+    expect(span.marks).toContain("customMark_kbd");
+    expect(span.marks).toContain("emphasis");
+    expect(validateDast(result)).toEqual([]);
   });
 
   it("restores block ref sentinels", () => {

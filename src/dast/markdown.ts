@@ -28,25 +28,31 @@ import remarkGfm from "remark-gfm";
 import { parse as parseDastdown, serialize as serializeDastdown, DastdownParseError } from "datocms-structured-text-dastdown";
 import type * as Mdast from "mdast";
 import type { Document as DatoDastDocument } from "datocms-structured-text-utils";
-import type {
-  DastDocument,
-  RootNode,
-  BlockLevelNode,
-  InlineNode,
-  SpanNode,
-  LinkNode,
-  ItemLinkNode,
-  Mark,
-  ParagraphNode,
-  HeadingNode,
-  ListNode,
-  ListItemNode,
-  BlockquoteNode,
-  CodeNode,
-  TableNode,
-  TableRowNode,
-  TableCellNode,
+import {
+  type DastDocument,
+  type RootNode,
+  type BlockLevelNode,
+  type InlineNode,
+  type SpanNode,
+  type LinkNode,
+  type ItemLinkNode,
+  type Mark,
+  type CustomMark,
+  type ParagraphNode,
+  type HeadingNode,
+  type ListNode,
+  type ListItemNode,
+  type BlockquoteNode,
+  type CodeNode,
+  type TableNode,
+  type TableRowNode,
+  type TableCellNode,
 } from "./types.js";
+
+/** Type guard matching DatoCMS' `customMark_` naming convention. */
+function isCustomMark(mark: string): mark is CustomMark {
+  return mark.startsWith("customMark_");
+}
 
 // ---------------------------------------------------------------------------
 // Preservation map — stores metadata markdown cannot represent
@@ -106,6 +112,39 @@ const ITEM_LINK_META_SENTINEL_RE = /^<!--\s*cms:itemLinkMeta:(\S+)\s*-->$/;
 const ITEM_LINK_PREFIX = "itemLink:";
 const MARK_RE = /^<mark>([\s\S]*)<\/mark>$/;
 const UNDERLINE_RE = /^<u>([\s\S]*)<\/u>$/;
+// Custom marks (`customMark_*`) have no CommonMark syntax, so they're carried
+// as a generic HTML tag mirroring datocms-structured-text-dastdown's own
+// `<m k="...">` encoding — this keeps the editable-markdown projection and
+// the agent-text/dastdown surface (src/dast/agent-text.ts) symmetric: text
+// dastToAgentText emits via dastdown round-trips back through agentTextToDast
+// (which reparses via this module, not dastdown) without corruption.
+const CUSTOM_MARK_OPEN_RE = /^<m k="((?:\\.|[^"\\])*)">$/;
+const CUSTOM_MARK_CLOSE_TAG = "</m>";
+const CUSTOM_MARK_WRAP_RE = /^<m k="((?:\\.|[^"\\])*)">([\s\S]*)<\/m>$/;
+
+function escapeMarkAttr(value: string): string {
+  return value
+    .replaceAll("\\", "\\\\")
+    .replaceAll('"', '\\"')
+    .replaceAll("\n", "\\n")
+    .replaceAll("\r", "\\r")
+    .replaceAll("\t", "\\t");
+}
+
+function unescapeMarkAttr(value: string): string {
+  let out = "";
+  for (let i = 0; i < value.length; i++) {
+    if (value[i] === "\\" && i + 1 < value.length) {
+      const next = value[i + 1];
+      if (next === "n") { out += "\n"; i++; continue; }
+      if (next === "r") { out += "\r"; i++; continue; }
+      if (next === "t") { out += "\t"; i++; continue; }
+      if (next === '"' || next === "\\") { out += next; i++; continue; }
+    }
+    out += value[i];
+  }
+  return out;
+}
 
 // ---------------------------------------------------------------------------
 // DAST → Editable Markdown
@@ -207,6 +246,16 @@ function spanToMdast(span: SpanNode): Mdast.PhrasingContent {
     }
     node = { type: "html", value: html };
   }
+
+  const customMarks = marks.filter(isCustomMark);
+  if (customMarks.length > 0) {
+    let html = node.type === "html" ? node.value : escapeHtmlText(span.value);
+    for (const mark of customMarks) {
+      html = `<m k="${escapeMarkAttr(mark)}">${html}</m>`;
+    }
+    node = { type: "html", value: html };
+  }
+
   if (marks.includes("strikethrough")) {
     node = { type: "delete", children: [node] };
   }
@@ -351,11 +400,7 @@ function tableRowToMdast(row: TableRowNode, ctx: SerializeContext): Mdast.TableR
 function tableCellToMdast(cell: TableCellNode, ctx: SerializeContext): Mdast.TableCell {
   const phrasing: Mdast.PhrasingContent[] = [];
   for (const child of cell.children) {
-    if (child.type === "paragraph") {
-      phrasing.push(...inlinesToMdast(child.children, ctx));
-    } else {
-      phrasing.push(...inlineToMdast(child, ctx));
-    }
+    phrasing.push(...inlinesToMdast(child.children, ctx));
   }
   return { type: "tableCell", children: phrasing };
 }
@@ -394,12 +439,12 @@ const HTML_TAG_TO_MARK: Record<string, Mark> = {
 };
 const HTML_CLOSING_TAGS = new Set(["</u>", "</mark>"]);
 
-function isOpeningMarkTag(value: string): value is keyof typeof HTML_TAG_TO_MARK {
-  return value in HTML_TAG_TO_MARK;
+function isOpeningMarkTag(value: string): boolean {
+  return value in HTML_TAG_TO_MARK || CUSTOM_MARK_OPEN_RE.test(value);
 }
 
 function isClosingMarkTag(value: string): boolean {
-  return HTML_CLOSING_TAGS.has(value);
+  return HTML_CLOSING_TAGS.has(value) || value === CUSTOM_MARK_CLOSE_TAG;
 }
 
 function mergeHtmlTagSequences(nodes: readonly Mdast.PhrasingContent[]): Mdast.PhrasingContent[] {
@@ -616,6 +661,16 @@ function parseMarkedHtml(value: string): SpanNode | null {
       continue;
     }
 
+    const customMatch = CUSTOM_MARK_WRAP_RE.exec(current);
+    if (customMatch) {
+      const markName = unescapeMarkAttr(customMatch[1]);
+      if (isCustomMark(markName)) {
+        marks.push(markName);
+      }
+      current = customMatch[2];
+      continue;
+    }
+
     break;
   }
 
@@ -726,9 +781,9 @@ function mdastTableRowToDast(row: Mdast.TableRow, pres: PreservationMap): TableR
 
 function mdastTableCellToDast(cell: Mdast.TableCell, pres: PreservationMap): TableCellNode {
   const inlines = mdastPhrasingToDastInlines(cell.children, pres);
-  if (inlines.length === 0) {
-    return { type: "tableCell", children: [{ type: "paragraph", children: [{ type: "span", value: "" }] }] };
-  }
+  // An empty cell is an empty paragraph, not a paragraph holding an empty
+  // span — empty spans don't survive structured editors (ProseMirror refuses
+  // zero-length text nodes).
   return { type: "tableCell", children: [{ type: "paragraph", children: inlines }] };
 }
 

@@ -132,6 +132,14 @@ export function extractLinkIds(doc: DastLikeDocument): string[] {
  * Remove block/inlineBlock nodes whose item ID is in the given set.
  * Returns a deep-cloned document with those nodes pruned from the tree.
  */
+function mapNonEmpty<A, B>(
+  arr: readonly [A, ...A[]],
+  f: (a: A) => B
+): readonly [B, ...B[]] {
+  const [head, ...tail] = arr;
+  return [f(head), ...tail.map(f)];
+}
+
 export function pruneBlockNodes(
   doc: {
     schema: string;
@@ -194,17 +202,13 @@ export function pruneBlockNodes(
       case "table":
         return {
           ...node,
-          children: node.children.map((row) => ({
+          children: mapNonEmpty(node.children, (row) => ({
             ...row,
-            children: row.children.map((cell) => ({
+            children: mapNonEmpty(row.children, (cell) => ({
               ...cell,
-              children: cell.children.map((child) =>
-                "item" in child || "url" in child || "value" in child
-                  ? pruneInlineNode(child as InlineNode)
-                  : pruneBlockLevelNode(child as BlockLevelNode)
-              ).filter((child): child is ParagraphNode | InlineNode => child !== null),
+              children: mapNonEmpty(cell.children, pruneParagraphNode),
             })),
-          })) as unknown as typeof node.children,
+          })),
         };
       default:
         return node;
