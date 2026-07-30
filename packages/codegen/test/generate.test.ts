@@ -17,17 +17,19 @@ describe("generate", () => {
 
   it("emits host-generic fragment builders, not a self-contained app", () => {
     const files = generate(parseSchemaExport(fixture));
-    // The contract is a fragment builder over the host's RpcFactory<C>, not its
-    // own `rpc.context`, and mutations merge the host's `mutationErrors`.
-    expect(files["contract.ts"]).toContain(
-      "export function cmsContract<C, MErrors extends ErrorDefinitionMap>("
-    );
+    // The contract is a fragment builder over the host's browser-safe
+    // ContractFactory<C>, not its own `rpc.context`. The host's mutation errors
+    // arrive as a concrete import from the scaffolded host-errors.ts rather than
+    // a type parameter — result-rpc's compatibility constraints only evaluate
+    // against a concrete map.
+    expect(files["contract.ts"]).toContain("export function cmsContract<C>(app: ContractFactory<C>) {");
+    expect(files["contract.ts"]).toContain('import { mutationErrors } from "./host-errors.js";');
     expect(files["contract.ts"]).toContain(
       "return { post, author, siteSettings, navItem, landingPage, pressMention, metricSample, assets };",
     );
     expect(files["contract.ts"]).not.toContain("rpc.context");
     // procedures are a factory the host spreads into its own router.
-    expect(files["procedures.ts"]).toContain("export function cmsProcedures<C,");
+    expect(files["procedures.ts"]).toContain("export function cmsProcedures<C>(");
     expect(files["procedures.ts"]).toContain("@agent-cms/codegen/server-runtime");
     expect(files["procedures.ts"]).not.toContain("createCmsRestExecutor");
   });
@@ -73,7 +75,9 @@ describe("generate", () => {
     expect(contract).toContain("_locales?: LocalesFilter;");
     expect(contract).toContain("AND?: readonly PostFilter[];");
     // carried as a serializable (server re-validates); not a nested wire codec.
-    expect(contract).toContain("filter: wire.optional(wire.serializable<PostFilter>()),");
+    expect(contract).toContain(
+      'filter: wire.optional(wire.serializable<PostFilter>(guard.isFilter, { id: "agent-cms/filter.post@1" })),',
+    );
     expect(contract).toContain('export type PostOrderBy =');
     expect(contract).toContain('"title_ASC"');
     expect(contract).toContain('"_createdAt_DESC"');
@@ -145,8 +149,10 @@ describe("generate", () => {
     // browser-safety: the only value imports are result-rpc + the errors module.
     const valueImports = contract.match(/^import (?!type )[^\n]*$/gm) ?? [];
     expect(valueImports).toEqual([
-      'import { pickErrors, wire, type ErrorDefinitionMap, type InputOf, type RpcFactory } from "result-rpc";',
+      'import { pickErrors, wire, type ContractFactory, type ErrorDefinitionMap, type InputOf } from "result-rpc";',
+      'import * as guard from "@agent-cms/codegen/guards";',
       'import { cmsErrors } from "@agent-cms/codegen/errors";',
+      'import { mutationErrors } from "./host-errors.js";',
     ]);
     expect(contract).not.toContain('from "agent-cms');
   });
@@ -158,7 +164,7 @@ describe("generate", () => {
     );
     expect(contract).toContain("export interface StructuredTextWrite<TBlock = Record<string, unknown>> {");
     expect(contract).toContain("  blocks?: Readonly<Record<string, TBlock>>;");
-    expect(contract).toContain("content: wire.optional(wire.union([wire.serializable<PostContentWrite>(), wire.null] as const)),");
+    expect(contract).toContain("content: wire.optional(wire.union([wire.serializable<PostContentWrite>(guard.isStructuredTextWrite,");
   });
 
   describe("presentation descriptors (ADR 0006 / FRICTION #2)", () => {

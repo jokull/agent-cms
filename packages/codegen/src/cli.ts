@@ -3,9 +3,11 @@
  * agent-cms-codegen --schema <file-or-url> --out-dir <dir>
  *
  * Reads an agent-cms schema export (a JSON file or a live `/api/schema`
- * endpoint) and writes contract.ts + procedures.ts.
+ * endpoint) and writes contract.ts + procedures.ts, plus a one-time
+ * host-errors.ts scaffold the host owns.
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { generate } from "./generate.ts";
 import { parseSchemaExport } from "./schema-types.ts";
@@ -37,8 +39,15 @@ async function main() {
   const files = generate(schema);
   await mkdir(outDir, { recursive: true });
   for (const [name, content] of Object.entries(files)) {
-    await writeFile(join(outDir, name), content);
-    console.log(`wrote ${join(outDir, name)}`);
+    const target = join(outDir, name);
+    // host-errors.ts is the host's auth wiring, not a generated artifact.
+    // Scaffold it once; never overwrite what they have written there.
+    if (name === "host-errors.ts" && existsSync(target)) {
+      console.log(`kept   ${target} (host-owned)`);
+      continue;
+    }
+    await writeFile(target, content);
+    console.log(`wrote ${target}`);
   }
   console.log(
     "contract.ts imports DAST types from @agent-cms/dast (types-only, erased at build).\n" +

@@ -99,9 +99,11 @@ describe("generated artifact exposes asset urls", () => {
 
   it("media reads are typed with the enriched MediaRead shape", () => {
     expect(contract).toMatch(/export interface MediaRead \{[\s\S]*?url: string;/);
-    expect(contract).toContain("wire.serializable<MediaRead>()");
+    expect(contract).toContain(
+      'wire.serializable<MediaRead>(guard.isMediaRead, { id: "agent-cms/media.read@1" })',
+    );
     // Writes stay lean: an id or a descriptor.
-    expect(contract).toContain("wire.serializable<MediaValue>()");
+    expect(contract).toContain('wire.serializable<MediaValue>(guard.isMediaValue, { id: "agent-cms/media.write@1" })');
   });
 
   it("media_gallery reads are arrays of MediaRead", () => {
@@ -116,8 +118,10 @@ describe("generated artifact exposes asset urls", () => {
       validators: {},
     });
     const withGallery = generate(parseSchemaExport(raw))["contract.ts"];
-    expect(withGallery).toContain("wire.serializable<MediaRead[]>()");
-    expect(withGallery).toContain("wire.serializable<MediaValue[]>()");
+    expect(withGallery).toContain(
+      'wire.serializable<MediaRead[]>(guard.isMediaReadArray, { id: "agent-cms/media-gallery.read@1" })',
+    );
+    expect(withGallery).toContain('wire.serializable<MediaValue[]>(guard.isMediaValueArray, { id: "agent-cms/media-gallery.write@1" })');
   });
 
   it("seo reads carry image_url and picker rows carry imageUrl", () => {

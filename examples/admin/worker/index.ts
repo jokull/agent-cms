@@ -13,8 +13,8 @@
 import type { CmsD1Database, CmsR2Bucket } from "agent-cms/lib";
 import type { HostContext, HostUser } from "../src/contract.js";
 import { err, ok } from "result-rpc";
-import { createFetchHandler } from "result-rpc/server";
-import { app, cms, contract, inventoryListContract, Unauthorized, whoamiContract } from "../src/contract.js";
+import { createFetchHandler, serverRpc } from "result-rpc/server";
+import { cms, contract, inventoryListContract, Unauthorized, whoamiContract } from "../src/contract.js";
 import { cmsProcedures } from "../src/cms/procedures.js";
 
 interface Env {
@@ -49,15 +49,22 @@ const INVENTORY: ReadonlyArray<{ slug: string; seatsLeft: number; priceJpy: numb
 function buildHandler(env: Env, origin: string): (request: Request) => Promise<Response> {
   void contract;
 
-  const authenticated = app
+  // The contract in ../src/contract.ts is declared with `rpc.context` — the
+  // browser-safe factory, which by design has no middleware/router/implement.
+  // Implementations use `serverRpc.context` over the same HostContext. That
+  // split is what makes ADR 0004's client boundary a type error rather than a
+  // convention: the browser bundle cannot reach a handler.
+  const server = serverRpc.context<HostContext>();
+
+  const authenticated = server
     .middleware<{}>()
     .errors({ Unauthorized })
     .use(async ({ context, errors, next }) =>
       context.user ? next({ context }) : err(errors.Unauthorized()),
     );
 
-  const router = app.router({
-    cms: cmsProcedures(app, cms, {
+  const router = server.router({
+    cms: cmsProcedures(server, cms, {
       DB: env.DB,
       // Asset URLs. No ASSET_BASE_URL is configured for this app on purpose:
       // the CMS then resolves `<origin>/assets/<id>/<filename>`, the route
@@ -69,11 +76,11 @@ function buildHandler(env: Env, origin: string): (request: Request) => Promise<R
       mutationMiddleware: authenticated,
     }),
     host: {
-      whoami: app.implement(whoamiContract).handler(async ({ context }) =>
+      whoami: server.implement(whoamiContract).handler(async ({ context }) =>
         ok(context.user ? { id: context.user.id, name: context.user.name } : { id: null, name: null }),
       ),
       inventory: {
-        list: app.implement(inventoryListContract).handler(async ({ input }) =>
+        list: server.implement(inventoryListContract).handler(async ({ input }) =>
           ok(INVENTORY.filter((row) => input.slugs.includes(row.slug))),
         ),
       },

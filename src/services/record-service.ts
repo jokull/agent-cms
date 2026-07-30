@@ -2061,7 +2061,7 @@ export function searchRecords(modelApiKey: string, q: string, page?: PickerSearc
 
     const conditions: string[] = [];
     const params: unknown[] = [];
-    const trimmed = q?.trim() ?? "";
+    const trimmed = q.trim();
     if (trimmed.length > 0) {
       conditions.push(`"${titleKey}" LIKE ? ESCAPE '\\'`);
       params.push(likeContains(trimmed));

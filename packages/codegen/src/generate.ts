@@ -4,8 +4,11 @@
  *
  * Two files, honoring result-rpc's client boundary:
  * - contract.ts — codecs, types, and `cmsContract(app, { mutationErrors })`, a
- *   fragment builder generic over the host's `RpcFactory<C>`. Browser-safe:
- *   value-imports only result-rpc and @agent-cms/codegen/errors.
+ *   fragment builder generic over the host's `ContractFactory<C>` (result-rpc's
+ *   browser-safe factory: it cannot reach middleware/router/implement, which
+ *   makes the client boundary a type error rather than a convention).
+ *   Browser-safe: value-imports only result-rpc, @agent-cms/codegen/errors and
+ *   @agent-cms/codegen/guards.
  * - procedures.ts — `cmsProcedures(app, contract, deps)`, server-only handlers
  *   that run agent-cms's Effect services in-process against the host's D1 (or
  *   a pre-built SqlClient layer). The host spreads both into its own
@@ -16,7 +19,82 @@ import type { SchemaExport, SchemaExportField, SchemaExportModel } from "./schem
 export interface GeneratedFiles {
   "contract.ts": string;
   "procedures.ts": string;
+  /**
+   * Host-owned. Written only when absent — regeneration never overwrites it.
+   *
+   * The host's mutation errors have to be a CONCRETE value here rather than a
+   * type parameter on `cmsContract`. result-rpc checks error-map compatibility
+   * and builds failure unions with conditional types, and those can only
+   * evaluate against a concrete map; behind a generic they stay deferred and
+   * nothing downstream typechecks.
+   */
+  "host-errors.ts": string;
 }
+
+
+// --- wire.serializable identities -------------------------------------------
+//
+// result-rpc requires every `wire.serializable` to carry a runtime guard and a
+// stable schema id, and the id "must change whenever the guard's accepted shape
+// changes". Static shapes get a hand-written id; per-field shapes hash the
+// declared TypeScript type text, so changing a block whitelist (and therefore
+// the union a client may receive) mints a new identity.
+
+/** FNV-1a, hex. Stable across runs and machines — no crypto import needed. */
+function shortHash(input: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
+}
+
+function schemaId(kind: string, shape: string): string {
+  return `agent-cms/${kind}@${shortHash(shape)}`;
+}
+
+/** Opaque JSON passthrough: nothing to validate beyond "it survived the wire". */
+function jsonCodec(kind: string): string {
+  return `wire.serializable<unknown>(guard.isUnknown, { id: "agent-cms/${kind}@1" })`;
+}
+
+const SEO_CODEC = 'wire.serializable<SeoValue>(guard.isSeoValue, { id: "agent-cms/seo@1" })';
+const MEDIA_READ_CODEC = 'wire.serializable<MediaRead>(guard.isMediaRead, { id: "agent-cms/media.read@1" })';
+const MEDIA_WRITE_CODEC = 'wire.serializable<MediaValue>(guard.isMediaValue, { id: "agent-cms/media.write@1" })';
+const GALLERY_READ_CODEC = 'wire.serializable<MediaRead[]>(guard.isMediaReadArray, { id: "agent-cms/media-gallery.read@1" })';
+const GALLERY_WRITE_CODEC = 'wire.serializable<MediaValue[]>(guard.isMediaValueArray, { id: "agent-cms/media-gallery.write@1" })';
+
+
+/**
+ * Scaffolded once into the host's out-dir. `generate()` always returns it, but
+ * the CLI writes it only when it does not already exist, so a regeneration
+ * never clobbers the host's auth wiring.
+ */
+const HOST_ERRORS_SCAFFOLD = `/* Scaffolded by @agent-cms/codegen. YOURS TO EDIT — regeneration will not overwrite it. */
+
+/**
+ * Errors your mutation middleware can return.
+ *
+ * agent-cms declares no auth errors of its own (BYO-auth): it does not know how
+ * you authenticate, so the gate — and the error it fails with — is yours. Every
+ * error you list here is declared on every CMS mutation, which is what lets
+ * result-rpc accept your middleware; a middleware error that is not declared is
+ * rejected, at build time and again at runtime.
+ *
+ * Leave it empty if CMS mutations need no gate:
+ *
+ *   export const mutationErrors = {};
+ *
+ * Or declare your own, and return it from the middleware you pass as
+ * \`deps.mutationMiddleware\`:
+ *
+ *   import { error } from "result-rpc";
+ *   export const Unauthorized = error({ tag: "auth/unauthorized", httpStatus: 401 });
+ *   export const mutationErrors = { Unauthorized };
+ */
+export const mutationErrors = {};
+`;
 
 // --- naming ---
 
@@ -395,13 +473,13 @@ export const SyncStateCodec = wire.object({
   status: nullableString, publishedAt: nullableString, firstPublishedAt: nullableString,
   scheduledPublishAt: nullableString, scheduledUnpublishAt: nullableString, changedFields: wire.array(wire.string),
 });
-export const AssetRecordCodec = wire.serializable<AssetRecord>();
+export const AssetRecordCodec = wire.serializable<AssetRecord>(guard.isAssetRecord, { id: "agent-cms/AssetRecord@1" });
 export const AssetListCodec = wire.object({ assets: wire.array(AssetRecordCodec), total: wire.integer() });
 export const AssetUsagesCodec = wire.array(wire.object({ modelApiKey: wire.string, recordId: wire.string, fieldApiKey: wire.string }));
-export const AssetCreateResultCodec = wire.serializable<AssetCreateResult>();
-export const AssetReplaceResultCodec = wire.serializable<AssetReplaceResult>();
-export const AssetUpdateResultCodec = wire.serializable<AssetUpdateResult>();
-export const UploadUrlResultCodec = wire.serializable<UploadUrlResult>();
+export const AssetCreateResultCodec = wire.serializable<AssetCreateResult>(guard.isAssetCreateResult, { id: "agent-cms/AssetCreateResult@1" });
+export const AssetReplaceResultCodec = wire.serializable<AssetReplaceResult>(guard.isAssetReplaceResult, { id: "agent-cms/AssetReplaceResult@1" });
+export const AssetUpdateResultCodec = wire.serializable<AssetUpdateResult>(guard.isAssetUpdateResult, { id: "agent-cms/AssetUpdateResult@1" });
+export const UploadUrlResultCodec = wire.serializable<UploadUrlResult>(guard.isUploadUrlResult, { id: "agent-cms/UploadUrlResult@1" });
 export const AssetDeletedCodec = wire.object({ deleted: wire.boolean });
 `;
 
@@ -464,25 +542,25 @@ function fieldEmit(model: SchemaExportModel, field: SchemaExportField, ctx: Emit
       return { outCodec: codec, inCodec: codec, declarations: [] };
     }
     case "json":
-      return { outCodec: "wire.serializable<unknown>()", inCodec: "wire.serializable<unknown>()", declarations: [] };
+      return { outCodec: jsonCodec("json"), inCodec: jsonCodec("json"), declarations: [] };
     case "seo":
-      return { outCodec: "wire.serializable<SeoValue>()", inCodec: "wire.serializable<SeoValue>()", declarations: [] };
+      return { outCodec: SEO_CODEC, inCodec: SEO_CODEC, declarations: [] };
     case "media":
       return {
-        outCodec: "wire.serializable<MediaRead>()",
-        inCodec: "wire.serializable<MediaValue>()",
+        outCodec: MEDIA_READ_CODEC,
+        inCodec: MEDIA_WRITE_CODEC,
         declarations: [],
         comment: "read: asset + canonical url · write: asset id or descriptor",
       };
     case "media_gallery":
       return {
-        outCodec: "wire.serializable<MediaRead[]>()",
-        inCodec: "wire.serializable<MediaValue[]>()",
+        outCodec: GALLERY_READ_CODEC,
+        inCodec: GALLERY_WRITE_CODEC,
         declarations: [],
         comment: "read: assets + canonical urls · write: asset ids or descriptors",
       };
     case "video":
-      return { outCodec: "wire.serializable<unknown>()", inCodec: "wire.serializable<unknown>()", declarations: [] };
+      return { outCodec: jsonCodec("video"), inCodec: jsonCodec("video"), declarations: [] };
     case "link": {
       const targets = stringArrayValidator(field, "item_item_type");
       return {
@@ -522,8 +600,8 @@ function fieldEmit(model: SchemaExportModel, field: SchemaExportField, ctx: Emit
         ].join("\n"),
       ];
       return {
-        outCodec: `wire.serializable<${envelope}>()`,
-        inCodec: `wire.serializable<${write}>()`,
+        outCodec: `wire.serializable<${envelope}>(guard.isStructuredTextEnvelope, { id: "${schemaId(`st.${model.apiKey}.${field.apiKey}.read`, union)}" })`,
+        inCodec: `wire.serializable<${write}>(guard.isStructuredTextWrite, { id: "${schemaId(`st.${model.apiKey}.${field.apiKey}.write`, union)}" })`,
         declarations,
       };
     }
@@ -533,15 +611,15 @@ function fieldEmit(model: SchemaExportModel, field: SchemaExportField, ctx: Emit
         : null;
       const union = blockUnionFor(ctx, whitelist);
       return {
-        outCodec: `wire.serializable<Array<${union}>>()`,
-        inCodec: "wire.serializable<unknown>()",
+        outCodec: `wire.serializable<Array<${union}>>(guard.isBlockArray, { id: "${schemaId(`rt.${model.apiKey}.${field.apiKey}.read`, union)}" })`,
+        inCodec: jsonCodec(`rt.${model.apiKey}.${field.apiKey}.write`),
         declarations: [],
       };
     }
     default:
       return {
-        outCodec: "wire.serializable<unknown>()",
-        inCodec: "wire.serializable<unknown>()",
+        outCodec: jsonCodec(`unknown.${field.fieldType}`),
+        inCodec: jsonCodec(`unknown.${field.fieldType}`),
         declarations: [],
         comment: `unknown field type "${field.fieldType}" — passthrough`,
       };
@@ -722,8 +800,8 @@ function collectionContract(key: string, M: string, sortable: boolean): string {
   const affects = `.errors(mutationErrors).affects(${key}List).mutation()`;
   const lines = [
     `    const ${key}List = app.procedure().input(wire.object({`,
-    `      filter: wire.optional(wire.serializable<${M}Filter>()),`,
-    `      orderBy: wire.optional(wire.array(wire.serializable<${M}OrderBy>())),`,
+    `      filter: wire.optional(wire.serializable<${M}Filter>(guard.isFilter, { id: "agent-cms/filter.${key}@1" })),`,
+    `      orderBy: wire.optional(wire.array(wire.serializable<${M}OrderBy>(guard.isOrderBy, { id: "agent-cms/order-by.${key}@1" }))),`,
     `      page: wire.optional(PageInput),`,
     `      status: wire.optional(StatusInput),`,
     `    })).output(wire.object({ records: wire.array(${M}Codec), total: wire.integer() }))`,
@@ -753,7 +831,7 @@ function collectionContract(key: string, M: string, sortable: boolean): string {
     `        .errors(pickErrors(cmsErrors, "recordNotFound", "schemaDrift")).query(),`,
     // Loose input on purpose: a dry-run validates half-filled forms, so it must
     // accept a partial payload (the server reports the missing required fields).
-    `      validate: app.procedure().input(wire.object({ data: wire.serializable<Partial<Create${M}>>() })).output(ValidCodec)`,
+    `      validate: app.procedure().input(wire.object({ data: wire.serializable<Partial<Create${M}>>(guard.isRecordData, { id: "agent-cms/validate.${key}@1" }) })).output(ValidCodec)`,
     `        .errors(pickErrors(cmsErrors, "validationFailed", "schemaDrift")).query(),`,
     `      validateUpdate: app.procedure().input(wire.object({ id: wire.string, data: ${M}UpdateInput })).output(ValidCodec)`,
     `        .errors(pickErrors(cmsErrors, "recordNotFound", "validationFailed", "schemaDrift")).query(),`,
@@ -799,35 +877,35 @@ function collectionProcedures(key: string, M: string, KEYS: string, api: string,
     dec("byId"),
     `      }),`,
     `      search: app.implement(contract.${key}.search).handler(async ({ input }) => cms.search(${api}, input.q, input.page ?? undefined)),`,
-    `      create: mutation(contract.${key}.create).handler(async ({ input, context }) => {`,
+    `      create: app.implement(contract.${key}.create).use(gate).handler(async ({ input, context }) => {`,
     `        const r = await cms.create(${api}, toRecord(input.data), actorFor(context));`,
     `        if (!r.ok) return r;`,
     dec("create"),
     `      }),`,
-    `      update: mutation(contract.${key}.update).handler(async ({ input, context }) => {`,
+    `      update: app.implement(contract.${key}.update).use(gate).handler(async ({ input, context }) => {`,
     `        const r = await cms.update(${api}, input.id, toRecord(input.data), actorFor(context));`,
     `        if (!r.ok) return r;`,
     dec("update"),
     `      }),`,
-    `      delete: mutation(contract.${key}.delete).handler(async ({ input }) => cms.remove(${api}, input.id)),`,
-    `      duplicate: mutation(contract.${key}.duplicate).handler(async ({ input, context }) => {`,
+    `      delete: app.implement(contract.${key}.delete).use(gate).handler(async ({ input }) => cms.remove(${api}, input.id)),`,
+    `      duplicate: app.implement(contract.${key}.duplicate).use(gate).handler(async ({ input, context }) => {`,
     `        const r = await cms.duplicate(${api}, input.id, actorFor(context));`,
     `        if (!r.ok) return r;`,
     dec("duplicate"),
     `      }),`,
-    `      publish: mutation(contract.${key}.publish).handler(async ({ input, context }) => {`,
+    `      publish: app.implement(contract.${key}.publish).use(gate).handler(async ({ input, context }) => {`,
     `        const r = await cms.publish(${api}, input.id, actorFor(context));`,
     `        if (!r.ok) return r;`,
     dec("publish"),
     `      }),`,
-    `      unpublish: mutation(contract.${key}.unpublish).handler(async ({ input, context }) => {`,
+    `      unpublish: app.implement(contract.${key}.unpublish).use(gate).handler(async ({ input, context }) => {`,
     `        const r = await cms.unpublish(${api}, input.id, actorFor(context));`,
     `        if (!r.ok) return r;`,
     dec("unpublish"),
     `      }),`,
-    `      publishMany: mutation(contract.${key}.publishMany).handler(async ({ input, context }) => cms.publishMany(${api}, input.ids, actorFor(context))),`,
-    `      unpublishMany: mutation(contract.${key}.unpublishMany).handler(async ({ input, context }) => cms.unpublishMany(${api}, input.ids, actorFor(context))),`,
-    `      deleteMany: mutation(contract.${key}.deleteMany).handler(async ({ input, context }) => cms.deleteMany(${api}, input.ids, actorFor(context))),`,
+    `      publishMany: app.implement(contract.${key}.publishMany).use(gate).handler(async ({ input, context }) => cms.publishMany(${api}, input.ids, actorFor(context))),`,
+    `      unpublishMany: app.implement(contract.${key}.unpublishMany).use(gate).handler(async ({ input, context }) => cms.unpublishMany(${api}, input.ids, actorFor(context))),`,
+    `      deleteMany: app.implement(contract.${key}.deleteMany).use(gate).handler(async ({ input, context }) => cms.deleteMany(${api}, input.ids, actorFor(context))),`,
     `      links: app.implement(contract.${key}.links).handler(async ({ input }) => cms.links(${api}, input.id)),`,
     `      validate: app.implement(contract.${key}.validate).handler(async ({ input }) => cms.validate(${api}, toRecord(input.data))),`,
     `      validateUpdate: app.implement(contract.${key}.validateUpdate).handler(async ({ input }) => cms.validateUpdate(${api}, input.id, toRecord(input.data))),`,
@@ -847,23 +925,23 @@ function collectionProcedures(key: string, M: string, KEYS: string, api: string,
     `          if (!r.ok) return r;`,
     `          return decodeOutput(${M}VersionCodec, "${key}.versions.get", r.value);`,
     `        }),`,
-    `        restore: mutation(contract.${key}.versions.restore).handler(async ({ input, context }) => {`,
+    `        restore: app.implement(contract.${key}.versions.restore).use(gate).handler(async ({ input, context }) => {`,
     `          const r = await cms.versionsRestore(${api}, input.id, input.versionId, actorFor(context));`,
     `          if (!r.ok) return r;`,
     `          return decodeRecord(${M}Codec, ${KEYS}, "${key}.versions.restore", r.value);`,
     `        }),`,
     `      },`,
-    `      schedulePublish: mutation(contract.${key}.schedulePublish).handler(async ({ input, context }) => {`,
+    `      schedulePublish: app.implement(contract.${key}.schedulePublish).use(gate).handler(async ({ input, context }) => {`,
     `        const r = await cms.schedulePublish(${api}, input.id, input.at, actorFor(context));`,
     `        if (!r.ok) return r;`,
     dec("schedulePublish"),
     `      }),`,
-    `      scheduleUnpublish: mutation(contract.${key}.scheduleUnpublish).handler(async ({ input, context }) => {`,
+    `      scheduleUnpublish: app.implement(contract.${key}.scheduleUnpublish).use(gate).handler(async ({ input, context }) => {`,
     `        const r = await cms.scheduleUnpublish(${api}, input.id, input.at, actorFor(context));`,
     `        if (!r.ok) return r;`,
     dec("scheduleUnpublish"),
     `      }),`,
-    `      clearSchedule: mutation(contract.${key}.clearSchedule).handler(async ({ input, context }) => {`,
+    `      clearSchedule: app.implement(contract.${key}.clearSchedule).use(gate).handler(async ({ input, context }) => {`,
     `        const r = await cms.clearSchedule(${api}, input.id, actorFor(context));`,
     `        if (!r.ok) return r;`,
     dec("clearSchedule"),
@@ -871,7 +949,7 @@ function collectionProcedures(key: string, M: string, KEYS: string, api: string,
   ];
   if (sortable) {
     lines.push(
-      `      reorder: mutation(contract.${key}.reorder).handler(async ({ input, context }) => cms.reorder(${api}, input.ids, actorFor(context))),`,
+      `      reorder: app.implement(contract.${key}.reorder).use(gate).handler(async ({ input, context }) => cms.reorder(${api}, input.ids, actorFor(context))),`,
     );
   }
   lines.push(`    },`);
@@ -907,7 +985,7 @@ function singletonProcedures(key: string, M: string, KEYS: string, api: string):
     `        if (!r.ok) return r;`,
     `        return decodeRecord(${M}Codec, ${KEYS}, "${key}.get", r.value);`,
     `      }),`,
-    `      update: mutation(contract.${key}.update).handler(async ({ input, context }) => {`,
+    `      update: app.implement(contract.${key}.update).use(gate).handler(async ({ input, context }) => {`,
     `        const r = await cms.updateSingleton(${api}, toRecord(input.data), actorFor(context));`,
     `        if (!r.ok) return r;`,
     `        return decodeRecord(${M}Codec, ${KEYS}, "${key}.update", r.value);`,
@@ -918,12 +996,12 @@ function singletonProcedures(key: string, M: string, KEYS: string, api: string):
     `        if (!r.ok) return r;`,
     `        return decodeOutput(SyncStateCodec, "${key}.syncState", r.value);`,
     `      }),`,
-    `      publish: mutation(contract.${key}.publish).handler(async ({ context }) => {`,
+    `      publish: app.implement(contract.${key}.publish).use(gate).handler(async ({ context }) => {`,
     `        const r = await cms.publishSingleton(${api}, actorFor(context));`,
     `        if (!r.ok) return r;`,
     `        return decodeRecord(${M}Codec, ${KEYS}, "${key}.publish", r.value);`,
     `      }),`,
-    `      unpublish: mutation(contract.${key}.unpublish).handler(async ({ context }) => {`,
+    `      unpublish: app.implement(contract.${key}.unpublish).use(gate).handler(async ({ context }) => {`,
     `        const r = await cms.unpublishSingleton(${api}, actorFor(context));`,
     `        if (!r.ok) return r;`,
     `        return decodeRecord(${M}Codec, ${KEYS}, "${key}.unpublish", r.value);`,
@@ -944,13 +1022,13 @@ function assetsContract(): string {
     `        .errors(pickErrors(cmsErrors, "recordNotFound", "schemaDrift")).query(),`,
     `      createUploadUrl: app.procedure().input(wire.object({ filename: wire.string, contentType: wire.string })).output(UploadUrlResultCodec)`,
     `        .errors(pickErrors(cmsErrors, "schemaDrift")).errors(mutationErrors).mutation(),`,
-    `      create: app.procedure().input(wire.object({ data: wire.serializable<AssetCreateInput>() })).output(AssetCreateResultCodec)`,
+    `      create: app.procedure().input(wire.object({ data: wire.serializable<AssetCreateInput>(guard.isAssetCreateInput, { id: "agent-cms/AssetCreateInput@1" }) })).output(AssetCreateResultCodec)`,
     `        .errors(pickErrors(cmsErrors, "duplicate", "schemaDrift"))${affects},`,
-    `      importFromUrl: app.procedure().input(wire.serializable<AssetImportInput>()).output(AssetCreateResultCodec)`,
+    `      importFromUrl: app.procedure().input(wire.serializable<AssetImportInput>(guard.isAssetImportInput, { id: "agent-cms/AssetImportInput@1" })).output(AssetCreateResultCodec)`,
     `        .errors(pickErrors(cmsErrors, "schemaDrift")).errors(mutationErrors).affects(assetsList).mutation(),`,
-    `      update: app.procedure().input(wire.object({ id: wire.string, data: wire.serializable<AssetUpdateInput>() })).output(AssetUpdateResultCodec)`,
+    `      update: app.procedure().input(wire.object({ id: wire.string, data: wire.serializable<AssetUpdateInput>(guard.isAssetUpdateInput, { id: "agent-cms/AssetUpdateInput@1" }) })).output(AssetUpdateResultCodec)`,
     `        .errors(pickErrors(cmsErrors, "recordNotFound", "schemaDrift"))${affects},`,
-    `      replace: app.procedure().input(wire.object({ id: wire.string, data: wire.serializable<AssetCreateInput>() })).output(AssetReplaceResultCodec)`,
+    `      replace: app.procedure().input(wire.object({ id: wire.string, data: wire.serializable<AssetCreateInput>(guard.isAssetCreateInput, { id: "agent-cms/AssetCreateInput@1" }) })).output(AssetReplaceResultCodec)`,
     `        .errors(pickErrors(cmsErrors, "recordNotFound", "schemaDrift"))${affects},`,
     `      delete: app.procedure().input(wire.object({ id: wire.string, force: wire.optional(wire.boolean) })).output(AssetDeletedCodec)`,
     `        .errors(pickErrors(cmsErrors, "recordNotFound", "referenceConflict"))${affects},`,
@@ -973,32 +1051,32 @@ function assetsProcedures(): string {
     `        if (!r.ok) return r;`,
     `        return decodeOutput(AssetRecordCodec, "assets.get", r.value);`,
     `      }),`,
-    `      createUploadUrl: mutation(contract.assets.createUploadUrl).handler(async ({ input }) => {`,
+    `      createUploadUrl: app.implement(contract.assets.createUploadUrl).use(gate).handler(async ({ input }) => {`,
     `        const r = await cms.assetsCreateUploadUrl({ filename: input.filename, mimeType: input.contentType });`,
     `        if (!r.ok) return r;`,
     `        return decodeOutput(UploadUrlResultCodec, "assets.createUploadUrl", r.value);`,
     `      }),`,
-    `      create: mutation(contract.assets.create).handler(async ({ input, context }) => {`,
+    `      create: app.implement(contract.assets.create).use(gate).handler(async ({ input, context }) => {`,
     `        const r = await cms.assetsCreate(input.data, actorFor(context));`,
     `        if (!r.ok) return r;`,
     `        return decodeOutput(AssetCreateResultCodec, "assets.create", r.value);`,
     `      }),`,
-    `      importFromUrl: mutation(contract.assets.importFromUrl).handler(async ({ input, context }) => {`,
+    `      importFromUrl: app.implement(contract.assets.importFromUrl).use(gate).handler(async ({ input, context }) => {`,
     `        const r = await cms.assetsImportFromUrl(input, actorFor(context));`,
     `        if (!r.ok) return r;`,
     `        return decodeOutput(AssetCreateResultCodec, "assets.importFromUrl", r.value);`,
     `      }),`,
-    `      update: mutation(contract.assets.update).handler(async ({ input, context }) => {`,
+    `      update: app.implement(contract.assets.update).use(gate).handler(async ({ input, context }) => {`,
     `        const r = await cms.assetsUpdate(input.id, input.data, actorFor(context));`,
     `        if (!r.ok) return r;`,
     `        return decodeOutput(AssetUpdateResultCodec, "assets.update", r.value);`,
     `      }),`,
-    `      replace: mutation(contract.assets.replace).handler(async ({ input, context }) => {`,
+    `      replace: app.implement(contract.assets.replace).use(gate).handler(async ({ input, context }) => {`,
     `        const r = await cms.assetsReplace(input.id, input.data, actorFor(context));`,
     `        if (!r.ok) return r;`,
     `        return decodeOutput(AssetReplaceResultCodec, "assets.replace", r.value);`,
     `      }),`,
-    `      delete: mutation(contract.assets.delete).handler(async ({ input }) => cms.assetsDelete(input.id, input.force ?? false)),`,
+    `      delete: app.implement(contract.assets.delete).use(gate).handler(async ({ input }) => cms.assetsDelete(input.id, input.force ?? false)),`,
     `      usages: app.implement(contract.assets.usages).handler(async ({ input }) => cms.assetsUsages(input.id)),`,
     `    },`,
   ].join("\n");
@@ -1020,8 +1098,10 @@ export function generate(schema: SchemaExport): GeneratedFiles {
 
   push(`/* Generated by @agent-cms/codegen — DO NOT EDIT. Regenerate from the CMS schema. */`);
   push(`/* eslint-disable */`);
-  push(`import { pickErrors, wire, type ErrorDefinitionMap, type InputOf, type RpcFactory } from "result-rpc";`);
+  push(`import { pickErrors, wire, type ContractFactory, type ErrorDefinitionMap, type InputOf } from "result-rpc";`);
+  push(`import * as guard from "@agent-cms/codegen/guards";`);
   push(`import { cmsErrors } from "@agent-cms/codegen/errors";`);
+  push(`import { mutationErrors } from "./host-errors.js";`);
   push(DAST_IMPORT);
   push(``);
   push(`export type Locale = ${localeUnion};`);
@@ -1132,7 +1212,7 @@ export function generate(schema: SchemaExport): GeneratedFiles {
     push(``);
     push(`export const ${KEYS} = [${fields.map((f) => JSON.stringify(f.apiKey)).join(", ")}] as const;`);
     push(``);
-    push(`export const ${Model}VersionCodec = wire.serializable<VersionOf<${Model}>>();`);
+    push(`export const ${Model}VersionCodec = wire.serializable<VersionOf<${Model}>>(guard.isVersionOf, { id: "agent-cms/version.${model.apiKey}@1" });`);
     push(`export const ${Model}VersionListCodec = wire.array(${Model}VersionCodec);`);
     push(``);
 
@@ -1180,16 +1260,12 @@ export function generate(schema: SchemaExport): GeneratedFiles {
     [
       `/**`,
       ` * Contract fragment. Spread into the host's own contract:`,
-      ` *   app.contract({ ...cmsContract(app, { mutationErrors: {} }), ...hostProcedures })`,
-      ` * Pass \`mutationErrors\` (e.g. \`{ Unauthorized }\`) to declare the errors the`,
-      ` * host's auth middleware contributes to every CMS mutation. result-rpc is`,
-      ` * contract-first, so those definitions must be declared here to be usable.`,
+      ` *   app.contract({ ...cmsContract(app), ...hostProcedures })`,
+      ` * The errors your mutation middleware contributes are declared on every CMS`,
+      ` * mutation, read from ./host-errors.ts — result-rpc is contract-first, so a`,
+      ` * middleware error that is not declared there is rejected.`,
       ` */`,
-      `export function cmsContract<C, MErrors extends ErrorDefinitionMap>(`,
-      `  app: RpcFactory<C>,`,
-      `  options: { mutationErrors: MErrors },`,
-      `) {`,
-      `  const mutationErrors = options.mutationErrors;`,
+      `export function cmsContract<C>(app: ContractFactory<C>) {`,
       contractEntries.join("\n"),
       `  return { ${[...recordKeys, "assets"].join(", ")} };`,
       `}`,
@@ -1200,7 +1276,13 @@ export function generate(schema: SchemaExport): GeneratedFiles {
   const procedures = `/* Generated by @agent-cms/codegen — DO NOT EDIT. Regenerate from the CMS schema. */
 /* eslint-disable */
 /* Server-only: do not import from browser code (result-rpc client boundary). */
-import type { ErrorDefinitionMap, ProcedureContract, RpcFactory } from "result-rpc";
+import type { ErrorDefinitionMap } from "result-rpc";
+import type {
+  AnyProcedureTypes,
+  ProcedureContract,
+  ProcedureImplementationContextConstraint,
+  RpcFactory,
+} from "result-rpc/server";
 import {
   createCmsExecutor,
   decodeOutput,
@@ -1215,6 +1297,7 @@ import {
   cmsContract,
 ${codecImports.join("\n")}
 } from "./contract.ts";
+import { mutationErrors } from "./host-errors.js";
 
 /**
  * Server implementations. Spread into the host's own router:
@@ -1223,31 +1306,28 @@ ${codecImports.join("\n")}
  * agent-cms's Effect services in-process; \`deps.mutationMiddleware\` (the host's
  * auth) wraps every mutation, and \`deps.actor\` records the editor.
  */
-export function cmsProcedures<C, MErrors extends ErrorDefinitionMap = ErrorDefinitionMap>(
+export function cmsProcedures<C>(
   app: RpcFactory<C>,
-  // The contract is typed WIDE (ErrorDefinitionMap) on purpose: inside a body
-  // generic over MErrors the union would be opaque and the concrete cms errors
-  // the handlers return would not typecheck. The client's own type safety comes
-  // from cmsContract's concrete return, not from this server-side factory.
-  contract: ReturnType<typeof cmsContract<C, ErrorDefinitionMap>>,
-  deps: CmsProceduresDeps<C, MErrors>,
+  contract: ReturnType<typeof cmsContract<C>>,
+  deps: CmsProceduresDeps<C, typeof mutationErrors>,
 ) {
   const cms = createCmsExecutor(deps);
   const actorFor = (context: C): RequestActor | null => (deps.actor ? deps.actor(context) : null);
-  // Wrap a mutation contract with the host's auth middleware when supplied. The
-  // middleware's errors (MErrors) are already declared on the contract, so the
-  // handler's failure union is unchanged whether or not it is applied.
-  const mutation = <TInput, TOutput, TDefs extends ErrorDefinitionMap>(
-    procedureContract: ProcedureContract<C, TInput, TOutput, TDefs, "mutation">,
-  ) => {
-    const impl = app.implement(procedureContract);
-    return deps.mutationMiddleware ? impl.use(deps.mutationMiddleware) : impl;
-  };
+  // The host's gate, applied to every mutation. It is used inline at each site
+  // rather than through a generic helper on purpose: result-rpc checks
+  // middleware/contract compatibility with conditional types, and those can
+  // only evaluate where the procedure's types are concrete. Behind a generic
+  // wrapper they stay deferred and nothing typechecks.
+  const gate = deps.mutationMiddleware;
   return {
 ${procedureEntries.join("\n")}
   };
 }
 `;
 
-  return { "contract.ts": contract.join("\n"), "procedures.ts": procedures };
+  return {
+    "contract.ts": contract.join("\n"),
+    "procedures.ts": procedures,
+    "host-errors.ts": HOST_ERRORS_SCAFFOLD,
+  };
 }

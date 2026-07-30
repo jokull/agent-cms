@@ -25,7 +25,7 @@ import { join } from "node:path";
 import { Effect, Layer } from "effect";
 import { SqlClient } from "@effect/sql";
 import { createBrowserClient, batchFetchTransport } from "result-rpc/client";
-import { createFetchHandler } from "result-rpc/server";
+import { createFetchHandler, serverRpc } from "result-rpc/server";
 import { rpc, wire, ok, err, error } from "result-rpc";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createTestApp, jsonRequest } from "../../../test/app-helpers.js";
@@ -34,8 +34,6 @@ import { parseSchemaExport } from "../src/schema-types.ts";
 import { cmsErrors } from "../src/errors.ts";
 
 // The host's OWN error — contributed by the host's middleware, not agent-cms.
-const Unauthorized = error({ tag: "auth/unauthorized", httpStatus: 401 });
-
 interface HostContext {
   user: { id: string } | null;
 }
@@ -43,6 +41,10 @@ interface HostContext {
 type SqlLayer = Layer.Layer<SqlClient.SqlClient>;
 
 const genDir = join(import.meta.dirname, "__generated__");
+
+// The host's own auth error, read back out of the generated host-errors.ts so
+// assertions compare against the very definition the contract declared.
+let Unauthorized: ReturnType<typeof error>;
 
 // Filled by beforeAll once the schema is built and the client generated.
 let harness: {
@@ -106,17 +108,30 @@ beforeAll(async () => {
   mkdirSync(genDir, { recursive: true });
   writeFileSync(join(genDir, "contract.ts"), files["contract.ts"]);
   writeFileSync(join(genDir, "procedures.ts"), files["procedures.ts"]);
+  // Stand in for the host editing their scaffolded host-errors.ts. The contract
+  // and the middleware must reference the SAME definition object — result-rpc
+  // checks identity, not just the tag — which is exactly why this lives in one
+  // host-owned module instead of being passed in twice.
+  writeFileSync(
+    join(genDir, "host-errors.ts"),
+    `import { error } from "result-rpc";\n` +
+      `export const Unauthorized = error({ tag: "auth/unauthorized", httpStatus: 401 });\n` +
+      `export const mutationErrors = { Unauthorized };\n`,
+  );
 
   const contractModule = await import(join(genDir, "contract.ts"));
   const proceduresModule = await import(join(genDir, "procedures.ts"));
+  const hostErrors = await import(join(genDir, "host-errors.ts"));
   const { cmsContract } = contractModule;
   const { cmsProcedures } = proceduresModule;
+  Unauthorized = hostErrors.Unauthorized;
 
   // The host app — its OWN context, its OWN procedure, the CMS fragments, and
   // its OWN auth middleware, all in ONE contract / router / client.
   const app = rpc.context<HostContext>();
+  const server = serverRpc.context<HostContext>();
 
-  const cmsFragment = cmsContract(app, { mutationErrors: { Unauthorized } });
+  const cmsFragment = cmsContract(app);
 
   const whoamiContract = app
     .procedure()
@@ -128,21 +143,21 @@ beforeAll(async () => {
     host: { whoami: whoamiContract },
   });
 
-  const authenticated = app
+  const authenticated = server
     .middleware<{}>()
     .errors({ Unauthorized })
     .use(async ({ context, errors, next }) =>
       context.user ? next({ context }) : err(errors.Unauthorized()),
     );
 
-  const router = app.router({
-    cms: cmsProcedures(app, cmsFragment, {
+  const router = server.router({
+    cms: cmsProcedures(server, cmsFragment, {
       layer: sqlLayer,
       actor: (ctx: HostContext) => (ctx.user ? { type: "editor", label: ctx.user.id } : null),
       mutationMiddleware: authenticated,
     }),
     host: {
-      whoami: app.implement(whoamiContract).handler(async ({ context }) =>
+      whoami: server.implement(whoamiContract).handler(async ({ context }) =>
         ok({ id: context.user ? context.user.id : null }),
       ),
     },

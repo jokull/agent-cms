@@ -9,7 +9,8 @@
  *
  * Never import this from browser code — it pulls in agent-cms's service layer.
  */
-import { err, ok, type ErrorDefinitionMap, type Middleware, type Result } from "result-rpc";
+import { err, ok, type ErrorDefinitionMap, type Result } from "result-rpc";
+import type { Middleware, MiddlewareTypes } from "result-rpc/server";
 import {
   AggregateValidationError,
   AssetService,
@@ -754,7 +755,22 @@ export function createCmsExecutor(deps: CmsRuntimeDeps): CmsExecutor {
  */
 export type CmsProceduresDeps<C, MErrors extends ErrorDefinitionMap> = CmsRuntimeDeps & {
   readonly actor?: (context: C) => RequestActor | null;
-  readonly mutationMiddleware?: Middleware<C, C, MErrors>;
+  /**
+   * The host's gate, applied to every CMS mutation.
+   *
+   * Context-preserving by construction — input and output context are both `C`
+   * and it contributes no new context (`providedContext` is `{}`). The gate
+   * decides whether a mutation runs; it does not reshape what handlers see. A
+   * context-widening middleware would also split every implementer into an
+   * unusable union at the `.use()` sites in the generated procedures.
+   *
+   * Required rather than optional, for the same reason: an optional gate makes
+   * every mutation's type depend on a runtime branch. Pass a pass-through
+   * middleware if CMS mutations need no gate.
+   */
+  readonly mutationMiddleware: Middleware<
+    MiddlewareTypes<C, C, MErrors, readonly [], false, {}, MErrors>
+  >;
 };
 
 export type { CmsRuntimeDeps, RequestActor } from "agent-cms/lib";

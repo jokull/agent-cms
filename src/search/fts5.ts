@@ -30,6 +30,10 @@ export function toMatchExpression(query: string): string | null {
   const scanner = /"([^"]*)"|(\S+)/gu;
   for (const match of query.matchAll(scanner)) {
     const phrase = match[1];
+    // TypeScript types capture groups as `string`, but this one belongs to an
+    // alternation: when the `(\S+)` branch matches, group 1 really is undefined
+    // at runtime. The check is load-bearing, so the rule is wrong here.
+    // oxlint-disable-next-line typescript-eslint/no-unnecessary-condition
     if (phrase !== undefined) {
       if (HAS_TOKEN_CHAR.test(phrase)) terms.push(`"${phrase.replace(/"/g, '""')}"`);
       continue;

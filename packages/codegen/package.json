@@ -2,12 +2,13 @@
   "name": "@agent-cms/codegen",
   "version": "0.0.1",
   "private": true,
-  "description": "PROTOTYPE — generates a typed result-rpc contract + router from an agent-cms schema export. See .wayfinder/prototype/NOTES.md.",
+  "description": "PROTOTYPE \u2014 generates a typed result-rpc contract + router from an agent-cms schema export. See .wayfinder/prototype/NOTES.md.",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
     "./assets": "./src/assets.ts",
     "./errors": "./src/errors.ts",
+    "./guards": "./src/guards.ts",
     "./server-runtime": "./src/server-runtime.ts"
   },
   "bin": {

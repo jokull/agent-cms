@@ -6,11 +6,16 @@
  * ADR 0004's claim under test: "one client, one cache, one failure algebra"
  * — the CMS fragments and this app's OWN procedures live in one contract.
  */
-import { error, rpc, wire } from "result-rpc";
+import { rpc, wire } from "result-rpc";
 import { cmsContract } from "./cms/contract.js";
 
-/** The host's own auth failure. agent-cms declares none (BYO-auth, ADR 0005). */
-export const Unauthorized = error({ tag: "auth/unauthorized", httpStatus: 401 });
+/**
+ * The host's own auth failure. agent-cms declares none (BYO-auth, ADR 0005).
+ * It is defined in the scaffolded `cms/host-errors.ts` so the contract and the
+ * middleware share one definition object — result-rpc checks identity, not just
+ * the tag — and re-exported here so the rest of the app has one import site.
+ */
+export { Unauthorized } from "./cms/host-errors.js";
 
 export interface HostUser {
   id: string;
@@ -24,11 +29,12 @@ export interface HostContext {
 export const app = rpc.context<HostContext>();
 
 /**
- * Declared once and shared by contract + router. `mutationErrors` is required:
- * result-rpc is contract-first, so the middleware's error must be declared on
- * every CMS mutation before a middleware may contribute it.
+ * The CMS fragment. It reads the host's mutation errors straight from
+ * `cms/host-errors.ts`, so there is nothing to pass: those definitions are
+ * declared on every CMS mutation, which is the precondition for the auth
+ * middleware in worker/index.ts.
  */
-export const cms = cmsContract(app, { mutationErrors: { Unauthorized } });
+export const cms = cmsContract(app);
 
 export const whoamiContract = app
   .procedure()
