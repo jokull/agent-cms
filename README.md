@@ -2,6 +2,8 @@
 
 Agent-first headless CMS. Runs as a Cloudflare Worker backed by D1 and R2 in your own account. No hosted service, no admin UI. Agents define schemas, manage content, and publish — via MCP.
 
+When humans need to edit too, agent-cms does not ship a GUI. It ships the parts a GUI cannot be assembled without: **generated types and mutations** (typed RPC codegen) and **the one irreducible component** (a headless block editor whose document model is the content grammar). You bring the UI, components, auth, and router. See [`examples/admin/`](./examples/admin/) for a working admin built that way, and [`docs/adr/`](./docs/adr/) for why.
+
 ## What you get
 
 - **Structured text with typed blocks** — a document tree where rich components (code blocks, media, custom types) are embedded inline. One GraphQL query returns the full tree with discriminated block unions. Map directly to React/Svelte/Vue components in a single server hop. Render with [`react-datocms`](https://github.com/datocms/react-datocms), `vue-datocms`, or `datocms-svelte` — the structured text format is [DAST](https://www.datocms.com/docs/structured-text/dast), an open standard.
@@ -17,7 +19,8 @@ Agent-first headless CMS. Runs as a Cloudflare Worker backed by D1 and R2 in you
 - **Responsive images** — Cloudflare Image Resizing with focal points, blurhash for progressive loading, color palette extraction. R2 storage, no external service.
 - **Bulk operations** — create up to 1000 records in a single call.
 - **Schema portability** — export the full schema as JSON (no IDs, just api_keys), import it on a fresh instance.
-- **Three interfaces** — REST API, GraphQL, and MCP, all auto-generated from the content schema.
+- **Four interfaces** — REST API, GraphQL, MCP, and generated typed RPC, all derived from the content schema.
+- **Headless editing primitives** — codegen emits a [result-rpc](https://result-rpc.com) contract + router whose handlers run the CMS's own Effect services in-process against your D1 binding (no REST hop), and `@agent-cms/editor-react` gives you a Tiptap-based structured-text editor that renders nothing and ships no CSS.
 - **Effect-TS throughout** — typed errors, dependency injection via services and layers, no try/catch. The whole CMS is a single Worker.
 
 ## Quick start
@@ -134,6 +137,37 @@ FTS5 keyword search with BM25 ranking and snippets, scoped to all models or a si
 - **`keyword`** — FTS5. Phrases (`"exact match"`), prefix (`word*`), boolean (`AND`/`OR`).
 - **`semantic`** — Vectorize cosine similarity.
 - **`hybrid`** (default) — Reciprocal rank fusion of keyword + semantic results.
+
+### Generated typed RPC — editing surface
+
+For editing UIs, MCP is the wrong shape and GraphQL is read-only. `@agent-cms/codegen` reads a
+schema export and emits [result-rpc](https://result-rpc.com) **fragments** that merge into your own
+app's contract and router:
+
+```bash
+agent-cms-codegen --schema https://cms.example.com --out-dir src/cms
+```
+
+- `contract.ts` — browser-safe. Per-model wire codecs and TS types (`Post`, `CreatePost`,
+  `UpdatePost`), block payload unions, presentation descriptors, and
+  `cmsContract(app, { mutationErrors })`.
+- `procedures.ts` — server-only. `cmsProcedures(app, contract, deps)`, handlers running agent-cms's
+  Effect services **in-process** against your D1/R2 bindings.
+
+You own the `rpc.context`, so CMS procedures sit beside your own under one client, one cache, and
+one failure algebra. Auth is yours: agent-cms declares no auth error tag, and your middleware's
+error is threaded through the CMS mutations via `mutationErrors`. Reads, writes, publish, versions,
+search, backlinks, bulk operations and the asset library are all exposed. See
+[`packages/codegen/README.md`](./packages/codegen/README.md).
+
+## Packages
+
+| Package | What it is |
+|---------|-----------|
+| [`agent-cms`](./src/) | The Worker. Also exports `agent-cms/lib` — the services (record, publish, version, schedule, asset) as an embeddable library for in-process hosts. |
+| [`@agent-cms/dast`](./packages/dast/) | DAST node types and grammar constants. Zero dependencies, the single source of truth shared by the CMS, the editor, and generated contracts — so an editor document is assignable to a generated write input with no adapter. |
+| [`@agent-cms/codegen`](./packages/codegen/) | The typed RPC emitter above, plus `@agent-cms/codegen/assets` (`assetUrl`, `assetSrcSet` for Cloudflare Image Resizing). |
+| [`@agent-cms/editor-react`](./packages/editor-react/) | Headless structured-text editor on Tiptap 3. `/bridge` is the engine layer: Tiptap extensions whose `NodeSpec.content` **is** the DAST grammar, plus a lossless DAST ↔ ProseMirror codec. `useDastEditor` adds typed commands and reactive state for your toolbar. Renders nothing, ships no CSS. |
 
 ## Draft preview
 
@@ -358,6 +392,14 @@ Clients compose transforms with `assetUrl(asset, { width, height, fit, format, q
 - [`examples/blog/`](./examples/blog/) — CMS Worker + Astro SSR site with typed GraphQL (gql.tada), structured text rendering, responsive images, service bindings, **draft preview mode**
 - [`examples/nextjs/`](./examples/nextjs/) — Next.js App Router with `draftMode()` integration, multi-root GraphQL queries, preview bar component
 - [`examples/editor-mcp/`](./examples/editor-mcp/) — editor onboarding: app-land OAuth gateway, scoped editor tokens, separate MCP URLs for developers and editors
+- [`examples/admin/`](./examples/admin/) — **the proof**: a working content admin built from only the generated RPC client, the headless editor, and the app's own components. Record list, editing form with live validation, structured-text editing, media library. Its [`FRICTION.md`](./examples/admin/FRICTION.md) records every rough edge found while building it.
+- [`examples/editor/`](./examples/editor/) — minimal `useDastEditor` harness for the block editor on its own
+
+## Design decisions
+
+Architecture decisions are recorded as ADRs in [`docs/adr/`](./docs/adr/): DatoCMS parity policy,
+Tiptap as the block-editor engine, the DAST grammar, RPC fragments running in-process, the failure
+algebra, and why there is no admin UI.
 
 ## License
 

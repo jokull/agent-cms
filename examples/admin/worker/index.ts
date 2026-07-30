@@ -3,13 +3,12 @@
  * merged into the host's own router (ADR 0004); the assets binding serves the
  * SPA for everything else.
  *
- * ⚠️ Everything is behind a DYNAMIC import inside `fetch`. The documented
- * pattern — build the contract and router at module scope — does not boot on
- * workerd: `result-rpc/server`'s `contract.js` evaluates
- * `new AbortController().signal` at module scope, and workerd rejects that with
- * "Disallowed operation called within global scope". `wrangler deploy
- * --dry-run` bundles it happily; only `wrangler dev` / a real isolate fails.
- * FRICTION.md #0 — the only thing that outright blocked this app.
+ * Imports are static and the contract/router are built at module scope, as the
+ * codegen README documents. An earlier version of this file used dynamic
+ * imports to dodge a workerd "Disallowed operation called within global scope"
+ * crash; that was a stale `link:`ed result-rpc `dist/`, not a real constraint
+ * (FRICTION.md #0). The router itself is still built lazily below because it
+ * needs the request origin for asset URLs.
  */
 import type { CmsD1Database, CmsR2Bucket } from "agent-cms/lib";
 import type { HostContext, HostUser } from "../src/contract.js";

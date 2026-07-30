@@ -596,12 +596,12 @@ built from the presentation hints.
 | # | Severity | One line |
 |---|---|---|
 | 0 | ~~S1~~ resolved | Worker boot crash traced to a **stale linked `dist`**; source was already fixed. Static-import pattern verified working. |
-| 15 | S1 | `update` returns raw DAST where the codec says envelope; drift never fires |
-| 1 | S2 | Three vendored DAST type copies; editor output not assignable to the client input |
-| 13 | S2 | Editor package and generated server need opposite `exactOptionalPropertyTypes` |
-| 8 | S2 | Read block payloads are not assignable to the write shape (read→write doesn't compile) |
-| 3 | S2 | No asset URL exists anywhere — an admin literally cannot show images |
-| 5 | S2 | No `null` in update inputs — a field cannot be cleared |
-| 9 | S2 | `blockView` accepts no host props; block editing needs a context smuggle |
-| 18 | S2 | `syncState.changedFields` is always `["content"]` — unusable |
-| 7 | S2 | Block insertion is order-sensitive undocumented BYO state |
+| 15 | ~~S1~~ **fixed** | `update`/`create` now materialize the envelope at the CMS service layer (REST + MCP benefit too). The unvalidated-`serializable` drift gap remains — see below. |
+| 1 | ~~S2~~ **fixed** | `@agent-cms/dast` — one types package; CMS, editor bridge and the generated prelude all import it. The proof's 70-line adapter is deleted. |
+| 13 | S2 **open** | Still two tsconfigs in one app. A packaging decision — belongs to the ticket 15 grilling, not a bug fix. |
+| 8 | ~~S2~~ **fixed** | Write shapes are generic over the block union; a read envelope drops straight into an update input. |
+| 3 | ~~S2~~ **fixed** | Canonical `url` on assets + enriched media/gallery/seo/picker reads, one batched query; `assetUrl()` composes CF Image Resizing. The admin renders real images. |
+| 5 | ~~S2~~ **fixed** | Update inputs accept `null` per field (and per locale); `clear()` is now `{ [key]: null }`. |
+| 9 | ~~S2~~ **fixed** | `blockViewProps` pass-through (ref-read, no remounts). The admin's context smuggle is deleted. |
+| 18 | ~~S2~~ **fixed** | The live row is materialized before diffing, so untouched structured_text is no longer permanently dirty. The admin shows a real dirty badge. |
+| 7 | ~~S2~~ **fixed** | `insertBlock(draft)` mints the id and registers the payload before inserting the atom; `onBlockCreate` hands the host the id. The ordering bug is unreachable. |
