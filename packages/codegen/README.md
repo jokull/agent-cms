@@ -36,6 +36,13 @@ Emits:
 pnpm add result-rpc @agent-cms/dast
 ```
 
+> **`result-rpc` is not on npm yet.** The docs at
+> [result-rpc.com](https://result-rpc.com) are live, but the package is
+> unpublished — it is a sibling library developed alongside agent-cms as a
+> shared foundation, not a third-party dependency, and is consumed here via
+> `link:../../../result-rpc`. Hosts outside this workspace need the same link
+> until it ships.
+
 ## Wire it into your own app
 
 The host owns the `rpc.context`. Spread the CMS fragments into the host's own
