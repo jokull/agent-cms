@@ -2,15 +2,13 @@
  * Build GraphQL types and resolvers for block models.
  * Also computes per-field StructuredText union types.
  */
-import { Effect } from "effect";
-import { SqlClient } from "@effect/sql";
-import type { AssetRow } from "../db/row-types.js";
 import { getLinkTargets, getLinksTargets, getBlockWhitelist, getRichTextBlockWhitelist } from "../db/validators.js";
 import type { SchemaBuilderContext, DynamicRow, GqlContext } from "./gql-types.js";
 import { toTypeName, toCamelCase, fieldToSDL, getRegistryDef, resolveVideoField } from "./gql-utils.js";
 import { resolveStructuredTextValue } from "./structured-text-resolver.js";
 import { materializeRichTextValue } from "../services/structured-text-service.js";
 import { loadLinkedRecords } from "./linked-record-loader.js";
+import { loadAsset, loadAssets } from "./asset-loader.js";
 import { decodeJsonIfString, decodeJsonStringOr } from "../json.js";
 import { mergeAssetWithMediaReference, parseMediaFieldReference, parseMediaGalleryReferences } from "../media-field.js";
 
@@ -80,34 +78,26 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
       const gqlName = toCamelCase(f.api_key);
 
       if (f.field_type === "media") {
-        bmResolvers[gqlName] = async (parent: DynamicRow) => {
+        bmResolvers[gqlName] = async (parent: DynamicRow, _args: unknown, context: GqlContext) => {
           const reference = parseMediaFieldReference(parent[f.api_key]);
           if (!reference) return null;
-          const rows = await runSql(
-            Effect.gen(function* () {
-              const s = yield* SqlClient.SqlClient;
-              return yield* s.unsafe<AssetRow>("SELECT * FROM assets WHERE id = ?", [reference.uploadId]);
-            })
-          );
-          if (rows.length === 0) return null;
-          const a = rows[0];
+          // Batched across every sibling block in the request — N venues with
+          // images used to cost N round trips (#27).
+          const a = await loadAsset({ runSql, id: reference.uploadId, context });
+          if (!a) return null;
           return {
             ...mergeAssetWithMediaReference(a, reference, assetUrl),
           };
         };
       } else if (f.field_type === "media_gallery") {
-        bmResolvers[gqlName] = async (parent: DynamicRow) => {
+        bmResolvers[gqlName] = async (parent: DynamicRow, _args: unknown, context: GqlContext) => {
           const references = parseMediaGalleryReferences(parent[f.api_key]);
           if (references.length === 0) return [];
-          const rows = await runSql(
-            Effect.gen(function* () {
-              const s = yield* SqlClient.SqlClient;
-              const ids = references.map((reference) => reference.uploadId);
-              const placeholders = ids.map(() => "?").join(", ");
-              return yield* s.unsafe<AssetRow>(`SELECT * FROM assets WHERE id IN (${placeholders})`, ids);
-            })
-          );
-          const assetMap = new Map(rows.map((row) => [row.id, row] as const));
+          const assetMap = await loadAssets({
+            runSql,
+            ids: references.map((reference) => reference.uploadId),
+            context,
+          });
           return references.map((reference) => {
             const asset = assetMap.get(reference.uploadId);
             return asset ? mergeAssetWithMediaReference(asset, reference, assetUrl) : null;

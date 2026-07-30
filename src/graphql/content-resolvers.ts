@@ -3,12 +3,12 @@
  */
 import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
-import type { AssetRow } from "../db/row-types.js";
 import { getLinkTargets, getLinksTargets, computeIsValid, findUniqueConstraintViolations } from "../db/validators.js";
 import type { SchemaBuilderContext, ModelQueryMeta, DynamicRow, GqlContext, AssetObject } from "./gql-types.js";
 import { toTypeName, toCamelCase, fieldToSDL, getRegistryDef, deserializeRecord, decodeSnapshot, resolveVideoField } from "./gql-utils.js";
 import { resolveStructuredTextValue } from "./structured-text-resolver.js";
 import { loadLinkedRecords } from "./linked-record-loader.js";
+import { loadAsset, loadAssets } from "./asset-loader.js";
 import { loadStructuredTextEnvelope } from "./structured-text-loader.js";
 import { getBlockWhitelist, getRichTextBlockWhitelist } from "../db/validators.js";
 import { materializeRichTextValue } from "../services/structured-text-service.js";
@@ -192,15 +192,9 @@ export function buildContentModelResolvers(
           title = typeof seoObj.title === "string" ? seoObj.title : null;
           description = typeof seoObj.description === "string" ? seoObj.description : null;
           twitterCard = typeof seoObj.twitterCard === "string" ? seoObj.twitterCard : null;
-          if (seoObj.image) {
+          if (typeof seoObj.image === "string") {
             // Resolve image URL from asset ID
-            const asset = await runSql(
-              Effect.gen(function* () {
-                const s = yield* SqlClient.SqlClient;
-                const rows = yield* s.unsafe<AssetRow>("SELECT * FROM assets WHERE id = ?", [seoObj.image]);
-                return rows.length > 0 ? rows[0] : null;
-              })
-            );
+            const asset = await loadAsset({ runSql, id: seoObj.image, context });
             if (asset) imageUrl = assetUrl(asset.r2_key);
           }
         }
@@ -221,13 +215,7 @@ export function buildContentModelResolvers(
       }
       if (!imageUrl && firstMediaField && parent[firstMediaField.api_key]) {
         const assetId = parseMediaFieldReference(parent[firstMediaField.api_key])?.uploadId;
-        const asset = await runSql(
-          Effect.gen(function* () {
-            const s = yield* SqlClient.SqlClient;
-            const rows = yield* s.unsafe<AssetRow>("SELECT * FROM assets WHERE id = ?", [assetId]);
-            return rows.length > 0 ? rows[0] : null;
-          })
-        );
+        const asset = assetId ? await loadAsset({ runSql, id: assetId, context }) : null;
         if (asset) imageUrl = assetUrl(asset.r2_key);
       }
 
@@ -338,20 +326,16 @@ export function buildContentModelResolvers(
 
     // --- Batch resolution helpers (reduces N+1 to 1 query per field per record) ---
 
-    /** Batch-fetch assets by IDs, return map of id -> asset object */
-    async function batchFetchAssets(ids: string[]): Promise<Map<string, AssetObject>> {
-      if (ids.length === 0) return new Map();
-      const placeholders = ids.map(() => "?").join(", ");
-      const rows = await runSql(
-        Effect.gen(function* () {
-          const s = yield* SqlClient.SqlClient;
-          return yield* s.unsafe<AssetRow>(
-            `SELECT * FROM assets WHERE id IN (${placeholders})`, ids
-          );
-        })
-      );
+    /**
+     * Fetch assets by id, return map of id -> asset object.
+     *
+     * Routes through the request-scoped loader, so sibling records' media
+     * fields collapse into one query instead of one per record.
+     */
+    async function batchFetchAssets(ids: string[], context?: GqlContext): Promise<Map<string, AssetObject>> {
+      const rows = await loadAssets({ runSql, ids, context });
       const map = new Map<string, AssetObject>();
-      for (const a of rows) {
+      for (const a of rows.values()) {
         map.set(a.id, {
           ...mergeAssetWithMediaReference(a, null, assetUrl),
         });
@@ -407,10 +391,10 @@ export function buildContentModelResolvers(
       }
       // Media field resolver: batch-fetch single asset
       if (f.field_type === "media") {
-        typeResolvers[gqlName] = async (parent: DynamicRow) => {
+        typeResolvers[gqlName] = async (parent: DynamicRow, _args: unknown, context: GqlContext) => {
           const reference = parseMediaFieldReference(parent[f.api_key]);
           if (!reference) return null;
-          const map = await batchFetchAssets([reference.uploadId]);
+          const map = await batchFetchAssets([reference.uploadId], context);
           const asset = map.get(reference.uploadId);
           if (!asset) return null;
           return {
@@ -424,10 +408,10 @@ export function buildContentModelResolvers(
       }
       // Media gallery resolver: batch-fetch all assets in one IN query
       if (f.field_type === "media_gallery") {
-        typeResolvers[gqlName] = async (parent: DynamicRow) => {
+        typeResolvers[gqlName] = async (parent: DynamicRow, _args: unknown, context: GqlContext) => {
           const references = parseMediaGalleryReferences(parent[f.api_key]);
           if (references.length === 0) return [];
-          const assetMap = await batchFetchAssets(references.map((reference) => reference.uploadId));
+          const assetMap = await batchFetchAssets(references.map((reference) => reference.uploadId), context);
           // Return in original order
           return references.map((reference) => {
             const asset = assetMap.get(reference.uploadId);

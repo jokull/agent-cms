@@ -7,7 +7,8 @@ import { SqlClient } from "@effect/sql";
 import type { AssetRow } from "../db/row-types.js";
 import { compileFilterToSql, compileOrderBy } from "./filter-compiler.js";
 import { UPLOAD_TYPE_DEFS } from "./sdl-constants.js";
-import type { SchemaBuilderContext, DynamicRow, AssetObject } from "./gql-types.js";
+import type { SchemaBuilderContext, DynamicRow, GqlContext, AssetObject } from "./gql-types.js";
+import { loadAsset } from "./asset-loader.js";
 import { decodeJsonIfString } from "../json.js";
 import { mergeAssetWithMediaReference } from "../media-field.js";
 import { buildResponsiveImage } from "./responsive-image.js";
@@ -227,18 +228,11 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
 
   // SeoField.image resolver: look up asset by ID
   resolvers.SeoField = {
-    image: async (seo: DynamicRow) => {
+    image: async (seo: DynamicRow, _args: unknown, context: GqlContext) => {
       const assetId = seo.image;
-      if (!assetId) return null;
-      return await runSql(
-        Effect.gen(function* () {
-          const s = yield* SqlClient.SqlClient;
-          const rows = yield* s.unsafe<AssetRow>("SELECT * FROM assets WHERE id = ?", [assetId]);
-          if (rows.length === 0) return null;
-          const a = rows[0];
-          return mergeAssetWithMediaReference(a, null, assetUrl);
-        })
-      );
+      if (typeof assetId !== "string") return null;
+      const a = await loadAsset({ runSql, id: assetId, context });
+      return a ? mergeAssetWithMediaReference(a, null, assetUrl) : null;
     },
   };
 

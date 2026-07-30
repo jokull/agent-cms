@@ -3,7 +3,7 @@
  */
 import type { Effect } from "effect";
 import type { SqlClient } from "@effect/sql";
-import type { ModelRow, ParsedFieldRow } from "../db/row-types.js";
+import type { AssetRow, ModelRow, ParsedFieldRow } from "../db/row-types.js";
 
 /** A dynamic row from a content/block table */
 export type DynamicRow = Record<string, unknown>;
@@ -27,6 +27,16 @@ export interface GqlContext {
     }>;
     scheduled: boolean;
   }>;
+  /** Request-scoped asset loader — see `asset-loader.ts`. Needs no key: assets vary by neither drafts nor locale. */
+  assetLoader?: {
+    cache: Map<string, Promise<AssetRow | null>>;
+    pending: Map<string, {
+      promise: Promise<AssetRow | null>;
+      resolve: (value: AssetRow | null) => void;
+      reject: (error: unknown) => void;
+    }>;
+    scheduled: boolean;
+  };
   reverseRefLoaders?: Map<string, {
     cache: Map<string, Promise<DynamicRow[]>>;
     pending: Map<string, {
