@@ -1,0 +1,30 @@
+{
+  "name": "@agent-cms/codegen",
+  "version": "0.0.1",
+  "private": true,
+  "description": "PROTOTYPE — generates a typed result-rpc contract + router from an agent-cms schema export. See .wayfinder/prototype/NOTES.md.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./errors": "./src/errors.ts",
+    "./server-runtime": "./src/server-runtime.ts"
+  },
+  "bin": {
+    "agent-cms-codegen": "./src/cli.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "generate:example": "node --experimental-strip-types src/cli.ts --schema test/fixtures/blog-schema.json --out-dir example/generated"
+  },
+  "dependencies": {
+    "result-rpc": "link:../../../result-rpc",
+    "agent-cms": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0",
+    "@types/node": "^24.0.0",
+    "@cloudflare/workers-types": "^4.20260317.1"
+  }
+}
