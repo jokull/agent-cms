@@ -249,13 +249,23 @@ export function search(params: {
         modelApiKey: params.modelApiKey,
         first: ftsFirst,
         skip: ftsSkip,
-      }).pipe(Effect.catchAll(() => Effect.succeed([] as FtsResult[])));
+      }).pipe(
+        // Degrade to no keyword hits rather than failing the whole search, but
+        // never silently: an invisible FTS error is how #30 hid for months.
+        Effect.catchAll((cause) =>
+          Effect.logError("FTS keyword search failed", cause).pipe(
+            Effect.as([] as FtsResult[])
+          )
+        )
+      );
     }
 
     let vectorResults: Array<{ recordId: string; modelApiKey: string; score: number }> = [];
     if (useVector && Option.isSome(bindings)) {
       vectorResults = yield* vectorizeSearch(bindings.value.ai, bindings.value.vectorize, params.query, candidateWindow).pipe(
-        Effect.catchAll(() => Effect.succeed([]))
+        Effect.catchAll((cause) =>
+          Effect.logError("Vector search failed", cause).pipe(Effect.as([]))
+        )
       );
 
       if (params.modelApiKey) {

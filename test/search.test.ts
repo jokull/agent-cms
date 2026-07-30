@@ -351,6 +351,46 @@ describe("FTS5 Search Integration", () => {
     expect(noData.results).toHaveLength(0);
   });
 
+  // Regression: #30 — raw user text was passed straight to FTS5 MATCH, whose
+  // query language treats ' & - % " as operators. Every such search raised a
+  // syntax error that the service swallowed into an empty result set.
+  it("searches text containing FTS5 operator characters (#30)", async () => {
+    await jsonRequest(handler, "POST", "/api/records", {
+      modelApiKey: "post",
+      data: { title: "Coocoo's Nest", body: "Fish & chips at 50% off - a bargain" },
+    });
+
+    for (const query of ["Coocoo's", "fish & chips", "50%", 'stray " quote']) {
+      const res = await jsonRequest(handler, "POST", "/api/search", { query, modelApiKey: "post" });
+      expect(res.status, `query ${JSON.stringify(query)} should not error`).toBe(200);
+    }
+
+    const apostrophe = await jsonRequest(handler, "POST", "/api/search", { query: "Coocoo's", modelApiKey: "post" });
+    expect((await apostrophe.json()).results).toHaveLength(1);
+
+    const ampersand = await jsonRequest(handler, "POST", "/api/search", { query: "fish & chips", modelApiKey: "post" });
+    expect((await ampersand.json()).results).toHaveLength(1);
+  });
+
+  it("returns no results for a query with nothing searchable in it", async () => {
+    await jsonRequest(handler, "POST", "/api/records", {
+      modelApiKey: "post",
+      data: { title: "Anything", body: "Anything at all" },
+    });
+    const res = await jsonRequest(handler, "POST", "/api/search", { query: "  &&&  ", modelApiKey: "post" });
+    expect(res.status).toBe(200);
+    expect((await res.json()).results).toEqual([]);
+  });
+
+  it("supports prefix search with a trailing asterisk", async () => {
+    await jsonRequest(handler, "POST", "/api/records", {
+      modelApiKey: "post",
+      data: { title: "Bakeries everywhere", body: "sourdough" },
+    });
+    const res = await jsonRequest(handler, "POST", "/api/search", { query: "baker*", modelApiKey: "post" });
+    expect((await res.json()).results).toHaveLength(1);
+  });
+
   it("searches across multiple models", async () => {
     // Create a second model
     const model2Res = await jsonRequest(handler, "POST", "/api/models", { name: "Page", apiKey: "page" });

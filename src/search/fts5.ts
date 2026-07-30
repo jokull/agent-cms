@@ -10,6 +10,40 @@ export interface FtsResult {
 }
 
 /**
+ * Turn arbitrary user text into a valid FTS5 MATCH expression.
+ *
+ * MATCH takes a *query language*, not a literal string: bare `'`, `"`, `&`,
+ * `%`, `-`, `(`, `:` and friends are operators or syntax errors. Passing raw
+ * user input (e.g. a search for `Coocoo's`) raises "fts5: syntax error", which
+ * the search service used to swallow into an empty result set (#30).
+ *
+ * Two deliberate features survive: a user-authored `"..."` segment stays a
+ * phrase query, and a trailing `*` still means prefix search. Everything else
+ * becomes a quoted term, joined implicitly with AND. Terms that tokenize to
+ * nothing (pure punctuation like `&`) are dropped — FTS5 rejects empty phrases.
+ * Returns null when nothing searchable remains, so callers skip the query.
+ */
+const HAS_TOKEN_CHAR = /[\p{L}\p{N}]/u;
+
+export function toMatchExpression(query: string): string | null {
+  const terms: string[] = [];
+  const scanner = /"([^"]*)"|(\S+)/gu;
+  for (const match of query.matchAll(scanner)) {
+    const phrase = match[1];
+    if (phrase !== undefined) {
+      if (HAS_TOKEN_CHAR.test(phrase)) terms.push(`"${phrase.replace(/"/g, '""')}"`);
+      continue;
+    }
+    const raw = match[2] ?? "";
+    const prefix = raw.endsWith("*");
+    const bare = prefix ? raw.slice(0, -1) : raw;
+    if (!HAS_TOKEN_CHAR.test(bare)) continue;
+    terms.push(`"${bare.replace(/"/g, '""')}"${prefix ? "*" : ""}`);
+  }
+  return terms.length > 0 ? terms.join(" ") : null;
+}
+
+/**
  * Create FTS5 virtual table for a model.
  */
 export function createFtsTable(modelApiKey: string) {
@@ -70,6 +104,8 @@ export function ftsSearch(query: string, options: {
     const sql = yield* SqlClient.SqlClient;
     const limit = Math.min(options.first ?? 10, 100);
     const offset = options.skip ?? 0;
+    const match = toMatchExpression(query);
+    if (match === null) return [];
 
     if (options.modelApiKey) {
       // Single model search
@@ -88,7 +124,7 @@ export function ftsSearch(query: string, options: {
          WHERE "fts_${modelApiKey}" MATCH ?
          ORDER BY rank
          LIMIT ? OFFSET ?`,
-        [query, limit, offset]
+        [match, limit, offset]
       );
       return rows.map((r) => ({
         recordId: r.record_id,
@@ -115,7 +151,7 @@ export function ftsSearch(query: string, options: {
     });
 
     const unionQuery = unions.join(" UNION ALL ") + " ORDER BY rank LIMIT ? OFFSET ?";
-    const params = [...tables.map(() => query), limit, offset];
+    const params = [...tables.map(() => match), limit, offset];
 
     const rows = yield* sql.unsafe<{
       record_id: string;
@@ -143,12 +179,14 @@ export function ftsSearch(query: string, options: {
 export function ftsCount(query: string, options: { modelApiKey?: string }) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
+    const match = toMatchExpression(query);
+    if (match === null) return 0;
 
     if (options.modelApiKey) {
       const modelApiKey = options.modelApiKey;
       const rows = yield* sql.unsafe<{ c: number }>(
         `SELECT COUNT(*) as c FROM "fts_${modelApiKey}" WHERE "fts_${modelApiKey}" MATCH ?`,
-        [query]
+        [match]
       );
       return rows[0]?.c ?? 0;
     }
@@ -164,7 +202,7 @@ export function ftsCount(query: string, options: { modelApiKey?: string }) {
     const countQuery = `SELECT COALESCE(SUM(c), 0) as c FROM (${counts.join(" UNION ALL ")})`;
     const rows = yield* sql.unsafe<{ c: number }>(
       countQuery,
-      tables.map(() => query)
+      tables.map(() => match)
     );
     return rows[0]?.c ?? 0;
   });
