@@ -107,6 +107,34 @@ describe("Schema import/export", () => {
     expect(bodyField.validators).toEqual({ structured_text_blocks: ["cta_block"] });
   });
 
+  it("round-trips title_field / image_preview_field presentation hints", async () => {
+    const { handler: h1 } = createTestApp();
+
+    const post = await createModel(h1, "Blog Post", "blog_post");
+    await addField(h1, post.id, "Title", "title", "string");
+    await addField(h1, post.id, "Cover", "cover", "media");
+
+    const patchRes = await jsonRequest(h1, "PATCH", `/api/models/${post.id}`, {
+      titleField: "title",
+      imagePreviewField: "cover",
+    });
+    expect(patchRes.status).toBe(200);
+
+    const exported: SchemaExport = await (await h1(new Request("http://localhost/api/schema"))).json();
+    const exportedPost = exported.models.find((m) => m.apiKey === "blog_post")!;
+    expect(exportedPost.titleField).toBe("title");
+    expect(exportedPost.imagePreviewField).toBe("cover");
+
+    const { handler: h2 } = createTestApp();
+    const importRes = await jsonRequest(h2, "POST", "/api/schema", exported);
+    expect(importRes.status).toBe(201);
+
+    const imported: SchemaExport = await (await h2(new Request("http://localhost/api/schema"))).json();
+    const importedPost = imported.models.find((m) => m.apiKey === "blog_post")!;
+    expect(importedPost.titleField).toBe("title");
+    expect(importedPost.imagePreviewField).toBe("cover");
+  });
+
   it("imported schema produces a working GraphQL API", async () => {
     // Build and export a simple schema
     const { handler: h1 } = createTestApp();

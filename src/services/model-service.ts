@@ -15,13 +15,98 @@ import type { CreateModelInput, UpdateModelInput } from "./input-schemas.js";
 import { decodeJsonRecordStringOr, encodeJson } from "../json.js";
 import { bumpSchemaVersion } from "./schema-version.js";
 
-export function listModels() {
+/**
+ * Canonical wire shape for a content model returned by the REST API and MCP
+ * tools: camelCase keys, real booleans (not SQLite 0/1). Every model-returning
+ * handler serializes through `serializeModel` so `list`/`get`/`create`/`update`
+ * all agree on one shape.
+ */
+export interface ModelApiResponse {
+  readonly id: string;
+  readonly name: string;
+  readonly apiKey: string;
+  readonly isBlock: boolean;
+  readonly singleton: boolean;
+  readonly sortable: boolean;
+  readonly tree: boolean;
+  readonly hasDraft: boolean;
+  readonly allLocalesRequired: boolean;
+  readonly ordering: string | null;
+  readonly canonicalPathTemplate: string | null;
+  readonly titleField: string | null;
+  readonly imagePreviewField: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+/** Convert a raw `models` row (snake_case, SQLite integer booleans) to the canonical API shape. */
+export function serializeModel(row: ModelRow): ModelApiResponse {
+  return {
+    id: row.id,
+    name: row.name,
+    apiKey: row.api_key,
+    isBlock: row.is_block === 1,
+    singleton: row.singleton === 1,
+    sortable: row.sortable === 1,
+    tree: row.tree === 1,
+    hasDraft: row.has_draft === 1,
+    allLocalesRequired: row.all_locales_required === 1,
+    ordering: row.ordering,
+    canonicalPathTemplate: row.canonical_path_template,
+    titleField: row.title_field,
+    imagePreviewField: row.image_preview_field,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+/**
+ * Validate a presentation-hint value (title_field / image_preview_field) against
+ * the model's current fields. `null` always passes (clearing is always allowed).
+ * A non-null value must reference an existing field api_key on the model;
+ * `requireMediaType` additionally requires that field's type to be `media`
+ * (DatoCMS requires the image-preview hint to point at an asset field).
+ */
+function validateHintField(
+  sql: SqlClient.SqlClient,
+  modelId: string,
+  hintName: "title_field" | "image_preview_field",
+  value: string | null,
+  requireMediaType: boolean
+) {
   return Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    return yield* sql.unsafe<ModelRow>("SELECT * FROM models ORDER BY created_at");
+    if (value === null) return;
+    const matches = yield* sql.unsafe<FieldRow>(
+      "SELECT * FROM fields WHERE model_id = ? AND api_key = ?",
+      [modelId, value]
+    );
+    if (matches.length === 0) {
+      return yield* new ValidationError({
+        message: `${hintName} '${value}' does not match any field api_key on this model`,
+      });
+    }
+    if (requireMediaType && matches[0].field_type !== "media") {
+      return yield* new ValidationError({
+        message: `image_preview_field '${value}' must reference a field of type 'media', got '${matches[0].field_type}'`,
+      });
+    }
   });
 }
 
+/** List all models in the canonical API shape (used by the REST `GET /models` handler). */
+export function listModels() {
+  return Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const rows = yield* sql.unsafe<ModelRow>("SELECT * FROM models ORDER BY created_at");
+    return rows.map(serializeModel);
+  });
+}
+
+/**
+ * Get a single model by id, in the canonical API shape, with its fields attached
+ * (used by the REST `GET /models/:id` handler). `fields` stays raw `FieldRow[]`
+ * (validators parsed) — tightening that shape too is a separate concern.
+ */
 export function getModel(id: string) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
@@ -34,7 +119,7 @@ export function getModel(id: string) {
     );
 
     return {
-      ...models[0],
+      ...serializeModel(models[0]),
       fields: fields.map(parseFieldValidators),
     };
   });
@@ -74,12 +159,23 @@ export function createModel(body: CreateModelInput) {
     if (existing.length > 0)
       return yield* new DuplicateError({ message: `Model with apiKey '${body.apiKey}' already exists` });
 
+    // Presentation hints reference fields, which don't exist yet at creation
+    // time — only null is accepted here. Set them via PATCH once fields exist.
+    if (body.titleField != null)
+      return yield* new ValidationError({
+        message: "titleField cannot be set at model creation — fields don't exist yet; set it via PATCH after adding fields",
+      });
+    if (body.imagePreviewField != null)
+      return yield* new ValidationError({
+        message: "imagePreviewField cannot be set at model creation — fields don't exist yet; set it via PATCH after adding fields",
+      });
+
     const now = new Date().toISOString();
     const id = generateId();
 
     yield* sql.unsafe(
-      `INSERT INTO models (id, name, api_key, is_block, singleton, sortable, tree, has_draft, all_locales_required, ordering, canonical_path_template, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO models (id, name, api_key, is_block, singleton, sortable, tree, has_draft, all_locales_required, ordering, canonical_path_template, title_field, image_preview_field, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id, body.name, body.apiKey,
         body.isBlock ? 1 : 0,
@@ -90,6 +186,8 @@ export function createModel(body: CreateModelInput) {
         body.allLocalesRequired ? 1 : 0,
         body.ordering ?? null,
         body.canonicalPathTemplate ?? null,
+        null,
+        null,
         now, now,
       ]
     );
@@ -106,16 +204,20 @@ export function createModel(body: CreateModelInput) {
 
     yield* bumpSchemaVersion();
 
-    return {
-      id, name: body.name, apiKey: body.apiKey,
-      isBlock: body.isBlock, singleton: body.singleton,
-      sortable: body.sortable, tree: body.tree,
-      hasDraft: body.hasDraft,
-      allLocalesRequired: body.allLocalesRequired,
+    return serializeModel({
+      id, name: body.name, api_key: body.apiKey,
+      is_block: body.isBlock ? 1 : 0,
+      singleton: body.singleton ? 1 : 0,
+      sortable: body.sortable ? 1 : 0,
+      tree: body.tree ? 1 : 0,
+      has_draft: body.hasDraft ? 1 : 0,
+      all_locales_required: body.allLocalesRequired ? 1 : 0,
       ordering: body.ordering ?? null,
-      canonicalPathTemplate: body.canonicalPathTemplate ?? null,
-      createdAt: now, updatedAt: now,
-    };
+      canonical_path_template: body.canonicalPathTemplate ?? null,
+      title_field: null,
+      image_preview_field: null,
+      created_at: now, updated_at: now,
+    });
   });
 }
 
@@ -137,6 +239,17 @@ export function updateModel(id: string, body: UpdateModelInput) {
     if (body.allLocalesRequired !== undefined) { sets.push("all_locales_required = ?"); values.push(body.allLocalesRequired ? 1 : 0); }
     if (body.ordering !== undefined) { sets.push("ordering = ?"); values.push(body.ordering); }
     if (body.canonicalPathTemplate !== undefined) { sets.push("canonical_path_template = ?"); values.push(body.canonicalPathTemplate); }
+
+    if (body.titleField !== undefined) {
+      yield* validateHintField(sql, id, "title_field", body.titleField, false);
+      sets.push("title_field = ?");
+      values.push(body.titleField);
+    }
+    if (body.imagePreviewField !== undefined) {
+      yield* validateHintField(sql, id, "image_preview_field", body.imagePreviewField, true);
+      sets.push("image_preview_field = ?");
+      values.push(body.imagePreviewField);
+    }
 
     // Handle api_key rename → rename the dynamic table
     if (body.apiKey !== undefined && body.apiKey !== model.api_key) {
@@ -205,7 +318,7 @@ export function updateModel(id: string, body: UpdateModelInput) {
     yield* bumpSchemaVersion();
 
     const updated = yield* sql.unsafe<ModelRow>("SELECT * FROM models WHERE id = ?", [id]);
-    return updated[0];
+    return serializeModel(updated[0]);
   });
 }
 

@@ -11,6 +11,13 @@ import {
   UpdateModelInput,
 } from "../../services/input-schemas.js";
 
+/**
+ * Canonical model response shape — camelCase keys, real booleans. Every
+ * model-returning endpoint (list/get/create/update) shares this schema so
+ * clients don't have to handle `isBlock: true` in one response and
+ * `is_block: 1` in another for the same resource. Mirrors
+ * `ModelService.serializeModel`'s output (`src/services/model-service.ts`).
+ */
 const ModelResponse = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
@@ -23,24 +30,15 @@ const ModelResponse = Schema.Struct({
   allLocalesRequired: Schema.Boolean,
   ordering: Schema.NullOr(Schema.String),
   canonicalPathTemplate: Schema.NullOr(Schema.String),
+  titleField: Schema.NullOr(Schema.String),
+  imagePreviewField: Schema.NullOr(Schema.String),
   createdAt: Schema.String,
   updatedAt: Schema.String,
 });
 
+/** `GET /models/:id` extends the canonical shape with the model's fields. */
 const ModelWithFieldsResponse = Schema.Struct({
-  id: Schema.String,
-  name: Schema.String,
-  api_key: Schema.String,
-  is_block: Schema.Number,
-  singleton: Schema.Number,
-  sortable: Schema.Number,
-  tree: Schema.Number,
-  has_draft: Schema.Number,
-  all_locales_required: Schema.Number,
-  ordering: Schema.NullOr(Schema.String),
-  canonical_path_template: Schema.NullOr(Schema.String),
-  created_at: Schema.String,
-  updated_at: Schema.String,
+  ...ModelResponse.fields,
   fields: Schema.Array(Schema.Unknown),
 });
 

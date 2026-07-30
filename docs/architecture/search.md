@@ -148,13 +148,27 @@ Create one FTS5 virtual table per content model:
 CREATE VIRTUAL TABLE IF NOT EXISTS fts_post
 USING fts5(
   record_id UNINDEXED,    -- for joining back to content table
-  title,                   -- higher weight
-  body,                    -- concatenated text fields
-  content=''               -- contentless (we manage content ourselves)
+  title,                   -- weighted higher at query time (see below)
+  body                     -- concatenated text fields
 );
 ```
 
-Use `rank` for BM25 scoring. Columns listed first get implicit higher weight in FTS5 ranking.
+This is an **ordinary** (content-carrying) FTS5 table, not a `content=''`
+contentless one — the search read path reads `title` back out of it directly
+(`src/search/search-service.ts`, `lookupIndexedTitle`), which a contentless
+table cannot serve.
+
+FTS5 has **no implicit column weighting**; default bm25 weights are all `1.0`.
+Title matches are ranked above body matches by passing explicit column weights
+to `bm25()` at query time:
+
+```sql
+ORDER BY bm25("fts_post", 0.0, 10.0, 1.0)  -- record_id, title, body
+```
+
+(`src/search/fts5.ts`). This mirrors what a Postgres
+`setweight(..., 'A')` / `setweight(..., 'B')` implementation would do, keeping
+the two backends aligned.
 
 ### Index Lifecycle
 
@@ -163,35 +177,41 @@ Managed via Effect services, triggered from record mutation hooks in [`src/servi
 | Event | Action |
 |---|---|
 | `record.create` | Extract text → `INSERT INTO fts_{model}` |
-| `record.update` | Delete old → insert new (FTS5 contentless tables don't support UPDATE) |
+| `record.update` | Delete old → insert new (re-index) |
 | `record.delete` | `DELETE FROM fts_{model} WHERE record_id = ?` |
-| `record.publish` | No-op (FTS5 indexes draft content; filter by `_status` at query time) |
-| `field.create` / `field.delete` | Rebuild FTS5 table (columns changed) |
+| `record.publish` | No-op |
 | `model.delete` | `DROP TABLE IF EXISTS fts_{model}` |
 
-The webhook system in [`src/services/webhook-service.ts`](../../src/services/webhook-service.ts) already fires on all these events. The search indexer hooks into the same points.
+Indexing is wired directly into record mutations in
+[`src/services/record-service.ts`](../../src/services/record-service.ts) (there
+is no separate `webhook-service.ts`).
+
+**Drafts are searchable.** Nothing filters by `_status` — `src/search/` has no
+`_status` reference, so `record.publish` is genuinely a no-op and both draft and
+published content is returned by search.
+
+> **Manual reindex required after schema changes.** `field.create` /
+> `field.delete` do **not** rebuild the FTS5 table — `src/services/field-service.ts`
+> has no reference to the search service. If you add a text field to a model and
+> populate it on existing records, those records stay unsearchable on the new
+> field until you call **`POST /api/search/reindex`** (optionally
+> `{ "modelApiKey": "..." }` to scope to one model; MCP tool: `reindex_search`).
+> This rebuilds the FTS5 table and re-embeds into Vectorize.
 
 ### Query API
 
-```graphql
-type Query {
-  _search(query: String!, first: Int, skip: Int): [SearchResult!]!
-}
+Search is exposed over **REST** (`POST /api/search`) and **MCP**
+(`search_content`) only. There is no GraphQL `_search` root query.
 
-type SearchResult {
-  record: JSON!          # full record data
-  modelApiKey: String!
-  score: Float!          # BM25 rank
-  snippet: String        # FTS5 snippet() with highlights
-}
-```
-
-SQL under the hood:
+SQL under the hood (per model; cross-model search `UNION ALL`s across all
+`fts_*` tables):
 
 ```sql
-SELECT record_id, rank, snippet(fts_post, 1, '<mark>', '</mark>', '...', 32)
-FROM fts_post
-WHERE fts_post MATCH ?
+SELECT record_id, title,
+       bm25("fts_post", 0.0, 10.0, 1.0) AS rank,
+       snippet("fts_post", 2, '<mark>', '</mark>', '...', 32) AS snippet
+FROM "fts_post"
+WHERE "fts_post" MATCH ?
 ORDER BY rank
 LIMIT ? OFFSET ?
 ```
@@ -372,17 +392,22 @@ POST /api/search
       "recordId": "01ABC...",
       "modelApiKey": "post",
       "title": "Why Cloudflare Workers",
-      "score": 0.032,
+      "rank": 0.032,
       "snippet": "...set up <mark>image resizing</mark> with..."
     }
   ],
-  "meta": { "count": 42, "mode": "hybrid" }
+  "meta": { "returned": 10, "total": 42, "mode": "keyword" }
 }
 ```
 
-MCP tool: `search_content` with same parameters.
+`meta.returned` is the length of the returned page. `meta.total` is the full
+match count and is present **only for keyword mode** (a cheap `COUNT(*)` over the
+same MATCH predicate). Semantic and hybrid responses omit `total` — a true total
+across the fused/topK-bounded candidate sets is not cheaply computable, so
+`meta` for those modes reports only `returned` and `mode`.
 
-GraphQL: `_search(query: "...", mode: HYBRID, first: 10)` root query.
+MCP tool: `search_content` with the same parameters. There is no GraphQL search
+field — search is REST + MCP only.
 
 ## 6. Implementation Plan
 
@@ -447,8 +472,7 @@ Vectorize pricing: `(queried + stored vectors) × dimensions × $0.01/1M`. At 10
 - [`src/dast/index.ts`](../../src/dast/index.ts) — `extractBlockIds()`, `extractInlineBlockIds()`, `extractLinkIds()` tree walkers
 - [`src/dast/validate.ts`](../../src/dast/validate.ts) — `walkNodesForType()` recursive traversal pattern
 - [`src/field-types.ts`](../../src/field-types.ts) — `FIELD_TYPE_REGISTRY` with `localizable`, `jsonStored` flags
-- [`src/services/record-service.ts`](../../src/services/record-service.ts) — Record CRUD with webhook hooks (lines ~173, ~272, ~300)
-- [`src/services/webhook-service.ts`](../../src/services/webhook-service.ts) — Event types and `fireWebhooks()` pattern
+- [`src/services/record-service.ts`](../../src/services/record-service.ts) — Record CRUD; search indexing is called directly from the mutation paths here
 - [`src/graphql/schema-builder.ts`](../../src/graphql/schema-builder.ts) — Recursive block resolution (reference for block text extraction)
 - [`src/index.ts`](../../src/index.ts) — `CmsEnv` type (where `AI` and `VECTORIZE` bindings go)
 

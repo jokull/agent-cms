@@ -1,19 +1,22 @@
 import { Effect, Schema } from "effect";
 import { SqlClient } from "@effect/sql";
 import { generateId } from "../id.js";
-import { NotFoundError, ValidationError, DuplicateError } from "../errors.js";
+import { NotFoundError, ValidationError, AggregateValidationError, DuplicateError, isCmsError, errorToResponse, type ValidationIssue } from "../errors.js";
 import { generateSlug } from "../slug.js";
 import {
   insertRecord,
   selectAll,
   selectById,
+  deserializeRow,
   updateRecord as sqlUpdateRecord,
   deleteRecord as sqlDeleteRecord,
 } from "../schema-engine/sql-records.js";
-import { writeStructuredText, writeRichText, deleteBlocksForField, getStructuredTextStorageKey, materializeRecordStructuredTextFields, materializeStructuredTextValue, type RichTextWriteBlock } from "./structured-text-service.js";
+import { compileFilterToSql, compileOrderBy, type FilterCompilerOpts } from "../graphql/filter-compiler.js";
+import * as PublishService from "./publish-service.js";
+import { writeStructuredText, writeRichText, validateStructuredText, validateRichText, deleteBlocksForField, getStructuredTextStorageKey, materializeRecordStructuredTextFields, materializeStructuredTextValue, type RichTextWriteBlock } from "./structured-text-service.js";
 import type { ModelRow, FieldRow, ParsedFieldRow } from "../db/row-types.js";
 import { parseFieldValidators, isContentRow } from "../db/row-types.js";
-import { getSlugSource, getBlockWhitelist, getBlocksOnly, getRichTextBlockWhitelist, isRequired, findUniqueConstraintViolations, isUnique, getLinkTargets, getLinksTargets } from "../db/validators.js";
+import { getSlugSource, getBlockWhitelist, getBlocksOnly, getRichTextBlockWhitelist, getInlineBlockWhitelist, getStructuredTextLinkModels, isRequired, findUniqueConstraintViolations, isUnique, getLinkTargets, getLinksTargets, collectValueValidationIssues } from "../db/validators.js";
 import * as SearchService from "../search/search-service.js";
 import type { CreateRecordInput, PatchRecordInput, BulkCreateRecordsInput, PatchBlocksInput } from "./input-schemas.js";
 import { getFieldTypeDef } from "../field-types.js";
@@ -22,6 +25,7 @@ import { parseMediaFieldReference, parseMediaGalleryReferences } from "../media-
 import { StructuredTextWriteInput } from "../dast/schema.js";
 import { pruneBlockNodes, expandStructuredTextShorthand } from "../dast/index.js";
 import { fireHook } from "../hooks.js";
+import { likeContains } from "../sql-util.js";
 import * as VersionService from "./version-service.js";
 import { decodeJsonIfString, encodeJson } from "../json.js";
 import type { RequestActor } from "../attribution.js";
@@ -79,6 +83,59 @@ function getModelFields(modelId: string) {
     );
     return fields.map(parseFieldValidators);
   });
+}
+
+function isEmptyFieldValue(value: unknown): boolean {
+  return value === undefined || value === null || value === "";
+}
+
+function toValidationIssue(error: ValidationError): ValidationIssue {
+  const issue: ValidationIssue = error.field === undefined
+    ? { message: error.message }
+    : { field: error.field, message: error.message };
+  return error.code === undefined ? issue : { ...issue, code: error.code };
+}
+
+/**
+ * Fold the failures accumulated by an `Effect.validateAll` field loop into a
+ * single error. Field-level `ValidationError`s collapse into one
+ * `AggregateValidationError` carrying every issue (Dato-style whole-form
+ * mapping, so a form can mark every bad field in one submit). A non-validation
+ * failure (e.g. a `SqlError`) is a structural defect, not a per-field issue, so
+ * it is surfaced directly and unchanged rather than folded into `issues`.
+ */
+function foldFieldValidationErrors<E>(
+  errors: readonly (ValidationError | E)[],
+): AggregateValidationError | E {
+  const issues: ValidationIssue[] = [];
+  for (const error of errors) {
+    if (error instanceof ValidationError) {
+      issues.push(toValidationIssue(error));
+    } else {
+      return error;
+    }
+  }
+  return new AggregateValidationError({ issues });
+}
+
+/**
+ * Missing-required-field issues for the incoming data, accumulated across the
+ * whole model (not fail-fast). `labelPrefix` scopes the message for bulk rows.
+ */
+function requiredFieldIssues(
+  modelFields: readonly ParsedFieldRow[],
+  data: Record<string, unknown>,
+  labelPrefix?: string,
+): ValidationIssue[] {
+  return modelFields
+    .filter((field) => isRequired(field.validators) && isEmptyFieldValue(data[field.api_key]))
+    .map((field) => ({
+      field: field.api_key,
+      code: "required" as const,
+      message: labelPrefix
+        ? `${labelPrefix}: field '${field.api_key}' is required`
+        : `Field '${field.api_key}' is required`,
+    }));
 }
 
 function decodeLocalizedStructuredTextMap(field: ParsedFieldRow, rawValue: unknown) {
@@ -220,6 +277,16 @@ type CreateLikeFieldProcessingParams = {
   modelFields: readonly ParsedFieldRow[];
   errorPrefix?: string;
   skipReferenceValidation?: boolean;
+  /**
+   * Dry-run: run every check the create path runs (DAST/blocks validation,
+   * whitelists, reference & asset existence, composite decode, localized guards)
+   * but write NO block rows — structured_text/rich_text go through the
+   * `validate*` twins instead of the `write*` ones. The slug branch stays as-is:
+   * it only SELECTs to find a free suffix and mutates the in-memory `data`, so it
+   * has no persistent side effect to suppress (no slug is reserved on write
+   * either). Nothing else in this loop persists.
+   */
+  dryRun?: boolean;
 };
 
 function createFieldErrorMessage(prefix: string | undefined, message: string) {
@@ -275,6 +342,7 @@ function validateAssetFieldValue(
       return yield* new ValidationError({
         message: createFieldErrorMessage(errorPrefix, `Asset(s) not found for field '${field.api_key}': ${missing.join(", ")}`),
         field: field.api_key,
+        code: "type",
       });
     }
   });
@@ -324,6 +392,7 @@ function validateReferenceFieldValue(
           `Linked record(s) not found for field '${field.api_key}': ${missingIds.join(", ")}`,
         ),
         field: field.api_key,
+        code: "link_target",
       });
     }
   });
@@ -338,11 +407,19 @@ function processCreateLikeRecordFields({
   modelFields,
   errorPrefix,
   skipReferenceValidation,
+  dryRun,
 }: CreateLikeFieldProcessingParams) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
 
-    for (const field of modelFields) {
+    // Validate/process every field, ACCUMULATING per-field failures across the
+    // whole loop instead of aborting on the first bad field (Dato-style
+    // whole-form error mapping). `Effect.validateAll` runs each field's effect
+    // (sequential — side effects like structured-text block writes must keep
+    // their order) and collects all failures; `foldFieldValidationErrors` then
+    // fails once with an AggregateValidationError carrying every issue.
+    const processField = (field: ParsedFieldRow) =>
+      Effect.gen(function* () {
       if (field.field_type === "structured_text" && data[field.api_key] !== undefined && data[field.api_key] !== null) {
         if (field.localized) {
           const localeMap = yield* decodeLocalizedStructuredTextMap(field, data[field.api_key]).pipe(
@@ -370,7 +447,7 @@ function processCreateLikeRecordFields({
             const allowedBlockTypes = getBlockWhitelist(field.validators);
             const blocksOnly = getBlocksOnly(field.validators);
 
-            const dast = yield* writeStructuredText({
+            const stParams = {
               rootModelApiKey: modelApiKey,
               fieldApiKey: field.api_key,
               rootFieldStorageKey: getStructuredTextStorageKey(field.api_key, localeCode),
@@ -378,15 +455,20 @@ function processCreateLikeRecordFields({
               value: stInput.value,
               blocks: stInput.blocks,
               allowedBlockTypes: allowedBlockTypes ?? [],
+              allowedInlineBlockTypes: getInlineBlockWhitelist(field.validators),
+              allowedLinkModels: getStructuredTextLinkModels(field.validators),
               blocksOnly,
-            });
-
-            localizedDast[localeCode] = dast;
+            };
+            if (dryRun) {
+              yield* validateStructuredText(stParams);
+            } else {
+              localizedDast[localeCode] = yield* writeStructuredText(stParams);
+            }
           }
 
           data[field.api_key] = localizedDast;
           record[field.api_key] = localizedDast;
-          continue;
+          return;
         }
 
         const expanded = expandStructuredTextShorthand(data[field.api_key]);
@@ -401,17 +483,22 @@ function processCreateLikeRecordFields({
         const allowedBlockTypes = getBlockWhitelist(field.validators);
         const blocksOnly = getBlocksOnly(field.validators);
 
-        const dast = yield* writeStructuredText({
+        const stParams = {
           rootModelApiKey: modelApiKey,
           fieldApiKey: field.api_key,
           rootRecordId: recordId,
           value: stInput.value,
           blocks: stInput.blocks,
           allowedBlockTypes: allowedBlockTypes ?? [],
+          allowedInlineBlockTypes: getInlineBlockWhitelist(field.validators),
+          allowedLinkModels: getStructuredTextLinkModels(field.validators),
           blocksOnly,
-        });
-
-        data[field.api_key] = dast;
+        };
+        if (dryRun) {
+          yield* validateStructuredText(stParams);
+        } else {
+          data[field.api_key] = yield* writeStructuredText(stParams);
+        }
       }
 
       if (field.field_type === "rich_text" && data[field.api_key] !== undefined && data[field.api_key] !== null) {
@@ -436,19 +523,23 @@ function processCreateLikeRecordFields({
                 field: field.api_key,
               });
             }
-            const blockIds = yield* writeRichText({
+            const rtParams = {
               rootModelApiKey: modelApiKey,
               fieldApiKey: field.api_key,
               rootFieldStorageKey: getStructuredTextStorageKey(field.api_key, localeCode),
               rootRecordId: recordId,
               blocks: localeValue as RichTextWriteBlock[],
               allowedBlockTypes,
-            });
-            localizedBlockIds[localeCode] = blockIds;
+            };
+            if (dryRun) {
+              yield* validateRichText(rtParams);
+            } else {
+              localizedBlockIds[localeCode] = yield* writeRichText(rtParams);
+            }
           }
           data[field.api_key] = localizedBlockIds;
           record[field.api_key] = localizedBlockIds;
-          continue;
+          return;
         }
 
         const rawBlocks = data[field.api_key];
@@ -458,14 +549,18 @@ function processCreateLikeRecordFields({
             field: field.api_key,
           });
         }
-        const blockIds = yield* writeRichText({
+        const rtParams = {
           rootModelApiKey: modelApiKey,
           fieldApiKey: field.api_key,
           rootRecordId: recordId,
           blocks: rawBlocks as RichTextWriteBlock[],
           allowedBlockTypes,
-        });
-        data[field.api_key] = blockIds;
+        };
+        if (dryRun) {
+          yield* validateRichText(rtParams);
+        } else {
+          data[field.api_key] = yield* writeRichText(rtParams);
+        }
       }
 
       if (field.field_type === "slug") {
@@ -518,6 +613,7 @@ function processCreateLikeRecordFields({
           return yield* new ValidationError({
             message: createFieldErrorMessage(errorPrefix, `Field '${field.api_key}' is not localized and cannot accept locale-keyed values`),
             field: field.api_key,
+            code: "locale",
           });
         }
         if (fieldDef.inputSchema) {
@@ -526,6 +622,7 @@ function processCreateLikeRecordFields({
               Effect.mapError((error) => new ValidationError({
                 message: createFieldErrorMessage(errorPrefix, error.message),
                 field: error.field,
+                code: "locale",
               }))
             );
             for (const [localeCode, localeValue] of Object.entries(localeMap)) {
@@ -534,6 +631,7 @@ function processCreateLikeRecordFields({
                 Effect.mapError((e) => new ValidationError({
                   message: createFieldErrorMessage(errorPrefix, `Invalid ${field.field_type} for field '${field.api_key}' locale '${localeCode}': ${e.message}`),
                   field: field.api_key,
+                  code: "type",
                 }))
               );
             }
@@ -542,6 +640,7 @@ function processCreateLikeRecordFields({
               Effect.mapError((e) => new ValidationError({
                 message: createFieldErrorMessage(errorPrefix, `Invalid ${field.field_type} for field '${field.api_key}': ${e.message}`),
                 field: field.api_key,
+                code: "type",
               }))
             );
           }
@@ -596,7 +695,11 @@ function processCreateLikeRecordFields({
       if (data[field.api_key] !== undefined) {
         record[field.api_key] = data[field.api_key];
       }
-    }
+      });
+
+    yield* Effect.validateAll(modelFields, processField, { concurrency: 1 }).pipe(
+      Effect.mapError(foldFieldValidationErrors),
+    );
   });
 }
 
@@ -622,11 +725,11 @@ export function createRecord(body: CreateRecordInput, actor?: RequestActor | nul
 
     // Validate required fields only for non-draft models (has_draft=false auto-publishes)
     // Draft models defer required validation to publish time
+    // Required-field check is its own accumulation gate, run BEFORE field
+    // processing: every missing required field surfaces in one AggregateValidationError.
     if (!model.has_draft) {
-      for (const field of modelFields) {
-        if (isRequired(field.validators) && (data[field.api_key] === undefined || data[field.api_key] === null || data[field.api_key] === ""))
-          return yield* new ValidationError({ message: `Field '${field.api_key}' is required`, field: field.api_key });
-      }
+      const missing = requiredFieldIssues(modelFields, data);
+      if (missing.length > 0) return yield* new AggregateValidationError({ issues: missing });
     }
 
     const now = new Date().toISOString();
@@ -691,9 +794,12 @@ export function createRecord(body: CreateRecordInput, actor?: RequestActor | nul
       ),
     });
     if (createUniqueViolations.length > 0) {
-      return yield* new ValidationError({
-        message: `Unique constraint violation for field(s): ${createUniqueViolations.join(", ")}`,
-        field: createUniqueViolations[0],
+      return yield* new AggregateValidationError({
+        issues: createUniqueViolations.map((field) => ({
+          field,
+          code: "unique" as const,
+          message: `Unique constraint violation for field '${field}'`,
+        })),
       });
     }
 
@@ -836,7 +942,10 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
 
     const sql = yield* SqlClient.SqlClient;
 
-    for (const field of modelFields) {
+    // Same accumulation as the create path: process every field and collect all
+    // per-field ValidationErrors, then fail once with AggregateValidationError.
+    const processField = (field: ParsedFieldRow) =>
+      Effect.gen(function* () {
       // StructuredText update: delete old blocks, write new ones
       if (field.field_type === "structured_text" && data[field.api_key] !== undefined) {
         if (data[field.api_key] === null) {
@@ -883,6 +992,8 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
                 value: stInput.value,
                 blocks: stInput.blocks,
                 allowedBlockTypes: allowedBlockTypes ?? [],
+                allowedInlineBlockTypes: getInlineBlockWhitelist(field.validators),
+                allowedLinkModels: getStructuredTextLinkModels(field.validators),
                 blocksOnly,
               });
 
@@ -891,7 +1002,7 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
 
             data[field.api_key] = nextLocaleMap;
             updates[field.api_key] = nextLocaleMap;
-            continue;
+            return;
           }
 
           const expanded = expandStructuredTextShorthand(data[field.api_key]);
@@ -915,6 +1026,8 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
             value: stInput.value,
             blocks: stInput.blocks,
             allowedBlockTypes: allowedBlockTypes ?? [],
+            allowedInlineBlockTypes: getInlineBlockWhitelist(field.validators),
+            allowedLinkModels: getStructuredTextLinkModels(field.validators),
             blocksOnly,
           });
 
@@ -965,7 +1078,7 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
 
           data[field.api_key] = nextLocaleMap;
           updates[field.api_key] = nextLocaleMap;
-          continue;
+          return;
         } else {
           const rawBlocks = data[field.api_key];
           if (!Array.isArray(rawBlocks)) {
@@ -1096,7 +1209,11 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
       if (data[field.api_key] !== undefined) {
         updates[field.api_key] = data[field.api_key];
       }
-    }
+      });
+
+    yield* Effect.validateAll(modelFields, processField, { concurrency: 1 }).pipe(
+      Effect.mapError(foldFieldValidationErrors),
+    );
 
     const uniqueFieldsTouched = new Set(
       modelFields
@@ -1113,9 +1230,12 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
         onlyFieldApiKeys: uniqueFieldsTouched,
       });
       if (patchUniqueViolations.length > 0) {
-        return yield* new ValidationError({
-          message: `Unique constraint violation for field(s): ${patchUniqueViolations.join(", ")}`,
-          field: patchUniqueViolations[0],
+        return yield* new AggregateValidationError({
+          issues: patchUniqueViolations.map((field) => ({
+            field,
+            code: "unique" as const,
+            message: `Unique constraint violation for field '${field}'`,
+          })),
         });
       }
     }
@@ -1220,12 +1340,10 @@ export function bulkCreateRecords({ modelApiKey, records }: BulkCreateRecordsInp
       const rawRecord = records[idx];
       const data: Record<string, unknown> = { ...rawRecord };
 
-      // Validate required fields only for non-draft models
+      // Validate required fields only for non-draft models (accumulated per record)
       if (!model.has_draft) {
-        for (const field of modelFields) {
-          if (isRequired(field.validators) && (data[field.api_key] === undefined || data[field.api_key] === null || data[field.api_key] === ""))
-            return yield* new ValidationError({ message: `Record ${idx}: field '${field.api_key}' is required`, field: field.api_key });
-        }
+        const missing = requiredFieldIssues(modelFields, data, `Record ${idx}`);
+        if (missing.length > 0) return yield* new AggregateValidationError({ issues: missing });
       }
 
       const requestedId = typeof data.id === "string" && data.id.trim().length > 0 ? data.id : undefined;
@@ -1555,6 +1673,8 @@ export function patchBlocksForField(body: PatchBlocksInput, actor?: RequestActor
       value: finalDastValue,
       blocks: mergedBlocks,
       allowedBlockTypes: allowedBlockTypes ?? [],
+      allowedInlineBlockTypes: getInlineBlockWhitelist(field.validators),
+      allowedLinkModels: getStructuredTextLinkModels(field.validators),
       blocksOnly,
     });
 
@@ -1638,4 +1758,814 @@ export function reorderRecords(modelApiKey: string, recordIds: readonly string[]
 
     return { reordered: recordIds.length };
   });
+}
+
+// ===========================================================================
+// Queryable list — filtered/paginated/sorted list with total count
+// ===========================================================================
+
+/**
+ * System meta columns accepted in `filter`/`orderBy`. Both the camelCase forms
+ * the GraphQL compiler maps (e.g. `_createdAt`) and the raw snake_case DB
+ * columns (e.g. `_created_at`) are allowed, since the compiler resolves either.
+ */
+const QUERY_META_KEYS: ReadonlySet<string> = new Set([
+  "id",
+  "_status",
+  "_position",
+  "_parent",
+  "_parent_id",
+  "_createdAt", "_created_at",
+  "_updatedAt", "_updated_at",
+  "_publishedAt", "_published_at",
+  "_firstPublishedAt", "_first_published_at",
+  "_publicationScheduledAt", "_scheduled_publish_at",
+  "_unpublishingScheduledAt", "_scheduled_unpublish_at",
+]);
+
+function buildFilterCompilerOpts(fields: readonly ParsedFieldRow[], locale?: string): FilterCompilerOpts {
+  const localizedDbColumns = fields.filter((f) => f.localized).map((f) => f.api_key);
+  const jsonArrayFields = new Set(
+    fields.filter((f) => f.field_type === "links" || f.field_type === "media_gallery").map((f) => f.api_key),
+  );
+  const jsonObjectIdFields = new Set(
+    fields.filter((f) => f.field_type === "media").map((f) => f.api_key),
+  );
+  const localizedKeys = new Set(localizedDbColumns);
+  return {
+    fieldIsLocalized: (field: string) => localizedKeys.has(field),
+    localizedDbColumns,
+    jsonArrayFields,
+    jsonObjectIdFields,
+    locale,
+  };
+}
+
+function allowedQueryColumns(fields: readonly ParsedFieldRow[]): ReadonlySet<string> {
+  return new Set<string>([...QUERY_META_KEYS, ...fields.map((f) => f.api_key)]);
+}
+
+/** Reject filter keys that are not real field api_keys or system meta columns. */
+function assertFilterColumns(filter: unknown, allowed: ReadonlySet<string>): Effect.Effect<void, ValidationError> {
+  return Effect.gen(function* () {
+    if (!isJsonRecord(filter)) return;
+    for (const [key, value] of Object.entries(filter)) {
+      if (key === "AND" || key === "OR") {
+        if (Array.isArray(value)) {
+          for (const sub of value) yield* assertFilterColumns(sub, allowed);
+        }
+        continue;
+      }
+      if (key === "_locales") continue;
+      if (!allowed.has(key)) {
+        return yield* new ValidationError({ message: `Unknown filter field '${key}'`, field: key });
+      }
+    }
+  });
+}
+
+/** Reject orderBy specs whose field is not a real field api_key or meta column. */
+function assertOrderByColumns(orderBy: readonly string[] | undefined, allowed: ReadonlySet<string>): Effect.Effect<void, ValidationError> {
+  return Effect.gen(function* () {
+    for (const spec of orderBy ?? []) {
+      const match = spec.match(/^(.+)_(ASC|DESC)$/);
+      if (!match) {
+        return yield* new ValidationError({ message: `Invalid orderBy spec '${spec}' (expected '<field>_ASC' or '<field>_DESC')` });
+      }
+      const field = match[1];
+      if (field === "_locales" || !allowed.has(field)) {
+        return yield* new ValidationError({ message: `Unknown orderBy field '${field}'` });
+      }
+    }
+  });
+}
+
+export interface QueryRecordsOptions {
+  filter?: Record<string, unknown>;
+  orderBy?: readonly string[];
+  page?: { limit?: number; offset?: number };
+  status?: "draft" | "published" | "updated";
+  locale?: string;
+}
+
+/**
+ * Filtered/sorted/paginated record list plus a total count for the same filter.
+ * Reuses the generic GraphQL SQL compiler for filter/orderBy. Unlike the
+ * GraphQL delivery path this returns records of every status (admin list view);
+ * pass `status` to narrow. Records are materialized identically to listRecords.
+ */
+export function queryRecords(modelApiKey: string, opts: QueryRecordsOptions) {
+  return Effect.gen(function* () {
+    if (!modelApiKey)
+      return yield* new ValidationError({ message: "modelApiKey is required" });
+    const model = yield* getModelByApiKey(modelApiKey);
+    if (!model) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
+
+    const fields = yield* getModelFields(model.id);
+    const allowed = allowedQueryColumns(fields);
+    yield* assertFilterColumns(opts.filter, allowed);
+    yield* assertOrderByColumns(opts.orderBy, allowed);
+
+    const sql = yield* SqlClient.SqlClient;
+    const tableName = `content_${model.api_key}`;
+    const filterOpts = buildFilterCompilerOpts(fields, opts.locale);
+
+    const conditions: string[] = [];
+    const whereParams: unknown[] = [];
+    if (opts.status) {
+      conditions.push(`"_status" = ?`);
+      whereParams.push(opts.status);
+    }
+    const compiled = compileFilterToSql(opts.filter, filterOpts);
+    if (compiled) {
+      conditions.push(compiled.where);
+      whereParams.push(...compiled.params);
+    }
+    const whereClause = conditions.length > 0 ? ` WHERE ${conditions.join(" AND ")}` : "";
+
+    const totalRows = yield* sql.unsafe<{ count: number }>(
+      `SELECT COUNT(*) as count FROM "${tableName}"${whereClause}`,
+      whereParams,
+    );
+    const total = totalRows[0]?.count ?? 0;
+
+    const limit = Math.min(Math.max(opts.page?.limit ?? 50, 1), 500);
+    const offset = Math.max(opts.page?.offset ?? 0, 0);
+
+    let query = `SELECT * FROM "${tableName}"${whereClause}`;
+    const orderBy = compileOrderBy(opts.orderBy ? [...opts.orderBy] : undefined, filterOpts);
+    if (orderBy) {
+      query += ` ORDER BY ${orderBy}`;
+    }
+    query += ` LIMIT ? OFFSET ?`;
+
+    const rawRows = yield* sql.unsafe<Record<string, unknown>>(query, [...whereParams, limit, offset]);
+    const records = yield* Effect.all(
+      rawRows.map((row) => materializeRecordStructuredTextFields({
+        modelApiKey: model.api_key,
+        record: normalizeBooleanFields(deserializeRow(row), fields),
+        fields,
+      })),
+      { concurrency: "unbounded" },
+    );
+
+    return { records, total };
+  }).pipe(
+    Effect.withSpan("record.query"),
+    Effect.annotateSpans({ modelApiKey }),
+  );
+}
+
+// ===========================================================================
+// Model-scoped picker search — presentation rows for record-picker UIs
+// ===========================================================================
+
+const TITLE_FIELD_NAMES: ReadonlySet<string> = new Set(["title", "name", "heading", "label"]);
+const STRING_FIELD_TYPES: ReadonlySet<string> = new Set(["string", "text", "slug"]);
+
+function resolveTitleFieldKey(model: ModelRow, fields: readonly ParsedFieldRow[]): string {
+  if (model.title_field && fields.some((f) => f.api_key === model.title_field)) {
+    return model.title_field;
+  }
+  const named = fields.find((f) => TITLE_FIELD_NAMES.has(f.api_key));
+  if (named) return named.api_key;
+  const stringField = fields.find((f) => STRING_FIELD_TYPES.has(f.field_type));
+  if (stringField) return stringField.api_key;
+  return "id";
+}
+
+function resolveImageFieldKey(model: ModelRow, fields: readonly ParsedFieldRow[]): string | null {
+  if (model.image_preview_field && fields.some((f) => f.api_key === model.image_preview_field)) {
+    return model.image_preview_field;
+  }
+  const media = fields.find((f) => f.field_type === "media");
+  return media ? media.api_key : null;
+}
+
+export interface PickerSearchRow {
+  id: string;
+  title: unknown;
+  image: string | null;
+  status: unknown;
+  updatedAt: unknown;
+}
+
+export interface PickerSearchPage {
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * Model-scoped picker search returning presentation rows for record-picker UIs.
+ * Matches `q` case-insensitively (SQL LIKE) against the model's resolved title
+ * field. Title/image fields come from the model's presentation hints
+ * (title_field / image_preview_field) with sensible fallbacks.
+ */
+export function searchRecords(modelApiKey: string, q: string, page?: PickerSearchPage) {
+  return Effect.gen(function* () {
+    if (!modelApiKey)
+      return yield* new ValidationError({ message: "modelApiKey is required" });
+    const model = yield* getModelByApiKey(modelApiKey);
+    if (!model) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
+
+    const fields = yield* getModelFields(model.id);
+    const titleKey = resolveTitleFieldKey(model, fields);
+    const imageKey = resolveImageFieldKey(model, fields);
+
+    const sql = yield* SqlClient.SqlClient;
+    const tableName = `content_${model.api_key}`;
+
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    const trimmed = q?.trim() ?? "";
+    if (trimmed.length > 0) {
+      conditions.push(`"${titleKey}" LIKE ? ESCAPE '\\'`);
+      params.push(likeContains(trimmed));
+    }
+    const whereClause = conditions.length > 0 ? ` WHERE ${conditions.join(" AND ")}` : "";
+
+    const limit = Math.min(Math.max(page?.limit ?? 20, 1), 100);
+    const offset = Math.max(page?.offset ?? 0, 0);
+
+    const rawRows = yield* sql.unsafe<Record<string, unknown>>(
+      `SELECT * FROM "${tableName}"${whereClause} ORDER BY "_updated_at" DESC LIMIT ? OFFSET ?`,
+      [...params, limit, offset],
+    );
+
+    const rows: PickerSearchRow[] = rawRows.map((raw) => {
+      const row = deserializeRow(raw);
+      const image = imageKey ? (parseMediaFieldReference(row[imageKey])?.uploadId ?? null) : null;
+      return {
+        id: String(row.id),
+        title: titleKey === "id" ? String(row.id) : row[titleKey],
+        image,
+        status: row._status,
+        updatedAt: row._updated_at,
+      };
+    });
+
+    return rows;
+  }).pipe(
+    Effect.withSpan("record.picker_search"),
+    Effect.annotateSpans({ modelApiKey }),
+  );
+}
+
+// ===========================================================================
+// Duplicate — deep-copy a record, minting fresh block ids for block subtrees
+// ===========================================================================
+
+function isRichTextBlockArray(value: unknown): value is Array<Record<string, unknown>> {
+  return Array.isArray(value)
+    && value.length > 0
+    && value.every((entry) => isJsonRecord(entry) && typeof entry.block_type === "string");
+}
+
+/**
+ * Recursively re-key a materialized structured_text envelope so every block id
+ * (top-level and nested) is replaced by a fresh generated id, keeping the DAST
+ * `item` references in sync. Nested structured_text envelopes and nested
+ * rich_text arrays inside block data are remapped too.
+ */
+function remapStructuredTextEnvelopeIds(
+  envelope: { value: unknown; blocks: Record<string, unknown> },
+): { value: unknown; blocks: Record<string, unknown> } {
+  const idMap = new Map(Object.keys(envelope.blocks).map((oldId) => [oldId, generateId()]));
+
+  const rewriteNode = (node: unknown): unknown => {
+    if (Array.isArray(node)) return node.map(rewriteNode);
+    if (!isJsonRecord(node)) return node;
+    const next: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(node)) next[key] = rewriteNode(child);
+    if ((next.type === "block" || next.type === "inlineBlock") && typeof next.item === "string") {
+      next.item = idMap.get(next.item) ?? next.item;
+    }
+    return next;
+  };
+
+  const newBlocks: Record<string, unknown> = {};
+  for (const [oldId, blockData] of Object.entries(envelope.blocks)) {
+    newBlocks[idMap.get(oldId) ?? oldId] = remapBlockDataIds(blockData);
+  }
+
+  return { value: rewriteNode(envelope.value), blocks: newBlocks };
+}
+
+/** Remap block ids inside a single block's field data (nested containers). */
+function remapBlockDataIds(blockData: unknown): unknown {
+  if (!isJsonRecord(blockData)) return blockData;
+  const next: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(blockData)) {
+    if (isStructuredTextEnvelopeLike(value)) {
+      next[key] = remapStructuredTextEnvelopeIds(value);
+    } else if (isRichTextBlockArray(value)) {
+      next[key] = remapRichTextBlockIds(value);
+    } else {
+      next[key] = value;
+    }
+  }
+  return next;
+}
+
+/** Remap block ids for a materialized rich_text array (each block gets a fresh id). */
+function remapRichTextBlockIds(blocks: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  return blocks.map((block) => {
+    const remapped = remapBlockDataIds(block);
+    return isJsonRecord(remapped) ? { ...remapped, id: generateId() } : block;
+  });
+}
+
+function remapLocalizedFieldValue(
+  value: unknown,
+  remap: (inner: unknown) => unknown,
+): unknown {
+  if (!isJsonRecord(value)) return remap(value);
+  // A localized value is a { [locale]: value } map.
+  const next: Record<string, unknown> = {};
+  for (const [locale, localeValue] of Object.entries(value)) {
+    next[locale] = localeValue === null || localeValue === undefined ? localeValue : remap(localeValue);
+  }
+  return next;
+}
+
+/**
+ * Duplicate a record. The copy starts in Draft status (for draft-enabled
+ * models), all field values are copied, and every structured_text / rich_text
+ * block subtree is deep-copied with fresh block ids. Slug fields uniquify via
+ * the standard create path (a suffix is appended when the value would collide).
+ * Block writes reuse the same writeStructuredText / writeRichText machinery as
+ * normal creates — only the block ids are re-minted beforehand.
+ */
+export function duplicateRecord(modelApiKey: string, id: string, actor?: RequestActor | null) {
+  return Effect.gen(function* () {
+    if (!modelApiKey)
+      return yield* new ValidationError({ message: "modelApiKey is required" });
+    const model = yield* getModelByApiKey(modelApiKey);
+    if (!model) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
+    if (model.is_block)
+      return yield* new ValidationError({ message: "Cannot duplicate records of block types" });
+    if (model.singleton)
+      return yield* new ValidationError({ message: "Cannot duplicate a singleton record" });
+
+    const tableName = `content_${model.api_key}`;
+    const source = yield* selectById(tableName, id);
+    if (!source) return yield* new NotFoundError({ entity: "Record", id });
+
+    const fields = yield* getModelFields(model.id);
+    const materialized = yield* materializeRecordStructuredTextFields({
+      modelApiKey: model.api_key,
+      record: normalizeBooleanFields(source, fields),
+      fields,
+    });
+
+    const data: Record<string, unknown> = {};
+    for (const field of fields) {
+      const value = materialized[field.api_key];
+      if (value === undefined || value === null) continue;
+
+      if (field.field_type === "structured_text") {
+        data[field.api_key] = field.localized
+          ? remapLocalizedFieldValue(value, (inner) =>
+              isStructuredTextEnvelopeLike(inner) ? remapStructuredTextEnvelopeIds(inner) : inner)
+          : (isStructuredTextEnvelopeLike(value) ? remapStructuredTextEnvelopeIds(value) : value);
+      } else if (field.field_type === "rich_text") {
+        data[field.api_key] = field.localized
+          ? remapLocalizedFieldValue(value, (inner) =>
+              isRichTextBlockArray(inner) ? remapRichTextBlockIds(inner) : inner)
+          : (isRichTextBlockArray(value) ? remapRichTextBlockIds(value) : value);
+      } else {
+        data[field.api_key] = value;
+      }
+    }
+
+    if (model.tree && source._parent_id !== undefined && source._parent_id !== null) {
+      data._parent_id = source._parent_id;
+    }
+
+    const created = yield* createRecord({ modelApiKey, data }, actor);
+    return yield* getRecord(modelApiKey, String(created.id));
+  }).pipe(
+    Effect.withSpan("record.duplicate"),
+    Effect.annotateSpans({
+      modelApiKey,
+      recordId: id,
+      actorType: actor?.type ?? "anonymous",
+    }),
+  );
+}
+
+// ===========================================================================
+// Bulk status ops — per-id best-effort, no cross-id transaction
+// ===========================================================================
+
+export interface BulkOpResult {
+  id: string;
+  ok: boolean;
+  error?: string;
+}
+
+function describeCmsError(error: unknown): string {
+  if (isCmsError(error)) {
+    const body = errorToResponse(error).body;
+    return body.error;
+  }
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
+function runBulkOp<R>(
+  ids: readonly string[],
+  op: (id: string) => Effect.Effect<unknown, unknown, R>,
+): Effect.Effect<BulkOpResult[], never, R> {
+  return Effect.forEach(
+    ids,
+    (id) =>
+      op(id).pipe(
+        Effect.as<BulkOpResult>({ id, ok: true }),
+        Effect.catchAll((error) => Effect.succeed<BulkOpResult>({ id, ok: false, error: describeCmsError(error) })),
+      ),
+    { concurrency: 1 },
+  );
+}
+
+/** Publish many records; per-id best-effort (no transaction across ids). */
+export function publishRecords(modelApiKey: string, ids: readonly string[], actor?: RequestActor | null) {
+  return runBulkOp(ids, (id) => PublishService.publishRecord(modelApiKey, id, actor)).pipe(
+    Effect.withSpan("record.bulk_publish"),
+    Effect.annotateSpans({ modelApiKey }),
+  );
+}
+
+/** Unpublish many records; per-id best-effort (no transaction across ids). */
+export function unpublishRecords(modelApiKey: string, ids: readonly string[], actor?: RequestActor | null) {
+  return runBulkOp(ids, (id) => PublishService.unpublishRecord(modelApiKey, id, actor)).pipe(
+    Effect.withSpan("record.bulk_unpublish"),
+    Effect.annotateSpans({ modelApiKey }),
+  );
+}
+
+/** Delete many records; per-id best-effort (no transaction across ids). */
+export function deleteRecords(modelApiKey: string, ids: readonly string[], _actor?: RequestActor | null) {
+  return runBulkOp(ids, (id) => removeRecord(modelApiKey, id)).pipe(
+    Effect.withSpan("record.bulk_delete"),
+    Effect.annotateSpans({ modelApiKey }),
+  );
+}
+
+// ===========================================================================
+// Backlinks — records that reference this record via link / links fields
+// ===========================================================================
+
+export interface RecordBacklink {
+  modelApiKey: string;
+  recordId: string;
+  fieldApiKey: string;
+}
+
+/**
+ * Build the SQL predicate that matches rows whose `field` references `recordId`.
+ * `link` columns hold a scalar id; `links` columns hold a JSON array of ids
+ * (matched via json_each — the same shape the GraphQL reverse-reference loader
+ * uses). Localized columns store a { locale: value } map, so a substring match
+ * on the JSON text is used (best-effort).
+ */
+function backlinkCondition(field: ParsedFieldRow, recordId: string): { sql: string; params: unknown[] } {
+  if (field.localized) {
+    return { sql: `"${field.api_key}" LIKE ?`, params: [`%"${recordId}"%`] };
+  }
+  if (field.field_type === "link") {
+    return { sql: `"${field.api_key}" = ?`, params: [recordId] };
+  }
+  return {
+    sql: `EXISTS (SELECT 1 FROM json_each("${field.api_key}") WHERE value = ?)`,
+    params: [recordId],
+  };
+}
+
+/**
+ * Inbound references: every record (across all content models) whose `link` /
+ * `links` field points at the given record. A link/links field is scanned when
+ * it is unconstrained OR its target-model whitelist includes this record's
+ * model. Returns one entry per (referencing record, referencing field).
+ *
+ * NOTE: there is no record-level delete guard in the CMS today (removeRecord
+ * deletes unconditionally), so there is no delete-guard caller to share this
+ * with — the model-delete guard in model-service is a *field*-reference scan, a
+ * different query. This is the single source of truth for record backlinks.
+ */
+export function getRecordBacklinks(modelApiKey: string, id: string) {
+  return Effect.gen(function* () {
+    if (!modelApiKey)
+      return yield* new ValidationError({ message: "modelApiKey is required" });
+    const model = yield* getModelByApiKey(modelApiKey);
+    if (!model) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
+    const existing = yield* selectById(`content_${model.api_key}`, id);
+    if (!existing) return yield* new NotFoundError({ entity: "Record", id });
+
+    const sql = yield* SqlClient.SqlClient;
+    const contentModels = yield* sql.unsafe<ModelRow>("SELECT * FROM models WHERE is_block = 0");
+
+    const results: RecordBacklink[] = [];
+    for (const sourceModel of contentModels) {
+      const fields = yield* getModelFields(sourceModel.id);
+      const linkFields = fields.filter((f) => f.field_type === "link" || f.field_type === "links");
+      for (const field of linkFields) {
+        const targets = field.field_type === "link"
+          ? getLinkTargets(field.validators)
+          : getLinksTargets(field.validators);
+        // Skip fields constrained to other models; scan unconstrained fields.
+        if (targets !== undefined && !targets.includes(modelApiKey)) continue;
+
+        const condition = backlinkCondition(field, id);
+        const rows = yield* sql.unsafe<{ id: string }>(
+          `SELECT id FROM "content_${sourceModel.api_key}" WHERE ${condition.sql}`,
+          condition.params,
+        );
+        for (const row of rows) {
+          results.push({ modelApiKey: sourceModel.api_key, recordId: row.id, fieldApiKey: field.api_key });
+        }
+      }
+    }
+
+    return results;
+  }).pipe(
+    Effect.withSpan("record.backlinks"),
+    Effect.annotateSpans({ modelApiKey, recordId: id }),
+  );
+}
+
+// ===========================================================================
+// Validation dry-run — run the create/patch validation with ZERO persistence
+// ===========================================================================
+
+/**
+ * Run an effect that either succeeds or fails with an `AggregateValidationError`,
+ * returning its issues as data. Any other failure (e.g. a `SqlError`) is a real
+ * defect, not a per-field validation issue, so it propagates unchanged.
+ */
+function collectAggregateIssues<A, E, R>(
+  effect: Effect.Effect<A, AggregateValidationError | E, R>,
+): Effect.Effect<ValidationIssue[], E, R> {
+  return effect.pipe(
+    Effect.as<ValidationIssue[]>([]),
+    Effect.catchIf(
+      (error): error is AggregateValidationError => error instanceof AggregateValidationError,
+      (error) => Effect.succeed([...error.issues]),
+    ),
+  );
+}
+
+/**
+ * The shared dry-run body behind {@link validateRecord} / {@link validateRecordUpdate}.
+ * Runs exactly the checks the write paths run, accumulating issues from every
+ * gate (rather than short-circuiting at the first, the way a single write does)
+ * so a form can mark every bad field at once:
+ *
+ *  1. scalar-value validation (required / enum / length / range / format) via the
+ *     same `collectValueValidationIssues` the publish gate uses;
+ *  2. field processing (composite decode, localized-map decode, structured_text
+ *     DAST + block/inline whitelist + structured_text_links, rich_text blocks,
+ *     link/asset existence) via `processCreateLikeRecordFields({ dryRun: true })`
+ *     — the identical code path a create runs, minus the block-row inserts;
+ *  3. unique constraints via the same `findUniqueConstraintViolations`.
+ *
+ * `requireAllRequired` distinguishes create-shaped (every required field must be
+ * present) from patch-shaped (only fields present in `data` are checked).
+ */
+function runDryRunValidation(params: {
+  model: ModelRow;
+  modelFields: readonly ParsedFieldRow[];
+  tableName: string;
+  data: Record<string, unknown>;
+  recordId: string;
+  excludeId: string | null;
+  requireAllRequired: boolean;
+}) {
+  return Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const issues: ValidationIssue[] = [];
+
+    const localeRows = yield* sql.unsafe<{ code: string }>("SELECT code FROM locales ORDER BY position", []);
+    const defaultLocale = localeRows.length > 0 ? localeRows[0].code : null;
+    const allLocales = params.model.all_locales_required && localeRows.length > 0
+      ? localeRows.map((l) => l.code)
+      : undefined;
+
+    // 1. Scalar-value validation. Create-shaped enforces required on every field;
+    // patch-shaped only inspects the fields actually present in the payload.
+    const valueCheckFields = params.requireAllRequired
+      ? params.modelFields
+      : params.modelFields.filter((field) => field.api_key in params.data);
+    for (const issue of collectValueValidationIssues(params.data, valueCheckFields, defaultLocale, allLocales)) {
+      issues.push({
+        field: issue.field,
+        code: issue.code,
+        message: `Field '${issue.field}' failed '${issue.code}' validation`,
+      });
+    }
+
+    // 2. Field processing (no persistence). Uses a private copy of `data` because
+    // the create path mutates it (slug generation etc.); the scalar checks above
+    // ran against the untouched original.
+    const record: Record<string, unknown> = {};
+    const processIssues = yield* collectAggregateIssues(
+      processCreateLikeRecordFields({
+        modelApiKey: params.model.api_key,
+        tableName: params.tableName,
+        recordId: params.recordId,
+        data: { ...params.data },
+        record,
+        modelFields: params.modelFields,
+        dryRun: true,
+      }),
+    );
+    issues.push(...processIssues);
+
+    // 3. Unique constraints — only for unique fields present in the payload
+    // (matching the write paths), excluding the record itself on update.
+    const uniqueFields = new Set(
+      params.modelFields
+        .filter((field) => isUnique(field.validators) && params.data[field.api_key] !== undefined)
+        .map((field) => field.api_key),
+    );
+    if (uniqueFields.size > 0) {
+      const uniqueViolations = yield* findUniqueConstraintViolations({
+        tableName: params.tableName,
+        record,
+        fields: params.modelFields,
+        excludeId: params.excludeId,
+        onlyFieldApiKeys: uniqueFields,
+      });
+      for (const field of uniqueViolations) {
+        issues.push({ field, code: "unique", message: `Unique constraint violation for field '${field}'` });
+      }
+    }
+
+    return issues;
+  });
+}
+
+/**
+ * Create-shaped validation dry-run: answers "would creating a record with this
+ * data be valid?" without writing anything. Required fields are enforced for the
+ * whole model (unlike a draft create, which defers required to publish) because
+ * the dry-run's job is live form validation — the same question Dato's
+ * `POST /items/validate` answers. Succeeds with `{ valid: true }`, or fails with
+ * the same `AggregateValidationError` a real create would raise (every offending
+ * field, each carrying its machine-readable `code`).
+ */
+export function validateRecord(modelApiKey: string, data: Record<string, unknown>) {
+  return Effect.gen(function* () {
+    if (!modelApiKey) return yield* new ValidationError({ message: "modelApiKey is required" });
+    const model = yield* getModelByApiKey(modelApiKey);
+    if (!model) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
+    if (model.is_block) {
+      return yield* new ValidationError({ message: "Cannot validate records for block types directly" });
+    }
+
+    const modelFields = yield* getModelFields(model.id);
+    const issues = yield* runDryRunValidation({
+      model,
+      modelFields,
+      tableName: `content_${model.api_key}`,
+      data,
+      recordId: generateId(),
+      excludeId: null,
+      requireAllRequired: true,
+    });
+    if (issues.length > 0) return yield* new AggregateValidationError({ issues });
+    return { valid: true as const };
+  }).pipe(
+    Effect.withSpan("record.validate"),
+    Effect.annotateSpans({ modelApiKey }),
+  );
+}
+
+/**
+ * Patch-shaped validation dry-run: validates a partial update against an existing
+ * record without writing anything. Only fields present in `data` are checked
+ * (required is not re-imposed on absent fields), the record must exist (404
+ * otherwise), and unique checks exclude the record itself.
+ *
+ * Boundary note: the real patch path deletes the field's existing blocks before
+ * writing the new ones; the dry-run only validates the NEW value (via the shared
+ * `processCreateLikeRecordFields({ dryRun: true })`) and never touches stored
+ * blocks — validation is equivalent, with no destructive side effect.
+ */
+export function validateRecordUpdate(modelApiKey: string, id: string, data: Record<string, unknown>) {
+  return Effect.gen(function* () {
+    if (!modelApiKey) return yield* new ValidationError({ message: "modelApiKey is required" });
+    const model = yield* getModelByApiKey(modelApiKey);
+    if (!model) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
+
+    const tableName = `content_${model.api_key}`;
+    const existing = yield* selectById(tableName, id);
+    if (!existing) return yield* new NotFoundError({ entity: "Record", id });
+
+    const modelFields = yield* getModelFields(model.id);
+    const issues = yield* runDryRunValidation({
+      model,
+      modelFields,
+      tableName,
+      data,
+      recordId: id,
+      excludeId: id,
+      requireAllRequired: false,
+    });
+    if (issues.length > 0) return yield* new AggregateValidationError({ issues });
+    return { valid: true as const };
+  }).pipe(
+    Effect.withSpan("record.validate_update"),
+    Effect.annotateSpans({ modelApiKey, recordId: id }),
+  );
+}
+
+// ===========================================================================
+// Sync state — sidebar status cluster: publish/schedule timestamps + field diff
+// ===========================================================================
+
+/** Recursively key-sorted JSON, so two structurally-equal values compare equal. */
+function canonicalJson(value: unknown): string {
+  const normalize = (input: unknown): unknown => {
+    if (Array.isArray(input)) return input.map(normalize);
+    if (isJsonRecord(input)) {
+      const sorted: Record<string, unknown> = {};
+      for (const key of Object.keys(input).sort()) sorted[key] = normalize(input[key]);
+      return sorted;
+    }
+    return input;
+  };
+  return JSON.stringify(normalize(value) ?? null);
+}
+
+/** Decode a stored column value to its comparable JSON form (null if absent). */
+function snapshotComparable(value: unknown): unknown {
+  if (value === undefined || value === null) return null;
+  const decoded = decodeJsonIfString(value);
+  return decoded === undefined ? null : decoded;
+}
+
+export interface RecordSyncState {
+  status: unknown;
+  publishedAt: unknown;
+  firstPublishedAt: unknown;
+  scheduledPublishAt: unknown;
+  scheduledUnpublishAt: unknown;
+  changedFields: string[];
+}
+
+/**
+ * Sidebar status cluster for a record: its publication status, publish/first-
+ * publish timestamps, any scheduled publish/unpublish times, and which field
+ * api_keys differ from the last published snapshot.
+ *
+ * `changedFields` diffs each field's current stored value against the matching
+ * key in `_published_snapshot` (canonical-JSON compared). A record that was
+ * never published (no snapshot) reports every field that currently holds a
+ * meaningful value.
+ *
+ * Boundary note: the published snapshot stores *materialized* structured_text /
+ * rich_text (block content inlined) whereas the live column stores the raw
+ * DAST / block-id list, so those two field types can read as "changed" even when
+ * their content is unchanged. Scalar fields diff exactly. This mirrors how the
+ * snapshot is built at publish time and is a known, documented limitation.
+ */
+export function getSyncState(modelApiKey: string, id: string) {
+  return Effect.gen(function* () {
+    if (!modelApiKey) return yield* new ValidationError({ message: "modelApiKey is required" });
+    const model = yield* getModelByApiKey(modelApiKey);
+    if (!model) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
+
+    const tableName = `content_${model.api_key}`;
+    const existing = yield* selectById(tableName, id);
+    if (!existing) return yield* new NotFoundError({ entity: "Record", id });
+
+    const modelFields = yield* getModelFields(model.id);
+
+    const decodedSnapshot = snapshotComparable(existing._published_snapshot);
+    const snapshotRecord = isJsonRecord(decodedSnapshot) ? decodedSnapshot : null;
+
+    const changedFields: string[] = [];
+    for (const field of modelFields) {
+      const current = snapshotComparable(existing[field.api_key]);
+      if (snapshotRecord === null) {
+        if (current !== null && current !== "") changedFields.push(field.api_key);
+      } else {
+        const snapshotValue = snapshotComparable(snapshotRecord[field.api_key]);
+        if (canonicalJson(current) !== canonicalJson(snapshotValue)) changedFields.push(field.api_key);
+      }
+    }
+
+    return {
+      status: existing._status ?? null,
+      publishedAt: existing._published_at ?? null,
+      firstPublishedAt: existing._first_published_at ?? null,
+      scheduledPublishAt: existing._scheduled_publish_at ?? null,
+      scheduledUnpublishAt: existing._scheduled_unpublish_at ?? null,
+      changedFields,
+    } satisfies RecordSyncState;
+  }).pipe(
+    Effect.withSpan("record.sync_state"),
+    Effect.annotateSpans({ modelApiKey, recordId: id }),
+  );
 }

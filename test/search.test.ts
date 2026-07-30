@@ -458,6 +458,71 @@ describe("FTS5 Search Integration", () => {
     expect(page2Data.results).toHaveLength(2);
   });
 
+  it("returns a correct, non-overlapping second page (keyword)", async () => {
+    for (let i = 0; i < 5; i++) {
+      await jsonRequest(handler, "POST", "/api/records", {
+        modelApiKey: "post",
+        data: { title: `Searchable Post ${i}`, body: "Common keyword here" },
+      });
+    }
+
+    const page1 = await jsonRequest(handler, "POST", "/api/search", { query: "keyword", modelApiKey: "post", first: 2, skip: 0 });
+    const page1Data = await page1.json();
+    const page2 = await jsonRequest(handler, "POST", "/api/search", { query: "keyword", modelApiKey: "post", first: 2, skip: 2 });
+    const page2Data = await page2.json();
+
+    expect(page1Data.results).toHaveLength(2);
+    expect(page2Data.results).toHaveLength(2);
+
+    const page1Ids: string[] = page1Data.results.map((r: any) => r.recordId);
+    const page2Ids: string[] = page2Data.results.map((r: any) => r.recordId);
+
+    // Page 2 must not repeat any record from page 1.
+    expect(page1Ids.some((id) => page2Ids.includes(id))).toBe(false);
+    // Four distinct records across the two pages.
+    expect(new Set([...page1Ids, ...page2Ids]).size).toBe(4);
+  });
+
+  it("reports an honest total count for keyword search, independent of page size", async () => {
+    for (let i = 0; i < 5; i++) {
+      await jsonRequest(handler, "POST", "/api/records", {
+        modelApiKey: "post",
+        data: { title: `Searchable Post ${i}`, body: "Common keyword here" },
+      });
+    }
+
+    const res = await jsonRequest(handler, "POST", "/api/search", { query: "keyword", modelApiKey: "post", first: 2 });
+    const data = await res.json();
+
+    expect(data.meta.mode).toBe("keyword");
+    // total is the full match count over the MATCH predicate, not the page length.
+    expect(data.meta.total).toBe(5);
+    expect(data.meta.returned).toBe(2);
+    expect(data.results).toHaveLength(2);
+  });
+
+  it("ranks a title match above a body-only match (bm25 title weighting)", async () => {
+    // Body-only match for the term.
+    await jsonRequest(handler, "POST", "/api/records", {
+      modelApiKey: "post",
+      data: { title: "Unrelated Heading", body: "An article that mentions kubernetes in passing" },
+    });
+    // Title match for the same term.
+    const titleMatch = await jsonRequest(handler, "POST", "/api/records", {
+      modelApiKey: "post",
+      data: { title: "Kubernetes Deep Dive", body: "Some generic content without the term" },
+    });
+    const titleMatchRecord = await titleMatch.json();
+
+    const res = await jsonRequest(handler, "POST", "/api/search", { query: "kubernetes", modelApiKey: "post" });
+    const data = await res.json();
+
+    expect(data.results.length).toBe(2);
+    // Title weight (10.0) must outrank body weight (1.0).
+    expect(data.results[0].recordId).toBe(titleMatchRecord.id);
+    expect(data.results[0].title).toBe("Kubernetes Deep Dive");
+  });
+
   it("reindexes all models via POST /api/search/reindex", async () => {
     // Create records first
     await jsonRequest(handler, "POST", "/api/records", {

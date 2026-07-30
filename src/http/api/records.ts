@@ -8,6 +8,9 @@ import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "@effect/platform";
 import { Schema } from "effect";
 import {
   BulkCreateRecordsInput,
+  BulkRecordOperationInput,
+  QueryRecordsInput,
+  ValidateRecordInput,
   CreateRecordInput,
   PatchRecordInput,
   PatchBlocksInput,
@@ -49,6 +52,85 @@ export const recordsGroup = HttpApiGroup.make("records")
       .annotate(OpenApi.Summary, "List records for a model")
       .setUrlParams(ModelApiKeyParams)
       .addSuccess(Schema.Unknown),
+  )
+  // POST /records/query — filtered/paginated/sorted list with total
+  .add(
+    HttpApiEndpoint.post("queryRecords", "/records/query")
+      .annotate(OpenApi.Summary, "Query records (filter, orderBy, pagination, status)")
+      .setPayload(QueryRecordsInput)
+      .addSuccess(Schema.Unknown),
+  )
+  // GET /records/picker-search — model-scoped presentation-row search
+  .add(
+    HttpApiEndpoint.get("pickerSearchRecords", "/records/picker-search")
+      .annotate(OpenApi.Summary, "Model-scoped picker search")
+      .setUrlParams(Schema.Struct({
+        modelApiKey: Schema.String,
+        q: Schema.optional(Schema.String),
+        limit: Schema.optional(Schema.String),
+        offset: Schema.optional(Schema.String),
+      }))
+      .addSuccess(Schema.Unknown),
+  )
+  // POST /records/validate — create-shaped validation dry-run (204 / 400)
+  .add(
+    HttpApiEndpoint.post("validateRecord", "/records/validate")
+      .annotate(OpenApi.Summary, "Validate a would-be record (dry-run, no persistence)")
+      .setPayload(ValidateRecordInput)
+      .addSuccess(Schema.Void, { status: 204 }),
+  )
+  // POST /records/:id/validate — patch-shaped validation dry-run (204 / 400 / 404)
+  .add(
+    HttpApiEndpoint.post("validateRecordUpdate", "/records/:id/validate")
+      .annotate(OpenApi.Summary, "Validate a partial update (dry-run, no persistence)")
+      .setPath(IdPath)
+      .setPayload(ValidateRecordInput)
+      .addSuccess(Schema.Void, { status: 204 }),
+  )
+  // GET /records/:id/sync-state — sidebar status cluster
+  .add(
+    HttpApiEndpoint.get("recordSyncState", "/records/:id/sync-state")
+      .annotate(OpenApi.Summary, "Record sync state (publish/schedule + changed fields)")
+      .setPath(IdPath)
+      .setUrlParams(ModelApiKeyParams)
+      .addSuccess(Schema.Unknown),
+  )
+  // POST /records/bulk-publish — publish many (per-id results)
+  .add(
+    HttpApiEndpoint.post("bulkPublishRecords", "/records/bulk-publish")
+      .annotate(OpenApi.Summary, "Bulk publish records")
+      .setPayload(BulkRecordOperationInput)
+      .addSuccess(Schema.Unknown),
+  )
+  // POST /records/bulk-unpublish — unpublish many (per-id results)
+  .add(
+    HttpApiEndpoint.post("bulkUnpublishRecords", "/records/bulk-unpublish")
+      .annotate(OpenApi.Summary, "Bulk unpublish records")
+      .setPayload(BulkRecordOperationInput)
+      .addSuccess(Schema.Unknown),
+  )
+  // POST /records/bulk-delete — delete many (per-id results)
+  .add(
+    HttpApiEndpoint.post("bulkDeleteRecords", "/records/bulk-delete")
+      .annotate(OpenApi.Summary, "Bulk delete records")
+      .setPayload(BulkRecordOperationInput)
+      .addSuccess(Schema.Unknown),
+  )
+  // GET /records/:id/links — inbound references (backlinks)
+  .add(
+    HttpApiEndpoint.get("recordBacklinks", "/records/:id/links")
+      .annotate(OpenApi.Summary, "Inbound references to a record")
+      .setPath(IdPath)
+      .setUrlParams(ModelApiKeyParams)
+      .addSuccess(Schema.Unknown),
+  )
+  // POST /records/:id/duplicate — deep-copy a record
+  .add(
+    HttpApiEndpoint.post("duplicateRecord", "/records/:id/duplicate")
+      .annotate(OpenApi.Summary, "Duplicate a record")
+      .setPath(IdPath)
+      .setPayload(Schema.Struct({ modelApiKey: Schema.NonEmptyString }))
+      .addSuccess(Schema.Unknown, { status: 201 }),
   )
   // GET /records/:id/versions — list versions
   .add(

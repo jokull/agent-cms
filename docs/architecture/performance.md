@@ -116,38 +116,40 @@ It is:
 
 That is why batching matters so much. GraphQL makes it very easy to express N+1 behavior. SQLite makes it cheap to do set-oriented batched lookups like `IN (...)`, so the right compromise is usually many small, batched queries, not one huge join.
 
-## Why Not One Giant Join
+## Why Not One Giant *Flat Join*
 
-SQL absolutely can represent nesting, but not in the same way GraphQL does.
-
-For simple relations, joins are a natural fit. For example:
-
-- post -> author
-- post -> category
-
-But a real GraphQL query in this system mixes several different shapes:
-
-- normal links
-- lists of records
-- StructuredText values
-- unions across different block tables
-- nested StructuredText inside blocks
-
-Trying to flatten that into one joined SQL statement has real downsides:
+SQL can represent nesting, but not the same way GraphQL does. The thing to
+avoid is one giant **flat join** — the naive translation of nested GraphQL into
+a single `JOIN`-heavy rowset. It has real downsides:
 
 - rows explode because parent data repeats for every child row
 - unions across block types become awkward
 - nested blocks recurse in a way that does not map cleanly to flat joins
 - rebuilding the exact GraphQL shape from one huge rowset is expensive and messy
 
-So this codebase prefers:
+Two different strategies avoid this, one per read path:
+
+**Preview path — batched queries + in-memory assembly.** The general resolver
+path (used for draft/preview reads, which mix normal links, lists, StructuredText
+values, block-table unions, and nested StructuredText inside blocks) prefers:
 
 - one root query for top-level rows
 - batched link fetches
 - batched StructuredText materialization
 - in-memory reconstruction of the nested response
 
-This keeps SQL simple and indexable while still serving a nested GraphQL API.
+**Published path — a single *JSON-shaped* statement, not a flat join.** The
+published fast path in [`src/graphql/published-fast-path.ts`](../../src/graphql/published-fast-path.ts)
+*does* compile the whole response into one SQL statement, but it sidesteps row
+explosion by building the nested shape with SQLite JSON functions instead of
+joins: nested `json_object(...)` for object fields, correlated subqueries for
+links, and `json_group_array(...)` for lists, with the entire response assembled
+in a single `SELECT json_object(...)`. Because nesting is expressed as nested
+JSON rather than a cross product of rows, there is no parent-row duplication —
+the flat-join downsides above never arise.
+
+Both keep SQL indexable while serving a nested GraphQL API; they differ in where
+assembly happens (in the Worker for preview, in SQLite for published).
 
 ## Service Binding vs D1
 
@@ -492,7 +494,7 @@ Key wins:
 Explored and discarded (47 experiments):
 
 - Concurrent Effect.forEach for block table queries — D1 contention regressed
-- D1 batch() API — unstable, regressed when type checks passed
+- Concurrent `Effect.forEach` over D1's `batch()` API for the hot block-fetch loop — regressed under D1 contention (note: `batch()` itself *did* ship as the general batched-query fast path in [`src/db/run-batched-queries.ts`](../../src/db/run-batched-queries.ts), collapsing sibling statements into one hop; it carries the preview workload today. What regressed was fanning it out concurrently across block tables.)
 - Breadth-first iterative materialization — bookkeeping overhead regressed
 - Extending direct-D1 beyond the hot block fetch loop — always regressed
 - Module-level prepared statement reuse — D1's own cache is better
@@ -503,11 +505,21 @@ Explored and discarded (47 experiments):
 
 ## What To Optimize Next
 
-The published read path is the primary delivery path for end users. Published queries currently take ~8-13ms locally (55ms+ on deployed Workers), even though the SQL is trivial — one root query, one batched link fetch, and a pre-materialized snapshot read.
+The published read path is the primary delivery path for end users. The
+**SQLite JSON compilation** approach — compiling the whole GraphQL query into a
+single SQL statement with correlated subqueries and `json_group_array()`,
+bypassing the resolver layer — already ships here as
+[`src/graphql/published-fast-path.ts`](../../src/graphql/published-fast-path.ts)
+(the same technique Drizzle ORM's relational query system and Hasura's query
+engine use). Where that fast path applies, a published read is a single
+statement rather than a root query plus batched follow-ups.
 
-The overhead is in the GraphQL execution pipeline: Yoga parse/validate/execute, resolver-per-field dispatch, Effect runtime, DataLoader scheduling.
+Remaining optimization targets:
 
-The next optimization target is **published read latency**, potentially via:
-
-- **SQLite JSON compilation**: compile GraphQL queries into single SQL statements with correlated subqueries and `json_group_array()`, bypassing the resolver layer entirely. This is the approach used by Drizzle ORM's relational query system and Hasura's query engine.
-- **Handler overhead reduction**: eliminate double query parsing, skip schema cache Effect.runPromise calls, short-circuit auth for unauthenticated reads.
+- **Extend JSON compilation to the preview path** (and to any published
+  selections the fast path does not yet cover, e.g. StructuredText). The preview
+  resolver path still pays for sequential resolver round-trips (see the key
+  insight above); giving it the same single-statement treatment is the next
+  large win.
+- **Handler overhead reduction**: eliminate double query parsing, skip schema
+  cache Effect.runPromise calls, short-circuit auth for unauthenticated reads.

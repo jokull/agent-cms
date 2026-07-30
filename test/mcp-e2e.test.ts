@@ -112,7 +112,7 @@ describe("P5.6: End-to-end MCP → GraphQL", () => {
     // Verify schema via discovery
     const schemaResult = parse(await agent.callTool({ name: "schema_info", arguments: {} }));
     expect(schemaResult.models).toHaveLength(3);
-    const postDetail = parse(await agent.callTool({ name: "schema_info", arguments: { filterByName: "blog_post" } }));
+    const postDetail = parse(await agent.callTool({ name: "schema_info", arguments: { filterByName: "Blog Post" } }));
     expect(postDetail.models[0].fields).toHaveLength(4);
 
     // === Step 3: Agent creates content ===

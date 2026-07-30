@@ -121,14 +121,20 @@ export function removeBlockFromWhitelist(params: {
 
     const field = fields[0];
     if (field.field_type !== "structured_text")
-      return yield* new ValidationError({ message: "Field is not a structured_text field" });
+      return yield* new ValidationError({
+        message: "Field is not a structured_text field",
+        field: field.api_key,
+      });
 
     const validators = decodeJsonRecordStringOr(field.validators || "{}", {});
     const whitelist = Array.isArray(validators.structured_text_blocks)
       ? validators.structured_text_blocks.filter((b): b is string => typeof b === "string")
       : [];
     if (!whitelist.includes(blockApiKey))
-      return yield* new ValidationError({ message: `Block type '${blockApiKey}' is not in this field's whitelist` });
+      return yield* new ValidationError({
+        message: `Block type '${blockApiKey}' is not in this field's whitelist`,
+        field: field.api_key,
+      });
 
     // Find the model that owns this field
     const model = yield* sql.unsafe<ModelRow>("SELECT * FROM models WHERE id = ?", [field.model_id]);

@@ -1,11 +1,14 @@
 import { Context, Effect } from "effect";
 import { SqlClient } from "@effect/sql";
 import { generateId } from "../id.js";
-import { NotFoundError, ValidationError } from "../errors.js";
-import type { AssetRow } from "../db/row-types.js";
+import { NotFoundError, ValidationError, ReferenceConflictError } from "../errors.js";
+import type { AssetRow, ModelRow } from "../db/row-types.js";
 import type { CreateAssetInput, CreateUploadUrlInput, ImportAssetFromUrlInput } from "./input-schemas.js";
-import { encodeJson } from "../json.js";
+import { encodeJson, decodeJsonIfString } from "../json.js";
+import { isObjectRecord } from "../value-utils.js";
+import { parseMediaFieldReference, parseMediaGalleryReferences } from "../media-field.js";
 import type { RequestActor } from "../attribution.js";
+import { likeContains } from "../sql-util.js";
 
 export class AssetImportContext extends Context.Tag("AssetImportContext")<
   AssetImportContext,
@@ -316,11 +319,68 @@ export function createAsset(body: CreateAssetInput, actor?: RequestActor | null)
   );
 }
 
-export function listAssets() {
+/** Columns `listAssets`'s `orderBy` may sort on (`'<field>_ASC' | '<field>_DESC'`, same
+ * convention as `record-service.ts`'s `assertOrderByColumns`). */
+const ASSET_ORDER_BY_COLUMNS: ReadonlySet<string> = new Set(["created_at", "updated_at", "filename", "size"]);
+
+function compileAssetOrderBy(orderBy: readonly string[] | undefined) {
+  return Effect.gen(function* () {
+    if (!orderBy || orderBy.length === 0) {
+      return `"created_at" DESC`;
+    }
+    const clauses: string[] = [];
+    for (const spec of orderBy) {
+      const match = spec.match(/^(.+)_(ASC|DESC)$/);
+      if (!match) {
+        return yield* new ValidationError({ message: `Invalid orderBy spec '${spec}' (expected '<field>_ASC' or '<field>_DESC')` });
+      }
+      const [, field, direction] = match;
+      if (!ASSET_ORDER_BY_COLUMNS.has(field)) {
+        return yield* new ValidationError({ message: `Unknown asset orderBy field '${field}'` });
+      }
+      clauses.push(`"${field}" ${direction}`);
+    }
+    return clauses.join(", ");
+  });
+}
+
+export interface ListAssetsOptions {
+  readonly query?: string;
+  readonly page?: { readonly limit?: number; readonly offset?: number };
+  readonly orderBy?: readonly string[];
+}
+
+/**
+ * List/search assets with case-insensitive matching against filename, title,
+ * and alt text, pagination (with a total count), and column-based ordering.
+ */
+export function listAssets(opts?: ListAssetsOptions) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    return yield* sql.unsafe<AssetRow>("SELECT * FROM assets ORDER BY created_at DESC");
-  });
+    const query = opts?.query;
+    const limit = opts?.page?.limit ?? 24;
+    const offset = opts?.page?.offset ?? 0;
+    const orderByClause = yield* compileAssetOrderBy(opts?.orderBy);
+
+    const whereClause = query
+      ? `WHERE lower(filename) LIKE lower(?) ESCAPE '\\' OR lower(alt) LIKE lower(?) ESCAPE '\\' OR lower(title) LIKE lower(?) ESCAPE '\\'`
+      : "";
+    const likePattern = query ? likeContains(query) : "";
+    const whereParams = query ? [likePattern, likePattern, likePattern] : [];
+
+    const assets = yield* sql.unsafe<AssetRow>(
+      `SELECT * FROM assets ${whereClause} ORDER BY ${orderByClause} LIMIT ? OFFSET ?`,
+      [...whereParams, limit, offset]
+    );
+    const countRows = yield* sql.unsafe<{ total: number }>(
+      `SELECT COUNT(*) as total FROM assets ${whereClause}`,
+      whereParams
+    );
+    return { assets: Array.from(assets), total: countRows[0]?.total ?? 0 };
+  }).pipe(
+    Effect.withSpan("asset.list"),
+    Effect.annotateSpans({ query: opts?.query ?? "" }),
+  );
 }
 
 export function getAsset(id: string) {
@@ -375,36 +435,6 @@ export function replaceAsset(id: string, body: CreateAssetInput, actor?: Request
   });
 }
 
-export function searchAssets(opts: { query?: string; limit: number; offset: number }) {
-  return Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    const { query, limit, offset } = opts;
-
-    if (query) {
-      const pattern = `%${query}%`;
-      const assets = yield* sql.unsafe<AssetRow>(
-        `SELECT * FROM assets WHERE filename LIKE ? OR alt LIKE ? OR title LIKE ?
-         ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-        [pattern, pattern, pattern, limit, offset]
-      );
-      const countRows = yield* sql.unsafe<{ total: number }>(
-        `SELECT COUNT(*) as total FROM assets WHERE filename LIKE ? OR alt LIKE ? OR title LIKE ?`,
-        [pattern, pattern, pattern]
-      );
-      return { assets: Array.from(assets), total: countRows[0]?.total ?? 0 };
-    }
-
-    const assets = yield* sql.unsafe<AssetRow>(
-      "SELECT * FROM assets ORDER BY created_at DESC LIMIT ? OFFSET ?",
-      [limit, offset]
-    );
-    const countRows = yield* sql.unsafe<{ total: number }>(
-      "SELECT COUNT(*) as total FROM assets"
-    );
-    return { assets: Array.from(assets), total: countRows[0]?.total ?? 0 };
-  });
-}
-
 export function updateAssetMetadata(id: string, body: { alt?: string; title?: string; width?: number; height?: number }, actor?: RequestActor | null) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
@@ -427,14 +457,165 @@ export function updateAssetMetadata(id: string, body: { alt?: string; title?: st
   });
 }
 
-export function deleteAsset(id: string) {
+/**
+ * Delete an asset. Guarded by the SAME `getAssetUsages` scan the `/usages`
+ * endpoint exposes (single source of truth — the guard and the report can't
+ * drift): if any record still references the asset, deletion fails with a
+ * `ReferenceConflictError` (HTTP 409) listing each reference as
+ * `"<modelApiKey>.<fieldApiKey> (<recordId>)"`. Pass `force` to delete anyway
+ * (leaving those references dangling). `getAssetUsages` also raises `NotFound`
+ * when the asset does not exist, so no separate existence check is needed.
+ */
+export function deleteAsset(id: string, force = false) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const rows = yield* sql.unsafe<{ id: string }>("SELECT id FROM assets WHERE id = ?", [id]);
-    if (rows.length === 0) return yield* new NotFoundError({ entity: "Asset", id });
+    const usages = yield* getAssetUsages(id);
+    if (usages.length > 0 && !force) {
+      return yield* new ReferenceConflictError({
+        message: `Asset '${id}' is referenced by ${usages.length} field value(s) and cannot be deleted. Pass force=true to delete anyway.`,
+        references: usages.map((usage) => `${usage.modelApiKey}.${usage.fieldApiKey} (${usage.recordId})`),
+      });
+    }
     yield* sql.unsafe("DELETE FROM assets WHERE id = ?", [id]);
     return { deleted: true };
-  });
+  }).pipe(
+    Effect.withSpan("asset.delete"),
+    Effect.annotateSpans({ assetId: id, force: String(force) }),
+  );
+}
+
+export interface AssetUsage {
+  readonly modelApiKey: string;
+  readonly recordId: string;
+  readonly fieldApiKey: string;
+}
+
+interface AssetReferencingField {
+  readonly api_key: string;
+  readonly field_type: string;
+}
+
+/**
+ * Extract asset ids referenced by a single media / media_gallery / seo field's raw
+ * column value. None of these three field types are localizable (see
+ * `field-types.ts`'s `localizable: false`), so the raw column is always the plain
+ * (non-locale-keyed) value — no locale-map unwrapping needed.
+ */
+function extractAssetIds(fieldType: string, rawValue: unknown): string[] {
+  const value = decodeJsonIfString(rawValue);
+  if (fieldType === "media") {
+    const ref = parseMediaFieldReference(value);
+    return ref ? [ref.uploadId] : [];
+  }
+  if (fieldType === "media_gallery") {
+    return parseMediaGalleryReferences(value).map((ref) => ref.uploadId);
+  }
+  if (fieldType === "seo" && isObjectRecord(value) && typeof value.image === "string" && value.image.length > 0) {
+    return [value.image];
+  }
+  return [];
+}
+
+/**
+ * Which records reference a given asset, via its media / media_gallery / seo.image
+ * fields. Uses the same `parseMediaFieldReference` / `parseMediaGalleryReferences`
+ * primitives from `../media-field.js` that `record-service.ts` and the GraphQL
+ * resolvers use for the same string-or-{upload_id} encoding, so the two can't drift.
+ *
+ * Scans two layers:
+ *  - Every content model's own table (`content_<api_key>`) for top-level
+ *    media/media_gallery/seo fields — reported directly as
+ *    `{ modelApiKey: <model>, recordId: <row id>, fieldApiKey }`.
+ *  - Every block model's table (`block_<api_key>`) for the same field types.
+ *    Blocks (including blocks nested inside other blocks, e.g. structured_text
+ *    block/inlineBlock payloads) are stored as real SQL rows, not embedded JSON —
+ *    each carries `_root_record_id` / `_root_field_api_key` columns pointing back
+ *    to the top-level record/field it's attached under (regardless of nesting
+ *    depth), so block-table columns ARE reachable the same way as content-table
+ *    columns. Usages found there are reported against the *root* record/field
+ *    (the model-and-field an editor would actually open to see/remove the
+ *    reference), after resolving which content model owns that root record id.
+ *
+ * NOT covered: an asset id embedded ad hoc inside a JSON/rich-content field's
+ * raw value that isn't itself typed media/media_gallery/seo (e.g. a `json`
+ * field that happens to contain `{"assetId": "..."}`, or an inline reference
+ * baked into a structured_text DAST node's custom attrs) — only the three
+ * asset-typed fields are matched.
+ */
+export function getAssetUsages(id: string) {
+  return Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+
+    const found = yield* sql.unsafe<{ id: string }>("SELECT id FROM assets WHERE id = ?", [id]);
+    if (found.length === 0) return yield* new NotFoundError({ entity: "Asset", id });
+
+    const models = yield* sql.unsafe<ModelRow>("SELECT * FROM models");
+    const contentModels = models.filter((m) => m.is_block === 0);
+
+    const rootModelCache = new Map<string, string | null>();
+    const resolveRootModel = (recordId: string) => Effect.gen(function* () {
+      const cached = rootModelCache.get(recordId);
+      if (cached !== undefined) return cached;
+      for (const contentModel of contentModels) {
+        const rows = yield* sql.unsafe<{ id: string }>(
+          `SELECT id FROM "content_${contentModel.api_key}" WHERE id = ?`,
+          [recordId],
+        );
+        if (rows.length > 0) {
+          rootModelCache.set(recordId, contentModel.api_key);
+          return contentModel.api_key;
+        }
+      }
+      rootModelCache.set(recordId, null);
+      return null;
+    });
+
+    const usages: AssetUsage[] = [];
+
+    for (const model of models) {
+      const fields = yield* sql.unsafe<AssetReferencingField>(
+        "SELECT api_key, field_type FROM fields WHERE model_id = ? AND field_type IN ('media', 'media_gallery', 'seo')",
+        [model.id],
+      );
+      if (fields.length === 0) continue;
+
+      const isBlock = model.is_block === 1;
+      const tableName = isBlock ? `block_${model.api_key}` : `content_${model.api_key}`;
+      const rootColumns = isBlock ? `, "_root_record_id", "_root_field_api_key"` : "";
+      const rows = yield* sql.unsafe<Record<string, unknown>>(
+        `SELECT "id"${rootColumns}, ${fields.map((f) => `"${f.api_key}"`).join(", ")} FROM "${tableName}"`
+      );
+
+      for (const row of rows) {
+        for (const field of fields) {
+          const assetIds = extractAssetIds(field.field_type, row[field.api_key]);
+          if (!assetIds.includes(id)) continue;
+
+          if (isBlock) {
+            const rootRecordId = typeof row._root_record_id === "string" ? row._root_record_id : null;
+            const rootFieldApiKey = typeof row._root_field_api_key === "string" ? row._root_field_api_key : null;
+            if (!rootRecordId || !rootFieldApiKey) continue;
+            const rootModelApiKey = yield* resolveRootModel(rootRecordId);
+            if (!rootModelApiKey) continue;
+            usages.push({ modelApiKey: rootModelApiKey, recordId: rootRecordId, fieldApiKey: rootFieldApiKey });
+          } else {
+            usages.push({ modelApiKey: model.api_key, recordId: String(row.id), fieldApiKey: field.api_key });
+          }
+        }
+      }
+    }
+
+    const seen = new Set<string>();
+    return usages.filter((usage) => {
+      const key = `${usage.modelApiKey} ${usage.recordId} ${usage.fieldApiKey}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }).pipe(
+    Effect.withSpan("asset.usages"),
+    Effect.annotateSpans({ assetId: id }),
+  );
 }
 
 export function createAssetUploadUrl(input: CreateUploadUrlInput) {

@@ -72,10 +72,18 @@ export function validatePreviewToken(token: string) {
       return { valid: false as const };
     }
 
-    // Fire-and-forget cleanup of expired tokens
+    // Fire-and-forget cleanup of expired tokens.
+    // Bind the comparison value from JS (ISO 8601, e.g. "2026-07-29T12:00:00.000Z")
+    // instead of comparing against SQLite's datetime('now') (e.g. "2026-07-29 12:00:00").
+    // Both columns are TEXT, so this was a lexicographic comparison that disagreed at the
+    // date/time separator (`T` vs space) — expired tokens were never reaped on the day
+    // they expired. Note: the `datetime('now')` DEFAULT clauses in src/migrations.ts are
+    // never compared against anything, so that space-separated format is cosmetic only;
+    // left untouched there because versioned migration SQL must stay byte-stable.
     yield* Effect.fork(
       sql.unsafe(
-        `DELETE FROM preview_tokens WHERE id IN (SELECT id FROM preview_tokens WHERE expires_at < datetime('now') LIMIT 100)`
+        `DELETE FROM preview_tokens WHERE id IN (SELECT id FROM preview_tokens WHERE expires_at < ? LIMIT 100)`,
+        [new Date().toISOString()]
       ).pipe(Effect.ignore)
     );
 

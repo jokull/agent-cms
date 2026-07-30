@@ -54,6 +54,14 @@ export const CreateModelInput = Schema.Struct({
   allLocalesRequired: Schema.optionalWith(Schema.Boolean, { default: () => false }),
   ordering: Schema.optional(Schema.String),
   canonicalPathTemplate: Schema.optional(Schema.NullOr(Schema.String)),
+  /**
+   * DatoCMS parity: presentation hints for record links / block cards.
+   * Must reference a field api_key on this model. Since fields are created
+   * after the model, a non-null value is rejected at creation time — set
+   * these via PATCH once the referenced fields exist.
+   */
+  titleField: Schema.optional(Schema.NullOr(Schema.String)),
+  imagePreviewField: Schema.optional(Schema.NullOr(Schema.String)),
 });
 export type CreateModelInput = typeof CreateModelInput.Type;
 
@@ -158,14 +166,24 @@ export const ImportAssetFromUrlInput = Schema.Struct({
 });
 export type ImportAssetFromUrlInput = typeof ImportAssetFromUrlInput.Type;
 
-export const SearchAssetsInput = Schema.Struct({
-  query: Schema.optional(Schema.String),
-  limit: Schema.optionalWith(positiveInt("limit"), { default: () => 24 }),
-  offset: Schema.optionalWith(Int.pipe(
-    Schema.filter((value) => value >= 0, { message: () => "offset must be >= 0" }),
-  ), { default: () => 0 }),
+/**
+ * List/search assets (GET /assets). `orderBy` follows the same
+ * `'<field>_ASC' | '<field>_DESC'` convention as `QueryRecordsInput.orderBy`;
+ * allowed fields are validated in the service (created_at, updated_at, filename, size).
+ */
+export const ListAssetsInput = Schema.Struct({
+  q: Schema.optional(Schema.String),
+  orderBy: Schema.optional(Schema.Array(Schema.String)),
+  page: Schema.optional(
+    Schema.Struct({
+      limit: Schema.optionalWith(positiveInt("limit"), { default: () => 24 }),
+      offset: Schema.optionalWith(Int.pipe(
+        Schema.filter((value) => value >= 0, { message: () => "offset must be >= 0" }),
+      ), { default: () => 0 }),
+    }),
+  ),
 });
-export type SearchAssetsInput = typeof SearchAssetsInput.Type;
+export type ListAssetsInput = typeof ListAssetsInput.Type;
 
 export const UpdateAssetMetadataInput = Schema.Struct({
   alt: Schema.optional(Schema.String),
@@ -185,12 +203,51 @@ export type ReorderInput = typeof ReorderInput.Type;
 
 export const BulkRecordOperationInput = Schema.Struct({
   modelApiKey: Schema.NonEmptyString,
-  recordIds: Schema.Array(Schema.String).pipe(
-    Schema.filter((value) => value.length >= 1, { message: () => "recordIds must contain at least 1 entry" }),
-    Schema.filter((value) => value.length <= 1000, { message: () => "recordIds must contain at most 1000 entries" }),
+  ids: Schema.Array(Schema.String).pipe(
+    Schema.filter((value) => value.length >= 1, { message: () => "ids must contain at least 1 entry" }),
+    Schema.filter((value) => value.length <= 1000, { message: () => "ids must contain at most 1000 entries" }),
   ),
 });
 export type BulkRecordOperationInput = typeof BulkRecordOperationInput.Type;
+
+/**
+ * Filtered/paginated record list query (POST /records/query).
+ * `filter`/`orderBy` are compiled by the generic GraphQL SQL compiler
+ * (src/graphql/filter-compiler.ts); keys are field api_keys and system meta
+ * columns. `page` caps are enforced in the service.
+ */
+export const QueryRecordsInput = Schema.Struct({
+  modelApiKey: Schema.NonEmptyString,
+  filter: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
+  orderBy: Schema.optional(Schema.Array(Schema.String)),
+  page: Schema.optional(
+    Schema.Struct({
+      limit: Schema.optionalWith(positiveInt("limit"), { default: () => 50 }),
+      offset: Schema.optionalWith(
+        Int.pipe(Schema.filter((value) => value >= 0, { message: () => "offset must be >= 0" })),
+        { default: () => 0 },
+      ),
+    }),
+  ),
+  status: Schema.optional(Schema.Literal("draft", "published", "updated")),
+  locale: Schema.optional(Schema.String),
+});
+export type QueryRecordsInput = typeof QueryRecordsInput.Type;
+
+/**
+ * Body for the validation dry-run endpoints (POST /records/validate and
+ * POST /records/:id/validate). Same `{ modelApiKey, data }` shape as a
+ * create/patch payload; the record id (for the update variant) comes from the
+ * path, not the body.
+ */
+export const ValidateRecordInput = Schema.Struct({
+  modelApiKey: Schema.NonEmptyString,
+  data: Schema.optionalWith(
+    Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+    { default: () => ({}) },
+  ),
+});
+export type ValidateRecordInput = typeof ValidateRecordInput.Type;
 
 export const ScheduleRecordInput = Schema.Struct({
   modelApiKey: Schema.NonEmptyString,
@@ -238,6 +295,9 @@ export const UpdateModelInput = Schema.Struct({
   allLocalesRequired: Schema.optional(Schema.Boolean),
   ordering: Schema.optional(Schema.NullOr(Schema.String)),
   canonicalPathTemplate: Schema.optional(Schema.NullOr(Schema.String)),
+  /** Set to a field api_key on this model, or null to clear. See CreateModelInput. */
+  titleField: Schema.optional(Schema.NullOr(Schema.String)),
+  imagePreviewField: Schema.optional(Schema.NullOr(Schema.String)),
 });
 export type UpdateModelInput = typeof UpdateModelInput.Type;
 
@@ -285,6 +345,8 @@ const SchemaExportModelSchema = Schema.Struct({
   hasDraft: Schema.Boolean,
   ordering: Schema.optionalWith(Schema.NullOr(Schema.String), { default: () => null }),
   canonicalPathTemplate: Schema.optionalWith(Schema.NullOr(Schema.String), { default: () => null }),
+  titleField: Schema.optionalWith(Schema.NullOr(Schema.String), { default: () => null }),
+  imagePreviewField: Schema.optionalWith(Schema.NullOr(Schema.String), { default: () => null }),
   fields: Schema.Array(SchemaExportFieldSchema),
 });
 

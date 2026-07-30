@@ -24,8 +24,15 @@ export const assetsGroup = HttpApiGroup.make("assets")
           q: Schema.optional(Schema.String),
           limit: Schema.optional(Schema.String),
           offset: Schema.optional(Schema.String),
+          orderBy: Schema.optional(Schema.String),
         }),
       )
+      .addSuccess(Schema.Unknown),
+  )
+  .add(
+    HttpApiEndpoint.get("getAssetUsages", "/assets/:id/usages")
+      .annotate(OpenApi.Summary, "List records referencing an asset")
+      .setPath(Schema.Struct({ id: Schema.String }))
       .addSuccess(Schema.Unknown),
   )
   .add(
@@ -62,8 +69,9 @@ export const assetsGroup = HttpApiGroup.make("assets")
   )
   .add(
     HttpApiEndpoint.del("deleteAsset", "/assets/:id")
-      .annotate(OpenApi.Summary, "Delete an asset")
+      .annotate(OpenApi.Summary, "Delete an asset (409 if referenced unless force=true)")
       .setPath(Schema.Struct({ id: Schema.String }))
+      .setUrlParams(Schema.Struct({ force: Schema.optional(Schema.String) }))
       .addSuccess(Schema.Unknown),
   )
   .add(

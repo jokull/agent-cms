@@ -40,6 +40,8 @@ export interface SchemaExportModel {
   hasDraft: boolean;
   ordering: string | null;
   canonicalPathTemplate: string | null;
+  titleField: string | null;
+  imagePreviewField: string | null;
   fields: SchemaExportField[];
 }
 
@@ -103,6 +105,8 @@ export function exportSchema() {
       hasDraft: !!m.has_draft,
       ordering: m.ordering,
       canonicalPathTemplate: m.canonical_path_template ?? null,
+      titleField: m.title_field ?? null,
+      imagePreviewField: m.image_preview_field ?? null,
       fields: (fieldsByModelId.get(m.id) ?? []).map((f) => ({
         label: f.label,
         apiKey: f.api_key,
@@ -214,6 +218,21 @@ export function importSchema(s: ImportSchemaInput) {
           tree: model.tree,
         },
       );
+    }
+
+    // --- 5. Apply presentation hints (title_field / image_preview_field) ---
+    // Hints reference field api_keys, so they can only be validated and applied
+    // after fields exist — this must run after phases 3/4, not folded into phase 2.
+    for (const model of s.models) {
+      if (model.titleField == null && model.imagePreviewField == null) continue;
+      const modelId = modelApiKeyToId.get(model.apiKey);
+      if (modelId === undefined) {
+        return yield* new ValidationError({ message: `Model "${model.apiKey}" was not created — cannot apply presentation hints` });
+      }
+      yield* ModelService.updateModel(modelId, {
+        titleField: model.titleField ?? undefined,
+        imagePreviewField: model.imagePreviewField ?? undefined,
+      });
     }
 
     return stats;

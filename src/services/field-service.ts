@@ -11,6 +11,7 @@ import { deleteBlockSubtrees } from "./structured-text-service.js";
 import { isUnique, supportsUniqueValidation } from "../db/validators.js";
 import { decodeJsonRecordStringOr, encodeJson } from "../json.js";
 import { bumpSchemaVersion } from "./schema-version.js";
+import { isObjectRecord } from "../value-utils.js";
 
 const ALLOWED_FIELD_VALIDATOR_KEYS = new Set([
   "required",
@@ -25,9 +26,25 @@ const ALLOWED_FIELD_VALIDATOR_KEYS = new Set([
   "items_item_type",
   "structured_text_blocks",
   "rich_text_blocks",
+  "structured_text_links",
+  "structured_text_inline_blocks",
   "blocks_only",
   "searchable",
 ]);
+
+/**
+ * Validators whose values are item-type (model) reference lists. DatoCMS
+ * references item types by ID in all of these; we store them as api_keys, so
+ * each string entry is resolved ID→api_key (see normalizeItemTypeValidators).
+ */
+const ITEM_TYPE_VALIDATOR_KEYS = [
+  "item_item_type",
+  "items_item_type",
+  "structured_text_blocks",
+  "rich_text_blocks",
+  "structured_text_links",
+  "structured_text_inline_blocks",
+] as const;
 
 const BOOLEAN_VALIDATOR_KEYS = new Set(["required", "unique", "searchable"]);
 
@@ -48,18 +65,39 @@ function normalizeBooleanValidators(validators: Record<string, unknown>): Record
 }
 
 /**
- * Normalize link/links target references to model API KEYS. DatoCMS-style
- * `item_item_type` / `items_item_type` reference the target model by ID, but the
- * GraphQL schema-builder + link resolvers key everything by api_key — a target
- * left as an ID falls back to a scalar `JSON` field (relation unreadable). Resolve
- * any entry that is a model ID to its api_key; leave already-api_key (or unknown)
- * entries untouched.
+ * Unwrap DatoCMS-style wrapped list validators to our canonical bare-array form.
+ * Dato's CMA wraps `enum` values as `{ values: [...] }` and every item-type list
+ * (`item_item_type`, `items_item_type`, the structured-/rich-text block whitelists,
+ * and the structured-text link / inline-block whitelists) as `{ item_types: [...] }`.
+ * We validate and store bare arrays; unwrap here so BOTH the wrapped and bare forms
+ * are accepted — agents translating a Dato export reach for the wrapped shape and
+ * used to hit "validator must be an array of strings".
  */
-function normalizeLinkTargets(validators: Record<string, unknown>) {
+function unwrapWrappedListValidators(validators: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...validators };
+  const enumValue = out.enum;
+  if (isObjectRecord(enumValue) && Array.isArray(enumValue.values)) out.enum = enumValue.values;
+  for (const key of ITEM_TYPE_VALIDATOR_KEYS) {
+    const v = out[key];
+    if (isObjectRecord(v) && Array.isArray(v.item_types)) out[key] = v.item_types;
+  }
+  return out;
+}
+
+/**
+ * Normalize item-type references to model API KEYS. DatoCMS references the target
+ * item types by ID in every ITEM_TYPE_VALIDATOR_KEYS list, but the GraphQL
+ * schema-builder + link resolvers key everything by api_key — a target left as an
+ * ID falls back to a scalar `JSON` field (relation unreadable) or fails whitelist
+ * matching. Resolve any entry that is a model ID to its api_key; leave
+ * already-api_key (or unknown) entries untouched. Run after
+ * unwrapWrappedListValidators so wrapped lists have already collapsed to arrays.
+ */
+function normalizeItemTypeValidators(validators: Record<string, unknown>) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const out: Record<string, unknown> = { ...validators };
-    for (const key of ["item_item_type", "items_item_type"]) {
+    for (const key of ITEM_TYPE_VALIDATOR_KEYS) {
       const v = out[key];
       if (!Array.isArray(v)) continue;
       const resolved: unknown[] = [];
@@ -262,6 +300,38 @@ function validateFieldValidators(
       }
     }
 
+    const structuredTextLinks = validators.structured_text_links;
+    if (structuredTextLinks !== undefined) {
+      if (fieldType !== "structured_text") {
+        return yield* new ValidationError({
+          message: `structured_text_links validator is only supported for structured_text fields`,
+          field: apiKey,
+        });
+      }
+      if (!Array.isArray(structuredTextLinks) || !structuredTextLinks.every((value) => typeof value === "string")) {
+        return yield* new ValidationError({
+          message: `structured_text_links validator must be an array of strings`,
+          field: apiKey,
+        });
+      }
+    }
+
+    const structuredTextInlineBlocks = validators.structured_text_inline_blocks;
+    if (structuredTextInlineBlocks !== undefined) {
+      if (fieldType !== "structured_text") {
+        return yield* new ValidationError({
+          message: `structured_text_inline_blocks validator is only supported for structured_text fields`,
+          field: apiKey,
+        });
+      }
+      if (!Array.isArray(structuredTextInlineBlocks) || !structuredTextInlineBlocks.every((value) => typeof value === "string")) {
+        return yield* new ValidationError({
+          message: `structured_text_inline_blocks validator must be an array of strings`,
+          field: apiKey,
+        });
+      }
+    }
+
     const numberRange = validators.number_range;
     if (numberRange !== undefined) {
       if (!["integer", "float"].includes(fieldType)) {
@@ -414,7 +484,9 @@ export function createField(modelId: string, body: CreateFieldInput) {
     const position = body.position ?? allFields.length;
 
     // Validate required field + defaultValue BEFORE any mutations
-    const parsedValidators = yield* normalizeLinkTargets(normalizeBooleanValidators(body.validators));
+    const parsedValidators = yield* normalizeItemTypeValidators(
+      normalizeBooleanValidators(unwrapWrappedListValidators(body.validators)),
+    );
     yield* validateFieldValidators(body.fieldType, body.apiKey, parsedValidators);
     if (parsedValidators.required) {
       const modelInfo = yield* sql.unsafe<{ api_key: string; is_block: number }>(
@@ -488,8 +560,10 @@ export function updateField(fieldId: string, body: UpdateFieldInput) {
 
     const field = fields[0];
     const nextFieldType = body.fieldType ?? field.field_type;
-    const nextValidators = yield* normalizeLinkTargets(
-      normalizeBooleanValidators(body.validators ?? parseFieldValidators(field).validators),
+    const nextValidators = yield* normalizeItemTypeValidators(
+      normalizeBooleanValidators(
+        unwrapWrappedListValidators(body.validators ?? parseFieldValidators(field).validators),
+      ),
     );
     yield* validateFieldValidators(nextFieldType, field.api_key, nextValidators);
 
@@ -620,6 +694,15 @@ export function deleteField(fieldId: string) {
     );
 
     if (modelInfo.length > 0) {
+      // A dangling presentation hint is worse than a cleared one — clear it if
+      // this field was the referenced title_field / image_preview_field.
+      const hintClears: string[] = [];
+      if (modelInfo[0].title_field === field.api_key) hintClears.push("title_field = NULL");
+      if (modelInfo[0].image_preview_field === field.api_key) hintClears.push("image_preview_field = NULL");
+      if (hintClears.length > 0) {
+        yield* sql.unsafe(`UPDATE models SET ${hintClears.join(", ")} WHERE id = ?`, [modelId]);
+      }
+
       const tableName = modelInfo[0].is_block ? `block_${modelInfo[0].api_key}` : `content_${modelInfo[0].api_key}`;
 
       // Strip deleted field from all published snapshots

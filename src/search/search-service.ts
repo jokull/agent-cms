@@ -1,7 +1,7 @@
 import { Effect, Option } from "effect";
 import { SqlClient } from "@effect/sql";
 import { extractRecordText } from "./extract-text.js";
-import { createFtsTable as _createFtsTable, dropFtsTable, ftsIndex, ftsDeindex, ftsSearch } from "./fts5.js";
+import { createFtsTable as _createFtsTable, dropFtsTable, ftsIndex, ftsDeindex, ftsSearch, ftsCount } from "./fts5.js";
 import type { FtsResult } from "./fts5.js";
 import type { ParsedFieldRow, FieldRow } from "../db/row-types.js";
 import { parseFieldValidators } from "../db/row-types.js";
@@ -230,21 +230,31 @@ export function search(params: {
     const bindings = yield* VectorizeContext;
     const hasVector = Option.isSome(bindings);
     const limit = Math.min(params.first ?? 10, 100);
+    const skip = params.skip ?? 0;
+    // Pre-fusion candidate window. Fusion and semantic paging happen in memory,
+    // so both backends must surface enough rows to cover everything up to the
+    // requested page (skip + limit), not just one page's worth.
+    const candidateWindow = skip + limit;
     const mode = params.mode ?? (hasVector ? "hybrid" : "keyword");
     const useVector = (mode === "semantic" || mode === "hybrid") && hasVector;
 
     let ftsResults: FtsResult[] = [];
     if (mode !== "semantic") {
+      // Keyword mode pages directly in SQL (LIMIT/OFFSET). Hybrid mode fuses in
+      // memory, so it must fetch the whole candidate window from offset 0 and
+      // page after fusion — otherwise skip would be applied twice.
+      const ftsFirst = mode === "hybrid" ? candidateWindow : limit;
+      const ftsSkip = mode === "hybrid" ? 0 : skip;
       ftsResults = yield* ftsSearch(params.query, {
         modelApiKey: params.modelApiKey,
-        first: limit,
-        skip: params.skip,
+        first: ftsFirst,
+        skip: ftsSkip,
       }).pipe(Effect.catchAll(() => Effect.succeed([] as FtsResult[])));
     }
 
     let vectorResults: Array<{ recordId: string; modelApiKey: string; score: number }> = [];
     if (useVector && Option.isSome(bindings)) {
-      vectorResults = yield* vectorizeSearch(bindings.value.ai, bindings.value.vectorize, params.query, limit * 2).pipe(
+      vectorResults = yield* vectorizeSearch(bindings.value.ai, bindings.value.vectorize, params.query, candidateWindow).pipe(
         Effect.catchAll(() => Effect.succeed([]))
       );
 
@@ -255,23 +265,34 @@ export function search(params: {
 
     if (mode === "hybrid" && ftsResults.length > 0 && vectorResults.length > 0) {
       const merged = reciprocalRankFusion(ftsResults, vectorResults);
-      const paged = merged.slice(params.skip ?? 0, (params.skip ?? 0) + limit);
+      // Single paging step, after fusion — skip is NOT re-applied to ftsResults.
+      const paged = merged.slice(skip, skip + limit);
 
       const ftsMetaMap = new Map(ftsResults.map((r) => [`${r.modelApiKey}:${r.recordId}`, { title: r.title, snippet: r.snippet }]));
 
-      const results = paged.map((r) => ({
-        recordId: r.recordId,
-        modelApiKey: r.modelApiKey,
-        rank: r.score,
-        title: ftsMetaMap.get(`${r.modelApiKey}:${r.recordId}`)?.title ?? null,
-        snippet: ftsMetaMap.get(`${r.modelApiKey}:${r.recordId}`)?.snippet ?? "",
-      }));
+      const results = yield* Effect.forEach(paged, (r) =>
+        Effect.gen(function* () {
+          const meta = ftsMetaMap.get(`${r.modelApiKey}:${r.recordId}`);
+          // Vector-only hits are absent from the FTS metadata map; backfill the
+          // title from the FTS table so semantic-only results keep a title.
+          const title = meta?.title ?? (yield* lookupIndexedTitle(r.modelApiKey, r.recordId));
+          return {
+            recordId: r.recordId,
+            modelApiKey: r.modelApiKey,
+            rank: r.score,
+            title,
+            snippet: meta?.snippet ?? "",
+          };
+        })
+      );
 
-      return { results, meta: { count: results.length, mode: "hybrid" as const } };
+      // No honest total for hybrid: the true union of distinct keyword+vector
+      // matches is not cheaply computable, so meta reports only page length.
+      return { results, meta: { returned: results.length, mode: "hybrid" as const } };
     }
 
     if (mode === "semantic" && vectorResults.length > 0) {
-      const paged = vectorResults.slice(params.skip ?? 0, (params.skip ?? 0) + limit);
+      const paged = vectorResults.slice(skip, skip + limit);
       const results = yield* Effect.forEach(paged, (r) =>
         Effect.gen(function* () {
           const title = yield* lookupIndexedTitle(r.modelApiKey, r.recordId);
@@ -284,15 +305,27 @@ export function search(params: {
           };
         })
       );
-      return { results, meta: { count: results.length, mode: "semantic" as const } };
+      return { results, meta: { returned: results.length, mode: "semantic" as const } };
     }
 
+    if (mode === "keyword") {
+      // Keyword total is cheaply knowable: COUNT(*) over the same MATCH predicate.
+      const total = yield* ftsCount(params.query, { modelApiKey: params.modelApiKey }).pipe(
+        Effect.catchAll(() => Effect.succeed(0))
+      );
+      return {
+        results: ftsResults,
+        meta: { returned: ftsResults.length, total, mode: "keyword" as const },
+      };
+    }
+
+    // Fallback: hybrid/semantic requested but one backend returned nothing.
+    // In degraded hybrid, ftsResults holds the candidate window from offset 0,
+    // so page it here to honor skip.
+    const ftsPage = mode === "hybrid" ? ftsResults.slice(skip, skip + limit) : ftsResults;
     return {
-      results: ftsResults,
-      meta: {
-        count: ftsResults.length,
-        mode: (hasVector ? mode : "keyword"),
-      },
+      results: ftsPage,
+      meta: { returned: ftsPage.length, mode },
     };
   });
 }

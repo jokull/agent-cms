@@ -10,6 +10,10 @@
     ".": {
       "import": "./dist/index.mjs",
       "types": "./dist/index.d.mts"
+    },
+    "./lib": {
+      "types": "./dist/lib.d.mts",
+      "import": "./src/lib.ts"
     }
   },
   "files": [

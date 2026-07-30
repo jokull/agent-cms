@@ -146,6 +146,26 @@ describe("Filter compiler — comprehensive", () => {
       expect(r.data.allArticles).toHaveLength(1);
     });
 
+    it("matches treats % and _ as literal characters, not LIKE wildcards", async () => {
+      await createRecord("article", {
+        title: { en: "Percent Article" },
+        body: "Save 50% today, terms apply.",
+      });
+      await createRecord("article", {
+        title: { en: "Dash Article" },
+        body: "Save 50-percent today too.",
+      });
+
+      // A literal "%" must not act as a wildcard matching every article's body.
+      const percentResult = await q(
+        `{ allArticles(filter: { body: { matches: "50%" } }) { title } }`,
+        { includeDrafts: true }
+      );
+      expect(percentResult.errors).toBeUndefined();
+      expect(percentResult.data.allArticles).toHaveLength(1);
+      expect(percentResult.data.allArticles[0].title).toBe("Percent Article");
+    });
+
     it("notMatches excludes matching records", async () => {
       const r = await q(`{ allArticles(filter: { body: { notMatches: "typescript" } }) { title } }`, { includeDrafts: true });
       expect(r.data.allArticles.length).toBeGreaterThanOrEqual(1);
@@ -387,6 +407,22 @@ describe("Filter compiler — comprehensive", () => {
     it("allIn requires all specified locales to have content", async () => {
       const r = await q(`{ allArticles(filter: { _locales: { allIn: [en, is] } }) { title } }`, { includeDrafts: true });
       expect(r.data.allArticles).toHaveLength(1);
+    });
+
+    it("anyIn is OR across locales, not AND — a record localized in only 'en' still matches [en, is]", async () => {
+      // Article 1 ("Deep Dive") has both en + is content.
+      // Article 2 ("Cooking with Rust") has en content, is: "" (blank — no content).
+      // Article 3 ("Empty Thoughts") has en content only, no "is" key at all.
+      // Every article has *some* content in {en, is}, so anyIn must return all three —
+      // this is the regression case for anyIn compiling to the same (AND) SQL as allIn.
+      const any = await q(`{ allArticles(filter: { _locales: { anyIn: [en, is] } }) { title } }`, { includeDrafts: true });
+      expect(any.errors).toBeUndefined();
+      expect(any.data.allArticles).toHaveLength(3);
+
+      // allIn on the same locale set only matches the one article with content in both.
+      const all = await q(`{ allArticles(filter: { _locales: { allIn: [en, is] } }) { title } }`, { includeDrafts: true });
+      expect(all.data.allArticles).toHaveLength(1);
+      expect(all.data.allArticles[0].title).toBe("Deep Dive into TypeScript");
     });
 
     it("notIn excludes records with content in a locale", async () => {

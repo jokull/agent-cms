@@ -167,6 +167,125 @@ describe("@effect/sql DDL operations", () => {
     );
   });
 
+  it("migrates: removing an indexed field via schema import (drops dependent index before DROP COLUMN)", async () => {
+    await run(
+      Effect.gen(function* () {
+        yield* migrateContentTable("article", false, [
+          { apiKey: "title", fieldType: "string" },
+          { apiKey: "published_date", fieldType: "date" },
+        ]);
+
+        yield* insertRecord("content_article", {
+          id: "rec_1",
+          _status: "draft",
+          _created_at: "2024-01-01",
+          _updated_at: "2024-01-01",
+          title: "Hello",
+          published_date: "2024-01-01",
+        });
+
+        // Removing the indexed "published_date" field via a schema-import-style diff
+        // must succeed even though idx_content_article_published_date references it.
+        const result = yield* migrateContentTable("article", false, [
+          { apiKey: "title", fieldType: "string" },
+        ]);
+
+        expect(result.columnsDropped).toEqual(["published_date"]);
+
+        const sql = yield* SqlClient.SqlClient;
+        const indexes = yield* sql.unsafe<{ name: string }>('PRAGMA index_list("content_article")');
+        expect(indexes.some((i) => i.name === "idx_content_article_published_date")).toBe(false);
+
+        const cols = yield* getTableColumns("content_article");
+        expect(cols.map((c) => c.name)).not.toContain("published_date");
+      })
+    );
+  });
+
+  it("removing an indexed link+date pair drops the composite index before dropping either column", async () => {
+    await run(
+      Effect.gen(function* () {
+        yield* migrateContentTable("entry", false, [
+          { apiKey: "category", fieldType: "link" },
+          { apiKey: "published_date", fieldType: "date" },
+        ]);
+
+        const sql = yield* SqlClient.SqlClient;
+        let indexes = yield* sql.unsafe<{ name: string }>('PRAGMA index_list("content_entry")');
+        expect(indexes.some((i) => i.name === "idx_content_entry_category_published_date")).toBe(true);
+
+        // Drop the "category" link field — the composite index references it.
+        const result = yield* migrateContentTable("entry", false, [
+          { apiKey: "published_date", fieldType: "date" },
+        ]);
+        expect(result.columnsDropped).toEqual(["category"]);
+
+        indexes = yield* sql.unsafe<{ name: string }>('PRAGMA index_list("content_entry")');
+        expect(indexes.some((i) => i.name === "idx_content_entry_category_published_date")).toBe(false);
+      })
+    );
+  });
+
+  it("a renamed field leaves exactly one index behind, not a stale duplicate (#62)", async () => {
+    await run(
+      Effect.gen(function* () {
+        yield* migrateContentTable("post", false, [
+          { apiKey: "published_date", fieldType: "date" },
+        ]);
+
+        const sql = yield* SqlClient.SqlClient;
+        let indexes = yield* sql.unsafe<{ name: string }>('PRAGMA index_list("content_post")');
+        expect(indexes.some((i) => i.name === "idx_content_post_published_date")).toBe(true);
+
+        // Simulate what field-service.ts's rename path does: rename the column directly,
+        // leaving the old-named index in place (SQLite carries indexes through a rename).
+        yield* sql.unsafe(`ALTER TABLE "content_post" RENAME COLUMN "published_date" TO "release_date"`);
+
+        indexes = yield* sql.unsafe<{ name: string }>('PRAGMA index_list("content_post")');
+        expect(indexes.some((i) => i.name === "idx_content_post_published_date")).toBe(true);
+
+        // The next reconciliation pass (schema sync / import) must drop the stale
+        // old-named index and create exactly one index under the new name — not both.
+        yield* migrateContentTable("post", false, [
+          { apiKey: "release_date", fieldType: "date" },
+        ]);
+
+        indexes = yield* sql.unsafe<{ name: string }>('PRAGMA index_list("content_post")');
+        const onReleaseDate = indexes.filter((i) => i.name.startsWith("idx_content_post_"));
+        expect(onReleaseDate).toHaveLength(1);
+        expect(onReleaseDate[0].name).toBe("idx_content_post_release_date");
+      })
+    );
+  });
+
+  it("a renamed model leaves exactly one index behind under the table's new name (#62)", async () => {
+    await run(
+      Effect.gen(function* () {
+        yield* migrateContentTable("draft_model", false, [
+          { apiKey: "published_date", fieldType: "date" },
+        ]);
+
+        const sql = yield* SqlClient.SqlClient;
+        // Simulate what model-service.ts's rename path does: rename the table directly.
+        yield* sql.unsafe(`ALTER TABLE "content_draft_model" RENAME TO "content_final_model"`);
+
+        let indexes = yield* sql.unsafe<{ name: string }>('PRAGMA index_list("content_final_model")');
+        expect(indexes.some((i) => i.name === "idx_content_draft_model_published_date")).toBe(true);
+
+        // The next reconciliation pass for the renamed model must replace the old-named
+        // index with a new-named one rather than accumulate a duplicate.
+        yield* migrateContentTable("final_model", false, [
+          { apiKey: "published_date", fieldType: "date" },
+        ]);
+
+        indexes = yield* sql.unsafe<{ name: string }>('PRAGMA index_list("content_final_model")');
+        const ourIndexes = indexes.filter((i) => i.name.startsWith("idx_content_"));
+        expect(ourIndexes).toHaveLength(1);
+        expect(ourIndexes[0].name).toBe("idx_content_final_model_published_date");
+      })
+    );
+  });
+
   it("drops a table", async () => {
     await run(
       Effect.gen(function* () {

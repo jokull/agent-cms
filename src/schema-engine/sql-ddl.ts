@@ -39,11 +39,69 @@ function blockLookupIndexName(blockApiKey: string): string {
   return `idx_block_${blockApiKey}_lookup`;
 }
 
+/**
+ * List indexes currently defined on a table (via sqlite_master / PRAGMA index_list).
+ * Used to reconcile away stale indexes left behind by table/column renames — a renamed
+ * table keeps its old-named indexes (SQLite indexes follow the renamed object but keep
+ * their own name), so name-generation alone can't find them; we have to look at what's
+ * actually on the table.
+ */
+function listIndexesOnTable(tableName: string) {
+  return Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const rows = yield* sql.unsafe<{ name: string }>(`PRAGMA index_list("${tableName}")`);
+    return rows.map((r) => r.name);
+  });
+}
+
+/**
+ * Drop any index on `tableName` whose name looks like one of ours (matches `namePrefix`)
+ * but isn't in the current `desiredNames` set. This is what mops up stale indexes left
+ * under old names after a model/field rename (#62): the rename statement (ALTER TABLE
+ * RENAME / RENAME COLUMN) carries the index along, but its name still embeds the old
+ * api_key, so `CREATE INDEX IF NOT EXISTS` under the new name just creates a duplicate
+ * instead of replacing it. It also mops up indexes left behind when a field's type
+ * changes to one `shouldIndexField` no longer covers, since such a field's name simply
+ * drops out of `desiredNames`.
+ */
+function dropStaleIndexes(tableName: string, namePrefix: string, desiredNames: ReadonlySet<string>) {
+  return Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const existingNames = yield* listIndexesOnTable(tableName);
+    for (const name of existingNames) {
+      if (name.startsWith(namePrefix) && !desiredNames.has(name)) {
+        yield* sql.unsafe(`DROP INDEX "${name}"`);
+      }
+    }
+  });
+}
+
+/**
+ * Drop any index referencing `columnName` on `tableName`, keyed off the index's actual
+ * columns (PRAGMA index_info) rather than the naming scheme. SQLite refuses `ALTER TABLE
+ * ... DROP COLUMN` when an index still references the column (#64), and after a rename
+ * the index name may not match the naming scheme at all (#62), so this has to inspect
+ * the index definition rather than guess a name to drop.
+ */
+function dropIndexesReferencingColumn(tableName: string, columnName: string) {
+  return Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const indexNames = yield* listIndexesOnTable(tableName);
+    for (const indexName of indexNames) {
+      const columns = yield* sql.unsafe<{ name: string | null }>(`PRAGMA index_info("${indexName}")`);
+      if (columns.some((c) => c.name === columnName)) {
+        yield* sql.unsafe(`DROP INDEX "${indexName}"`);
+      }
+    }
+  });
+}
+
 export function ensureBlockLookupIndex(blockApiKey: string) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const tableName = `block_${blockApiKey}`;
     const indexName = blockLookupIndexName(blockApiKey);
+    yield* dropStaleIndexes(tableName, "idx_block_", new Set([indexName]));
     yield* sql.unsafe(
       `CREATE INDEX IF NOT EXISTS "${indexName}"
        ON "${tableName}" (
@@ -78,10 +136,34 @@ function contentCompositeIndexName(modelApiKey: string, leftFieldApiKey: string,
   return `idx_content_${modelApiKey}_${leftFieldApiKey}_${rightFieldApiKey}`;
 }
 
+/** The full set of index names `ensureContentFieldIndexes` wants to exist for `fields`. */
+function desiredContentIndexNames(modelApiKey: string, fields: FieldDef[]): Set<string> {
+  const desired = new Set<string>();
+  for (const field of fields) {
+    if (shouldIndexField(field.fieldType)) {
+      desired.add(contentFieldIndexName(modelApiKey, field.apiKey));
+    }
+  }
+  const linkFields = fields.filter((field) => field.fieldType === "link");
+  const temporalFields = fields.filter((field) => field.fieldType === "date" || field.fieldType === "date_time");
+  for (const linkField of linkFields) {
+    for (const temporalField of temporalFields) {
+      desired.add(contentCompositeIndexName(modelApiKey, linkField.apiKey, temporalField.apiKey));
+    }
+  }
+  return desired;
+}
+
 export function ensureContentFieldIndexes(modelApiKey: string, fields: FieldDef[]) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const tableName = `content_${modelApiKey}`;
+
+    // Reconcile before (re)creating: drops indexes left behind under old names by a
+    // model/field rename (#62), and indexes for fields whose type changed to one
+    // `shouldIndexField` no longer covers. See dropStaleIndexes for details.
+    yield* dropStaleIndexes(tableName, "idx_content_", desiredContentIndexNames(modelApiKey, fields));
+
     for (const field of fields) {
       if (!shouldIndexField(field.fieldType)) continue;
       yield* sql.unsafe(
@@ -266,9 +348,14 @@ export function migrateContentTable(
       }
     }
 
-    // Drop extra columns (that aren't system columns)
+    // Drop extra columns (that aren't system columns).
+    // SQLite refuses DROP COLUMN while an index still references the column (#64), so
+    // any index over it — by current name, stale renamed name, or composite index that
+    // includes it (#62) — has to be dropped first. Found via PRAGMA index_info rather
+    // than the naming scheme, since renamed leftovers won't match it.
     for (const col of existingCols) {
       if (!systemColNames.has(col.name) && !desiredFieldNames.has(col.name)) {
+        yield* dropIndexesReferencingColumn(tableName, col.name);
         yield* dropColumn(tableName, col.name);
         columnsDropped.push(col.name);
       }

@@ -265,7 +265,7 @@ describe("Dangling link safety", () => {
 
   describe("media field — deleted asset", () => {
     it("returns null for deleted cover asset", async () => {
-      await jsonRequest(handler, "DELETE", `/api/assets/${assetId}`);
+      await jsonRequest(handler, "DELETE", `/api/assets/${assetId}?force=true`);
 
       const r = await gql(`{ allPosts { title cover { filename } } }`);
       expect(r.errors).toBeUndefined();
@@ -275,7 +275,7 @@ describe("Dangling link safety", () => {
 
   describe("media gallery — deleted assets", () => {
     it("filters out deleted assets from gallery", async () => {
-      await jsonRequest(handler, "DELETE", `/api/assets/${assetId}`);
+      await jsonRequest(handler, "DELETE", `/api/assets/${assetId}?force=true`);
 
       const r = await gql(`{ allPosts { gallery { filename } } }`);
       expect(r.errors).toBeUndefined();

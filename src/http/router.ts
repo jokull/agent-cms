@@ -23,10 +23,13 @@ import {
   PatchBlocksInput,
   CreateAssetInput,
   ImportAssetFromUrlInput,
-  SearchAssetsInput,
+  ListAssetsInput,
   UpdateAssetMetadataInput,
   CreateLocaleInput,
   BulkCreateRecordsInput,
+  BulkRecordOperationInput,
+  QueryRecordsInput,
+  ValidateRecordInput,
   ScheduleRecordInput,
   ImportSchemaInput,
   ReindexSearchInput, ReorderInput, SearchInput,
@@ -88,6 +91,36 @@ function handle<A, R>(
         Effect.zipRight(HttpServerResponse.json({ error: "Internal server error" }, { status: 500 })),
       );
     })
+  );
+}
+
+/**
+ * Run a CMS Effect purely for its success/failure, returning 204 No Content on
+ * success (the body is intentionally discarded — used by the validation dry-run
+ * endpoints, which signal "valid" with an empty 204). Failures map through
+ * `errorToResponse` exactly like `handle` (so an AggregateValidationError still
+ * yields 400 `{ error, issues }`).
+ */
+function handleNoContent<A, R>(effect: Effect.Effect<A, unknown, R>) {
+  return effect.pipe(
+    Effect.flatMap(() => HttpServerResponse.empty({ status: 204 })),
+    Effect.tapErrorCause((cause) => Effect.logError("REST effect failed", Cause.pretty(cause))),
+    Effect.catchAll((error: unknown) => {
+      if (isCmsError(error)) {
+        const mapped = errorToResponse(error);
+        return HttpServerResponse.json(mapped.body, { status: mapped.status });
+      }
+      return Effect.logError("Unhandled REST error").pipe(
+        Effect.annotateLogs({ error: describeUnknown(error) }),
+        Effect.zipRight(HttpServerResponse.json({ error: "Internal server error" }, { status: 500 })),
+      );
+    }),
+    Effect.catchAllDefect((defect: unknown) =>
+      Effect.logError("REST defect").pipe(
+        Effect.annotateLogs({ defect: describeUnknown(defect) }),
+        Effect.zipRight(HttpServerResponse.json({ error: "Internal server error" }, { status: 500 })),
+      ),
+    ),
   );
 }
 
@@ -213,7 +246,7 @@ const fieldsRouter = HttpRouter.empty.pipe(
 );
 
 // --- Records ---
-const recordsRouter = HttpRouter.empty.pipe(
+const recordsRouter1 = HttpRouter.empty.pipe(
   HttpRouter.post(
     "/records/bulk",
     Effect.gen(function* () {
@@ -242,6 +275,80 @@ const recordsRouter = HttpRouter.empty.pipe(
     })
   ),
 
+  // --- Queryable list / picker / bulk (static paths, before /records/:id) ---
+  HttpRouter.post(
+    "/records/query",
+    Effect.gen(function* () {
+      const body = yield* readJsonBody();
+      const input = yield* decodeUnknownInput(QueryRecordsInput, body);
+      return yield* handle(RecordService.queryRecords(input.modelApiKey, {
+        filter: input.filter,
+        orderBy: input.orderBy,
+        page: input.page,
+        status: input.status,
+        locale: input.locale,
+      }));
+    })
+  ),
+
+  HttpRouter.get(
+    "/records/picker-search",
+    Effect.gen(function* () {
+      const req = yield* HttpServerRequest.HttpServerRequest;
+      const url = new URL(req.url, "http://localhost");
+      const modelApiKey = url.searchParams.get("modelApiKey") ?? "";
+      const q = url.searchParams.get("q") ?? "";
+      const limitParam = url.searchParams.get("limit");
+      const offsetParam = url.searchParams.get("offset");
+      return yield* handle(RecordService.searchRecords(modelApiKey, q, {
+        limit: limitParam !== null ? Number(limitParam) : undefined,
+        offset: offsetParam !== null ? Number(offsetParam) : undefined,
+      }));
+    })
+  ),
+
+  // Validation dry-run (create-shaped) — 204 valid / 400 issues, no persistence
+  HttpRouter.post(
+    "/records/validate",
+    Effect.gen(function* () {
+      const body = yield* readJsonBody();
+      const input = yield* decodeUnknownInput(ValidateRecordInput, body);
+      return yield* handleNoContent(RecordService.validateRecord(input.modelApiKey, input.data));
+    })
+  ),
+
+  HttpRouter.post(
+    "/records/bulk-publish",
+    Effect.gen(function* () {
+      const body = yield* readJsonBody();
+      const input = yield* decodeUnknownInput(BulkRecordOperationInput, body);
+      const actor = yield* currentActor();
+      return yield* handle(RecordService.publishRecords(input.modelApiKey, input.ids, actor));
+    })
+  ),
+
+  HttpRouter.post(
+    "/records/bulk-unpublish",
+    Effect.gen(function* () {
+      const body = yield* readJsonBody();
+      const input = yield* decodeUnknownInput(BulkRecordOperationInput, body);
+      const actor = yield* currentActor();
+      return yield* handle(RecordService.unpublishRecords(input.modelApiKey, input.ids, actor));
+    })
+  ),
+
+  HttpRouter.post(
+    "/records/bulk-delete",
+    Effect.gen(function* () {
+      const body = yield* readJsonBody();
+      const input = yield* decodeUnknownInput(BulkRecordOperationInput, body);
+      const actor = yield* currentActor();
+      return yield* handle(RecordService.deleteRecords(input.modelApiKey, input.ids, actor));
+    })
+  ),
+);
+
+const recordsRouter2 = HttpRouter.empty.pipe(
   // --- Versions (must be before /records/:id) ---
   HttpRouter.get(
     "/records/:id/versions",
@@ -267,6 +374,52 @@ const recordsRouter = HttpRouter.empty.pipe(
       const modelApiKey = yield* queryParam("modelApiKey");
       const actor = yield* currentActor();
       return yield* handle(VersionService.restoreVersion(modelApiKey, param(params, "id"), param(params, "versionId"), actor));
+    })
+  ),
+
+  // Inbound references (backlinks) — before /records/:id
+  HttpRouter.get(
+    "/records/:id/links",
+    Effect.gen(function* () {
+      const params = yield* HttpRouter.params;
+      const modelApiKey = yield* queryParam("modelApiKey");
+      return yield* handle(RecordService.getRecordBacklinks(modelApiKey, param(params, "id")));
+    })
+  ),
+
+  // Duplicate a record
+  HttpRouter.post(
+    "/records/:id/duplicate",
+    Effect.gen(function* () {
+      const params = yield* HttpRouter.params;
+      const body = yield* readJsonBody();
+      const input = yield* decodeUnknownInput(
+        Schema.Struct({ modelApiKey: Schema.NonEmptyString }),
+        body,
+      );
+      const actor = yield* currentActor();
+      return yield* handle(RecordService.duplicateRecord(input.modelApiKey, param(params, "id"), actor), 201);
+    })
+  ),
+
+  // Validation dry-run (patch-shaped) — 204 valid / 400 issues / 404 missing
+  HttpRouter.post(
+    "/records/:id/validate",
+    Effect.gen(function* () {
+      const params = yield* HttpRouter.params;
+      const body = yield* readJsonBody();
+      const input = yield* decodeUnknownInput(ValidateRecordInput, body);
+      return yield* handleNoContent(RecordService.validateRecordUpdate(input.modelApiKey, param(params, "id"), input.data));
+    })
+  ),
+
+  // Sync state — sidebar status cluster (publish/schedule timestamps + diff)
+  HttpRouter.get(
+    "/records/:id/sync-state",
+    Effect.gen(function* () {
+      const params = yield* HttpRouter.params;
+      const modelApiKey = yield* queryParam("modelApiKey");
+      return yield* handle(RecordService.getSyncState(modelApiKey, param(params, "id")));
     })
   ),
 
@@ -384,6 +537,8 @@ const recordsRouter = HttpRouter.empty.pipe(
   )
 );
 
+const recordsRouter = recordsRouter1.pipe(HttpRouter.concat(recordsRouter2));
+
 // --- Assets ---
 // Upload URL endpoint is handled in fetchHandler (needs r2Credentials from options)
 const assetsRouter = HttpRouter.empty.pipe(
@@ -395,19 +550,20 @@ const assetsRouter = HttpRouter.empty.pipe(
       const q = url.searchParams.get("q");
       const limit = url.searchParams.get("limit");
       const offset = url.searchParams.get("offset");
-      if (q !== null || limit !== null || offset !== null) {
-        const parsed = yield* decodeUnknownInput(SearchAssetsInput, {
-          query: q ?? undefined,
+      const orderByParam = url.searchParams.get("orderBy");
+      const parsed = yield* decodeUnknownInput(ListAssetsInput, {
+        q: q ?? undefined,
+        orderBy: orderByParam !== null ? orderByParam.split(",").map((s) => s.trim()).filter(Boolean) : undefined,
+        page: (limit !== null || offset !== null) ? {
           limit: limit !== null ? Number(limit) : undefined,
           offset: offset !== null ? Number(offset) : undefined,
-        }, "Invalid asset search input");
-        return yield* handle(AssetService.searchAssets({
-          query: parsed.query,
-          limit: Math.min(parsed.limit, 100),
-          offset: parsed.offset,
-        }));
-      }
-      return yield* handle(AssetService.listAssets());
+        } : undefined,
+      }, "Invalid asset list input");
+      return yield* handle(AssetService.listAssets({
+        query: parsed.q,
+        page: parsed.page ? { limit: Math.min(parsed.page.limit, 100), offset: parsed.page.offset } : undefined,
+        orderBy: parsed.orderBy,
+      }));
     })
   ),
 
@@ -439,6 +595,16 @@ const assetsRouter = HttpRouter.empty.pipe(
     })
   ),
 
+  HttpRouter.get(
+    "/:id/usages",
+    Effect.gen(function* () {
+      const params = yield* HttpRouter.params;
+      return yield* handle(
+        AssetService.getAssetUsages(param(params, "id")).pipe(Effect.map((usages) => ({ usages })))
+      );
+    })
+  ),
+
   HttpRouter.put(
     "/:id",
     Effect.gen(function* () {
@@ -465,7 +631,9 @@ const assetsRouter = HttpRouter.empty.pipe(
     "/:id",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
-      return yield* handle(AssetService.deleteAsset(param(params, "id")));
+      const req = yield* HttpServerRequest.HttpServerRequest;
+      const force = new URL(req.url, "http://localhost").searchParams.get("force") === "true";
+      return yield* handle(AssetService.deleteAsset(param(params, "id"), force));
     })
   )
 );

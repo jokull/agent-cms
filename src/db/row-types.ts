@@ -15,6 +15,8 @@ export interface ModelRow {
   readonly all_locales_required: number;
   readonly ordering: string | null;
   readonly canonical_path_template: string | null;
+  readonly title_field: string | null;
+  readonly image_preview_field: string | null;
   readonly created_at: string;
   readonly updated_at: string;
 }

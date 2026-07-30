@@ -61,15 +61,17 @@ export function runBatchedQueries<T extends object>(
       });
     }
 
+    // Non-D1 fallback: no batch() API, so this runs N sequential round trips —
+    // report the metrics that actually happened, not the D1-batch shape above.
     const results = yield* Effect.all(
       queries.map((query) => sql.unsafe<T>(query.sql, query.params)),
       { concurrency: 1 },
     );
     recordSqlMetrics(performance.now() - startedAt, {
       statementCount: queries.length,
-      hopCount: 1,
-      batchHopCount: 1,
-      batchedStatementCount: queries.length,
+      hopCount: queries.length,
+      batchHopCount: 0,
+      batchedStatementCount: 0,
       phase: options?.phase,
     });
     return results;

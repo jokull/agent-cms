@@ -3,6 +3,7 @@ import { SqlClient } from "@effect/sql";
 import { decodeJsonRecordStringOr } from "../json.js";
 import { parseMediaFieldReference } from "../media-field.js";
 import { isObjectRecord } from "../value-utils.js";
+import type { ValidationIssueCode } from "../errors.js";
 
 /**
  * Typed access to field validator properties.
@@ -25,6 +26,24 @@ export function getBlockWhitelist(validators: Record<string, unknown>): string[]
 /** Safely get the rich_text_blocks whitelist */
 export function getRichTextBlockWhitelist(validators: Record<string, unknown>): string[] | undefined {
   const v = validators.rich_text_blocks;
+  return Array.isArray(v) && v.every((x) => typeof x === "string") ? v : undefined;
+}
+
+/**
+ * Safely get the structured_text_inline_blocks whitelist. When absent (undefined),
+ * one whitelist (structured_text_blocks) governs both positions — validators are
+ * opt-in refinements here, so leaving this one off means "don't split the lists",
+ * not "no inline blocks" (DatoCMS requires it for inline blocks at all; we diverge
+ * deliberately). Enforcement lives in structured-text-service.
+ */
+export function getInlineBlockWhitelist(validators: Record<string, unknown>): string[] | undefined {
+  const v = validators.structured_text_inline_blocks;
+  return Array.isArray(v) && v.every((x) => typeof x === "string") ? v : undefined;
+}
+
+/** Safely get the structured_text_links allowed-model whitelist (api_keys) */
+export function getStructuredTextLinkModels(validators: Record<string, unknown>): string[] | undefined {
+  const v = validators.structured_text_links;
   return Array.isArray(v) && v.every((x) => typeof x === "string") ? v : undefined;
 }
 
@@ -126,28 +145,87 @@ function isValueValidForField(
   fieldType: string,
   validators: Record<string, unknown>,
 ): boolean {
+  return valueValidationCode(value, fieldType, validators) === null;
+}
+
+/**
+ * The specific validator a value fails first (in a stable order), or `null` if
+ * the value is valid. Single source of truth for scalar-value validation, shared
+ * by {@link computeIsValid} (publish gate) and {@link collectValueValidationIssues}
+ * (dry-run) so the two never diverge on what counts as valid.
+ */
+function valueValidationCode(
+  value: unknown,
+  fieldType: string,
+  validators: Record<string, unknown>,
+): ValidationIssueCode | null {
   if (isRequired(validators) && !hasMeaningfulValue(value)) {
-    return false;
+    return "required";
   }
   if (!hasMeaningfulValue(value)) {
-    return true;
+    return null;
   }
   if (!passesEnumValidation(value, validators)) {
-    return false;
+    return "enum";
   }
   if (!passesLengthValidation(value, fieldType, validators)) {
-    return false;
+    return "length";
   }
   if (!passesNumberRangeValidation(value, fieldType, validators)) {
-    return false;
+    return "range";
   }
   if (!passesFormatValidation(value, fieldType, validators)) {
-    return false;
+    return "format";
   }
   if (!passesDateRangeValidation(value, fieldType, validators)) {
-    return false;
+    return "range";
   }
-  return true;
+  return null;
+}
+
+export interface ValueValidationIssue {
+  readonly field: string;
+  readonly code: ValidationIssueCode;
+}
+
+/**
+ * Per-field scalar-value validation issues (required / enum / length / range /
+ * format), mirroring {@link computeIsValid}'s field walk but reporting the
+ * *specific* validator each field failed rather than a flat missing-field list.
+ * Powers the validation dry-run's machine-readable `code`. Localized fields are
+ * checked per the same locale rules as `computeIsValid`.
+ */
+export function collectValueValidationIssues(
+  record: Record<string, unknown>,
+  fields: ReadonlyArray<{ api_key: string; field_type: string; localized: number; validators: Record<string, unknown> }>,
+  defaultLocale: string | null,
+  allLocales?: readonly string[],
+): ValueValidationIssue[] {
+  const issues: ValueValidationIssue[] = [];
+  for (const field of fields) {
+    const value = record[field.api_key];
+    if (field.localized && defaultLocale) {
+      let localeMap = value;
+      if (typeof localeMap === "string") {
+        localeMap = decodeJsonRecordStringOr(localeMap, {});
+      }
+      if (!isObjectRecord(localeMap)) {
+        issues.push({ field: field.api_key, code: isRequired(field.validators) ? "required" : "type" });
+        continue;
+      }
+      const localesToCheck = allLocales ?? [defaultLocale];
+      let fieldCode: ValidationIssueCode | null = null;
+      for (const locale of localesToCheck) {
+        fieldCode = valueValidationCode(localeMap[locale], field.field_type, field.validators);
+        if (fieldCode !== null) break;
+      }
+      if (fieldCode !== null) issues.push({ field: field.api_key, code: fieldCode });
+    } else {
+      const code = valueValidationCode(value, field.field_type, field.validators);
+      if (code !== null) issues.push({ field: field.api_key, code });
+    }
+  }
+  return issues;
 }
 
 function passesEnumValidation(value: unknown, validators: Record<string, unknown>): boolean {

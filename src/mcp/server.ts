@@ -40,6 +40,7 @@ import { VectorizeContext } from "../search/vectorize-context.js";
 import { HooksContext } from "../hooks.js";
 import { decodeJsonRecordStringOr, encodeJson } from "../json.js";
 import { isObjectRecord } from "../value-utils.js";
+import { likeContains } from "../sql-util.js";
 
 import type { RequestActor } from "../attribution.js";
 
@@ -885,8 +886,8 @@ export function createMcpLayer(
         if (filterByType === "model") conditions.push("is_block = 0");
         if (filterByType === "block") conditions.push("is_block = 1");
         if (filterByName) {
-          conditions.push("LOWER(name) LIKE ?");
-          params.push(`%${filterByName.toLowerCase()}%`);
+          conditions.push("LOWER(name) LIKE ? ESCAPE '\\'");
+          params.push(likeContains(filterByName.toLowerCase()));
         }
         if (conditions.length > 0) modelQuery += ` WHERE ${conditions.join(" AND ")}`;
         modelQuery += " ORDER BY is_block, created_at";
@@ -1018,7 +1019,7 @@ export function createMcpLayer(
     import_asset_from_url: withDecoded(ImportAssetFromUrlInput, (input) =>
       AssetService.importAssetFromUrl(input, options?.actor).pipe(Effect.map(withAssetUrl))),
     list_assets: () =>
-      AssetService.listAssets().pipe(Effect.map((assets) => assets.map((a) => {
+      AssetService.listAssets().pipe(Effect.map(({ assets }) => assets.map((a) => {
         const url = assetUrl(a.r2_key);
         return url ? { ...a, url } : a;
       }))),

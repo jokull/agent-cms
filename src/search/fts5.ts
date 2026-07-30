@@ -80,7 +80,10 @@ export function ftsSearch(query: string, options: {
         rank: number;
         snippet: string;
       }>(
-        `SELECT record_id, title, rank, snippet("fts_${modelApiKey}", 2, '<mark>', '</mark>', '...', 32) as snippet
+        // bm25 column weights: record_id 0.0 (UNINDEXED), title 10.0, body 1.0.
+        // FTS5 has no implicit column weighting, so title matches must be
+        // weighted explicitly here to rank above body matches.
+        `SELECT record_id, title, bm25("fts_${modelApiKey}", 0.0, 10.0, 1.0) as rank, snippet("fts_${modelApiKey}", 2, '<mark>', '</mark>', '...', 32) as snippet
          FROM "fts_${modelApiKey}"
          WHERE "fts_${modelApiKey}" MATCH ?
          ORDER BY rank
@@ -108,7 +111,7 @@ export function ftsSearch(query: string, options: {
     // Build UNION ALL query
     const unions = tables.map((t) => {
       const apiKey = t.name.replace(/^fts_/, "");
-      return `SELECT record_id, title, '${apiKey}' as model_api_key, rank, snippet("${t.name}", 2, '<mark>', '</mark>', '...', 32) as snippet FROM "${t.name}" WHERE "${t.name}" MATCH ?`;
+      return `SELECT record_id, title, '${apiKey}' as model_api_key, bm25("${t.name}", 0.0, 10.0, 1.0) as rank, snippet("${t.name}", 2, '<mark>', '</mark>', '...', 32) as snippet FROM "${t.name}" WHERE "${t.name}" MATCH ?`;
     });
 
     const unionQuery = unions.join(" UNION ALL ") + " ORDER BY rank LIMIT ? OFFSET ?";
@@ -129,5 +132,40 @@ export function ftsSearch(query: string, options: {
       title: r.title,
       snippet: r.snippet,
     }));
+  });
+}
+
+/**
+ * Count total FTS5 matches for a query, over the same MATCH predicate used by
+ * `ftsSearch` (ignoring LIMIT/OFFSET). Cheap in SQLite — lets keyword search
+ * report an honest total instead of just the returned page length.
+ */
+export function ftsCount(query: string, options: { modelApiKey?: string }) {
+  return Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+
+    if (options.modelApiKey) {
+      const modelApiKey = options.modelApiKey;
+      const rows = yield* sql.unsafe<{ c: number }>(
+        `SELECT COUNT(*) as c FROM "fts_${modelApiKey}" WHERE "fts_${modelApiKey}" MATCH ?`,
+        [query]
+      );
+      return rows[0]?.c ?? 0;
+    }
+
+    const tables = yield* sql.unsafe<{ name: string }>(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'fts_%' AND sql LIKE 'CREATE VIRTUAL TABLE%'`
+    );
+    if (tables.length === 0) return 0;
+
+    const counts = tables.map(
+      (t) => `SELECT COUNT(*) as c FROM "${t.name}" WHERE "${t.name}" MATCH ?`
+    );
+    const countQuery = `SELECT COALESCE(SUM(c), 0) as c FROM (${counts.join(" UNION ALL ")})`;
+    const rows = yield* sql.unsafe<{ c: number }>(
+      countQuery,
+      tables.map(() => query)
+    );
+    return rows[0]?.c ?? 0;
   });
 }

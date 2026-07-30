@@ -112,7 +112,7 @@ describe("Schema Lifecycle", () => {
       const renameRes = await jsonRequest(handler, "PATCH", `/api/models/${model.id}`, { apiKey: "article" });
       expect(renameRes.status).toBe(200);
       const renamed = await renameRes.json();
-      expect(renamed.api_key).toBe("article");
+      expect(renamed.apiKey).toBe("article");
 
       // Old model name should not work, new one should
       const oldRes = await handler(new Request("http://localhost/api/records?modelApiKey=post"));

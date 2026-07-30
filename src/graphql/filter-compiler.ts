@@ -12,6 +12,30 @@
  * - Logical: AND, OR (nestable)
  */
 
+import { buildPatternMatch } from "../sql-util.js";
+
+/**
+ * A locale code is interpolated into a JSON path literal (`'$.<locale>'`) — it
+ * cannot be a bound parameter there — so it MUST be validated to a strict
+ * character allowlist or it is a SQL-injection vector. This is reachable on the
+ * unauthenticated published read path (the fast-path compiler runs no graphql-js
+ * validation), and locale strings also arrive inside `_locales` filter arrays.
+ * BCP-47-ish shape: letters/digits separated by `-` or `_`. Anything else throws.
+ */
+const LOCALE_SEGMENT = /^[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)*$/;
+
+export class UnsafeLocaleError extends Error {
+  constructor(readonly locale: string) {
+    super(`Invalid locale code: ${JSON.stringify(locale)}`);
+    this.name = "UnsafeLocaleError";
+  }
+}
+
+function safeLocale(locale: string): string {
+  if (!LOCALE_SEGMENT.test(locale)) throw new UnsafeLocaleError(locale);
+  return locale;
+}
+
 interface FilterInput {
   AND?: FilterInput[];
   OR?: FilterInput[];
@@ -99,7 +123,7 @@ function resolveDbExpr(key: string, dbKey: string, opts?: FilterCompilerOpts): s
 function resolveCol(key: string, dbKey: string, opts?: FilterCompilerOpts): string {
   const dbExpr = resolveDbExpr(key, dbKey, opts);
   return opts?.fieldIsLocalized?.(key) && opts.locale
-    ? `json_extract(${dbExpr}, '$.${opts.locale}')`
+    ? `json_extract(${dbExpr}, '$.${safeLocale(opts.locale)}')`
     : dbExpr;
 }
 
@@ -274,27 +298,25 @@ function compileOperator(
     // --- String matching ---
     case "matches":
       if (typeof expected === "string") {
-        return { sql: `${col} LIKE ?`, params: [`%${expected}%`] };
+        const m = buildPatternMatch(col, expected);
+        return { sql: m.sql, params: [m.param] };
       }
       // DatoCMS-style { pattern, caseSensitive } object
       if (typeof expected === "object" && expected !== null && "pattern" in expected) {
         const obj = expected as Record<string, unknown>;
-        if (obj.caseSensitive) {
-          return { sql: `${col} GLOB ?`, params: [`*${String(obj.pattern)}*`] };
-        }
-        return { sql: `${col} LIKE ?`, params: [`%${String(obj.pattern)}%`] };
+        const m = buildPatternMatch(col, String(obj.pattern), { caseSensitive: Boolean(obj.caseSensitive) });
+        return { sql: m.sql, params: [m.param] };
       }
       return null;
     case "notMatches":
       if (typeof expected === "string") {
-        return { sql: `${col} NOT LIKE ?`, params: [`%${expected}%`] };
+        const m = buildPatternMatch(col, expected, { negated: true });
+        return { sql: m.sql, params: [m.param] };
       }
       if (typeof expected === "object" && expected !== null && "pattern" in expected) {
         const obj = expected as Record<string, unknown>;
-        if (obj.caseSensitive) {
-          return { sql: `${col} NOT GLOB ?`, params: [`*${String(obj.pattern)}*`] };
-        }
-        return { sql: `${col} NOT LIKE ?`, params: [`%${String(obj.pattern)}%`] };
+        const m = buildPatternMatch(col, String(obj.pattern), { caseSensitive: Boolean(obj.caseSensitive), negated: true });
+        return { sql: m.sql, params: [m.param] };
       }
       return null;
 
@@ -348,10 +370,8 @@ function compileOperator(
     case "matchesObject":
       if (typeof expected === "object" && expected !== null && "pattern" in expected) {
         const obj = expected as Record<string, unknown>;
-        if (obj.caseSensitive) {
-          return { sql: `${col} GLOB ?`, params: [`*${String(obj.pattern)}*`] };
-        }
-        return { sql: `${col} LIKE ?`, params: [`%${String(obj.pattern)}%`] };
+        const m = buildPatternMatch(col, String(obj.pattern), { caseSensitive: Boolean(obj.caseSensitive) });
+        return { sql: m.sql, params: [m.param] };
       }
       return null;
 
@@ -360,11 +380,25 @@ function compileOperator(
   }
 }
 
+/** SQL predicate: does `col` (a localized JSON-map column) have non-blank content for `locale`? */
+function hasLocaleContent(col: string, locale: string): string {
+  const safe = safeLocale(locale);
+  return `(json_extract("${col}", '$.${safe}') IS NOT NULL AND json_extract("${col}", '$.${safe}') != '')`;
+}
+
+/** SQL predicate: does `col` lack content for `locale` (null, missing, or empty string)? */
+function lacksLocaleContent(col: string, locale: string): string {
+  const safe = safeLocale(locale);
+  return `(json_extract("${col}", '$.${safe}') IS NULL OR json_extract("${col}", '$.${safe}') = '')`;
+}
+
 /**
  * Compile _locales filter across all localized columns.
  *
- * _locales: { anyIn: ["en"] }  → any localized field has a non-null value for "en"
- * _locales: { allIn: ["en", "is"] } → every locale has at least one non-null value
+ * _locales: { anyIn: ["en", "de"] } → record has content in AT LEAST ONE of the
+ *   requested locales (OR across locales; OR across fields within a locale).
+ * _locales: { allIn: ["en", "is"] } → record has content in EVERY requested
+ *   locale (AND across locales; OR across fields within a locale).
  * _locales: { notIn: ["de"] }  → no localized field has a value for "de"
  */
 function compileLocalesFilter(
@@ -377,32 +411,26 @@ function compileLocalesFilter(
 
   const parts: SqlCondition[] = [];
 
-  if (anyIn && Array.isArray(anyIn) && anyIn.length > 0) {
-    // For each requested locale, at least one localized field must have a non-null value
-    for (const locale of anyIn) {
-      const orParts = localizedDbColumns.map(
-        (col) => `(json_extract("${col}", '$.${locale}') IS NOT NULL AND json_extract("${col}", '$.${locale}') != '')`
-      );
-      parts.push({ sql: `(${orParts.join(" OR ")})`, params: [] });
-    }
+  if (anyIn && anyIn.length > 0) {
+    // Record matches if ANY requested locale has content in ANY localized field.
+    const localeParts = anyIn.map(
+      (locale) => `(${localizedDbColumns.map((col) => hasLocaleContent(col, locale)).join(" OR ")})`
+    );
+    parts.push({ sql: `(${localeParts.join(" OR ")})`, params: [] });
   }
 
-  if (allIn && Array.isArray(allIn) && allIn.length > 0) {
-    // Every requested locale must have content in at least one field
+  if (allIn && allIn.length > 0) {
+    // Record matches only if EVERY requested locale has content in some field.
     for (const locale of allIn) {
-      const orParts = localizedDbColumns.map(
-        (col) => `(json_extract("${col}", '$.${locale}') IS NOT NULL AND json_extract("${col}", '$.${locale}') != '')`
-      );
+      const orParts = localizedDbColumns.map((col) => hasLocaleContent(col, locale));
       parts.push({ sql: `(${orParts.join(" OR ")})`, params: [] });
     }
   }
 
-  if (notIn && Array.isArray(notIn) && notIn.length > 0) {
+  if (notIn && notIn.length > 0) {
     // None of the requested locales should have content in any field
     for (const locale of notIn) {
-      const andParts = localizedDbColumns.map(
-        (col) => `(json_extract("${col}", '$.${locale}') IS NULL OR json_extract("${col}", '$.${locale}') = '')`
-      );
+      const andParts = localizedDbColumns.map((col) => lacksLocaleContent(col, locale));
       parts.push({ sql: `(${andParts.join(" AND ")})`, params: [] });
     }
   }
@@ -435,7 +463,7 @@ export function compileOrderBy(
 
       const col =
         opts?.fieldIsLocalized?.(field) && opts.locale
-          ? `json_extract("${dbField}", '$.${opts.locale}')`
+          ? `json_extract("${dbField}", '$.${safeLocale(opts.locale)}')`
           : `"${dbField}"`;
 
       return `${col} ${dir}`;

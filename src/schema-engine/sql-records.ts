@@ -120,7 +120,7 @@ function serializeValue(value: unknown): unknown {
 }
 
 /** Deserialize a row from SQLite — parse JSON columns */
-function deserializeRow(row: Record<string, unknown>): Record<string, unknown> {
+export function deserializeRow(row: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(row)) {
     if (typeof value === "string" && (value.startsWith("{") || value.startsWith("["))) {

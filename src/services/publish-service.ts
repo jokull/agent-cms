@@ -1,10 +1,10 @@
 import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
-import { NotFoundError, ValidationError } from "../errors.js";
+import { NotFoundError, AggregateValidationError, type ValidationIssue } from "../errors.js";
 import { selectById } from "../schema-engine/sql-records.js";
 import type { ModelRow, FieldRow } from "../db/row-types.js";
 import { parseFieldValidators } from "../db/row-types.js";
-import { computeIsValid, findUniqueConstraintViolations } from "../db/validators.js";
+import { collectValueValidationIssues, findUniqueConstraintViolations } from "../db/validators.js";
 import { materializeRecordStructuredTextFields } from "./structured-text-service.js";
 import { fireHook } from "../hooks.js";
 import * as VersionService from "./version-service.js";
@@ -41,20 +41,32 @@ export function publishRecord(modelApiKey: string, recordId: string, actor?: Req
     const allLocales = model.all_locales_required && localeRows.length > 0
       ? localeRows.map((l) => l.code)
       : undefined;
-    const { valid, missingFields } = computeIsValid(record, parsedFields, defaultLocale, allLocales);
+    // Same scalar-value validation the dry-run uses (single source of truth in
+    // validators.ts), so each offending field carries its precise validator code
+    // (required / enum / length / range / format) rather than a flat message.
+    const valueIssues = collectValueValidationIssues(record, parsedFields, defaultLocale, allLocales);
     const uniqueViolations = yield* findUniqueConstraintViolations({
       tableName,
       record,
       fields: parsedFields,
       excludeId: recordId,
     });
-    if (!valid || uniqueViolations.length > 0) {
-      return yield* new ValidationError({
-        message: `Cannot publish: invalid fields: ${[
-          ...missingFields.map((field) => `${field} (required)`),
-          ...uniqueViolations.map((field) => `${field} (unique)`),
-        ].join(", ")}`,
-      });
+    if (valueIssues.length > 0 || uniqueViolations.length > 0) {
+      // Accumulate one issue per offending field so a form can mark them all at
+      // once, rather than concatenating field names into a single message.
+      const issues: ValidationIssue[] = [
+        ...valueIssues.map((issue) => ({
+          field: issue.field,
+          code: issue.code,
+          message: `Field '${issue.field}' failed '${issue.code}' validation`,
+        })),
+        ...uniqueViolations.map((field) => ({
+          field,
+          code: "unique" as const,
+          message: `Field '${field}' is not unique`,
+        })),
+      ];
+      return yield* new AggregateValidationError({ issues });
     }
 
     const materialized = yield* materializeRecordStructuredTextFields({

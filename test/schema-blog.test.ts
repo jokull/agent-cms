@@ -92,7 +92,7 @@ describe("[SCHEMA:blog] Blog Schema Integration", () => {
 
   it("refuses to delete referenced model", async () => {
     const models = await (await handler(new Request("http://localhost/api/models"))).json() as any[];
-    const authorModel = models.find((m: any) => m.api_key === "author");
+    const authorModel = models.find((m: any) => m.apiKey === "author");
     const res = await handler(new Request(`http://localhost/api/models/${authorModel.id}`, { method: "DELETE" }));
     expect(res.status).toBe(409);
   });

@@ -72,7 +72,7 @@ describe("GraphQL Content Delivery API", () => {
     await jsonRequest(handler, "POST", `/api/models/${author.id}/fields`, { label: "Name", apiKey: "name", fieldType: "string" });
 
     const models = await (await handler(new Request("http://localhost/api/models"))).json() as any[];
-    const postModel = models.find((m: any) => m.api_key === "post");
+    const postModel = models.find((m: any) => m.apiKey === "post");
     await jsonRequest(handler, "POST", `/api/models/${postModel.id}/fields`, {
       label: "Author", apiKey: "author", fieldType: "link", validators: { item_item_type: ["author"] },
     });

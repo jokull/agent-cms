@@ -1,12 +1,12 @@
 import { Effect, ParseResult, Schema } from "effect";
 import { SqlClient, SqlError } from "@effect/sql";
-import { validateBlocksOnly, extractAllBlockIds } from "../dast/index.js";
+import { validateBlocksOnly, extractAllBlockIds, extractBlockIds, extractLinkIds } from "../dast/index.js";
 import { ValidationError } from "../errors.js";
 import { DastDocumentInput, DastDocumentSchema, StructuredTextWriteInput } from "../dast/schema.js";
 import { runBatchedQueries, type BatchedQuery } from "../db/run-batched-queries.js";
 import type { FieldRow, ParsedFieldRow } from "../db/row-types.js";
 import { parseFieldValidators } from "../db/row-types.js";
-import { getBlockWhitelist, getBlocksOnly, getRichTextBlockWhitelist } from "../db/validators.js";
+import { getBlockWhitelist, getBlocksOnly, getRichTextBlockWhitelist, getInlineBlockWhitelist, getStructuredTextLinkModels } from "../db/validators.js";
 import { getFieldTypeDef } from "../field-types.js";
 import { isFieldType } from "../types.js";
 import { decodeJsonIfString, decodeJsonStringOr, encodeJson } from "../json.js";
@@ -82,6 +82,7 @@ function decodeStructuredTextInput(fieldApiKey: string, value: unknown) {
     Effect.mapError((e) => new ValidationError({
       message: `Invalid StructuredText for field '${fieldApiKey}': ${e.message}`,
       field: fieldApiKey,
+      code: "structured_text",
     }))
   );
 }
@@ -105,6 +106,7 @@ function getBlockModelSchema(sql: SqlClient.SqlClient, blockApiKey: string) {
     if (rows.length === 0) {
       return yield* new ValidationError({
         message: `Block type '${blockApiKey}' does not exist`,
+        code: "block_type",
       });
     }
     const model = rows[0];
@@ -178,6 +180,7 @@ function validateDastForField(fieldApiKey: string, value: unknown, blocksOnly: b
       Effect.mapError((e) => new ValidationError({
         message: `Invalid DAST document: ${formatDastParseErrors(e)}`,
         field: fieldApiKey,
+        code: "structured_text",
       }))
     );
 
@@ -187,12 +190,63 @@ function validateDastForField(fieldApiKey: string, value: unknown, blocksOnly: b
         return yield* new ValidationError({
           message: `Blocks-only field '${fieldApiKey}': ${blocksOnlyErrors.map((e) => e.message).join("; ")}`,
           field: fieldApiKey,
+          code: "structured_text",
         });
       }
     }
 
     return dast;
   });
+}
+
+/**
+ * Enforce the `structured_text_links` validator: every record referenced by an
+ * `itemLink` / `inlineItem` node must belong to a model in `allowedModelApiKeys`.
+ * A referenced id that is not found in any allowed model's content table is a
+ * violation (it either does not exist or belongs to a disallowed model — Dato
+ * rejects both). An empty allowlist means "no model is allowed", so any link
+ * fails; callers pass `undefined` (not `[]`) to opt out entirely.
+ */
+function enforceStructuredTextLinks(
+  sql: SqlClient.SqlClient,
+  fieldApiKey: string,
+  dast: DastLikeForLinks,
+  allowedModelApiKeys: readonly string[],
+) {
+  return Effect.gen(function* () {
+    const linkIds = extractLinkIds(dast);
+    if (linkIds.length === 0) return;
+
+    const allowedModels = allowedModelApiKeys.length > 0
+      ? yield* sql.unsafe<{ api_key: string }>(
+          `SELECT api_key FROM models WHERE api_key IN (${allowedModelApiKeys.map(() => "?").join(", ")}) AND is_block = 0`,
+          [...allowedModelApiKeys],
+        )
+      : [];
+
+    const foundIds = new Set<string>();
+    const idPlaceholders = linkIds.map(() => "?").join(", ");
+    for (const model of allowedModels) {
+      const rows = yield* sql.unsafe<{ id: string }>(
+        `SELECT id FROM "content_${model.api_key}" WHERE id IN (${idPlaceholders})`,
+        [...linkIds],
+      );
+      for (const row of rows) foundIds.add(row.id);
+    }
+
+    const disallowed = linkIds.filter((id) => !foundIds.has(id));
+    if (disallowed.length > 0) {
+      return yield* new ValidationError({
+        message: `StructuredText field '${fieldApiKey}' links to record(s) whose model is not permitted by structured_text_links: ${disallowed.join(", ")}`,
+        field: fieldApiKey,
+        code: "link_target",
+      });
+    }
+  });
+}
+
+interface DastLikeForLinks {
+  document: { children: readonly unknown[]; type?: string };
 }
 
 function compileStructuredText(
@@ -202,16 +256,36 @@ function compileStructuredText(
     fieldApiKey: string;
     input: StructuredTextWriteInput;
     allowedBlockTypes: string[];
+    // Whitelist for `inlineBlock` nodes. `undefined` = validator absent → one
+    // whitelist (`allowedBlockTypes`) governs both positions. Validators are
+    // opt-in refinements: absence means "don't split the lists", not "no inline
+    // blocks" (a deliberate divergence from Dato, which requires the validator
+    // for inline blocks at all).
+    allowedInlineBlockTypes?: readonly string[] | undefined;
+    // Whitelist of model api_keys that `itemLink` / `inlineItem` targets may
+    // reference. `undefined` = validator absent → unrestricted, like every other
+    // absent validator.
+    allowedLinkModels?: readonly string[] | undefined;
     blocksOnly: boolean;
   }
 ): Effect.Effect<CompiledStructuredText, ValidationError | SqlError.SqlError> {
   return Effect.gen(function* () {
     const { sql, seenBlockIds } = ctx;
-    const { fieldApiKey, input, allowedBlockTypes, blocksOnly } = params;
+    const { fieldApiKey, input, allowedBlockTypes, allowedInlineBlockTypes, allowedLinkModels, blocksOnly } = params;
 
     const dast = yield* validateDastForField(fieldApiKey, input.value, blocksOnly);
+    // Block-position `block` nodes use `allowedBlockTypes`; `inlineBlock` nodes use
+    // the inline whitelist when present, otherwise fall back to `allowedBlockTypes`.
+    const blockPositionIds = new Set(extractBlockIds(dast));
+    const effectiveInlineBlockTypes = allowedInlineBlockTypes ?? allowedBlockTypes;
     const referencedBlockIds = extractAllBlockIds(dast);
     const providedBlockIds = Object.keys(input.blocks);
+
+    // Enforce structured_text_links: every itemLink/inlineItem target must belong
+    // to an allowed model. Absent validator → allowedLinkModels undefined → skip.
+    if (allowedLinkModels !== undefined) {
+      yield* enforceStructuredTextLinks(sql, fieldApiKey, dast, allowedLinkModels);
+    }
 
     for (const blockId of referencedBlockIds) {
       if (!input.blocks[blockId]) {
@@ -256,10 +330,13 @@ function compileStructuredText(
           field: fieldApiKey,
         });
       }
-      if (allowedBlockTypes.length > 0 && !allowedBlockTypes.includes(blockData._type)) {
+      const isInlinePosition = !blockPositionIds.has(blockId);
+      const allowlistForNode = isInlinePosition ? effectiveInlineBlockTypes : allowedBlockTypes;
+      if (allowlistForNode.length > 0 && !allowlistForNode.includes(blockData._type)) {
         return yield* new ValidationError({
-          message: `Block type '${blockData._type}' is not allowed in field '${fieldApiKey}'. Allowed: ${allowedBlockTypes.join(", ")}`,
+          message: `${isInlinePosition ? "Inline block" : "Block"} type '${blockData._type}' is not allowed in field '${fieldApiKey}'. Allowed: ${allowlistForNode.join(", ")}`,
           field: fieldApiKey,
+          code: "block_type",
         });
       }
 
@@ -298,6 +375,8 @@ function compileStructuredText(
               fieldApiKey: field.api_key,
               input: nestedInput,
               allowedBlockTypes: getBlockWhitelist(field.validators) ?? [],
+              allowedInlineBlockTypes: getInlineBlockWhitelist(field.validators),
+              allowedLinkModels: getStructuredTextLinkModels(field.validators),
               blocksOnly: getBlocksOnly(field.validators),
             }
           );
@@ -409,7 +488,7 @@ function collectDescendantBlockIds(sql: SqlClient.SqlClient, startIds: string[])
   });
 }
 
-export function writeStructuredText(params: {
+export interface StructuredTextWriteParams {
   rootModelApiKey: string;
   fieldApiKey: string;
   rootFieldStorageKey?: string;
@@ -417,15 +496,27 @@ export function writeStructuredText(params: {
   value: unknown;
   blocks?: Record<string, unknown>;
   allowedBlockTypes?: string[];
+  allowedInlineBlockTypes?: readonly string[] | undefined;
+  allowedLinkModels?: readonly string[] | undefined;
   blocksOnly?: boolean;
-}) {
+}
+
+/**
+ * Decode + compile a structured_text value: runs the FULL validation pipeline
+ * (DAST decode, blocks_only, block/inline whitelist, structured_text_links,
+ * block-model existence, nested block validation) and produces the block rows,
+ * but does NOT persist them. `writeStructuredText` inserts the rows; the
+ * dry-run validator discards them — both go through this one function, so the
+ * write and validate paths can never diverge on what counts as valid.
+ */
+function compileStructuredTextValue(params: StructuredTextWriteParams) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const input = yield* decodeStructuredTextInput(params.fieldApiKey, {
       value: params.value,
       blocks: params.blocks ?? {},
     });
-    const compiled = yield* compileStructuredText(
+    return yield* compileStructuredText(
       {
         sql,
         rootRecordId: params.rootRecordId,
@@ -443,12 +534,30 @@ export function writeStructuredText(params: {
         fieldApiKey: params.fieldApiKey,
         input,
         allowedBlockTypes: params.allowedBlockTypes ?? [],
+        allowedInlineBlockTypes: params.allowedInlineBlockTypes,
+        allowedLinkModels: params.allowedLinkModels,
         blocksOnly: params.blocksOnly ?? false,
       }
     );
+  });
+}
+
+export function writeStructuredText(params: StructuredTextWriteParams) {
+  return Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const compiled = yield* compileStructuredTextValue(params);
     yield* insertCompiledRows(sql, compiled.rowsByTable);
     return compiled.dast;
   });
+}
+
+/**
+ * Validate a structured_text value exactly as `writeStructuredText` would, with
+ * ZERO persistence (no block rows inserted). Used by the record dry-run
+ * validator. Same code path (`compileStructuredTextValue`) as the write.
+ */
+export function validateStructuredText(params: StructuredTextWriteParams) {
+  return compileStructuredTextValue(params).pipe(Effect.asVoid);
 }
 
 export function deleteBlocksForField(params: {
@@ -569,6 +678,35 @@ function serializeMaterializePlan(plan: StructuredTextMaterializePlan | undefine
   return blockEntries.map(([blockApiKey, nested]) => `${blockApiKey}[${nested}]`).join("|");
 }
 
+/**
+ * Build the block-materialization query as a SINGLE `UNION ALL` statement over
+ * all candidate block models, instead of one structurally-identical SELECT per
+ * model collapsed via D1 `batch()`.
+ *
+ * Every branch shares the same projection, predicate, and bound values; the only
+ * per-branch differences are the table name, the `'<api_key>' AS __block_api_key`
+ * self-tag (so flattened rows remain identifiable), and the `json_object(...)`
+ * field projection. Returning one statement means 1 round trip on any backend
+ * (D1 or a future Postgres backend), independent of the `batch()` API.
+ *
+ * Id lists are bound as single JSON parameters via `json_each(?)` (a pattern
+ * already used across the codebase — driver support is confirmed) rather than
+ * `IN (?,?,…)` placeholder expansion. This keeps the SQL text stable regardless
+ * of id-list cardinality (the statement cache no longer sees a distinct query
+ * per list length) and keeps each branch's param tuple constant-sized.
+ *
+ * Params are bound left-to-right across all `UNION ALL` branches; since every
+ * branch shares identical values, the shared per-branch tuple is repeated once
+ * per model. The tuple is:
+ *   (rootRecordIdsJson, rootFieldApiKey, parentContainerModelApiKey,
+ *    parentFieldApiKey, [parentBlockIdsJson], blockIdsJson)
+ * with parentBlockIdsJson present only when parent blocks are non-empty (the
+ * `_parent_block_id IS NULL` branch binds nothing there).
+ *
+ * Returns an at-most-one-element array so the existing `runHotBlockQueries`
+ * plumbing and the callers' flattening (`rowGroups.flat()` / the per-group loop)
+ * stay unchanged. An empty `blockModels` yields no query.
+ */
 function buildMaterializeQueries(params: {
   blockModels: readonly BlockModelSchema[];
   rootRecordIds: readonly string[];
@@ -577,31 +715,43 @@ function buildMaterializeQueries(params: {
   parentFieldApiKey: string;
   parentBlockIds: readonly string[];
   blockIds: readonly string[];
-}) {
-  const rootRecordPlaceholders = params.rootRecordIds.map(() => "?").join(", ");
-  const blockPlaceholders = params.blockIds.map(() => "?").join(", ");
-  const parentBlockPlaceholders = params.parentBlockIds.map(() => "?").join(", ");
-  return params.blockModels.map((model) => {
+}): ReadonlyArray<BatchedQuery> {
+  if (params.blockModels.length === 0) return [];
+
+  const hasParentBlocks = params.parentBlockIds.length > 0;
+  const parentClause = hasParentBlocks
+    ? "_parent_block_id IN (SELECT value FROM json_each(?))"
+    : "_parent_block_id IS NULL";
+
+  const rootRecordIdsJson = JSON.stringify([...params.rootRecordIds]);
+  const parentBlockIdsJson = hasParentBlocks ? JSON.stringify([...params.parentBlockIds]) : null;
+  const blockIdsJson = JSON.stringify([...params.blockIds]);
+
+  const perBranchParams: ReadonlyArray<unknown> = [
+    rootRecordIdsJson,
+    params.rootFieldApiKey,
+    params.parentContainerModelApiKey,
+    params.parentFieldApiKey,
+    ...(parentBlockIdsJson === null ? [] : [parentBlockIdsJson]),
+    blockIdsJson,
+  ];
+
+  const branches = params.blockModels.map((model) => {
     const payloadParts = model.fields.map((field) => `'${field.api_key}', "${field.api_key}"`).join(", ");
-    return {
-      sql: `SELECT id, _root_record_id, _root_field_api_key, _parent_block_id, '${model.apiKey}' AS __block_api_key, json_object(${payloadParts}) AS __payload
+    return `SELECT id, _root_record_id, _root_field_api_key, _parent_block_id, '${model.apiKey}' AS __block_api_key, json_object(${payloadParts}) AS __payload
        FROM "block_${model.apiKey}"
-       WHERE _root_record_id IN (${rootRecordPlaceholders})
+       WHERE _root_record_id IN (SELECT value FROM json_each(?))
          AND _root_field_api_key = ?
          AND _parent_container_model_api_key = ?
          AND _parent_field_api_key = ?
-         AND ${params.parentBlockIds.length === 0 ? "_parent_block_id IS NULL" : `_parent_block_id IN (${parentBlockPlaceholders})`}
-         AND id IN (${blockPlaceholders})`,
-      params: [
-      ...params.rootRecordIds,
-      params.rootFieldApiKey,
-      params.parentContainerModelApiKey,
-      params.parentFieldApiKey,
-      ...(params.parentBlockIds.length === 0 ? [] : params.parentBlockIds),
-      ...params.blockIds,
-      ],
-    };
+         AND ${parentClause}
+         AND id IN (SELECT value FROM json_each(?))`;
   });
+
+  return [{
+    sql: branches.join("\n     UNION ALL\n"),
+    params: params.blockModels.flatMap(() => perBranchParams),
+  }];
 }
 
 export function materializeStructuredTextValues(params: {
@@ -910,149 +1060,56 @@ export interface RichTextWriteBlock {
  * Input: array of block objects [{block_type, ...fields}, ...].
  * Stores blocks in block_* tables, returns JSON array of block IDs for the column.
  */
-export function writeRichText(params: {
+export interface RichTextWriteParams {
   rootModelApiKey: string;
   fieldApiKey: string;
   rootFieldStorageKey?: string;
   rootRecordId: string;
   blocks: RichTextWriteBlock[];
   allowedBlockTypes: string[];
-}) {
+}
+
+/**
+ * Compile a top-level rich_text value into its block rows without persisting.
+ * Delegates to the same recursive `writeRichTextBlocks` used for nested
+ * rich_text so the root and nested cases (and the write vs. dry-run paths) share
+ * one implementation of the block-type / duplicate-id / nested-content checks.
+ */
+function compileRichTextValue(params: RichTextWriteParams) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const { fieldApiKey, blocks, allowedBlockTypes } = params;
-    const rootFieldApiKey = params.rootFieldStorageKey ?? params.fieldApiKey;
-    const seenBlockIds = new Set<string>();
-    const rowsByTable = new Map<string, DynamicRow[]>();
-    const blockIds: string[] = [];
+    return yield* writeRichTextBlocks({
+      sql,
+      rootRecordId: params.rootRecordId,
+      rootFieldApiKey: params.rootFieldStorageKey ?? params.fieldApiKey,
+      rootModelApiKey: params.rootModelApiKey,
+      seenBlockIds: new Set<string>(),
+      parentContainerModelApiKey: params.rootModelApiKey,
+      parentBlockId: null,
+      parentFieldApiKey: params.fieldApiKey,
+      depth: 0,
+      fieldApiKey: params.fieldApiKey,
+      blocks: params.blocks,
+      allowedBlockTypes: params.allowedBlockTypes,
+    });
+  });
+}
 
-    for (let i = 0; i < blocks.length; i++) {
-      const block = blocks[i];
-      if (typeof block.block_type !== "string" || block.block_type.length === 0) {
-        return yield* new ValidationError({
-          message: `rich_text block at index ${i} must have a block_type property`,
-          field: fieldApiKey,
-        });
-      }
-      if (allowedBlockTypes.length > 0 && !allowedBlockTypes.includes(block.block_type)) {
-        return yield* new ValidationError({
-          message: `Block type '${block.block_type}' is not allowed in rich_text field '${fieldApiKey}'. Allowed: ${allowedBlockTypes.join(", ")}`,
-          field: fieldApiKey,
-        });
-      }
-
-      const blockId = typeof block.id === "string" && block.id.length > 0
-        ? block.id
-        : crypto.randomUUID();
-
-      if (seenBlockIds.has(blockId)) {
-        return yield* new ValidationError({
-          message: `Duplicate block id '${blockId}' in rich_text field '${fieldApiKey}'`,
-          field: fieldApiKey,
-        });
-      }
-      seenBlockIds.add(blockId);
-      blockIds.push(blockId);
-
-      const blockModel = yield* getBlockModelSchema(sql, block.block_type);
-      const row: DynamicRow = {
-        id: blockId,
-        _root_record_id: params.rootRecordId,
-        _root_field_api_key: rootFieldApiKey,
-        _parent_container_model_api_key: params.rootModelApiKey,
-        _parent_block_id: null,
-        _parent_field_api_key: params.fieldApiKey,
-        _depth: 0,
-      };
-
-      for (const field of blockModel.fields) {
-        const value = block[field.api_key];
-        if (value === undefined) continue;
-        if (value === null) {
-          row[field.api_key] = null;
-          continue;
-        }
-
-        // Handle nested structured_text inside blocks
-        if (field.field_type === "structured_text") {
-          const nestedInput = yield* decodeStructuredTextInput(field.api_key, value);
-          const nestedCompiled = yield* compileStructuredText(
-            {
-              sql,
-              rootRecordId: params.rootRecordId,
-              rootFieldApiKey,
-              rootModelApiKey: params.rootModelApiKey,
-              seenBlockIds,
-            },
-            {
-              parentContainerModelApiKey: blockModel.apiKey,
-              parentBlockId: blockId,
-              parentFieldApiKey: field.api_key,
-              depth: 1,
-            },
-            {
-              fieldApiKey: field.api_key,
-              input: nestedInput,
-              allowedBlockTypes: getBlockWhitelist(field.validators) ?? [],
-              blocksOnly: getBlocksOnly(field.validators),
-            }
-          );
-          row[field.api_key] = nestedCompiled.dast;
-          mergeRowMaps(rowsByTable, nestedCompiled.rowsByTable);
-          continue;
-        }
-
-        // Handle nested rich_text inside blocks
-        if (field.field_type === "rich_text") {
-          if (!Array.isArray(value)) {
-            return yield* new ValidationError({
-              message: `Nested rich_text field '${field.api_key}' must be an array of block objects`,
-              field: field.api_key,
-            });
-          }
-          const nestedResult = yield* writeRichTextBlocks({
-            sql,
-            rootRecordId: params.rootRecordId,
-            rootFieldApiKey,
-            rootModelApiKey: params.rootModelApiKey,
-            seenBlockIds,
-            parentContainerModelApiKey: blockModel.apiKey,
-            parentBlockId: blockId,
-            parentFieldApiKey: field.api_key,
-            depth: 1,
-            fieldApiKey: field.api_key,
-            blocks: value as RichTextWriteBlock[],
-            allowedBlockTypes: getRichTextBlockWhitelist(field.validators) ?? [],
-          });
-          row[field.api_key] = nestedResult.blockIds;
-          mergeRowMaps(rowsByTable, nestedResult.rowsByTable);
-          continue;
-        }
-
-        if (isFieldType(field.field_type)) {
-          const fieldDef = getFieldTypeDef(field.field_type);
-          if (fieldDef.inputSchema) {
-            yield* Schema.decodeUnknown(fieldDef.inputSchema)(value).pipe(
-              Effect.mapError((e) => new ValidationError({
-                message: `Invalid ${field.field_type} for block field '${field.api_key}': ${e.message}`,
-                field: field.api_key,
-              }))
-            );
-          }
-        }
-
-        row[field.api_key] = value;
-      }
-
-      const tableName = `block_${blockModel.apiKey}`;
-      const rows = rowsByTable.get(tableName);
-      if (rows) rows.push(row);
-      else rowsByTable.set(tableName, [row]);
-    }
-
+export function writeRichText(params: RichTextWriteParams) {
+  return Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const { blockIds, rowsByTable } = yield* compileRichTextValue(params);
     yield* insertCompiledRows(sql, rowsByTable);
     return blockIds;
   });
+}
+
+/**
+ * Validate a rich_text value exactly as `writeRichText` would, with ZERO
+ * persistence (no block rows inserted). Used by the record dry-run validator.
+ */
+export function validateRichText(params: RichTextWriteParams) {
+  return compileRichTextValue(params).pipe(Effect.asVoid);
 }
 
 /** Internal recursive helper for nested rich_text inside blocks */
@@ -1087,6 +1144,7 @@ function writeRichTextBlocks(params: {
         return yield* new ValidationError({
           message: `Block type '${block.block_type}' is not allowed in rich_text field '${fieldApiKey}'. Allowed: ${allowedBlockTypes.join(", ")}`,
           field: fieldApiKey,
+          code: "block_type",
         });
       }
 
@@ -1142,6 +1200,8 @@ function writeRichTextBlocks(params: {
               fieldApiKey: field.api_key,
               input: nestedInput,
               allowedBlockTypes: getBlockWhitelist(field.validators) ?? [],
+              allowedInlineBlockTypes: getInlineBlockWhitelist(field.validators),
+              allowedLinkModels: getStructuredTextLinkModels(field.validators),
               blocksOnly: getBlocksOnly(field.validators),
             }
           );
