@@ -10,5 +10,5 @@ and its consequences; superseding decisions get a new ADR that references the ol
 - [0005 — RPC failure algebra: five cms/* tags, aggregated issues, BYO-auth](0005-failure-algebra.md)
 - [0006 — No admin ships: headless editing primitives, presentation hints, RPC-backed lists](0006-headless-editing-and-presentation.md)
 
-Related non-ADR references: `docs/plans/` for implementation plans; research notes behind these
-decisions live in the local (untracked) wayfinder workspace and are summarized into the ADRs.
+Research notes behind these decisions live in the local (untracked) wayfinder workspace and are
+summarized into the ADRs.

@@ -27,6 +27,29 @@ When humans need to edit too, agent-cms does not ship a GUI. It ships the parts 
 
 Copy the prompt from [`PROMPT.md`](./PROMPT.md) into Claude Code. It assesses your project, asks how you want to integrate (standalone Worker, service binding, or mounted in an existing Worker), and wires everything up — including D1 database, wrangler config, and MCP server connection.
 
+## Database setup
+
+A fresh D1 database has no system tables, so the CMS cannot serve anything until its schema is
+installed. **`POST /api/setup` installs it:**
+
+```bash
+curl -X POST https://your-worker.workers.dev/api/setup \
+  -H "Authorization: Bearer $CMS_WRITE_KEY"
+```
+
+Skipping this is the usual cause of a `500` / `INTERNAL_SERVER_ERROR` from `/graphql` on a
+brand-new deployment.
+
+- It counts as a schema mutation, so it needs `CMS_WRITE_KEY` when one is configured.
+- It is **idempotent and version-tracked** (`_cms_migrations`), so it is safe to call repeatedly.
+- **Re-run it after upgrading the `agent-cms` package.** New versions ship additional migrations,
+  and setup applies only the pending ones.
+
+The migrations are embedded in the Worker bundle, so there is nothing to copy out of
+`node_modules`. The equivalent `.sql` files also ship in the package under `migrations/` if you
+prefer to drive them yourself with `wrangler d1 migrations apply` — both paths produce the same
+schema, so pick one.
+
 ## Interfaces
 
 ### `/mcp` — Admin agent interface
@@ -337,6 +360,39 @@ Only `DB` is required. Everything else is optional and degrades gracefully.
 | `ASSET_BASE_URL` | Variable | Public URL prefix for assets and Image Resizing. Must be a custom domain for transforms. |
 | `SITE_URL` | Variable | Your site's public URL (e.g. `https://mysite.com`). Required for `get_preview_url` to generate fully assembled preview links. |
 | `LOADER` | Worker Loader | Code Mode — collapses MCP tools into a single `code` tool. Requires [Dynamic Workers](https://developers.cloudflare.com/dynamic-workers/) (Workers Paid plan). |
+| `r2AccessKeyId` | Secret | Presigned browser uploads. All four R2 S3 values are required together. |
+| `r2SecretAccessKey` | Secret | Presigned browser uploads. |
+| `r2BucketName` | Variable | Bucket name for the S3-compatible endpoint. |
+| `cfAccountId` | Variable | Account ID for the S3-compatible endpoint. |
+
+### Presigned browser uploads
+
+Server-side uploads (`import_asset_from_url`, or writing to R2 yourself) only need the `ASSETS`
+binding. **Direct browser uploads additionally need R2 S3-compatible credentials** — without all
+four, `create_asset_upload_url` and `POST /api/assets/upload-url` are unavailable.
+
+These are S3 API credentials, not a Worker binding, so they can only be created in the dashboard:
+**R2 → Manage R2 API Tokens → Create token**, with **Object Read & Write** scoped to your bucket.
+The account ID is the first path segment of the endpoint it shows you
+(`https://<accountId>.r2.cloudflarestorage.com`).
+
+Pass them through `createCMSHandler`:
+
+```ts
+createCMSHandler({
+  bindings: {
+    db: env.DB,
+    assets: env.ASSETS,
+    writeKey: env.CMS_WRITE_KEY,
+    r2AccessKeyId: env.R2_ACCESS_KEY_ID,
+    r2SecretAccessKey: env.R2_SECRET_ACCESS_KEY,
+    r2BucketName: "my-cms-assets",
+    cfAccountId: env.CF_ACCOUNT_ID,
+  },
+});
+```
+
+Use `wrangler secret put` for the two secrets in production, and `.dev.vars` locally.
 
 ```jsonc
 {
@@ -360,6 +416,12 @@ Asset binaries live in R2. Metadata in D1. Served from `/assets/:id/:filename`.
 - **Server**: upload to R2, then `POST /api/assets`
 
 Focal points, blurhash, and color palette are stored per-asset. Cloudflare Image Resizing generates responsive variants at the edge.
+
+> **`responsiveImage` returns `null` when an asset has no `width`/`height`.** It cannot compute
+> srcSet breakpoints or an aspect ratio without them, so images uploaded without dimensions
+> silently render nothing rather than erroring. If a `responsiveImage` field comes back empty,
+> check the asset row first. Dimensions can be backfilled with
+> `PATCH /api/assets/:id` (`width`, `height`).
 
 ### Canonical URLs
 

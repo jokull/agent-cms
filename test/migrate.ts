@@ -2,8 +2,9 @@
  * Test-only migration runner. Reads .sql files from the migrations
  * directory and executes them against an in-memory SQLite database.
  *
- * Production uses `wrangler d1 migrations apply` instead — the Worker
- * bundle never touches the filesystem.
+ * Production applies the equivalent migrations embedded in `src/migrations.ts`
+ * via `POST /api/setup` (or `wrangler d1 migrations apply` against these same
+ * files) — the Worker bundle never touches the filesystem.
  */
 import { Effect } from "effect";
 import { SqlClient } from "@effect/sql";
