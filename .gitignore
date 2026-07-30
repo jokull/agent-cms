@@ -12,3 +12,6 @@ autoresearch.jsonl
 autoresearch.ideas.md
 scripts/dato-import/out/
 scripts/dato-import/adapters/
+
+# Local planning workspace (decisions are distilled into docs/adr/)
+/.wayfinder/
