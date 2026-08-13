@@ -12,6 +12,7 @@
  * React component via `blockView`; the generated per-project types narrow the
  * payload union so a missing or misnamed block type is a compile error.
  */
+import type { AnyExtension } from "@tiptap/core";
 import { ReactNodeViewRenderer, useEditor, type Editor, type NodeViewProps } from "@tiptap/react";
 import type { ComponentType } from "react";
 import { createElement, useMemo, useRef } from "react";
@@ -81,6 +82,12 @@ export interface UseDastEditorOptions<Block, Props = undefined> {
    * remounts a node view.
    */
   blockViewProps?: Props;
+  /**
+   * Extra Tiptap extensions appended AFTER the DAST extensions (e.g. a
+   * slash-command plugin). Pass a STABLE array (memoize it or hoist it to
+   * module scope) — a fresh array every render rebuilds the whole editor.
+   */
+  extensions?: AnyExtension[];
 }
 
 export interface DastEditorHandle<Block = unknown> {
@@ -156,8 +163,17 @@ function mintId(): string {
 export function useDastEditor<Block, Props = undefined>(
   options: UseDastEditorOptions<Block, Props>
 ): DastEditorHandle<Block> {
-  const { value, mode, customMarks, placeholder, editable, onChange, onBlockCreate, blockView } =
-    options;
+  const {
+    value,
+    mode,
+    customMarks,
+    placeholder,
+    editable,
+    onChange,
+    onBlockCreate,
+    blockView,
+    extensions: hostExtensions,
+  } = options;
 
   // The envelope's blocks map, readable by node views without re-creating the
   // editor when payloads change.
@@ -202,7 +218,7 @@ export function useDastEditor<Block, Props = undefined>(
       ...(customMarks ? { customMarks } : {}),
       ...(placeholder ? { placeholder } : {}),
     });
-    if (!blockView) return base;
+    if (!blockView) return hostExtensions ? [...base, ...hostExtensions] : base;
     // The host's envelope wins; a freshly minted draft covers the frames before
     // the host's state catches up.
     const lookupBlock = (id: string): Block | undefined =>
@@ -218,7 +234,7 @@ export function useDastEditor<Block, Props = undefined>(
       };
       return createElement(blockView, viewProps);
     };
-    return base.map((extension) => {
+    const withBlockView = base.map((extension) => {
       if (extension.name === DastBlock.name) {
         return DastBlock.extend({
           addNodeView: () => ReactNodeViewRenderer(BlockViewAdapter),
@@ -231,9 +247,10 @@ export function useDastEditor<Block, Props = undefined>(
       }
       return extension;
     });
+    return hostExtensions ? [...withBlockView, ...hostExtensions] : withBlockView;
     // customMarksKey stands in for customMarks (content equality).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, customMarksKey, placeholder, blockView]);
+  }, [mode, customMarksKey, placeholder, blockView, hostExtensions]);
 
   const editor = useEditor(
     {

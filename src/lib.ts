@@ -29,6 +29,7 @@ export * as PublishService from "./services/publish-service.js";
 export * as VersionService from "./services/version-service.js";
 export * as ScheduleService from "./services/schedule-service.js";
 export * as AssetService from "./services/asset-service.js";
+export * as SchemaIO from "./services/schema-io.js";
 
 export {
   NotFoundError,

@@ -3,3 +3,4 @@ packages:
   - "examples/blog/cms"
   - "examples/editor"
   - "examples/admin"
+  - "examples/blocks-editor"

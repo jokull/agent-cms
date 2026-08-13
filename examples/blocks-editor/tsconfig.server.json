@@ -1,0 +1,21 @@
+{
+  // Server half (Node + tsx). `exactOptionalPropertyTypes` must be OFF: the
+  // generated procedures.ts and @agent-cms/codegen's server-runtime.ts both
+  // build `{ key: value | undefined }` objects for exact-optional targets.
+  // `allowImportingTsExtensions` is required because the generated
+  // procedures.ts imports "./contract.ts" with the extension.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "verbatimModuleSyntax": true,
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
+    "types": ["node", "@cloudflare/workers-types"],
+    "isolatedModules": true
+  },
+  "include": ["server", "src/contract.ts", "src/cms"]
+}
