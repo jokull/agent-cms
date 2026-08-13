@@ -70,67 +70,67 @@ export function cmsProcedures<C>(
     siteSettings: {
       get: app.implement(contract.siteSettings.get).handler(async () => {
         const r = await cms.getSingleton("site_settings");
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecord(SiteSettingsCodec, SITESETTINGS_FIELD_KEYS, "siteSettings.get", r.value);
       }),
       update: app.implement(contract.siteSettings.update).use(gate).handler(async ({ input, context }) => {
         const r = await cms.updateSingleton("site_settings", toRecord(input.data), actorFor(context));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecord(SiteSettingsCodec, SITESETTINGS_FIELD_KEYS, "siteSettings.update", r.value);
       }),
       validate: app.implement(contract.siteSettings.validate).handler(async ({ input }) => cms.validate("site_settings", toRecord(input.data))),
       syncState: app.implement(contract.siteSettings.syncState).handler(async () => {
         const r = await cms.syncStateSingleton("site_settings");
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeOutput(SyncStateCodec, "siteSettings.syncState", r.value);
       }),
       publish: app.implement(contract.siteSettings.publish).use(gate).handler(async ({ context }) => {
         const r = await cms.publishSingleton("site_settings", actorFor(context));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecord(SiteSettingsCodec, SITESETTINGS_FIELD_KEYS, "siteSettings.publish", r.value);
       }),
       unpublish: app.implement(contract.siteSettings.unpublish).use(gate).handler(async ({ context }) => {
         const r = await cms.unpublishSingleton("site_settings", actorFor(context));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecord(SiteSettingsCodec, SITESETTINGS_FIELD_KEYS, "siteSettings.unpublish", r.value);
       }),
     },
     author: {
       list: app.implement(contract.author.list).handler(async ({ input }) => {
         const r = await cms.query("author", toQueryOptions(input));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecordPage(AuthorCodec, AUTHOR_FIELD_KEYS, "author.list", r.value);
       }),
       byId: app.implement(contract.author.byId).handler(async ({ input }) => {
         const r = await cms.byId("author", input.id);
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecord(AuthorCodec, AUTHOR_FIELD_KEYS, "author.byId", r.value);
       }),
       search: app.implement(contract.author.search).handler(async ({ input }) => cms.search("author", input.q, input.page ?? undefined)),
       create: app.implement(contract.author.create).use(gate).handler(async ({ input, context }) => {
         const r = await cms.create("author", toRecord(input.data), actorFor(context));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecord(AuthorCodec, AUTHOR_FIELD_KEYS, "author.create", r.value);
       }),
       update: app.implement(contract.author.update).use(gate).handler(async ({ input, context }) => {
         const r = await cms.update("author", input.id, toRecord(input.data), actorFor(context));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecord(AuthorCodec, AUTHOR_FIELD_KEYS, "author.update", r.value);
       }),
       delete: app.implement(contract.author.delete).use(gate).handler(async ({ input }) => cms.remove("author", input.id)),
       duplicate: app.implement(contract.author.duplicate).use(gate).handler(async ({ input, context }) => {
         const r = await cms.duplicate("author", input.id, actorFor(context));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecord(AuthorCodec, AUTHOR_FIELD_KEYS, "author.duplicate", r.value);
       }),
       publish: app.implement(contract.author.publish).use(gate).handler(async ({ input, context }) => {
         const r = await cms.publish("author", input.id, actorFor(context));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecord(AuthorCodec, AUTHOR_FIELD_KEYS, "author.publish", r.value);
       }),
       unpublish: app.implement(contract.author.unpublish).use(gate).handler(async ({ input, context }) => {
         const r = await cms.unpublish("author", input.id, actorFor(context));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecord(AuthorCodec, AUTHOR_FIELD_KEYS, "author.unpublish", r.value);
       }),
       publishMany: app.implement(contract.author.publishMany).use(gate).handler(async ({ input, context }) => cms.publishMany("author", input.ids, actorFor(context))),
@@ -141,78 +141,78 @@ export function cmsProcedures<C>(
       validateUpdate: app.implement(contract.author.validateUpdate).handler(async ({ input }) => cms.validateUpdate("author", input.id, toRecord(input.data))),
       syncState: app.implement(contract.author.syncState).handler(async ({ input }) => {
         const r = await cms.syncState("author", input.id);
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeOutput(SyncStateCodec, "author.syncState", r.value);
       }),
       versions: {
         list: app.implement(contract.author.versions.list).handler(async ({ input }) => {
           const r = await cms.versionsList("author", input.id);
-          if (!r.ok) return r;
+          if (r.isErr()) return r;
           return decodeOutput(AuthorVersionListCodec, "author.versions.list", r.value);
         }),
         get: app.implement(contract.author.versions.get).handler(async ({ input }) => {
           const r = await cms.versionsGet("author", input.id, input.versionId);
-          if (!r.ok) return r;
+          if (r.isErr()) return r;
           return decodeOutput(AuthorVersionCodec, "author.versions.get", r.value);
         }),
         restore: app.implement(contract.author.versions.restore).use(gate).handler(async ({ input, context }) => {
           const r = await cms.versionsRestore("author", input.id, input.versionId, actorFor(context));
-          if (!r.ok) return r;
+          if (r.isErr()) return r;
           return decodeRecord(AuthorCodec, AUTHOR_FIELD_KEYS, "author.versions.restore", r.value);
         }),
       },
       schedulePublish: app.implement(contract.author.schedulePublish).use(gate).handler(async ({ input, context }) => {
         const r = await cms.schedulePublish("author", input.id, input.at, actorFor(context));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecord(AuthorCodec, AUTHOR_FIELD_KEYS, "author.schedulePublish", r.value);
       }),
       scheduleUnpublish: app.implement(contract.author.scheduleUnpublish).use(gate).handler(async ({ input, context }) => {
         const r = await cms.scheduleUnpublish("author", input.id, input.at, actorFor(context));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecord(AuthorCodec, AUTHOR_FIELD_KEYS, "author.scheduleUnpublish", r.value);
       }),
       clearSchedule: app.implement(contract.author.clearSchedule).use(gate).handler(async ({ input, context }) => {
         const r = await cms.clearSchedule("author", input.id, actorFor(context));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecord(AuthorCodec, AUTHOR_FIELD_KEYS, "author.clearSchedule", r.value);
       }),
     },
     category: {
       list: app.implement(contract.category.list).handler(async ({ input }) => {
         const r = await cms.query("category", toQueryOptions(input));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecordPage(CategoryCodec, CATEGORY_FIELD_KEYS, "category.list", r.value);
       }),
       byId: app.implement(contract.category.byId).handler(async ({ input }) => {
         const r = await cms.byId("category", input.id);
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecord(CategoryCodec, CATEGORY_FIELD_KEYS, "category.byId", r.value);
       }),
       search: app.implement(contract.category.search).handler(async ({ input }) => cms.search("category", input.q, input.page ?? undefined)),
       create: app.implement(contract.category.create).use(gate).handler(async ({ input, context }) => {
         const r = await cms.create("category", toRecord(input.data), actorFor(context));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecord(CategoryCodec, CATEGORY_FIELD_KEYS, "category.create", r.value);
       }),
       update: app.implement(contract.category.update).use(gate).handler(async ({ input, context }) => {
         const r = await cms.update("category", input.id, toRecord(input.data), actorFor(context));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecord(CategoryCodec, CATEGORY_FIELD_KEYS, "category.update", r.value);
       }),
       delete: app.implement(contract.category.delete).use(gate).handler(async ({ input }) => cms.remove("category", input.id)),
       duplicate: app.implement(contract.category.duplicate).use(gate).handler(async ({ input, context }) => {
         const r = await cms.duplicate("category", input.id, actorFor(context));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecord(CategoryCodec, CATEGORY_FIELD_KEYS, "category.duplicate", r.value);
       }),
       publish: app.implement(contract.category.publish).use(gate).handler(async ({ input, context }) => {
         const r = await cms.publish("category", input.id, actorFor(context));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecord(CategoryCodec, CATEGORY_FIELD_KEYS, "category.publish", r.value);
       }),
       unpublish: app.implement(contract.category.unpublish).use(gate).handler(async ({ input, context }) => {
         const r = await cms.unpublish("category", input.id, actorFor(context));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecord(CategoryCodec, CATEGORY_FIELD_KEYS, "category.unpublish", r.value);
       }),
       publishMany: app.implement(contract.category.publishMany).use(gate).handler(async ({ input, context }) => cms.publishMany("category", input.ids, actorFor(context))),
@@ -223,78 +223,78 @@ export function cmsProcedures<C>(
       validateUpdate: app.implement(contract.category.validateUpdate).handler(async ({ input }) => cms.validateUpdate("category", input.id, toRecord(input.data))),
       syncState: app.implement(contract.category.syncState).handler(async ({ input }) => {
         const r = await cms.syncState("category", input.id);
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeOutput(SyncStateCodec, "category.syncState", r.value);
       }),
       versions: {
         list: app.implement(contract.category.versions.list).handler(async ({ input }) => {
           const r = await cms.versionsList("category", input.id);
-          if (!r.ok) return r;
+          if (r.isErr()) return r;
           return decodeOutput(CategoryVersionListCodec, "category.versions.list", r.value);
         }),
         get: app.implement(contract.category.versions.get).handler(async ({ input }) => {
           const r = await cms.versionsGet("category", input.id, input.versionId);
-          if (!r.ok) return r;
+          if (r.isErr()) return r;
           return decodeOutput(CategoryVersionCodec, "category.versions.get", r.value);
         }),
         restore: app.implement(contract.category.versions.restore).use(gate).handler(async ({ input, context }) => {
           const r = await cms.versionsRestore("category", input.id, input.versionId, actorFor(context));
-          if (!r.ok) return r;
+          if (r.isErr()) return r;
           return decodeRecord(CategoryCodec, CATEGORY_FIELD_KEYS, "category.versions.restore", r.value);
         }),
       },
       schedulePublish: app.implement(contract.category.schedulePublish).use(gate).handler(async ({ input, context }) => {
         const r = await cms.schedulePublish("category", input.id, input.at, actorFor(context));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecord(CategoryCodec, CATEGORY_FIELD_KEYS, "category.schedulePublish", r.value);
       }),
       scheduleUnpublish: app.implement(contract.category.scheduleUnpublish).use(gate).handler(async ({ input, context }) => {
         const r = await cms.scheduleUnpublish("category", input.id, input.at, actorFor(context));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecord(CategoryCodec, CATEGORY_FIELD_KEYS, "category.scheduleUnpublish", r.value);
       }),
       clearSchedule: app.implement(contract.category.clearSchedule).use(gate).handler(async ({ input, context }) => {
         const r = await cms.clearSchedule("category", input.id, actorFor(context));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecord(CategoryCodec, CATEGORY_FIELD_KEYS, "category.clearSchedule", r.value);
       }),
     },
     post: {
       list: app.implement(contract.post.list).handler(async ({ input }) => {
         const r = await cms.query("post", toQueryOptions(input));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecordPage(PostCodec, POST_FIELD_KEYS, "post.list", r.value);
       }),
       byId: app.implement(contract.post.byId).handler(async ({ input }) => {
         const r = await cms.byId("post", input.id);
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecord(PostCodec, POST_FIELD_KEYS, "post.byId", r.value);
       }),
       search: app.implement(contract.post.search).handler(async ({ input }) => cms.search("post", input.q, input.page ?? undefined)),
       create: app.implement(contract.post.create).use(gate).handler(async ({ input, context }) => {
         const r = await cms.create("post", toRecord(input.data), actorFor(context));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecord(PostCodec, POST_FIELD_KEYS, "post.create", r.value);
       }),
       update: app.implement(contract.post.update).use(gate).handler(async ({ input, context }) => {
         const r = await cms.update("post", input.id, toRecord(input.data), actorFor(context));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecord(PostCodec, POST_FIELD_KEYS, "post.update", r.value);
       }),
       delete: app.implement(contract.post.delete).use(gate).handler(async ({ input }) => cms.remove("post", input.id)),
       duplicate: app.implement(contract.post.duplicate).use(gate).handler(async ({ input, context }) => {
         const r = await cms.duplicate("post", input.id, actorFor(context));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecord(PostCodec, POST_FIELD_KEYS, "post.duplicate", r.value);
       }),
       publish: app.implement(contract.post.publish).use(gate).handler(async ({ input, context }) => {
         const r = await cms.publish("post", input.id, actorFor(context));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecord(PostCodec, POST_FIELD_KEYS, "post.publish", r.value);
       }),
       unpublish: app.implement(contract.post.unpublish).use(gate).handler(async ({ input, context }) => {
         const r = await cms.unpublish("post", input.id, actorFor(context));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecord(PostCodec, POST_FIELD_KEYS, "post.unpublish", r.value);
       }),
       publishMany: app.implement(contract.post.publishMany).use(gate).handler(async ({ input, context }) => cms.publishMany("post", input.ids, actorFor(context))),
@@ -305,76 +305,76 @@ export function cmsProcedures<C>(
       validateUpdate: app.implement(contract.post.validateUpdate).handler(async ({ input }) => cms.validateUpdate("post", input.id, toRecord(input.data))),
       syncState: app.implement(contract.post.syncState).handler(async ({ input }) => {
         const r = await cms.syncState("post", input.id);
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeOutput(SyncStateCodec, "post.syncState", r.value);
       }),
       versions: {
         list: app.implement(contract.post.versions.list).handler(async ({ input }) => {
           const r = await cms.versionsList("post", input.id);
-          if (!r.ok) return r;
+          if (r.isErr()) return r;
           return decodeOutput(PostVersionListCodec, "post.versions.list", r.value);
         }),
         get: app.implement(contract.post.versions.get).handler(async ({ input }) => {
           const r = await cms.versionsGet("post", input.id, input.versionId);
-          if (!r.ok) return r;
+          if (r.isErr()) return r;
           return decodeOutput(PostVersionCodec, "post.versions.get", r.value);
         }),
         restore: app.implement(contract.post.versions.restore).use(gate).handler(async ({ input, context }) => {
           const r = await cms.versionsRestore("post", input.id, input.versionId, actorFor(context));
-          if (!r.ok) return r;
+          if (r.isErr()) return r;
           return decodeRecord(PostCodec, POST_FIELD_KEYS, "post.versions.restore", r.value);
         }),
       },
       schedulePublish: app.implement(contract.post.schedulePublish).use(gate).handler(async ({ input, context }) => {
         const r = await cms.schedulePublish("post", input.id, input.at, actorFor(context));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecord(PostCodec, POST_FIELD_KEYS, "post.schedulePublish", r.value);
       }),
       scheduleUnpublish: app.implement(contract.post.scheduleUnpublish).use(gate).handler(async ({ input, context }) => {
         const r = await cms.scheduleUnpublish("post", input.id, input.at, actorFor(context));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecord(PostCodec, POST_FIELD_KEYS, "post.scheduleUnpublish", r.value);
       }),
       clearSchedule: app.implement(contract.post.clearSchedule).use(gate).handler(async ({ input, context }) => {
         const r = await cms.clearSchedule("post", input.id, actorFor(context));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeRecord(PostCodec, POST_FIELD_KEYS, "post.clearSchedule", r.value);
       }),
     },
     assets: {
       list: app.implement(contract.assets.list).handler(async ({ input }) => {
         const r = await cms.assetsList({ query: input.q ?? undefined, page: input.page ?? undefined, orderBy: input.orderBy ? [...input.orderBy] : undefined });
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeOutput(AssetListCodec, "assets.list", r.value);
       }),
       get: app.implement(contract.assets.get).handler(async ({ input }) => {
         const r = await cms.assetsGet(input.id);
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeOutput(AssetRecordCodec, "assets.get", r.value);
       }),
       createUploadUrl: app.implement(contract.assets.createUploadUrl).use(gate).handler(async ({ input }) => {
         const r = await cms.assetsCreateUploadUrl({ filename: input.filename, mimeType: input.contentType });
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeOutput(UploadUrlResultCodec, "assets.createUploadUrl", r.value);
       }),
       create: app.implement(contract.assets.create).use(gate).handler(async ({ input, context }) => {
         const r = await cms.assetsCreate(input.data, actorFor(context));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeOutput(AssetCreateResultCodec, "assets.create", r.value);
       }),
       importFromUrl: app.implement(contract.assets.importFromUrl).use(gate).handler(async ({ input, context }) => {
         const r = await cms.assetsImportFromUrl(input, actorFor(context));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeOutput(AssetCreateResultCodec, "assets.importFromUrl", r.value);
       }),
       update: app.implement(contract.assets.update).use(gate).handler(async ({ input, context }) => {
         const r = await cms.assetsUpdate(input.id, input.data, actorFor(context));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeOutput(AssetUpdateResultCodec, "assets.update", r.value);
       }),
       replace: app.implement(contract.assets.replace).use(gate).handler(async ({ input, context }) => {
         const r = await cms.assetsReplace(input.id, input.data, actorFor(context));
-        if (!r.ok) return r;
+        if (r.isErr()) return r;
         return decodeOutput(AssetReplaceResultCodec, "assets.replace", r.value);
       }),
       delete: app.implement(contract.assets.delete).use(gate).handler(async ({ input }) => cms.assetsDelete(input.id, input.force ?? false)),

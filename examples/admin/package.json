@@ -18,6 +18,7 @@
     "@agent-cms/editor-react": "workspace:*",
     "@tiptap/react": "3.29.2",
     "agent-cms": "workspace:*",
+    "better-result": "^3.0.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "result-rpc": "link:../../../result-rpc"

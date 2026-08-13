@@ -156,6 +156,9 @@ importers:
       agent-cms:
         specifier: workspace:*
         version: link:../..
+      better-result:
+        specifier: ^3.0.0
+        version: 3.0.1
       react:
         specifier: ^19.2.4
         version: 19.2.8
@@ -236,6 +239,9 @@ importers:
       agent-cms:
         specifier: workspace:*
         version: link:../..
+      better-result:
+        specifier: ^3.0.0
+        version: 3.0.1
       result-rpc:
         specifier: link:../../../result-rpc
         version: link:../../../result-rpc
@@ -2355,6 +2361,9 @@ packages:
     resolution: {integrity: sha512-APw5YuIQAg6L9w4sHDI6j26DGFJI6RpYOhnkMPdC9lWbkKvsyPHzDsve1yd73lk21yz7Y09Kci8B2Pp9FonzWA==}
     engines: {node: '>=6.0.0'}
     hasBin: true
+
+  better-result@3.0.1:
+    resolution: {integrity: sha512-rnCeqEXkKPHmz5MO5ZroPRDyHe4YvlNPyy7qj8cVcWs/GnvSvC3086G74/220W+wWcIWlXgzvcjskFV0A4blUQ==}
 
   better-sqlite3@12.8.0:
     resolution: {integrity: sha512-RxD2Vd96sQDjQr20kdP+F+dK/1OUNiVOl200vKBZY8u0vTwysfolF6Hq+3ZK2+h8My9YvZhHsF+RSGZW2VYrPQ==}
@@ -6045,6 +6054,8 @@ snapshots:
   base64-js@1.5.1: {}
 
   baseline-browser-mapping@2.11.7: {}
+
+  better-result@3.0.1: {}
 
   better-sqlite3@12.8.0:
     dependencies:

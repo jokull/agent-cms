@@ -87,7 +87,7 @@ function PostForm({ record, recordId }: { readonly record: Post; readonly record
       const result = await client.cms.post.validateUpdate({ id: recordId, data: writeRef.current });
       if (cancelled) return;
       setValidateMs(Math.round(performance.now() - started));
-      setIssues(result.ok ? [] : issuesOf(result.error));
+      setIssues(result.isOk() ? [] : issuesOf(result.error));
     }, VALIDATE_DEBOUNCE_MS);
     return () => {
       cancelled = true;
@@ -100,8 +100,8 @@ function PostForm({ record, recordId }: { readonly record: Post; readonly record
   const formLevel = byField.get("") ?? [];
 
   const save = async () => {
-    const result = await update.mutate({ id: recordId, data: writeData });
-    if (result.ok) {
+    const result = await update.mutateAsync({ id: recordId, data: writeData });
+    if (result.isOk()) {
       setNotice(`saved · status ${result.value.status}`);
       setIssues([]);
       return;
@@ -112,15 +112,15 @@ function PostForm({ record, recordId }: { readonly record: Post; readonly record
 
   const searchAuthors = useCallback(async (q: string): Promise<readonly PickerRow[]> => {
     const result = await client.cms.author.search({ q });
-    return result.ok ? result.value : [];
+    return result.isOk() ? result.value : [];
   }, []);
   const searchCategories = useCallback(async (q: string): Promise<readonly PickerRow[]> => {
     const result = await client.cms.category.search({ q });
-    return result.ok ? result.value : [];
+    return result.isOk() ? result.value : [];
   }, []);
   const searchPosts = useCallback(async (q: string): Promise<readonly PickerRow[]> => {
     const result = await client.cms.post.search({ q });
-    return result.ok ? result.value : [];
+    return result.isOk() ? result.value : [];
   }, []);
 
   return (
@@ -260,8 +260,8 @@ function PostForm({ record, recordId }: { readonly record: Post; readonly record
           <button
             type="button"
             onClick={async () => {
-              const result = await publish.mutate({ id: recordId });
-              setNotice(result.ok ? `published` : describeError(result.error));
+              const result = await publish.mutateAsync({ id: recordId });
+              setNotice(result.isOk() ? `published` : describeError(result.error));
             }}
           >
             Publish
@@ -269,8 +269,8 @@ function PostForm({ record, recordId }: { readonly record: Post; readonly record
           <button
             type="button"
             onClick={async () => {
-              const result = await unpublish.mutate({ id: recordId });
-              setNotice(result.ok ? `unpublished` : describeError(result.error));
+              const result = await unpublish.mutateAsync({ id: recordId });
+              setNotice(result.isOk() ? `unpublished` : describeError(result.error));
             }}
           >
             Unpublish
@@ -388,8 +388,8 @@ function Sidebar({
           type="button"
           disabled={at.length === 0}
           onClick={async () => {
-            const result = await schedulePublish.mutate({ id: recordId, at: new Date(at).toISOString() });
-            onNotice(result.ok ? "scheduled" : describeError(result.error));
+            const result = await schedulePublish.mutateAsync({ id: recordId, at: new Date(at).toISOString() });
+            onNotice(result.isOk() ? "scheduled" : describeError(result.error));
           }}
         >
           Schedule publish
@@ -397,8 +397,8 @@ function Sidebar({
         <button
           type="button"
           onClick={async () => {
-            const result = await clearSchedule.mutate({ id: recordId });
-            onNotice(result.ok ? "schedule cleared" : describeError(result.error));
+            const result = await clearSchedule.mutateAsync({ id: recordId });
+            onNotice(result.isOk() ? "schedule cleared" : describeError(result.error));
           }}
         >
           Clear
@@ -439,8 +439,8 @@ function Sidebar({
                 <button
                   type="button"
                   onClick={async () => {
-                    const result = await restore.mutate({ id: recordId, versionId: version.id });
-                    onNotice(result.ok ? `restored #${version.version_number}` : describeError(result.error));
+                    const result = await restore.mutateAsync({ id: recordId, versionId: version.id });
+                    onNotice(result.isOk() ? `restored #${version.version_number}` : describeError(result.error));
                   }}
                 >
                   restore

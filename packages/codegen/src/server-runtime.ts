@@ -244,7 +244,7 @@ export function decodeRecords<T>(
   const out: T[] = [];
   for (const row of rows) {
     const decoded = decodeRecord(codec, fieldKeys, procedure, row);
-    if (!decoded.ok) return decoded;
+    if (decoded.isErr()) return decoded;
     out.push(decoded.value);
   }
   return ok(out);
@@ -258,7 +258,7 @@ export function decodeRecordPage<T>(
   page: { readonly records: readonly unknown[]; readonly total: number },
 ): Result<{ records: T[]; total: number }, SchemaDrift> {
   const decoded = decodeRecords(codec, fieldKeys, procedure, page.records);
-  if (!decoded.ok) return decoded;
+  if (decoded.isErr()) return decoded;
   return ok({ records: decoded.value, total: page.total });
 }
 
@@ -638,7 +638,7 @@ export function createCmsExecutor(deps: CmsRuntimeDeps): CmsExecutor {
     getSingleton: async (modelApiKey) => {
       const proc = `${modelApiKey}.get`;
       const idr = await firstSingletonId(modelApiKey, proc);
-      if (!idr.ok) return idr;
+      if (idr.isErr()) return idr;
       const r = await runtime.run(RecordService.getRecord(modelApiKey, idr.value));
       if (r.ok) return ok(r.value);
       return err(foldNotFound(proc, idr.value, r.error));
@@ -652,7 +652,7 @@ export function createCmsExecutor(deps: CmsRuntimeDeps): CmsExecutor {
     publishSingleton: async (modelApiKey, actor) => {
       const proc = `${modelApiKey}.publish`;
       const idr = await firstSingletonId(modelApiKey, proc);
-      if (!idr.ok) return idr;
+      if (idr.isErr()) return idr;
       const r = await runtime.run(PublishService.publishRecord(modelApiKey, idr.value, actor));
       if (r.ok) return ok(r.value);
       return err(foldPublish(proc, idr.value, r.error));
@@ -660,7 +660,7 @@ export function createCmsExecutor(deps: CmsRuntimeDeps): CmsExecutor {
     unpublishSingleton: async (modelApiKey, actor) => {
       const proc = `${modelApiKey}.unpublish`;
       const idr = await firstSingletonId(modelApiKey, proc);
-      if (!idr.ok) return idr;
+      if (idr.isErr()) return idr;
       const r = await runtime.run(PublishService.unpublishRecord(modelApiKey, idr.value, actor));
       if (r.ok) return ok(r.value);
       return err(foldPublish(proc, idr.value, r.error));
@@ -668,7 +668,7 @@ export function createCmsExecutor(deps: CmsRuntimeDeps): CmsExecutor {
     syncStateSingleton: async (modelApiKey) => {
       const proc = `${modelApiKey}.syncState`;
       const idr = await firstSingletonId(modelApiKey, proc);
-      if (!idr.ok) return idr;
+      if (idr.isErr()) return idr;
       const r = await runtime.run(RecordService.getSyncState(modelApiKey, idr.value));
       if (r.ok) return ok(r.value);
       return err(foldNotFound(proc, idr.value, r.error));

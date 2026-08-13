@@ -105,8 +105,8 @@ function AssetPanel({
   const remove = CmsShell.useMutation(client.cms.assets.delete);
 
   const doDelete = async (force: boolean) => {
-    const result = await remove.mutate({ id: asset.id, force });
-    if (result.ok) {
+    const result = await remove.mutateAsync({ id: asset.id, force });
+    if (result.isOk()) {
       onNotice(`deleted ${asset.filename}`);
       onClose();
       return;
@@ -142,8 +142,8 @@ function AssetPanel({
           <button
             type="button"
             onClick={async () => {
-              const result = await update.mutate({ id: asset.id, data: { alt, title } });
-              onNotice(result.ok ? "metadata saved" : describeError(result.error));
+              const result = await update.mutateAsync({ id: asset.id, data: { alt, title } });
+              onNotice(result.isOk() ? "metadata saved" : describeError(result.error));
             }}
           >
             Save metadata

@@ -22,6 +22,7 @@
   "dependencies": {
     "@agent-cms/dast": "workspace:*",
     "agent-cms": "workspace:*",
+    "better-result": "^3.0.0",
     "result-rpc": "link:../../../result-rpc"
   },
   "devDependencies": {

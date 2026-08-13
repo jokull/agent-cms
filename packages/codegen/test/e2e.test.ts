@@ -184,22 +184,22 @@ describe("codegen fragments over a real in-memory CMS", () => {
   it("merges host + CMS into one client (host.whoami and cms.post.* coexist)", async () => {
     const client = harness.client("editor_1");
     const who = await client.host.whoami();
-    expect(who.ok).toBe(true);
-    if (who.ok) expect(who.value.id).toBe("editor_1");
+    expect(who.isOk()).toBe(true);
+    if (who.isOk()) expect(who.value.id).toBe("editor_1");
   });
 
   it("typed write then read hits real SQLite", async () => {
     const client = harness.client("editor_1");
     const created = await client.cms.post.create({ data: { title: "Hello", tier: "free" } });
-    expect(created.ok, JSON.stringify(created)).toBe(true);
-    if (!created.ok) return;
+    expect(created.isOk(), JSON.stringify(created)).toBe(true);
+    if (!created.isOk()) return;
     const id = created.value.id;
     const title: string = created.value.title;
     expect(title).toBe("Hello");
 
     const read = await client.cms.post.byId({ id });
-    expect(read.ok).toBe(true);
-    if (read.ok) expect(read.value.tier).toBe("free");
+    expect(read.isOk()).toBe(true);
+    if (read.isOk()) expect(read.value.tier).toBe("free");
 
     // Actually in the database:
     const rows = await runSql(
@@ -217,8 +217,8 @@ describe("codegen fragments over a real in-memory CMS", () => {
     const result = await client.cms.post.create({
       data: { title: "x", cover: "missing_cover", banner: "missing_banner" },
     });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
+    expect(result.isOk()).toBe(false);
+    if (result.isOk()) return;
     expect(cmsErrors.validationFailed.is(result.error)).toBe(true);
     if (cmsErrors.validationFailed.is(result.error)) {
       expect(result.error.data.issues.length).toBeGreaterThanOrEqual(2);
@@ -231,16 +231,16 @@ describe("codegen fragments over a real in-memory CMS", () => {
   it("BYO-auth: unauthenticated mutation is rejected with the host's Unauthorized", async () => {
     const anon = harness.client(null);
     const denied = await anon.cms.post.create({ data: { title: "Nope", tier: "free" } });
-    expect(denied.ok).toBe(false);
-    if (denied.ok) return;
+    expect(denied.isOk()).toBe(false);
+    if (denied.isOk()) return;
     expect(Unauthorized.is(denied.error)).toBe(true);
   });
 
   it("authenticated mutation passes and the actor mapper writes _created_by", async () => {
     const client = harness.client("editor_42");
     const created = await client.cms.post.create({ data: { title: "By 42", tier: "member" } });
-    expect(created.ok, JSON.stringify(created)).toBe(true);
-    if (!created.ok) return;
+    expect(created.isOk(), JSON.stringify(created)).toBe(true);
+    if (!created.isOk()) return;
 
     const rows = await runSql(
       harness.sqlLayer,
@@ -255,8 +255,8 @@ describe("codegen fragments over a real in-memory CMS", () => {
   it("drift: a column corrupted out of contract surfaces as cms/schema-drift", async () => {
     const client = harness.client("editor_1");
     const created = await client.cms.post.create({ data: { title: "Drifter", tier: "free" } });
-    expect(created.ok).toBe(true);
-    if (!created.ok) return;
+    expect(created.isOk()).toBe(true);
+    if (!created.isOk()) return;
     const id = created.value.id;
 
     // Corrupt the enum column to a value the generated contract does not allow.
@@ -269,8 +269,8 @@ describe("codegen fragments over a real in-memory CMS", () => {
     );
 
     const read = await client.cms.post.byId({ id });
-    expect(read.ok).toBe(false);
-    if (read.ok) return;
+    expect(read.isOk()).toBe(false);
+    if (read.isOk()) return;
     expect(cmsErrors.schemaDrift.is(read.error)).toBe(true);
     if (cmsErrors.schemaDrift.is(read.error)) {
       expect(read.error.data.procedure).toBe("post.byId");
@@ -284,11 +284,11 @@ describe("codegen fragments over a real in-memory CMS", () => {
     const client = harness.client("editor_1");
     for (const tier of ["free", "member", "free"]) {
       const created = await client.cms.post.create({ data: { title: `List ${tier} ${Math.random()}`, tier } });
-      expect(created.ok, JSON.stringify(created)).toBe(true);
+      expect(created.isOk(), JSON.stringify(created)).toBe(true);
     }
     const page = await client.cms.post.list({ filter: { tier: { eq: "free" } }, orderBy: ["_createdAt_DESC"], page: { limit: 1, offset: 0 } });
-    expect(page.ok, JSON.stringify(page)).toBe(true);
-    if (!page.ok) return;
+    expect(page.isOk(), JSON.stringify(page)).toBe(true);
+    if (!page.isOk()) return;
     expect(page.value.records.length).toBe(1);
     expect(page.value.total).toBeGreaterThanOrEqual(2); // at least the two "free" rows
     expect(page.value.records[0].tier).toBe("free");
@@ -298,8 +298,8 @@ describe("codegen fragments over a real in-memory CMS", () => {
     const client = harness.client("editor_1");
     await client.cms.post.create({ data: { title: "Findable Unicorn", tier: "free" } });
     const rows = await client.cms.post.search({ q: "Unicorn" });
-    expect(rows.ok, JSON.stringify(rows)).toBe(true);
-    if (!rows.ok) return;
+    expect(rows.isOk(), JSON.stringify(rows)).toBe(true);
+    if (!rows.isOk()) return;
     expect(rows.value.length).toBeGreaterThanOrEqual(1);
     const row = rows.value[0];
     expect(typeof row.id).toBe("string");
@@ -311,8 +311,8 @@ describe("codegen fragments over a real in-memory CMS", () => {
     // Missing required title + two unresolvable media references → several issues,
     // each carrying a machine-readable code.
     const result = await client.cms.post.validate({ data: { cover: "missing_cover", banner: "missing_banner" } });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
+    expect(result.isOk()).toBe(false);
+    if (result.isOk()) return;
     expect(cmsErrors.validationFailed.is(result.error)).toBe(true);
     if (cmsErrors.validationFailed.is(result.error)) {
       expect(result.error.data.issues.length).toBeGreaterThanOrEqual(2);
@@ -326,11 +326,11 @@ describe("codegen fragments over a real in-memory CMS", () => {
   it("duplicate deep-copies a record into a new Draft", async () => {
     const client = harness.client("editor_1");
     const created = await client.cms.post.create({ data: { title: "Original", tier: "member" } });
-    expect(created.ok).toBe(true);
-    if (!created.ok) return;
+    expect(created.isOk()).toBe(true);
+    if (!created.isOk()) return;
     const dup = await client.cms.post.duplicate({ id: created.value.id });
-    expect(dup.ok, JSON.stringify(dup)).toBe(true);
-    if (!dup.ok) return;
+    expect(dup.isOk(), JSON.stringify(dup)).toBe(true);
+    if (!dup.isOk()) return;
     expect(dup.value.id).not.toBe(created.value.id);
     expect(dup.value.title).toBe("Original");
     expect(dup.value.status).toBe("draft");
@@ -339,11 +339,11 @@ describe("codegen fragments over a real in-memory CMS", () => {
   it("bulk publish returns per-id results for mixed ids", async () => {
     const client = harness.client("editor_1");
     const a = await client.cms.post.create({ data: { title: "Bulk A", tier: "free" } });
-    expect(a.ok).toBe(true);
-    if (!a.ok) return;
+    expect(a.isOk()).toBe(true);
+    if (!a.isOk()) return;
     const res = await client.cms.post.publishMany({ ids: [a.value.id, "does_not_exist"] });
-    expect(res.ok, JSON.stringify(res)).toBe(true);
-    if (!res.ok) return;
+    expect(res.isOk(), JSON.stringify(res)).toBe(true);
+    if (!res.isOk()) return;
     const byId = new Map(res.value.map((r) => [r.id, r]));
     expect(byId.get(a.value.id)?.ok).toBe(true);
     expect(byId.get("does_not_exist")?.ok).toBe(false);
@@ -353,14 +353,14 @@ describe("codegen fragments over a real in-memory CMS", () => {
   it("backlinks reports inbound references", async () => {
     const client = harness.client("editor_1");
     const target = await client.cms.post.create({ data: { title: "Target", tier: "free" } });
-    expect(target.ok).toBe(true);
-    if (!target.ok) return;
+    expect(target.isOk()).toBe(true);
+    if (!target.isOk()) return;
     const referrer = await client.cms.post.create({ data: { title: "Referrer", tier: "free", related: [target.value.id] } });
-    expect(referrer.ok, JSON.stringify(referrer)).toBe(true);
-    if (!referrer.ok) return;
+    expect(referrer.isOk(), JSON.stringify(referrer)).toBe(true);
+    if (!referrer.isOk()) return;
     const links = await client.cms.post.links({ id: target.value.id });
-    expect(links.ok, JSON.stringify(links)).toBe(true);
-    if (!links.ok) return;
+    expect(links.isOk(), JSON.stringify(links)).toBe(true);
+    if (!links.isOk()) return;
     const hit = links.value.find((l) => l.recordId === referrer.value.id);
     expect(hit).toBeTruthy();
     expect(hit?.fieldApiKey).toBe("related");
@@ -369,13 +369,13 @@ describe("codegen fragments over a real in-memory CMS", () => {
   it("syncState reflects an edit against the published snapshot", async () => {
     const client = harness.client("editor_1");
     const created = await client.cms.post.create({ data: { title: "Sync", tier: "free" } });
-    expect(created.ok).toBe(true);
-    if (!created.ok) return;
+    expect(created.isOk()).toBe(true);
+    if (!created.isOk()) return;
     await client.cms.post.publish({ id: created.value.id });
     await client.cms.post.update({ id: created.value.id, data: { title: "Sync edited" } });
     const state = await client.cms.post.syncState({ id: created.value.id });
-    expect(state.ok, JSON.stringify(state)).toBe(true);
-    if (!state.ok) return;
+    expect(state.isOk(), JSON.stringify(state)).toBe(true);
+    if (!state.isOk()) return;
     expect(state.value.changedFields).toContain("title");
     expect(state.value.status).toBeTruthy();
   });
@@ -383,61 +383,61 @@ describe("codegen fragments over a real in-memory CMS", () => {
   it("versions: an update produces a listable version; restore round-trips", async () => {
     const client = harness.client("editor_1");
     const created = await client.cms.post.create({ data: { title: "V1", tier: "free" } });
-    expect(created.ok).toBe(true);
-    if (!created.ok) return;
+    expect(created.isOk()).toBe(true);
+    if (!created.isOk()) return;
     await client.cms.post.publish({ id: created.value.id }); // snapshots
     await client.cms.post.update({ id: created.value.id, data: { title: "V2" } });
     await client.cms.post.publish({ id: created.value.id }); // versions the prior published state
     const versions = await client.cms.post.versions.list({ id: created.value.id });
-    expect(versions.ok, JSON.stringify(versions)).toBe(true);
-    if (!versions.ok) return;
+    expect(versions.isOk(), JSON.stringify(versions)).toBe(true);
+    if (!versions.isOk()) return;
     expect(versions.value.length).toBeGreaterThanOrEqual(1);
   });
 
   it("schedule then clearSchedule round-trips", async () => {
     const client = harness.client("editor_1");
     const created = await client.cms.post.create({ data: { title: "Scheduled", tier: "free" } });
-    expect(created.ok).toBe(true);
-    if (!created.ok) return;
+    expect(created.isOk()).toBe(true);
+    if (!created.isOk()) return;
     const at = new Date(Date.now() + 3_600_000).toISOString();
     const scheduled = await client.cms.post.schedulePublish({ id: created.value.id, at });
-    expect(scheduled.ok, JSON.stringify(scheduled)).toBe(true);
+    expect(scheduled.isOk(), JSON.stringify(scheduled)).toBe(true);
     const cleared = await client.cms.post.clearSchedule({ id: created.value.id });
-    expect(cleared.ok, JSON.stringify(cleared)).toBe(true);
+    expect(cleared.isOk(), JSON.stringify(cleared)).toBe(true);
   });
 
   it("assets: list / update metadata / usages / delete-guard 409 → force delete", async () => {
     const client = harness.client("editor_1");
     const asset = await client.cms.assets.create({ data: { filename: "photo.jpg", mimeType: "image/jpeg", size: 1234 } });
-    expect(asset.ok, JSON.stringify(asset)).toBe(true);
-    if (!asset.ok) return;
+    expect(asset.isOk(), JSON.stringify(asset)).toBe(true);
+    if (!asset.isOk()) return;
     const assetId = asset.value.id;
 
     const listed = await client.cms.assets.list({ q: "photo" });
-    expect(listed.ok).toBe(true);
-    if (listed.ok) {
+    expect(listed.isOk()).toBe(true);
+    if (listed.isOk()) {
       expect(listed.value.total).toBeGreaterThanOrEqual(1);
       expect(listed.value.assets.some((a) => a.id === assetId)).toBe(true);
     }
 
     const updated = await client.cms.assets.update({ id: assetId, data: { alt: "A photo", title: "Photo" } });
-    expect(updated.ok, JSON.stringify(updated)).toBe(true);
-    if (updated.ok) expect(updated.value.alt).toBe("A photo");
+    expect(updated.isOk(), JSON.stringify(updated)).toBe(true);
+    if (updated.isOk()) expect(updated.value.alt).toBe("A photo");
 
     // Reference the asset from a record, then usages + delete-guard.
     const post = await client.cms.post.create({ data: { title: "Has cover", tier: "free", cover: assetId } });
-    expect(post.ok, JSON.stringify(post)).toBe(true);
+    expect(post.isOk(), JSON.stringify(post)).toBe(true);
 
     const usages = await client.cms.assets.usages({ id: assetId });
-    expect(usages.ok, JSON.stringify(usages)).toBe(true);
-    if (usages.ok) expect(usages.value.length).toBeGreaterThanOrEqual(1);
+    expect(usages.isOk(), JSON.stringify(usages)).toBe(true);
+    if (usages.isOk()) expect(usages.value.length).toBeGreaterThanOrEqual(1);
 
     const guarded = await client.cms.assets.delete({ id: assetId });
-    expect(guarded.ok).toBe(false);
-    if (!guarded.ok) expect(cmsErrors.referenceConflict.is(guarded.error)).toBe(true);
+    expect(guarded.isOk()).toBe(false);
+    if (!guarded.isOk()) expect(cmsErrors.referenceConflict.is(guarded.error)).toBe(true);
 
     const forced = await client.cms.assets.delete({ id: assetId, force: true });
-    expect(forced.ok, JSON.stringify(forced)).toBe(true);
-    if (forced.ok) expect(forced.value.deleted).toBe(true);
+    expect(forced.isOk(), JSON.stringify(forced)).toBe(true);
+    if (forced.isOk()) expect(forced.value.deleted).toBe(true);
   });
 });

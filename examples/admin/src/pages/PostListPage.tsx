@@ -83,8 +83,8 @@ export function PostListPage() {
     const ids = [...selected];
     if (ids.length === 0) return;
     const result =
-      kind === "publish" ? await publishMany.mutate({ ids }) : await deleteMany.mutate({ ids });
-    if (!result.ok) {
+      kind === "publish" ? await publishMany.mutateAsync({ ids }) : await deleteMany.mutateAsync({ ids });
+    if (result.isErr()) {
       setNotice(describeError(result.error));
       return;
     }
@@ -219,8 +219,8 @@ export function PostListPage() {
                   <button
                     type="button"
                     onClick={async () => {
-                      const result = await duplicate.mutate({ id: record.id });
-                      setNotice(result.ok ? `duplicated → ${result.value.id}` : describeError(result.error));
+                      const result = await duplicate.mutateAsync({ id: record.id });
+                      setNotice(result.isOk() ? `duplicated → ${result.value.id}` : describeError(result.error));
                     }}
                   >
                     Duplicate
@@ -228,8 +228,8 @@ export function PostListPage() {
                   <button
                     type="button"
                     onClick={async () => {
-                      const result = await remove.mutate({ id: record.id });
-                      setNotice(result.ok ? `deleted ${result.value.id}` : describeError(result.error));
+                      const result = await remove.mutateAsync({ id: record.id });
+                      setNotice(result.isOk() ? `deleted ${result.value.id}` : describeError(result.error));
                     }}
                   >
                     Delete

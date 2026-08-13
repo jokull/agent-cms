@@ -165,7 +165,7 @@ export function ContentField({ initial, onChange }: ContentFieldProps) {
 
   const searchPosts = useCallback(async (q: string): Promise<readonly PickerRow[]> => {
     const result = await client.cms.post.search({ q });
-    return result.ok ? result.value : [];
+    return result.isOk() ? result.value : [];
   }, []);
 
   const onPick = (row: PickerRow) => {
