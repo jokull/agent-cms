@@ -1,26 +1,28 @@
-import { Effect } from "effect";
+/**
+ * Request-scoped, batched reverse-reference loader backed by `RequestResolver`.
+ *
+ * Resolves `_all<Model>` meta fields: for each parent record, find the
+ * source-table rows that reference it (via `link` or `links` fields) and
+ * return them in the requested order/limit. Without batching, N parents
+ * cost N queries; the resolver collapses lookups within the batch window
+ * into one query with OR'd conditions, then buckets rows back per parent.
+ *
+ * The caller builds a `loaderKey` encoding every query parameter
+ * (source table, refs, drafts, locale, filter, order, first, skip) — one
+ * resolver per key, closing over the first caller's params, promise-cached
+ * per request context (see `asset-loader.ts` for the rc.109 construction
+ * facts).
+ */
+import { Effect, Exit, Request, RequestResolver } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import type { DynamicRow, GqlContext, ReverseRef } from "./gql-types.js";
 import { decodeJsonIfString } from "../json.js";
 import { decodeSnapshot, deserializeRecord } from "./gql-utils.js";
 
-interface Deferred<T> {
-  promise: Promise<T>;
-  resolve: (value: T) => void;
-  reject: (error: unknown) => void;
-}
-
-interface ReverseRefLoader {
-  cache: Map<string, Promise<DynamicRow[]>>;
-  pending: Map<string, {
-    deferred: Deferred<DynamicRow[]>;
-    parentId: string;
-  }>;
-  scheduled: boolean;
-}
+type RunSql = <A>(effect: Effect.Effect<A, unknown, SqlClient.SqlClient>) => Promise<A>;
 
 interface ReverseRefLoaderParams {
-  runSql: <A>(effect: Effect.Effect<A, unknown, SqlClient.SqlClient>) => Promise<A>;
+  runSql: RunSql;
   context?: GqlContext;
   loaderKey: string;
   parentId: string;
@@ -34,30 +36,21 @@ interface ReverseRefLoaderParams {
   skip: number;
 }
 
-function createDeferred<T>(): Deferred<T> {
-  let resolve!: (value: T) => void;
-  let reject!: (error: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
+/** The batch-relevant subset of the params, shared by every request in a key. */
+type ReverseRefBatchParams = Omit<ReverseRefLoaderParams, "context" | "loaderKey" | "parentId">;
 
-function getLoader(context: GqlContext | undefined, loaderKey: string) {
-  if (!context) return null;
-  context.reverseRefLoaders ??= new Map();
-  let loader = context.reverseRefLoaders.get(loaderKey);
-  if (!loader) {
-    loader = {
-      cache: new Map(),
-      pending: new Map(),
-      scheduled: false,
-    } satisfies ReverseRefLoader;
-    context.reverseRefLoaders.set(loaderKey, loader);
-  }
-  return loader;
-}
+/** A single reverse-reference lookup: the source rows referencing one parent. */
+export class GetReverseRefs extends Request.Class<
+  { readonly parentId: string },
+  DynamicRow[],
+  unknown,
+  never
+> {}
+
+export type ReverseRefResolver = RequestResolver.RequestResolver<GetReverseRefs>;
+
+/** Per-request resolver cache, keyed by the caller's loaderKey. */
+const resolverCache = new WeakMap<GqlContext, Map<string, Promise<ReverseRefResolver>>>();
 
 function buildRefConditionsForSingleParent(sourceRefs: readonly ReverseRef[]) {
   const conditions: string[] = [];
@@ -119,7 +112,8 @@ function extractMatchingParentIds(row: DynamicRow, sourceRefs: readonly ReverseR
   return matches;
 }
 
-async function querySingleParent(params: Omit<ReverseRefLoaderParams, "loaderKey" | "context">) {
+/** One parent, no batching. Used directly when there is no request context. */
+async function querySingleParent(params: ReverseRefBatchParams & { parentId: string }) {
   const refConditions = buildRefConditionsForSingleParent(params.sourceRefs);
   const queryParams: unknown[] = params.sourceRefs.map(() => params.parentId);
 
@@ -151,135 +145,109 @@ async function querySingleParent(params: Omit<ReverseRefLoaderParams, "loaderKey
   return decodeRows(rows, params.includeDrafts);
 }
 
-function scheduleFlush(params: {
-  loader: ReverseRefLoader;
-  runSql: <A>(effect: Effect.Effect<A, unknown, SqlClient.SqlClient>) => Promise<A>;
-  sourceTableName: string;
-  sourceRefs: readonly ReverseRef[];
-  includeDrafts: boolean;
-  filterWhere?: string;
-  filterParams: readonly unknown[];
-  orderBy?: string;
-  first: number;
-  skip: number;
-}) {
-  if (params.loader.scheduled) return;
-  params.loader.scheduled = true;
+/**
+ * Build the resolver for one loaderKey. Batches all lookups in the window:
+ * a single pending parent runs the LIMIT/OFFSET query; multiple parents run
+ * one OR'd query and bucket rows back (deduping shared rows per parent).
+ */
+export function buildReverseRefResolver(
+  params: ReverseRefBatchParams,
+): Effect.Effect<ReverseRefResolver, unknown, never> {
+  return RequestResolver.make<GetReverseRefs>(
+    Effect.fn(function* (entries) {
+      if (entries.length === 1) {
+        const [entry] = entries;
+        const result = yield* Effect.tryPromise(() =>
+          querySingleParent({ ...params, parentId: entry.request.parentId })
+        );
+        entry.completeUnsafe(Exit.succeed(result));
+        return;
+      }
 
-  queueMicrotask(() => {
-    void (async () => {
-      const pendingEntries = [...params.loader.pending.entries()];
-      params.loader.pending.clear();
-      params.loader.scheduled = false;
-      if (pendingEntries.length === 0) return;
+      const parentIds = entries.map((entry) => entry.request.parentId);
+      const parentIdSet = new Set(parentIds);
+      const { conditions, params: refParams } = buildRefConditionsForManyParents(params.sourceRefs, parentIds);
+      const queryParams: unknown[] = [...refParams];
 
-      try {
-        if (pendingEntries.length === 1) {
-          const [cacheKey, entry] = pendingEntries[0];
-          const result = await querySingleParent({
-            runSql: params.runSql,
-            parentId: entry.parentId,
-            sourceTableName: params.sourceTableName,
-            sourceRefs: params.sourceRefs,
-            includeDrafts: params.includeDrafts,
-            filterWhere: params.filterWhere,
-            filterParams: params.filterParams,
-            orderBy: params.orderBy,
-            first: params.first,
-            skip: params.skip,
-          });
-          entry.deferred.resolve(result);
-          params.loader.cache.set(cacheKey, Promise.resolve(result));
-          return;
-        }
+      let query = `SELECT * FROM "${params.sourceTableName}" WHERE (${conditions.join(" OR ")})`;
+      if (!params.includeDrafts) {
+        query += ` AND "_status" IN ('published', 'updated')`;
+      }
+      if (params.filterWhere) {
+        query += ` AND ${params.filterWhere}`;
+        queryParams.push(...params.filterParams);
+      }
+      if (params.orderBy) {
+        query += ` ORDER BY ${params.orderBy}`;
+      }
 
-        const parentIds = pendingEntries.map(([, entry]) => entry.parentId);
-        const parentIdSet = new Set(parentIds);
-        const { conditions, params: refParams } = buildRefConditionsForManyParents(params.sourceRefs, parentIds);
-        const queryParams: unknown[] = [...refParams];
-
-        let query = `SELECT * FROM "${params.sourceTableName}" WHERE (${conditions.join(" OR ")})`;
-        if (!params.includeDrafts) {
-          query += ` AND "_status" IN ('published', 'updated')`;
-        }
-        if (params.filterWhere) {
-          query += ` AND ${params.filterWhere}`;
-          queryParams.push(...params.filterParams);
-        }
-        if (params.orderBy) {
-          query += ` ORDER BY ${params.orderBy}`;
-        }
-
-        const rows = await params.runSql(
+      const rows = yield* Effect.tryPromise(() =>
+        params.runSql(
           Effect.gen(function* () {
             const sql = yield* SqlClient.SqlClient;
             return yield* sql.unsafe<DynamicRow>(query, queryParams);
           })
-        );
+        )
+      );
 
-        const buckets = new Map<string, DynamicRow[]>();
-        const seenRowIds = new Map<string, Set<string>>();
-        for (const parentId of parentIds) {
-          buckets.set(parentId, []);
-          seenRowIds.set(parentId, new Set());
-        }
+      const buckets = new Map<string, DynamicRow[]>();
+      const seenRowIds = new Map<string, Set<string>>();
+      for (const parentId of parentIds) {
+        buckets.set(parentId, []);
+        seenRowIds.set(parentId, new Set());
+      }
 
-        for (const row of decodeRows(rows, params.includeDrafts)) {
-          const rowId = typeof row.id === "string" ? row.id : String(row.id);
-          const matchingParentIds = extractMatchingParentIds(row, params.sourceRefs, parentIdSet);
-          for (const parentId of matchingParentIds) {
-            const parentSeenRowIds = seenRowIds.get(parentId);
-            if (!parentSeenRowIds || parentSeenRowIds.has(rowId)) continue;
-            parentSeenRowIds.add(rowId);
-            const bucket = buckets.get(parentId);
-            if (bucket) bucket.push(row);
-          }
-        }
-
-        for (const [cacheKey, entry] of pendingEntries) {
-          const result = (buckets.get(entry.parentId) ?? []).slice(params.skip, params.skip + params.first);
-          entry.deferred.resolve(result);
-          params.loader.cache.set(cacheKey, Promise.resolve(result));
-        }
-      } catch (error) {
-        for (const [cacheKey, entry] of pendingEntries) {
-          params.loader.cache.delete(cacheKey);
-          entry.deferred.reject(error);
+      for (const row of decodeRows(rows, params.includeDrafts)) {
+        const rowId = typeof row.id === "string" ? row.id : String(row.id);
+        const matchingParentIds = extractMatchingParentIds(row, params.sourceRefs, parentIdSet);
+        for (const parentId of matchingParentIds) {
+          const parentSeenRowIds = seenRowIds.get(parentId);
+          if (!parentSeenRowIds || parentSeenRowIds.has(rowId)) continue;
+          parentSeenRowIds.add(rowId);
+          const bucket = buckets.get(parentId);
+          if (bucket) bucket.push(row);
         }
       }
-    })();
-  });
+
+      for (const entry of entries) {
+        const result = (buckets.get(entry.request.parentId) ?? []).slice(params.skip, params.skip + params.first);
+        entry.completeUnsafe(Exit.succeed(result));
+      }
+    }),
+  ).pipe(
+    RequestResolver.setDelay("0 millis"),
+    RequestResolver.withCache({ capacity: 4096 }),
+  );
 }
 
-export async function loadReverseRefs(params: ReverseRefLoaderParams): Promise<DynamicRow[]> {
-  const loader = getLoader(params.context, params.loaderKey);
-  if (!loader) {
-    return querySingleParent(params);
+function getResolver(
+  params: ReverseRefLoaderParams,
+): Promise<ReverseRefResolver> | null {
+  const { context, loaderKey } = params;
+  if (!context) return null;
+  let byKey = resolverCache.get(context);
+  if (!byKey) {
+    byKey = new Map();
+    resolverCache.set(context, byKey);
   }
+  let resolver = byKey.get(loaderKey);
+  if (!resolver) {
+    const { context: _ctx, loaderKey: _key, parentId: _pid, ...batchParams } = params;
+    void _ctx;
+    void _key;
+    void _pid;
+    resolver = Effect.runPromise(buildReverseRefResolver(batchParams));
+    byKey.set(loaderKey, resolver);
+  }
+  return resolver;
+}
 
-  const cacheKey = params.parentId;
-  const cached = loader.cache.get(cacheKey);
-  if (cached) return cached;
+/** Load the source rows referencing one parent, batched with siblings. */
+export async function loadReverseRefs(params: ReverseRefLoaderParams): Promise<DynamicRow[]> {
+  const resolver = await getResolver(params);
+  if (!resolver) return querySingleParent(params);
 
-  const deferred = createDeferred<DynamicRow[]>();
-  loader.cache.set(cacheKey, deferred.promise);
-  loader.pending.set(cacheKey, {
-    deferred,
-    parentId: params.parentId,
-  });
-
-  scheduleFlush({
-    loader,
-    runSql: params.runSql,
-    sourceTableName: params.sourceTableName,
-    sourceRefs: params.sourceRefs,
-    includeDrafts: params.includeDrafts,
-    filterWhere: params.filterWhere,
-    filterParams: params.filterParams,
-    orderBy: params.orderBy,
-    first: params.first,
-    skip: params.skip,
-  });
-
-  return deferred.promise;
+  return Effect.runPromise(
+    Effect.request(new GetReverseRefs({ parentId: params.parentId }), resolver),
+  );
 }

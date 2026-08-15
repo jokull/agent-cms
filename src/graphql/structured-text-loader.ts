@@ -1,22 +1,23 @@
-import { Effect } from "effect";
+/**
+ * Request-scoped, batched structured-text envelope loader backed by
+ * `RequestResolver`.
+ *
+ * `structured_text` fields materialize their DAST value (resolving linked
+ * records, blocks and assets) through `materializeStructuredTextValues`.
+ * Without batching, every block instance in a list would issue its own
+ * materialization; the resolver collapses same-key lookups within the batch
+ * window into one service call carrying all requests.
+ *
+ * One resolver per loaderKey (container model, field, block, allowed blocks),
+ * promise-cached per request context. See `asset-loader.ts` for the rc.109
+ * construction facts.
+ */
+import { Effect, Exit, Request, RequestResolver } from "effect";
 import type { SqlClient } from "effect/unstable/sql";
 import type { GqlContext } from "./gql-types.js";
 import { materializeStructuredTextValues } from "../services/structured-text-service.js";
 
-interface Deferred<T> {
-  promise: Promise<T>;
-  resolve: (value: T) => void;
-  reject: (error: unknown) => void;
-}
-
-interface StructuredTextEnvelopeLoader {
-  cache: Map<string, Promise<unknown>>;
-  pending: Map<string, {
-    deferred: Deferred<unknown>;
-    params: MaterializeParams;
-  }>;
-  scheduled: boolean;
-}
+type RunSql = <A>(effect: Effect.Effect<A, unknown, SqlClient.SqlClient>) => Promise<A>;
 
 interface MaterializeParams {
   allowedBlockApiKeys?: readonly string[];
@@ -28,15 +29,18 @@ interface MaterializeParams {
   rawValue: unknown;
 }
 
-function createDeferred<T>(): Deferred<T> {
-  let resolve!: (value: T) => void;
-  let reject!: (error: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
+/** A single materialization request, keyed for the result map + cache. */
+export class GetStructuredTextEnvelope extends Request.Class<
+  { readonly requestKey: string } & MaterializeParams,
+  unknown,
+  unknown,
+  never
+> {}
+
+export type StructuredTextResolver = RequestResolver.RequestResolver<GetStructuredTextEnvelope>;
+
+/** Per-request resolver cache, keyed by the loader key. */
+const resolverCache = new WeakMap<GqlContext, Map<string, Promise<StructuredTextResolver>>>();
 
 function getLoaderKey(params: MaterializeParams) {
   const allowed = params.allowedBlockApiKeys?.join(",") ?? "*";
@@ -59,66 +63,64 @@ function getRequestKey(params: MaterializeParams) {
   ].join(":");
 }
 
-function getLoader(context: GqlContext | undefined, params: MaterializeParams) {
-  if (!context) return null;
-  context.structuredTextEnvelopeLoaders ??= new Map();
-  const loaderKey = getLoaderKey(params);
-  let loader = context.structuredTextEnvelopeLoaders.get(loaderKey);
-  if (!loader) {
-    loader = {
-      cache: new Map(),
-      pending: new Map(),
-      scheduled: false,
-    } satisfies StructuredTextEnvelopeLoader;
-    context.structuredTextEnvelopeLoaders.set(loaderKey, loader);
-  }
-  return loader;
-}
-
-function scheduleFlush(params: {
-  loader: StructuredTextEnvelopeLoader;
-  runSql: <A>(effect: Effect.Effect<A, unknown, SqlClient.SqlClient>) => Promise<A>;
-}) {
-  if (params.loader.scheduled) return;
-  params.loader.scheduled = true;
-
-  queueMicrotask(() => {
-    void (async () => {
-      const pending = [...params.loader.pending.entries()];
-      params.loader.pending.clear();
-      params.loader.scheduled = false;
-      if (pending.length === 0) return;
-
-    try {
-      const results = await params.runSql(
-        materializeStructuredTextValues({
-          materializeContext: { blockModelSchemas: new Map(), candidateBlockModels: new Map() },
-          requests: pending.map(([requestKey, entry]) => ({
-            requestKey,
-            ...entry.params,
-          })),
-        })
+/**
+ * Build the resolver for one loaderKey. Every lookup in the batch window is
+ * materialized in a single `materializeStructuredTextValues` call; results
+ * are cached (LRU, 4096) for the lifetime of the resolver.
+ */
+export function buildStructuredTextResolver(
+  runSql: RunSql,
+): Effect.Effect<StructuredTextResolver, unknown, never> {
+  return RequestResolver.make<GetStructuredTextEnvelope>(
+    Effect.fn(function* (entries) {
+      const results = yield* Effect.tryPromise(() =>
+        runSql(
+          materializeStructuredTextValues({
+            materializeContext: { blockModelSchemas: new Map(), candidateBlockModels: new Map() },
+            requests: entries.map((entry) => {
+              const { requestKey, ...params } = entry.request;
+              return { requestKey, ...params };
+            }),
+          })
+        )
       );
-
-      for (const [requestKey, entry] of pending) {
-        entry.deferred.resolve(results.get(requestKey) ?? null);
+      for (const entry of entries) {
+        entry.completeUnsafe(Exit.succeed(results.get(entry.request.requestKey) ?? null));
       }
-    } catch (error) {
-        for (const [requestKey, entry] of pending) {
-          params.loader.cache.delete(requestKey);
-          entry.deferred.reject(error);
-        }
-      }
-    })();
-  });
+    }),
+  ).pipe(
+    RequestResolver.setDelay("0 millis"),
+    RequestResolver.withCache({ capacity: 4096 }),
+  );
 }
 
+function getResolver(
+  runSql: RunSql,
+  context: GqlContext | undefined,
+  params: MaterializeParams,
+): Promise<StructuredTextResolver> | null {
+  if (!context) return null;
+  let byKey = resolverCache.get(context);
+  if (!byKey) {
+    byKey = new Map();
+    resolverCache.set(context, byKey);
+  }
+  const loaderKey = getLoaderKey(params);
+  let resolver = byKey.get(loaderKey);
+  if (!resolver) {
+    resolver = Effect.runPromise(buildStructuredTextResolver(runSql));
+    byKey.set(loaderKey, resolver);
+  }
+  return resolver;
+}
+
+/** Materialize one structured-text envelope, batched with sibling lookups. */
 export async function loadStructuredTextEnvelope(params: {
-  runSql: <A>(effect: Effect.Effect<A, unknown, SqlClient.SqlClient>) => Promise<A>;
+  runSql: RunSql;
   context?: GqlContext;
 } & MaterializeParams) {
-  const loader = getLoader(params.context, params);
-  if (!loader) {
+  const resolver = await getResolver(params.runSql, params.context, params);
+  if (!resolver) {
     const results = await params.runSql(
       materializeStructuredTextValues({
         materializeContext: { blockModelSchemas: new Map(), candidateBlockModels: new Map() },
@@ -128,21 +130,10 @@ export async function loadStructuredTextEnvelope(params: {
     return results.get("single") ?? null;
   }
 
-  const requestKey = getRequestKey(params);
-  const cached = loader.cache.get(requestKey);
-  if (cached) {
-    return cached;
-  }
-
-  const deferred = createDeferred<unknown>();
-  loader.cache.set(requestKey, deferred.promise);
-  loader.pending.set(requestKey, {
-    deferred,
-    params,
-  });
-  scheduleFlush({
-    loader,
-    runSql: params.runSql,
-  });
-  return deferred.promise;
+  return Effect.runPromise(
+    Effect.request(
+      new GetStructuredTextEnvelope({ requestKey: getRequestKey(params), ...params }),
+      resolver,
+    ),
+  );
 }
