@@ -843,12 +843,10 @@ export function createMcpLayer(
   }
 
   /** Resolve the acting identity per request (headers set by the worker dispatch), falling back to construction-time options. */
-  function requestActor() {
-    return Effect.gen(function* () {
-      const req = yield* HttpServerRequest.HttpServerRequest;
-      return actorFromHeaders(new Headers(req.headers)) ?? options?.actor ?? null;
-    });
-  }
+  const requestActor = Effect.fn("requestActor")(function* () {
+    const req = yield* HttpServerRequest.HttpServerRequest;
+    return actorFromHeaders(new Headers(req.headers)) ?? options?.actor ?? null;
+  });
 
   function withAssetUrl<T extends { r2Key: string }>(asset: T) {
     const url = assetUrl(asset.r2Key);
@@ -856,39 +854,35 @@ export function createMcpLayer(
   }
 
   /** Look up canonical_path_template for a model and resolve _previewPath if set */
-  function addPreviewPath(modelApiKey: string, record: unknown) {
-    return Effect.gen(function* () {
-      if (!isObjectRecord(record)) return record;
-      const sql = yield* SqlClient.SqlClient;
-      const models = yield* sql.unsafe<{ canonical_path_template: string | null }>(
-        "SELECT canonical_path_template FROM models WHERE api_key = ?",
-        [modelApiKey]
-      );
-      const template = models[0]?.canonical_path_template;
-      if (!template) return record;
-      const previewPath = PreviewService.resolvePreviewPath(template, record);
-      return { ...record, _previewPath: previewPath };
-    });
-  }
+  const addPreviewPath = Effect.fn("addPreviewPath")(function* (modelApiKey: string, record: unknown) {
+    if (!isObjectRecord(record)) return record;
+    const sql = yield* SqlClient.SqlClient;
+    const models = yield* sql.unsafe<{ canonical_path_template: string | null }>(
+      "SELECT canonical_path_template FROM models WHERE api_key = ?",
+      [modelApiKey]
+    );
+    const template = models[0]?.canonical_path_template;
+    if (!template) return record;
+    const previewPath = PreviewService.resolvePreviewPath(template, record);
+    return { ...record, _previewPath: previewPath };
+  });
 
-  function addPreviewPathToList(modelApiKey: string, records: unknown) {
-    return Effect.gen(function* () {
-      if (!Array.isArray(records)) return records;
-      const recordList: readonly unknown[] = records;
-      const sql = yield* SqlClient.SqlClient;
-      const models = yield* sql.unsafe<{ canonical_path_template: string | null }>(
-        "SELECT canonical_path_template FROM models WHERE api_key = ?",
-        [modelApiKey]
-      );
-      const template = models[0]?.canonical_path_template;
-      if (!template) return recordList;
-      return recordList.map((r) => {
-        if (!isObjectRecord(r)) return r;
-        const previewPath = PreviewService.resolvePreviewPath(template, r);
-        return { ...r, _previewPath: previewPath };
-      });
+  const addPreviewPathToList = Effect.fn("addPreviewPathToList")(function* (modelApiKey: string, records: unknown) {
+    if (!Array.isArray(records)) return records;
+    const recordList: readonly unknown[] = records;
+    const sql = yield* SqlClient.SqlClient;
+    const models = yield* sql.unsafe<{ canonical_path_template: string | null }>(
+      "SELECT canonical_path_template FROM models WHERE api_key = ?",
+      [modelApiKey]
+    );
+    const template = models[0]?.canonical_path_template;
+    if (!template) return recordList;
+    return recordList.map((r) => {
+      if (!isObjectRecord(r)) return r;
+      const previewPath = PreviewService.resolvePreviewPath(template, r);
+      return { ...r, _previewPath: previewPath };
     });
-  }
+  });
 
   const toolHandlers: Record<string, (params: unknown) => Effect.Effect<unknown, unknown, unknown>> = {
     schema_info: withDecoded(SchemaInfoInput, ({ filterByName, filterByType, includeFieldDetails }) =>

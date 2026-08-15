@@ -129,13 +129,11 @@ function param(params: Record<string, string | undefined>, name: string): string
 }
 
 /** Get query param */
-function queryParam(name: string) {
-  return Effect.gen(function* () {
-    const req = yield* HttpServerRequest.HttpServerRequest;
-    const url = new URL(req.url, "http://localhost");
-    return url.searchParams.get(name) ?? "";
-  });
-}
+const queryParam = Effect.fn("queryParam")(function* (name: string) {
+  const req = yield* HttpServerRequest.HttpServerRequest;
+  const url = new URL(req.url, "http://localhost");
+  return url.searchParams.get(name) ?? "";
+});
 
 function decodeUnknownInput<S extends Schema.Constraint>(
   schema: S,
@@ -147,23 +145,19 @@ function decodeUnknownInput<S extends Schema.Constraint>(
   );
 }
 
-function readJsonBody(message: string = "Invalid JSON body") {
-  return Effect.gen(function* () {
-    const req = yield* HttpServerRequest.HttpServerRequest;
-    return yield* req.json.pipe(
-      Effect.mapError((e) => new ValidationError({
-        message: `${message}: ${describeUnknown(e)}`,
-      }))
-    );
-  });
-}
+const readJsonBody = Effect.fn("readJsonBody")(function* (message: string = "Invalid JSON body") {
+  const req = yield* HttpServerRequest.HttpServerRequest;
+  return yield* req.json.pipe(
+    Effect.mapError((e) => new ValidationError({
+      message: `${message}: ${describeUnknown(e)}`,
+    }))
+  );
+});
 
-function currentActor() {
-  return Effect.gen(function* () {
-    const req = yield* HttpServerRequest.HttpServerRequest;
-    return actorFromHeaders(new Headers(req.headers));
-  });
-}
+const currentActor = Effect.fn("currentActor")(function* () {
+  const req = yield* HttpServerRequest.HttpServerRequest;
+  return actorFromHeaders(new Headers(req.headers));
+});
 
 // --- Models ---
 const modelsRouter = HttpRouter.use((router) => {
