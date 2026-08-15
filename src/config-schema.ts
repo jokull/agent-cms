@@ -1,4 +1,4 @@
-import { Schema, SchemaIssue } from "effect";
+import { Cause, Option, Schema, SchemaIssue } from "effect";
 import type { AiBinding, VectorizeBinding } from "./search/vectorize.js";
 
 const RuntimeObject = Schema.Unknown.pipe(
@@ -83,21 +83,16 @@ export interface DecodedCmsBindings {
 }
 
 function formatConfigParseError(error: Schema.SchemaError): string {
-  return SchemaIssue.makeFormatterStandardSchemaV1()(error.issue)
-    .issues.map((issue) => (issue.path ?? []).length > 0 ? `${(issue.path ?? []).join(".")}: ${issue.message}` : issue.message)
-    .join("; ");
+  return SchemaIssue.makeFormatterDefault()(error.issue);
 }
 
 export function decodeCmsBindings(input: unknown): DecodedCmsBindings {
-  let bindings: Schema.Schema.Type<typeof RawCmsBindingsSchema>;
-  try {
-    bindings = Schema.decodeUnknownSync(RawCmsBindingsSchema)(input);
-  } catch (error) {
-    if (error instanceof Schema.SchemaError) {
-      throw new Error(`Invalid CMS bindings: ${formatConfigParseError(error)}`);
-    }
-    throw error;
+  const decoded = Schema.decodeUnknownExit(RawCmsBindingsSchema)(input);
+  if (decoded._tag === "Failure") {
+    const error = Cause.findErrorOption(decoded.cause).pipe(Option.getOrThrow);
+    throw new Error(`Invalid CMS bindings: ${formatConfigParseError(error)}`);
   }
+  const bindings = decoded.value;
   return {
     db: bindings.db as D1Database,
     assets: bindings.assets as R2Bucket | undefined,

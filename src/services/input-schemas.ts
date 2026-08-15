@@ -46,12 +46,12 @@ const HttpUrlString = Schema.String.pipe(
 export const CreateModelInput = Schema.Struct({
   name: Schema.NonEmptyString,
   apiKey: Schema.NonEmptyString,
-  isBlock: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.sync(() => false))),
-  singleton: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.sync(() => false))),
-  sortable: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.sync(() => false))),
-  tree: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.sync(() => false))),
-  hasDraft: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.sync(() => true))),
-  allLocalesRequired: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.sync(() => false))),
+  isBlock: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.succeed(false))),
+  singleton: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.succeed(false))),
+  sortable: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.succeed(false))),
+  tree: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.succeed(false))),
+  hasDraft: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.succeed(true))),
+  allLocalesRequired: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.succeed(false))),
   ordering: Schema.optional(Schema.String),
   canonicalPathTemplate: Schema.optional(Schema.NullOr(Schema.String)),
   /**
@@ -72,7 +72,7 @@ export const CreateFieldInput = Schema.Struct({
   position: Schema.optional(Int.pipe(
     Schema.check(Schema.makeFilter((value) => value >= 0, { message: "position must be >= 0" })),
   )),
-  localized: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.sync(() => false))),
+  localized: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.succeed(false))),
   validators: Schema.Record(Schema.String, Schema.Unknown).pipe(
     Schema.withDecodingDefaultType(Effect.sync(() => ({}))),
   ),
@@ -124,7 +124,7 @@ export const CreateAssetInput = Schema.Struct({
   id: Schema.optional(Schema.String),
   filename: Schema.NonEmptyString,
   mimeType: Schema.NonEmptyString,
-  size: nonNegativeFiniteNumber("size").pipe(Schema.withDecodingDefaultType(Effect.sync(() => 0))),
+  size: nonNegativeFiniteNumber("size").pipe(Schema.withDecodingDefaultType(Effect.succeed(0))),
   width: Schema.optional(nonNegativeFiniteNumber("width")),
   height: Schema.optional(nonNegativeFiniteNumber("height")),
   alt: Schema.optional(Schema.String),
@@ -171,10 +171,10 @@ export const ListAssetsInput = Schema.Struct({
   orderBy: Schema.optional(Schema.Array(Schema.String)),
   page: Schema.optional(
     Schema.Struct({
-      limit: positiveInt("limit").pipe(Schema.withDecodingDefaultType(Effect.sync(() => 24))),
+      limit: positiveInt("limit").pipe(Schema.withDecodingDefaultType(Effect.succeed(24))),
       offset: Int.pipe(
         Schema.check(Schema.makeFilter((value) => value >= 0, { message: "offset must be >= 0" })),
-        Schema.withDecodingDefaultType(Effect.sync(() => 0)),
+        Schema.withDecodingDefaultType(Effect.succeed(0)),
       ),
     }),
   ),
@@ -224,10 +224,10 @@ export const QueryRecordsInput = Schema.Struct({
   orderBy: Schema.optional(Schema.Array(Schema.String)),
   page: Schema.optional(
     Schema.Struct({
-      limit: positiveInt("limit").pipe(Schema.withDecodingDefaultType(Effect.sync(() => 50))),
+      limit: positiveInt("limit").pipe(Schema.withDecodingDefaultType(Effect.succeed(50))),
       offset: Int.pipe(
         Schema.check(Schema.makeFilter((value) => value >= 0, { message: "offset must be >= 0" })),
-        Schema.withDecodingDefaultType(Effect.sync(() => 0)),
+        Schema.withDecodingDefaultType(Effect.succeed(0)),
       ),
     }),
   ),
@@ -344,10 +344,10 @@ const SchemaExportModelSchema = Schema.Struct({
   sortable: Schema.Boolean,
   tree: Schema.Boolean,
   hasDraft: Schema.Boolean,
-  ordering: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefaultType(Effect.sync(() => null))),
-  canonicalPathTemplate: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefaultType(Effect.sync(() => null))),
-  titleField: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefaultType(Effect.sync(() => null))),
-  imagePreviewField: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefaultType(Effect.sync(() => null))),
+  ordering: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefaultType(Effect.succeed(null))),
+  canonicalPathTemplate: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefaultType(Effect.succeed(null))),
+  titleField: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefaultType(Effect.succeed(null))),
+  imagePreviewField: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefaultType(Effect.succeed(null))),
   fields: Schema.Array(SchemaExportFieldSchema),
 });
 

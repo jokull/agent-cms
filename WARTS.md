@@ -90,3 +90,10 @@ package we author. Each entry: what it is, why it hurts, a suggested fix.
   fresh `createMcpHttpHandler` per request (the v3 editor-token path) makes every
   follow-up request 404 (session not found). Cache the handler per app and
   resolve the actor per request from headers.
+
+- **`HttpEffect.toWebHandlerLayer(effect, layer)` typechecks but does NOT satisfy
+  `Request.From<…>`-marked handler requirements at runtime** — the handler
+  defects with a missing service (500). You must provide the app effect with
+  `Effect.provide(effect, fullLayer)` first and pass `Layer.empty` as the
+  layer argument. Type-level `ReqR = never` is not proof the services are
+  provided.

@@ -75,7 +75,7 @@ const LocaleIdInput = Schema.Struct({ localeId: Schema.String });
 const SchemaInfoInput = Schema.Struct({
   filterByName: Schema.optional(Schema.String),
   filterByType: Schema.optional(Schema.Literals(["model", "block"])),
-  includeFieldDetails: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.sync(() => true))),
+  includeFieldDetails: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.succeed(true))),
 });
 
 const UpdateRecordInput = Schema.Struct({
@@ -192,7 +192,7 @@ function cmsTool<Name extends string>(
 ) {
   let tool = AiTool.make(name, {
     description,
-    parameters: parameters ? Schema.Struct(parameters) : Schema.Struct({}),
+    parameters: parameters ? Schema.Struct(parameters) : AiTool.EmptyParams,
     success: Schema.Unknown,
     failure: Schema.Unknown,
     dependencies: CommonDependencies,
@@ -352,15 +352,19 @@ function toMcpInputSchema(tool: AiTool.Any): Record<string, unknown> {
     : { type: "object", properties: {}, additionalProperties: false };
 }
 
-function pickToolkitHandlers(
-  toolkit: { readonly tools: Record<string, AiTool.Any> },
-  handlers: Record<string, unknown>,
-) {
-  const filtered: Record<string, unknown> = {};
+type LooseToolHandler = (params: unknown) => Effect.Effect<unknown, unknown, unknown>;
+
+function pickToolkitHandlers<K extends Record<string, AiTool.Any>>(
+  toolkit: { readonly tools: K },
+  handlers: Record<string, LooseToolHandler>,
+): Record<keyof K, LooseToolHandler> {
+  const filtered: Record<string, LooseToolHandler> = {};
   for (const name of Object.keys(toolkit.tools)) {
     filtered[name] = handlers[name];
   }
-  return filtered;
+  // Object.keys is dynamic; the selected names are exactly the toolkit's tool
+  // names, so the narrowed key set is sound.
+  return filtered as Record<keyof K, LooseToolHandler>;
 }
 
 // --- Tool definitions ---
@@ -819,9 +823,6 @@ export function createMcpLayer(
 ){
   const mode = options?.mode ?? "admin";
   const path = options?.path ?? (mode === "editor" ? "/mcp/editor" : "/mcp");
-  const toolkit = mode === "editor" ? EditorToolkit : CmsToolkit;
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- editor toolkit is a subset of the admin toolkit for shared MCP registration plumbing.
-  const toolkitAny = toolkit as typeof CmsToolkit;
   const defaultVectorizeLayer: Layer.Layer<VectorizeContext> = Layer.succeed(VectorizeContext, Option.none());
   const defaultHooksLayer: Layer.Layer<HooksContext> = Layer.succeed(HooksContext, Option.none());
   const defaultAssetImportLayer: Layer.Layer<AssetImportContext> = Layer.succeed(AssetImportContext, {
@@ -1111,15 +1112,20 @@ export function createMcpLayer(
     }),
   } as const;
 
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Effect Toolkit.toLayer requires the exact generated handler map type.
-  const toolkitHandlers = toolkitAny.toLayer(pickToolkitHandlers(toolkitAny, toolHandlers) as never);
+  // Handler layer built against the admin toolkit (editor tools are a subset);
+  // the registration loop below selects which tools each mode actually exposes.
+  const toolkitHandlers = CmsToolkit.toLayer(pickToolkitHandlers(CmsToolkit, toolHandlers));
 
   const toolkitRegistration = Layer.effectDiscard(Effect.gen(function* () {
     const registry = yield* McpServer.McpServer;
-    const built = yield* toolkitAny;
+    // Editor tools are a strict subset of admin tools (same consts), so the
+    // registration mechanics run against the admin toolkit while the mode
+    // selects which tools actually get registered.
+    const built = yield* CmsToolkit;
     const context = yield* Effect.context();
+    const registeredTools = mode === "editor" ? EditorToolkit.tools : built.tools;
 
-    for (const tool of Object.values(built.tools)) {
+    for (const tool of Object.values(registeredTools)) {
       const mcpTool = new McpSchema.Tool({
         name: tool.name,
         description: tool.description,

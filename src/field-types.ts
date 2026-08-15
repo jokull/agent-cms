@@ -85,7 +85,7 @@ export interface FieldTypeDefinition {
   readonly multiLocaleType: string;
 
   /** Effect Schema for write-time validation, or null if no validation needed */
-  readonly inputSchema: Schema.Codec<any> | null;
+  readonly inputSchema: Schema.Codec<unknown> | null;
 
   /** Whether the stored value is JSON that needs parsing */
   readonly jsonStored: boolean;
