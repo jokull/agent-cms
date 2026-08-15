@@ -148,3 +148,20 @@ specific tool union to `Tool.Any`, whose name is erased to any — dropped the
 annotation) + structured-text `issue.path` join (map String).
 
 Verified: tsc 0, oxlint 0 warnings/0 errors, 910/910.
+
+## Wave 9.6 — zone enforcement (contentTableName) + buildModelRowSchema probe
+
+- contentTableName(modelApiKey) in src/dynamic/tables.ts: all 54 content-table
+  name constructions swept through it (17 files); identifier regex = defense
+  in depth (api_keys validated at model creation anyway). Sweep bug caught:
+  template-literal sites need `${contentTableName(x)}` interpolation, not
+  literal text — reversed and redone; standalone `` `${fn(x)}` `` templates
+  collapsed (no-unnecessary-template-expression).
+- buildModelRowSchema probe verdict: strict per-model Schema.Struct rejects
+  realistic rows (SQLite 0/1 booleans, legacy bare-string media), drops
+  system columns (Schema.Struct removes unknown keys — resolvers need
+  _status/_published_snapshot/...), and optional-with-default would add
+  keys. parse-only fromJsonString(Unknown) == deserializeRecord byte-for-
+  byte. Future zone wave: read-shaped legacy unions + system-column
+  coverage from DDL + key preservation. deserializeRecord stays the
+  production boundary decode.
