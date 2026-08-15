@@ -102,22 +102,29 @@ export type CmsError =
   | UnauthorizedError;
 
 /**
- * The error classes that make up {@link CmsError}, kept in one place so the
- * guard below can never drift from the union. instanceof, not duck-typing.
+ * The `_tag` discriminants of {@link CmsError}, kept in one place so the guard
+ * below can never drift from the union. Data.TaggedError classes carry their
+ * identity in `_tag` — matching it is the same mechanism `Effect.catchTag`
+ * uses, and it survives duplicate class copies / realm boundaries that
+ * `instanceof` does not.
  */
-const cmsErrorClasses = [
-  NotFoundError,
-  ValidationError,
-  AggregateValidationError,
-  ReferenceConflictError,
-  DuplicateError,
-  SchemaEngineError,
-  UnauthorizedError,
-] as const;
+const cmsErrorTags = new Set<string>([
+  "NotFoundError",
+  "ValidationError",
+  "AggregateValidationError",
+  "ReferenceConflictError",
+  "DuplicateError",
+  "SchemaEngineError",
+  "UnauthorizedError",
+] as const);
 
 /** Runtime type guard for CmsError */
 export function isCmsError(error: unknown): error is CmsError {
-  return cmsErrorClasses.some((cls) => error instanceof cls);
+  return typeof error === "object"
+    && error !== null
+    && "_tag" in error
+    && typeof error._tag === "string"
+    && cmsErrorTags.has(error._tag);
 }
 
 /** JSON body shapes emitted by errorToResponse, keyed by error tag */

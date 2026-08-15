@@ -91,12 +91,17 @@ package we author. Each entry: what it is, why it hurts, a suggested fix.
   follow-up request 404 (session not found). Cache the handler per app and
   resolve the actor per request from headers.
 
-- **`HttpEffect.toWebHandlerLayer(effect, layer)` typechecks but does NOT satisfy
-  `Request.From<…>`-marked handler requirements at runtime** — the handler
-  defects with a missing service (500). You must provide the app effect with
-  `Effect.provide(effect, fullLayer)` first and pass `Layer.empty` as the
-  layer argument. Type-level `ReqR = never` is not proof the services are
-  provided.
+- **`HttpEffect.toWebHandlerLayer(effect, layer)` builds the layer ONCE and
+  shares it across all requests** (implementation memoizes `Layer.buildWithScope`
+  in a `handlerPromise`), while `Effect.provide(effect, layer)` builds per
+  request. With `@effect/sql-sqlite-node` each connection owns a `prepareCache`
+  (Effect Cache, 10-min TTL) that RETAINS failed prepares — so with the
+  layer-param form, a request that fails to prepare a statement before schema
+  bootstrap (e.g. the `/api/setup` pattern: write fails, setup runs, write
+  again) keeps failing with the stale cached error ("no such table: models")
+  even though the DB file has the tables. `Effect.provide` + `Layer.empty` is
+  unaffected (fresh connection/cache per request). Keep the provide form for
+  handlers that bootstrap schema at runtime.
 
 - **`Schema.URL` is broken in 4.0.0-rc.109**: `decodeUnknownOption(Schema.URL)`
   returns `None` for every input (valid URLs included) — its filter rejects
