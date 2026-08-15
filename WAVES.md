@@ -165,3 +165,21 @@ Verified: tsc 0, oxlint 0 warnings/0 errors, 910/910.
   byte. Future zone wave: read-shaped legacy unions + system-column
   coverage from DDL + key preservation. deserializeRecord stays the
   production boundary decode.
+
+## Wave 9.7 — anti-slop vendored + toolchain bump
+
+Vendored dmmulroy/anti-slop (oxlint plugin, 15 rules) via its install skill:
+tools/oxlint/anti-slop/ + @oxlint/plugins@1.78.0 + oxlint@1.78.0 + jsPlugins
+wiring + ignorePatterns. Zone override extended: all anti-slop rules OFF in
+src/dynamic/**. Related toolchain bumped: vitest 4.1.10, tsdown 0.22.14,
+oxlint-tsgolint 7.0.2001. typescript stays 5.9.3 (TS7 deliberately deferred).
+
+Findings (the point of the exercise): 1150 anti-slop errors outside the
+zone — no-runtime-typeof 354, no-unsafe-dictionary-type 277, no-unknown-
+parameters 162, require-safety-comment-for-type-assertion 142, no-known-
+value-widening 75, no-reflect-get 54, no-unknown-returns 39, rest <15 each.
+The middle layer's duck-typing LEAKS: Record<string, unknown> + typeof +
+as-casts are spread across services/graphql/dast — the zone primitives
+(guards/decode/table naming) are contained, but the call sites aren't.
+Open decision: migration wave vs rule calibration (allowInTypeGuards) vs
+keep rules off until the wave.
