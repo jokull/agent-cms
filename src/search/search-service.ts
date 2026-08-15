@@ -1,5 +1,5 @@
 import { Effect, Option } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import { extractRecordText } from "./extract-text.js";
 import { createFtsTable as _createFtsTable, dropFtsTable, ftsIndex, ftsDeindex, ftsSearch, ftsCount } from "./fts5.js";
 import type { FtsResult } from "./fts5.js";
@@ -207,7 +207,7 @@ function lookupIndexedTitle(modelApiKey: string, recordId: string) {
     const rows = yield* sql.unsafe<{ title: string }>(
       `SELECT title FROM "fts_${modelApiKey}" WHERE record_id = ? LIMIT 1`,
       [recordId]
-    ).pipe(Effect.catchAll(() => Effect.succeed([])));
+    ).pipe(Effect.catch(() => Effect.succeed([])));
     return rows[0]?.title ?? null;
   });
 }
@@ -252,7 +252,7 @@ export function search(params: {
       }).pipe(
         // Degrade to no keyword hits rather than failing the whole search, but
         // never silently: an invisible FTS error is how #30 hid for months.
-        Effect.catchAll((cause) =>
+        Effect.catch((cause) =>
           Effect.logError("FTS keyword search failed", cause).pipe(
             Effect.as([] as FtsResult[])
           )
@@ -263,7 +263,7 @@ export function search(params: {
     let vectorResults: Array<{ recordId: string; modelApiKey: string; score: number }> = [];
     if (useVector && Option.isSome(bindings)) {
       vectorResults = yield* vectorizeSearch(bindings.value.ai, bindings.value.vectorize, params.query, candidateWindow).pipe(
-        Effect.catchAll((cause) =>
+        Effect.catch((cause) =>
           Effect.logError("Vector search failed", cause).pipe(Effect.as([]))
         )
       );
@@ -321,7 +321,7 @@ export function search(params: {
     if (mode === "keyword") {
       // Keyword total is cheaply knowable: COUNT(*) over the same MATCH predicate.
       const total = yield* ftsCount(params.query, { modelApiKey: params.modelApiKey }).pipe(
-        Effect.catchAll(() => Effect.succeed(0))
+        Effect.catch(() => Effect.succeed(0))
       );
       return {
         results: ftsResults,

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Effect } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import { createTestApp } from "./app-helpers.js";
 import { createPreviewToken, validatePreviewToken } from "../src/services/preview-service.js";
 

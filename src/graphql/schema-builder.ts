@@ -5,7 +5,7 @@
 import { createSchema } from "graphql-yoga";
 import { GraphQLScalarType, Kind } from "graphql";
 import { Effect, Layer } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import type { ModelRow, FieldRow } from "../db/row-types.js";
 import { parseFieldValidators } from "../db/row-types.js";
 import type { SchemaBuilderContext, SchemaBuilderOptions } from "./gql-types.js";

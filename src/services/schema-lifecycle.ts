@@ -3,7 +3,7 @@
  * These go beyond simple CRUD and handle content-level cascades.
  */
 import { Effect } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import { NotFoundError, ValidationError } from "../errors.js";
 import type { ModelRow, FieldRow } from "../db/row-types.js";
 import { dropTableSql } from "../schema-engine/sql-ddl.js";

@@ -1359,7 +1359,7 @@ export function createImportProgram({
                 completedRootIds.add(item.id);
               }),
             ),
-            Effect.catchAll((error) =>
+            Effect.catch((error) =>
               Effect.fail(
                 new ImportRootRecordError({
                   model: rootModel,
@@ -1421,7 +1421,7 @@ export function createImportProgram({
       findingsCount: findings.length,
     };
   }).pipe(
-    Effect.catchAll((error) =>
+    Effect.catch((error) =>
       saveCheckpointEffect("failed", {
         lastError: errorMessage(error),
         lastErrorTag: error && typeof error === "object" && "_tag" in error ? error._tag : undefined,

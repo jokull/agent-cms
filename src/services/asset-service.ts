@@ -1,5 +1,5 @@
 import { Context, Effect } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import { generateId } from "../id.js";
 import { NotFoundError, ValidationError, ReferenceConflictError } from "../errors.js";
 import type { AssetRow, ModelRow } from "../db/row-types.js";
@@ -24,14 +24,14 @@ export {
 import type { RequestActor } from "../attribution.js";
 import { likeContains } from "../sql-util.js";
 
-export class AssetImportContext extends Context.Tag("AssetImportContext")<
+export class AssetImportContext extends Context.Service<
   AssetImportContext,
   {
     readonly r2Bucket: R2Bucket | undefined;
     readonly r2Credentials: R2UploadCredentials | undefined;
     readonly fetch: typeof globalThis.fetch;
   }
->() {}
+>()("AssetImportContext") {}
 
 export interface R2UploadCredentials {
   accessKeyId: string;

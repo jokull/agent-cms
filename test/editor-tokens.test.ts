@@ -115,7 +115,7 @@ describe("editor tokens", () => {
 
     const created = await createEditorToken(handler, { name: "Bad token", expiresIn: 0 });
     expect(created.response.status).toBe(400);
-    expect((created.json as { error: string }).error).toContain("Expected a positive number, actual 0");
+    expect((created.json as { error: string }).error).toContain("Expected a positive number");
   });
 
 });

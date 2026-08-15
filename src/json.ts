@@ -1,9 +1,8 @@
-import * as Either from "effect/Either";
-import { Schema } from "effect";
+import { Exit, Schema } from "effect";
 
-const UnknownJson = Schema.parseJson();
-const JsonRecord = Schema.Record({ key: Schema.String, value: Schema.Unknown });
-const JsonRecordString = Schema.parseJson(JsonRecord);
+const UnknownJson = Schema.fromJsonString(Schema.Unknown);
+const JsonRecord = Schema.Record(Schema.String, Schema.Unknown);
+const JsonRecordString = Schema.fromJsonString(JsonRecord);
 
 export function encodeJson(value: unknown): string {
   return Schema.encodeSync(UnknownJson)(value);
@@ -14,9 +13,9 @@ export function decodeJsonString(input: string): unknown {
 }
 
 export function tryDecodeJsonString(input: string) {
-  const result = Schema.decodeUnknownEither(UnknownJson)(input);
-  return Either.isRight(result)
-    ? { ok: true as const, value: result.right }
+  const result = Schema.decodeUnknownExit(UnknownJson)(input);
+  return Exit.isSuccess(result)
+    ? { ok: true as const, value: result.value }
     : { ok: false as const };
 }
 
@@ -29,8 +28,8 @@ export function decodeJsonRecordStringOr(
   input: string,
   fallback: Record<string, unknown>,
 ): Record<string, unknown> {
-  const result = Schema.decodeUnknownEither(JsonRecordString)(input);
-  return Either.isRight(result) ? result.right : fallback;
+  const result = Schema.decodeUnknownExit(JsonRecordString)(input);
+  return Exit.isSuccess(result) ? result.value : fallback;
 }
 
 export function decodeJsonIfString(value: unknown): unknown {

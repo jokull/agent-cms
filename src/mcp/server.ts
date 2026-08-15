@@ -2,12 +2,14 @@
  * Effect-native MCP (Model Context Protocol) server for agent-cms.
  * 3-layer architecture: Discovery -> Schema -> Content
  */
-import * as McpServer from "@effect/ai/McpServer";
-import * as McpSchema from "@effect/ai/McpSchema";
-import * as AiTool from "@effect/ai/Tool";
-import * as Toolkit from "@effect/ai/Toolkit";
-import { Context, Effect, Layer, Option, ParseResult, Schema } from "effect";
-import { SqlClient } from "@effect/sql";
+import * as McpServer from "effect/unstable/ai/McpServer";
+import * as McpSchema from "effect/unstable/ai/McpSchema";
+import * as McpProtocol from "effect/unstable/ai/McpProtocol";
+import * as AiTool from "effect/unstable/ai/Tool";
+import * as Toolkit from "effect/unstable/ai/Toolkit";
+import { Context, Effect, Layer, Option, Schema, SchemaIssue, Stream } from "effect";
+import { HttpServerRequest } from "effect/unstable/http";
+import { SqlClient } from "effect/unstable/sql";
 import * as ModelService from "../services/model-service.js";
 import * as FieldService from "../services/field-service.js";
 import * as RecordService from "../services/record-service.js";
@@ -42,9 +44,9 @@ import { decodeJsonRecordStringOr, encodeJson } from "../json.js";
 import { isObjectRecord } from "../value-utils.js";
 import { likeContains } from "../sql-util.js";
 
-import type { RequestActor } from "../attribution.js";
+import { actorFromHeaders, type RequestActor } from "../attribution.js";
 
-const JsonRecord = Schema.Record({ key: Schema.String, value: Schema.Unknown });
+const JsonRecord = Schema.Record(Schema.String, Schema.Unknown);
 const CommonDependencies = [SqlClient.SqlClient, VectorizeContext, HooksContext, AssetImportContext];
 
 const UpdateModelInput = Schema.Struct({
@@ -72,22 +74,22 @@ const LocaleIdInput = Schema.Struct({ localeId: Schema.String });
 
 const SchemaInfoInput = Schema.Struct({
   filterByName: Schema.optional(Schema.String),
-  filterByType: Schema.optional(Schema.Literal("model", "block")),
-  includeFieldDetails: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  filterByType: Schema.optional(Schema.Literals(["model", "block"])),
+  includeFieldDetails: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.sync(() => true))),
 });
 
 const UpdateRecordInput = Schema.Struct({
   recordId: Schema.optional(Schema.String),
   modelApiKey: Schema.String,
-  data: Schema.optionalWith(JsonRecord, { default: () => ({}) }),
+  data: JsonRecord.pipe(Schema.withDecodingDefaultType(Effect.sync(() => ({})))),
 });
 
 
 const DeleteRecordInput = Schema.Struct({
   modelApiKey: Schema.String,
   recordIds: Schema.Array(Schema.String).pipe(
-    Schema.filter((value) => value.length >= 1, { message: () => "recordIds must contain at least 1 entry" }),
-    Schema.filter((value) => value.length <= 1000, { message: () => "recordIds must contain at most 1000 entries" }),
+    Schema.check(Schema.makeFilter((value) => value.length >= 1, { message: "recordIds must contain at least 1 entry" })),
+    Schema.check(Schema.makeFilter((value) => value.length <= 1000, { message: "recordIds must contain at most 1000 entries" })),
   ),
 });
 
@@ -103,25 +105,25 @@ const BulkCreateRecordsInput = Schema.Struct({
 const PublishRecordsInput = Schema.Struct({
   modelApiKey: Schema.String,
   recordIds: Schema.Array(Schema.String).pipe(
-    Schema.filter((value) => value.length >= 1, { message: () => "recordIds must contain at least 1 entry" }),
-    Schema.filter((value) => value.length <= 1000, { message: () => "recordIds must contain at most 1000 entries" }),
+    Schema.check(Schema.makeFilter((value) => value.length >= 1, { message: "recordIds must contain at least 1 entry" })),
+    Schema.check(Schema.makeFilter((value) => value.length <= 1000, { message: "recordIds must contain at most 1000 entries" })),
   ),
 });
 
 const SetPublishStatusInput = Schema.Struct({
-  action: Schema.Literal("publish", "unpublish"),
+  action: Schema.Literals(["publish", "unpublish"]),
   ...PublishRecordsInput.fields,
 });
 
 const ScheduleInput = Schema.Struct({
   recordId: Schema.String,
   modelApiKey: Schema.String,
-  action: Schema.Literal("publish", "unpublish", "clear"),
+  action: Schema.Literals(["publish", "unpublish", "clear"]),
   at: Schema.optional(Schema.NullOr(Schema.String)),
 });
 
 const RecordVersionsInput = Schema.Struct({
-  action: Schema.Literal("list", "get", "restore"),
+  action: Schema.Literals(["list", "get", "restore"]),
   modelApiKey: Schema.String,
   recordId: Schema.String,
   versionId: Schema.optional(Schema.String),
@@ -138,7 +140,7 @@ const ReplaceAssetInput = Schema.Struct({
 });
 
 const SchemaIOInput = Schema.Struct({
-  action: Schema.Literal("export", "import"),
+  action: Schema.Literals(["export", "import"]),
   schema: Schema.optional(ImportSchemaInput),
 });
 
@@ -156,9 +158,12 @@ const UpdateSiteSettingsInput = Schema.Struct({
 });
 
 const EditorTokensInput = Schema.Struct({
-  action: Schema.Literal("create", "list", "revoke"),
+  action: Schema.Literals(["create", "list", "revoke"]),
   name: Schema.optional(Schema.String),
-  expiresIn: Schema.optional(Schema.Number.pipe(Schema.int(), Schema.positive())),
+  expiresIn: Schema.optional(Schema.Number.pipe(
+    Schema.check(Schema.isInt()),
+    Schema.check(Schema.isGreaterThan(0)),
+  )),
   tokenId: Schema.optional(Schema.String),
 });
 
@@ -187,7 +192,7 @@ function cmsTool<Name extends string>(
 ) {
   let tool = AiTool.make(name, {
     description,
-    parameters: parameters ?? {},
+    parameters: parameters ? Schema.Struct(parameters) : Schema.Struct({}),
     success: Schema.Unknown,
     failure: Schema.Unknown,
     dependencies: CommonDependencies,
@@ -204,7 +209,17 @@ function cmsTool<Name extends string>(
 }
 
 function toStructuredContent(value: unknown) {
-  return value !== null && typeof value === "object" && !Array.isArray(value) ? value : undefined;
+  // The MCP CallToolResult `structuredContent` field is a Json codec; class
+  // instances (e.g. Data.TaggedError) fail its validation, so normalize to a
+  // plain JSON value before constructing the result.
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    try {
+      return JSON.parse(encodeJson(value));
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -214,15 +229,10 @@ function toStructuredContent(value: unknown) {
  * MCP client. Non-ParseError failures pass through unchanged.
  */
 function formatToolError(error: unknown): unknown {
-  if (
-    error !== null
-    && typeof error === "object"
-    && "_tag" in error
-    && (error as { _tag: unknown })._tag === "ParseError"
-  ) {
+  if (Schema.isSchemaError(error)) {
     return {
       _tag: "ValidationError",
-      message: ParseResult.TreeFormatter.formatErrorSync(error as ParseResult.ParseError),
+      message: SchemaIssue.makeFormatterDefault()(error.issue),
     };
   }
   return error;
@@ -324,17 +334,16 @@ function parseValidators(value: unknown): Record<string, unknown> {
   return isObjectRecord(value) ? value : {};
 }
 
-function withDecoded<A, I, R, E, R2>(
-  schema: Schema.Schema<A, I, R>,
-  handler: (params: A) => Effect.Effect<unknown, E, R2>,
+function withDecoded<S extends Schema.Constraint, E, R2>(
+  schema: S,
+  handler: (params: S["Type"]) => Effect.Effect<unknown, E, R2>,
 ) {
-  return (params: unknown) => Schema.decodeUnknown(schema)(params).pipe(Effect.flatMap(handler));
+  return (params: unknown) => Schema.decodeUnknownEffect(schema)(params).pipe(Effect.flatMap(handler));
 }
 
 function toMcpInputSchema(tool: AiTool.Any): Record<string, unknown> {
   // Effect AI's helper is typed against the concrete Tool model, while AiTool.Any is wider.
   // Runtime behavior is correct here because every entry in CmsToolkit is created via AiTool.make.
-  // @ts-expect-error external type mismatch between Any and getJsonSchema helper
   const inputSchema = AiTool.getJsonSchema(tool);
   return isObjectRecord(inputSchema)
     && "type" in inputSchema
@@ -745,7 +754,7 @@ function createSetupContentModelPrompt() {
   return McpServer.prompt({
     name: "setup-content-model",
     description: "Guide an agent through designing and creating content models from a description",
-    parameters: SetupContentModelPromptInput,
+    parameters: SetupContentModelPromptInput.fields,
     content: ({ description }) =>
       Effect.succeed(`Set up content models for: ${description}
 
@@ -770,7 +779,7 @@ function createGenerateGraphqlQueriesPrompt() {
   return McpServer.prompt({
     name: "generate-graphql-queries",
     description: "Generate GraphQL queries for a content model with proper naming conventions",
-    parameters: GenerateGraphqlQueriesPromptInput,
+    parameters: GenerateGraphqlQueriesPromptInput.fields,
     content: ({ modelApiKey }) =>
       Effect.succeed(`Generate GraphQL queries for the "${modelApiKey}" model.
 
@@ -824,16 +833,25 @@ export function createMcpLayer(
     Layer.merge(Layer.merge(defaultVectorizeLayer, defaultHooksLayer), defaultAssetImportLayer),
     sqlLayer,
   );
-  const serverLayer = McpServer.layerHttpRouter({
+  const serverLayer = McpServer.layerHttp({
     name: mode === "editor" ? "agent-cms-editor" : "agent-cms",
     version: "0.1.0",
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Effect MCP path is typed as a route literal, but this server accepts a runtime-configured route.
     path: path as never,
+    protocols: [McpProtocol.v2025_06_18],
   });
 
   function assetUrl(r2Key: string): string | undefined {
     if (!options?.assetBaseUrl) return undefined;
     return `${options.assetBaseUrl.replace(/\/$/, "")}/${r2Key}`;
+  }
+
+  /** Resolve the acting identity per request (headers set by the worker dispatch), falling back to construction-time options. */
+  function requestActor() {
+    return Effect.gen(function* () {
+      const req = yield* HttpServerRequest.HttpServerRequest;
+      return actorFromHeaders(new Headers(req.headers)) ?? options?.actor ?? null;
+    });
   }
 
   function withAssetUrl<T extends { r2Key: string }>(asset: T) {
@@ -946,34 +964,41 @@ export function createMcpLayer(
     delete_model: withDecoded(ModelIdInput, ({ modelId }) => ModelService.deleteModel(modelId)),
     delete_field: withDecoded(FieldIdInput, ({ fieldId }) => FieldService.deleteField(fieldId)),
     create_record: withDecoded(CreateRecordInput, (input) =>
-      RecordService.createRecord(input, options?.actor).pipe(Effect.flatMap((r) => addPreviewPath(input.modelApiKey, r)))),
-    update_record: withDecoded(UpdateRecordInput, ({ recordId, modelApiKey, data }) => {
-      const effect = recordId
-        ? RecordService.patchRecord(recordId, { modelApiKey, data }, options?.actor)
-        : RecordService.updateSingletonRecord(modelApiKey, data, options?.actor);
-      return effect.pipe(Effect.flatMap((r) => addPreviewPath(modelApiKey, r)));
-    }),
+      Effect.gen(function* () {
+        const actor = yield* requestActor();
+        return yield* RecordService.createRecord(input, actor).pipe(Effect.flatMap((r) => addPreviewPath(input.modelApiKey, r)));
+      })),
+    update_record: withDecoded(UpdateRecordInput, ({ recordId, modelApiKey, data }) =>
+      Effect.gen(function* () {
+        const actor = yield* requestActor();
+        const effect = recordId
+          ? RecordService.patchRecord(recordId, { modelApiKey, data }, actor)
+          : RecordService.updateSingletonRecord(modelApiKey, data, actor);
+        return yield* effect.pipe(Effect.flatMap((r) => addPreviewPath(modelApiKey, r)));
+      })),
     patch_blocks: withDecoded(PatchBlocksInput, (input) =>
-      RecordService.patchBlocksForField(input, options?.actor).pipe(
-        Effect.map((record) => {
-          const deletedIds = Object.entries(input.blocks)
-            .filter(([, v]) => v === null)
-            .map(([k]) => k);
-          if (!record) {
-            return {
-              recordId: null,
-              status: null,
-              fieldApiKey: input.fieldApiKey,
-              field: null,
-              blocks: {},
-              deleted: deletedIds,
-              blockOrder: [],
-            };
-          }
-          return compactPatchBlocksResponse(record, input.fieldApiKey, deletedIds);
-        }),
-      ),
-    ),
+      Effect.gen(function* () {
+        const actor = yield* requestActor();
+        return yield* RecordService.patchBlocksForField(input, actor).pipe(
+          Effect.map((record) => {
+            const deletedIds = Object.entries(input.blocks)
+              .filter(([, v]) => v === null)
+              .map(([k]) => k);
+            if (!record) {
+              return {
+                recordId: null,
+                status: null,
+                fieldApiKey: input.fieldApiKey,
+                field: null,
+                blocks: {},
+                deleted: deletedIds,
+                blockOrder: [],
+              };
+            }
+            return compactPatchBlocksResponse(record, input.fieldApiKey, deletedIds);
+          }),
+        );
+      })),
     delete_record: withDecoded(DeleteRecordInput, ({ recordIds, modelApiKey }) =>
       Effect.forEach(recordIds, (recordId) => RecordService.removeRecord(modelApiKey, recordId)).pipe(
         Effect.map((results) => ({ deleted: true, count: results.length })),
@@ -982,22 +1007,30 @@ export function createMcpLayer(
       RecordService.getRecord(modelApiKey, recordId).pipe(Effect.flatMap((r) => addPreviewPath(modelApiKey, r)))),
     query_records: withDecoded(QueryRecordsInput, ({ modelApiKey }) =>
       RecordService.listRecords(modelApiKey).pipe(Effect.flatMap((r) => addPreviewPathToList(modelApiKey, r)))),
-    bulk_create_records: withDecoded(BulkCreateRecordsInput, ({ modelApiKey, records }) => RecordService.bulkCreateRecords({ modelApiKey, records }, options?.actor)),
-    set_publish_status: withDecoded(SetPublishStatusInput, ({ action, recordIds, modelApiKey }) => {
-      const op = action === "publish"
-        ? (recordIds.length === 1
-            ? PublishService.publishRecord(modelApiKey, recordIds[0], options?.actor)
-            : PublishService.bulkPublishRecords(modelApiKey, recordIds, options?.actor))
-        : (recordIds.length === 1
-            ? PublishService.unpublishRecord(modelApiKey, recordIds[0], options?.actor)
-            : PublishService.bulkUnpublishRecords(modelApiKey, recordIds, options?.actor));
-      return op;
-    }),
-    schedule: withDecoded(ScheduleInput, ({ recordId, modelApiKey, action, at }) => {
-      if (action === "clear") return ScheduleService.clearSchedule(modelApiKey, recordId, options?.actor);
-      if (action === "publish") return ScheduleService.schedulePublish(modelApiKey, recordId, at ?? null, options?.actor);
-      return ScheduleService.scheduleUnpublish(modelApiKey, recordId, at ?? null, options?.actor);
-    }),
+    bulk_create_records: withDecoded(BulkCreateRecordsInput, ({ modelApiKey, records }) =>
+      Effect.gen(function* () {
+        const actor = yield* requestActor();
+        return yield* RecordService.bulkCreateRecords({ modelApiKey, records }, actor);
+      })),
+    set_publish_status: withDecoded(SetPublishStatusInput, ({ action, recordIds, modelApiKey }) =>
+      Effect.gen(function* () {
+        const actor = yield* requestActor();
+        const op = action === "publish"
+          ? (recordIds.length === 1
+              ? PublishService.publishRecord(modelApiKey, recordIds[0], actor)
+              : PublishService.bulkPublishRecords(modelApiKey, recordIds, actor))
+          : (recordIds.length === 1
+              ? PublishService.unpublishRecord(modelApiKey, recordIds[0], actor)
+              : PublishService.bulkUnpublishRecords(modelApiKey, recordIds, actor));
+        return yield* op;
+      })),
+    schedule: withDecoded(ScheduleInput, ({ recordId, modelApiKey, action, at }) =>
+      Effect.gen(function* () {
+        const actor = yield* requestActor();
+        if (action === "clear") return yield* ScheduleService.clearSchedule(modelApiKey, recordId, actor);
+        if (action === "publish") return yield* ScheduleService.schedulePublish(modelApiKey, recordId, at ?? null, actor);
+        return yield* ScheduleService.scheduleUnpublish(modelApiKey, recordId, at ?? null, actor);
+      })),
     record_versions: withDecoded(RecordVersionsInput, ({ action, modelApiKey, recordId, versionId }) => {
       if (action === "list") return VersionService.listVersions(modelApiKey, recordId);
       if (action === "get") {
@@ -1005,9 +1038,16 @@ export function createMcpLayer(
         return VersionService.getVersion(versionId);
       }
       if (!versionId) return Effect.fail({ _tag: "ValidationError", message: "versionId is required for restore action" });
-      return VersionService.restoreVersion(modelApiKey, recordId, versionId, options?.actor);
+      return Effect.gen(function* () {
+        const actor = yield* requestActor();
+        return yield* VersionService.restoreVersion(modelApiKey, recordId, versionId, actor);
+      });
     }),
-    reorder_records: withDecoded(ReorderInput, ({ modelApiKey, recordIds }) => RecordService.reorderRecords(modelApiKey, recordIds, options?.actor)),
+    reorder_records: withDecoded(ReorderInput, ({ modelApiKey, recordIds }) =>
+      Effect.gen(function* () {
+        const actor = yield* requestActor();
+        return yield* RecordService.reorderRecords(modelApiKey, recordIds, actor);
+      })),
     remove_block: withDecoded(RemoveBlockInput, ({ blockApiKey, fieldId }) => {
       if (fieldId) return SchemaLifecycle.removeBlockFromWhitelist({ fieldId, blockApiKey });
       return SchemaLifecycle.removeBlockType(blockApiKey);
@@ -1015,16 +1055,25 @@ export function createMcpLayer(
     remove_locale: withDecoded(LocaleIdInput, ({ localeId }) => SchemaLifecycle.removeLocale(localeId)),
     create_asset_upload_url: withDecoded(CreateUploadUrlInput, AssetService.createAssetUploadUrl),
     upload_asset: withDecoded(AssetInput, (input) =>
-      AssetService.createAsset(input, options?.actor).pipe(Effect.map(withAssetUrl))),
+      Effect.gen(function* () {
+        const actor = yield* requestActor();
+        return yield* AssetService.createAsset(input, actor).pipe(Effect.map(withAssetUrl));
+      })),
     import_asset_from_url: withDecoded(ImportAssetFromUrlInput, (input) =>
-      AssetService.importAssetFromUrl(input, options?.actor).pipe(Effect.map(withAssetUrl))),
+      Effect.gen(function* () {
+        const actor = yield* requestActor();
+        return yield* AssetService.importAssetFromUrl(input, actor).pipe(Effect.map(withAssetUrl));
+      })),
     list_assets: () =>
       AssetService.listAssets().pipe(Effect.map(({ assets }) => assets.map((a) => {
         const url = assetUrl(a.r2_key);
         return url ? { ...a, url } : a;
       }))),
     replace_asset: withDecoded(ReplaceAssetInput, ({ assetId, ...rest }) =>
-      AssetService.replaceAsset(assetId, rest, options?.actor).pipe(Effect.map(withAssetUrl))),
+      Effect.gen(function* () {
+        const actor = yield* requestActor();
+        return yield* AssetService.replaceAsset(assetId, rest, actor).pipe(Effect.map(withAssetUrl));
+      })),
     schema_io: withDecoded(SchemaIOInput, ({ action, schema }) => {
       if (action === "export") return SchemaIO.exportSchema();
       if (!schema) return Effect.fail({ _tag: "ValidationError", message: "schema is required for import action" });
@@ -1075,17 +1124,18 @@ export function createMcpLayer(
         name: tool.name,
         description: tool.description,
         inputSchema: toMcpInputSchema(tool),
-        annotations: new McpSchema.ToolAnnotations({
+        annotations: {
           ...Context.getOption(tool.annotations, AiTool.Title).pipe(Option.map((title) => ({ title })), Option.getOrUndefined),
           readOnlyHint: Context.get(tool.annotations, AiTool.Readonly),
           destructiveHint: Context.get(tool.annotations, AiTool.Destructive),
           idempotentHint: Context.get(tool.annotations, AiTool.Idempotent),
           openWorldHint: Context.get(tool.annotations, AiTool.OpenWorld),
-        }),
+        },
       });
 
       yield* registry.addTool({
         tool: mcpTool,
+        annotations: Context.empty(),
         handle(payload) {
           const params = isToolPayload(payload) ? payload : {};
           // Enforce `additionalProperties: false` on the raw payload before the
@@ -1107,21 +1157,25 @@ export function createMcpLayer(
           // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- dynamic MCP registry dispatch crosses Effect Toolkit's generated tool-name/payload types.
           return built.handle(tool.name as never, params as never).pipe(
             Effect.provide(context),
-            Effect.match({
-              onFailure: (rawError) => {
-                const error = formatToolError(rawError);
-                return new McpSchema.CallToolResult({
-                  isError: true,
-                  structuredContent: toStructuredContent(error),
-                  content: [{ type: "text", text: encodeJson(error) }],
-                });
-              },
-              onSuccess: (result: { encodedResult: unknown }) =>
-                new McpSchema.CallToolResult({
-                  isError: false,
-                  structuredContent: toStructuredContent(result.encodedResult),
-                  content: [{ type: "text", text: encodeJson(result.encodedResult) }],
-                }),
+            Effect.flatMap((stream) => Stream.runLast(stream)),
+            Effect.map((maybeResult) =>
+              Option.isSome(maybeResult)
+                ? new McpSchema.CallToolResult({
+                    isError: maybeResult.value.isFailure,
+                    structuredContent: toStructuredContent(maybeResult.value.encodedResult),
+                    content: [{ type: "text", text: encodeJson(maybeResult.value.encodedResult) }],
+                  })
+                : new McpSchema.CallToolResult({
+                    content: [{ type: "text", text: "Tool returned no result" }],
+                  }),
+            ),
+            Effect.catch((rawError) => {
+              const error = formatToolError(rawError);
+              return Effect.succeed(new McpSchema.CallToolResult({
+                isError: true,
+                structuredContent: toStructuredContent(error),
+                content: [{ type: "text", text: encodeJson(error) }],
+              }));
             }),
           );
         },

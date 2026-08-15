@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 
 export interface FtsResult {
   recordId: string;

@@ -2,56 +2,56 @@
  * Effect Schema definitions for REST API request body validation.
  * Replaces manual type guard functions with runtime-verified decoding.
  */
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 
-const Int = Schema.Number.pipe(Schema.int());
+const Int = Schema.Number.pipe(Schema.check(Schema.isInt()));
 
 function finiteNumber(message: string) {
   return Schema.Number.pipe(
-    Schema.filter((value) => Number.isFinite(value), { message: () => message }),
+    Schema.check(Schema.makeFilter((value) => Number.isFinite(value), { message })),
   );
 }
 
 function positiveInt(label: string) {
   return Int.pipe(
-    Schema.filter((value) => Number.isFinite(value) && value > 0, {
-      message: () => `${label} must be a positive integer`,
-    }),
+    Schema.check(Schema.makeFilter((value) => Number.isFinite(value) && value > 0, {
+      message: `${label} must be a positive integer`,
+    })),
   );
 }
 
 function nonNegativeFiniteNumber(label: string) {
   return finiteNumber(`${label} must be a finite number`).pipe(
-    Schema.filter((value) => value >= 0, { message: () => `${label} must be >= 0` }),
+    Schema.check(Schema.makeFilter((value) => value >= 0, { message: `${label} must be >= 0` })),
   );
 }
 
 const UnitIntervalNumber = finiteNumber("Expected a finite number").pipe(
-  Schema.filter((value) => value >= 0 && value <= 1, {
-    message: () => "Expected a number between 0 and 1",
-  }),
+  Schema.check(Schema.makeFilter((value) => value >= 0 && value <= 1, {
+    message: "Expected a number between 0 and 1",
+  })),
 );
 
 const HttpUrlString = Schema.String.pipe(
-  Schema.filter((value) => {
+  Schema.check(Schema.makeFilter((value) => {
     try {
       const url = new URL(value);
       return url.protocol === "http:" || url.protocol === "https:";
     } catch {
       return false;
     }
-  }, { message: () => "Expected a valid http:// or https:// URL" }),
+  }, { message: "Expected a valid http:// or https:// URL" })),
 );
 
 export const CreateModelInput = Schema.Struct({
   name: Schema.NonEmptyString,
   apiKey: Schema.NonEmptyString,
-  isBlock: Schema.optionalWith(Schema.Boolean, { default: () => false }),
-  singleton: Schema.optionalWith(Schema.Boolean, { default: () => false }),
-  sortable: Schema.optionalWith(Schema.Boolean, { default: () => false }),
-  tree: Schema.optionalWith(Schema.Boolean, { default: () => false }),
-  hasDraft: Schema.optionalWith(Schema.Boolean, { default: () => true }),
-  allLocalesRequired: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  isBlock: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.sync(() => false))),
+  singleton: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.sync(() => false))),
+  sortable: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.sync(() => false))),
+  tree: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.sync(() => false))),
+  hasDraft: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.sync(() => true))),
+  allLocalesRequired: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.sync(() => false))),
   ordering: Schema.optional(Schema.String),
   canonicalPathTemplate: Schema.optional(Schema.NullOr(Schema.String)),
   /**
@@ -70,12 +70,11 @@ export const CreateFieldInput = Schema.Struct({
   apiKey: Schema.NonEmptyString,
   fieldType: Schema.NonEmptyString,
   position: Schema.optional(Int.pipe(
-    Schema.filter((value) => value >= 0, { message: () => "position must be >= 0" }),
+    Schema.check(Schema.makeFilter((value) => value >= 0, { message: "position must be >= 0" })),
   )),
-  localized: Schema.optionalWith(Schema.Boolean, { default: () => false }),
-  validators: Schema.optionalWith(
-    Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-    { default: () => ({}) }
+  localized: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.sync(() => false))),
+  validators: Schema.Record(Schema.String, Schema.Unknown).pipe(
+    Schema.withDecodingDefaultType(Effect.sync(() => ({}))),
   ),
   defaultValue: Schema.optional(Schema.Unknown),
   appearance: Schema.optional(Schema.Unknown),
@@ -87,9 +86,8 @@ export type CreateFieldInput = typeof CreateFieldInput.Type;
 export const CreateRecordInput = Schema.Struct({
   id: Schema.optional(Schema.String),
   modelApiKey: Schema.NonEmptyString,
-  data: Schema.optionalWith(
-    Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-    { default: () => ({}) }
+  data: Schema.Record(Schema.String, Schema.Unknown).pipe(
+    Schema.withDecodingDefaultType(Effect.sync(() => ({}))),
   ),
   overrides: Schema.optional(
     Schema.Struct({
@@ -106,9 +104,8 @@ export type CreateRecordInput = typeof CreateRecordInput.Type;
 
 export const PatchRecordInput = Schema.Struct({
   modelApiKey: Schema.NonEmptyString,
-  data: Schema.optionalWith(
-    Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-    { default: () => ({}) }
+  data: Schema.Record(Schema.String, Schema.Unknown).pipe(
+    Schema.withDecodingDefaultType(Effect.sync(() => ({}))),
   ),
   overrides: Schema.optional(
     Schema.Struct({
@@ -127,7 +124,7 @@ export const CreateAssetInput = Schema.Struct({
   id: Schema.optional(Schema.String),
   filename: Schema.NonEmptyString,
   mimeType: Schema.NonEmptyString,
-  size: Schema.optionalWith(nonNegativeFiniteNumber("size"), { default: () => 0 }),
+  size: nonNegativeFiniteNumber("size").pipe(Schema.withDecodingDefaultType(Effect.sync(() => 0))),
   width: Schema.optional(nonNegativeFiniteNumber("width")),
   height: Schema.optional(nonNegativeFiniteNumber("height")),
   alt: Schema.optional(Schema.String),
@@ -135,14 +132,12 @@ export const CreateAssetInput = Schema.Struct({
   r2Key: Schema.optional(Schema.String),
   blurhash: Schema.optional(Schema.String),
   colors: Schema.optional(Schema.Array(Schema.String).pipe(
-    Schema.filter((value) => value.length <= 16, { message: () => "colors must contain at most 16 entries" }),
+    Schema.check(Schema.makeFilter((value) => value.length <= 16, { message: "colors must contain at most 16 entries" })),
   )),
   focalPoint: Schema.optional(Schema.Struct({ x: UnitIntervalNumber, y: UnitIntervalNumber })),
-  tags: Schema.optionalWith(
-    Schema.Array(Schema.String).pipe(
-      Schema.filter((value) => value.length <= 50, { message: () => "tags must contain at most 50 entries" }),
-    ),
-    { default: () => [] },
+  tags: Schema.Array(Schema.String).pipe(
+    Schema.check(Schema.makeFilter((value) => value.length <= 50, { message: "tags must contain at most 50 entries" })),
+    Schema.withDecodingDefaultType(Effect.sync(() => [])),
   ),
 });
 export type CreateAssetInput = typeof CreateAssetInput.Type;
@@ -159,10 +154,10 @@ export const ImportAssetFromUrlInput = Schema.Struct({
   r2Key: Schema.optional(Schema.String),
   blurhash: Schema.optional(Schema.String),
   colors: Schema.optional(Schema.Array(Schema.String).pipe(
-    Schema.filter((value) => value.length <= 16, { message: () => "colors must contain at most 16 entries" }),
+    Schema.check(Schema.makeFilter((value) => value.length <= 16, { message: "colors must contain at most 16 entries" })),
   )),
   focalPoint: Schema.optional(Schema.Struct({ x: UnitIntervalNumber, y: UnitIntervalNumber })),
-  tags: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
+  tags: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultType(Effect.sync(() => []))),
 });
 export type ImportAssetFromUrlInput = typeof ImportAssetFromUrlInput.Type;
 
@@ -176,10 +171,11 @@ export const ListAssetsInput = Schema.Struct({
   orderBy: Schema.optional(Schema.Array(Schema.String)),
   page: Schema.optional(
     Schema.Struct({
-      limit: Schema.optionalWith(positiveInt("limit"), { default: () => 24 }),
-      offset: Schema.optionalWith(Int.pipe(
-        Schema.filter((value) => value >= 0, { message: () => "offset must be >= 0" }),
-      ), { default: () => 0 }),
+      limit: positiveInt("limit").pipe(Schema.withDecodingDefaultType(Effect.sync(() => 24))),
+      offset: Int.pipe(
+        Schema.check(Schema.makeFilter((value) => value >= 0, { message: "offset must be >= 0" })),
+        Schema.withDecodingDefaultType(Effect.sync(() => 0)),
+      ),
     }),
   ),
 });
@@ -188,15 +184,21 @@ export type ListAssetsInput = typeof ListAssetsInput.Type;
 export const UpdateAssetMetadataInput = Schema.Struct({
   alt: Schema.optional(Schema.String),
   title: Schema.optional(Schema.String),
-  width: Schema.optional(Schema.Number.pipe(Schema.int(), Schema.positive())),
-  height: Schema.optional(Schema.Number.pipe(Schema.int(), Schema.positive())),
+  width: Schema.optional(Schema.Number.pipe(
+    Schema.check(Schema.isInt()),
+    Schema.check(Schema.isGreaterThan(0)),
+  )),
+  height: Schema.optional(Schema.Number.pipe(
+    Schema.check(Schema.isInt()),
+    Schema.check(Schema.isGreaterThan(0)),
+  )),
 });
 export type UpdateAssetMetadataInput = typeof UpdateAssetMetadataInput.Type;
 
 export const ReorderInput = Schema.Struct({
   modelApiKey: Schema.NonEmptyString,
   recordIds: Schema.Array(Schema.String).pipe(
-    Schema.filter((value) => value.length <= 1000, { message: () => "recordIds must contain at most 1000 entries" }),
+    Schema.check(Schema.makeFilter((value) => value.length <= 1000, { message: "recordIds must contain at most 1000 entries" })),
   ),
 });
 export type ReorderInput = typeof ReorderInput.Type;
@@ -204,8 +206,8 @@ export type ReorderInput = typeof ReorderInput.Type;
 export const BulkRecordOperationInput = Schema.Struct({
   modelApiKey: Schema.NonEmptyString,
   ids: Schema.Array(Schema.String).pipe(
-    Schema.filter((value) => value.length >= 1, { message: () => "ids must contain at least 1 entry" }),
-    Schema.filter((value) => value.length <= 1000, { message: () => "ids must contain at most 1000 entries" }),
+    Schema.check(Schema.makeFilter((value) => value.length >= 1, { message: "ids must contain at least 1 entry" })),
+    Schema.check(Schema.makeFilter((value) => value.length <= 1000, { message: "ids must contain at most 1000 entries" })),
   ),
 });
 export type BulkRecordOperationInput = typeof BulkRecordOperationInput.Type;
@@ -218,18 +220,18 @@ export type BulkRecordOperationInput = typeof BulkRecordOperationInput.Type;
  */
 export const QueryRecordsInput = Schema.Struct({
   modelApiKey: Schema.NonEmptyString,
-  filter: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
+  filter: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
   orderBy: Schema.optional(Schema.Array(Schema.String)),
   page: Schema.optional(
     Schema.Struct({
-      limit: Schema.optionalWith(positiveInt("limit"), { default: () => 50 }),
-      offset: Schema.optionalWith(
-        Int.pipe(Schema.filter((value) => value >= 0, { message: () => "offset must be >= 0" })),
-        { default: () => 0 },
+      limit: positiveInt("limit").pipe(Schema.withDecodingDefaultType(Effect.sync(() => 50))),
+      offset: Int.pipe(
+        Schema.check(Schema.makeFilter((value) => value >= 0, { message: "offset must be >= 0" })),
+        Schema.withDecodingDefaultType(Effect.sync(() => 0)),
       ),
     }),
   ),
-  status: Schema.optional(Schema.Literal("draft", "published", "updated")),
+  status: Schema.optional(Schema.Literals(["draft", "published", "updated"])),
   locale: Schema.optional(Schema.String),
 });
 export type QueryRecordsInput = typeof QueryRecordsInput.Type;
@@ -242,9 +244,8 @@ export type QueryRecordsInput = typeof QueryRecordsInput.Type;
  */
 export const ValidateRecordInput = Schema.Struct({
   modelApiKey: Schema.NonEmptyString,
-  data: Schema.optionalWith(
-    Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-    { default: () => ({}) },
+  data: Schema.Record(Schema.String, Schema.Unknown).pipe(
+    Schema.withDecodingDefaultType(Effect.sync(() => ({}))),
   ),
 });
 export type ValidateRecordInput = typeof ValidateRecordInput.Type;
@@ -252,9 +253,9 @@ export type ValidateRecordInput = typeof ValidateRecordInput.Type;
 export const ScheduleRecordInput = Schema.Struct({
   modelApiKey: Schema.NonEmptyString,
   at: Schema.NullOr(Schema.String.pipe(
-    Schema.filter((value) => !Number.isNaN(Date.parse(value)), {
-      message: () => "at must be a valid ISO datetime string or null",
-    }),
+    Schema.check(Schema.makeFilter((value) => !Number.isNaN(Date.parse(value)), {
+      message: "at must be a valid ISO datetime string or null",
+    })),
   )),
 });
 export type ScheduleRecordInput = typeof ScheduleRecordInput.Type;
@@ -264,9 +265,9 @@ export const SearchInput = Schema.Struct({
   modelApiKey: Schema.optional(Schema.String),
   first: Schema.optional(positiveInt("first")),
   skip: Schema.optional(Int.pipe(
-    Schema.filter((value) => value >= 0, { message: () => "skip must be >= 0" }),
+    Schema.check(Schema.makeFilter((value) => value >= 0, { message: "skip must be >= 0" })),
   )),
-  mode: Schema.optional(Schema.Literal("keyword", "semantic", "hybrid")),
+  mode: Schema.optional(Schema.Literals(["keyword", "semantic", "hybrid"])),
 });
 export type SearchInput = typeof SearchInput.Type;
 
@@ -280,7 +281,7 @@ export type ReindexSearchInput = typeof ReindexSearchInput.Type;
 export const CreateLocaleInput = Schema.Struct({
   code: Schema.NonEmptyString,
   position: Schema.optional(Int.pipe(
-    Schema.filter((value) => value >= 0, { message: () => "position must be >= 0" }),
+    Schema.check(Schema.makeFilter((value) => value >= 0, { message: "position must be >= 0" })),
   )),
   fallbackLocaleId: Schema.optional(Schema.String),
 });
@@ -306,11 +307,11 @@ export const UpdateFieldInput = Schema.Struct({
   apiKey: Schema.optional(Schema.NonEmptyString),
   fieldType: Schema.optional(Schema.NonEmptyString),
   position: Schema.optional(Int.pipe(
-    Schema.filter((value) => value >= 0, { message: () => "position must be >= 0" }),
+    Schema.check(Schema.makeFilter((value) => value >= 0, { message: "position must be >= 0" })),
   )),
   localized: Schema.optional(Schema.Boolean),
   validators: Schema.optional(
-    Schema.Record({ key: Schema.String, value: Schema.Unknown })
+    Schema.Record(Schema.String, Schema.Unknown)
   ),
   hint: Schema.optional(Schema.String),
   appearance: Schema.optional(Schema.Unknown),
@@ -320,7 +321,7 @@ export type UpdateFieldInput = typeof UpdateFieldInput.Type;
 export const BulkCreateRecordsInput = Schema.Struct({
   modelApiKey: Schema.NonEmptyString,
   records: Schema.Array(
-    Schema.Record({ key: Schema.String, value: Schema.Unknown })
+    Schema.Record(Schema.String, Schema.Unknown)
   ),
 });
 export type BulkCreateRecordsInput = typeof BulkCreateRecordsInput.Type;
@@ -331,7 +332,7 @@ const SchemaExportFieldSchema = Schema.Struct({
   fieldType: Schema.String,
   position: Schema.Number,
   localized: Schema.Boolean,
-  validators: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+  validators: Schema.Record(Schema.String, Schema.Unknown),
   hint: Schema.NullOr(Schema.String),
 });
 
@@ -343,10 +344,10 @@ const SchemaExportModelSchema = Schema.Struct({
   sortable: Schema.Boolean,
   tree: Schema.Boolean,
   hasDraft: Schema.Boolean,
-  ordering: Schema.optionalWith(Schema.NullOr(Schema.String), { default: () => null }),
-  canonicalPathTemplate: Schema.optionalWith(Schema.NullOr(Schema.String), { default: () => null }),
-  titleField: Schema.optionalWith(Schema.NullOr(Schema.String), { default: () => null }),
-  imagePreviewField: Schema.optionalWith(Schema.NullOr(Schema.String), { default: () => null }),
+  ordering: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefaultType(Effect.sync(() => null))),
+  canonicalPathTemplate: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefaultType(Effect.sync(() => null))),
+  titleField: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefaultType(Effect.sync(() => null))),
+  imagePreviewField: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefaultType(Effect.sync(() => null))),
   fields: Schema.Array(SchemaExportFieldSchema),
 });
 
@@ -362,14 +363,14 @@ export const PatchBlocksInput = Schema.Struct({
   fieldApiKey: Schema.NonEmptyString,
   value: Schema.optional(Schema.Unknown),
   order: Schema.optional(Schema.Array(Schema.NonEmptyString)),
-  blocks: Schema.Record({ key: Schema.String, value: Schema.NullOr(Schema.Unknown) }),
-  append: Schema.optional(Schema.Array(Schema.Record({ key: Schema.String, value: Schema.Unknown }))),
+  blocks: Schema.Record(Schema.String, Schema.NullOr(Schema.Unknown)),
+  append: Schema.optional(Schema.Array(Schema.Record(Schema.String, Schema.Unknown))),
 });
 export type PatchBlocksInput = typeof PatchBlocksInput.Type;
 
 export const ImportSchemaInput = Schema.Struct({
-  version: Schema.Literal(1),
-  locales: Schema.optionalWith(Schema.Array(SchemaExportLocaleSchema), { default: () => [] }),
+  version: Schema.Literals([1]),
+  locales: Schema.Array(SchemaExportLocaleSchema).pipe(Schema.withDecodingDefaultType(Effect.sync(() => []))),
   models: Schema.Array(SchemaExportModelSchema),
 });
 export type ImportSchemaInput = typeof ImportSchemaInput.Type;
@@ -383,10 +384,10 @@ export type CreateUploadUrlInput = typeof CreateUploadUrlInput.Type;
 export const CreateEditorTokenInput = Schema.Struct({
   name: Schema.NonEmptyString,
   expiresIn: Schema.optional(Int.pipe(
-    Schema.positive(),
-    Schema.filter((value) => value <= 60 * 60 * 24 * 365, {
-      message: () => "expiresIn must be <= 31536000 seconds",
-    }),
+    Schema.check(Schema.isGreaterThan(0, { message: "Expected a positive number" })),
+    Schema.check(Schema.makeFilter((value) => value <= 60 * 60 * 24 * 365, {
+      message: "expiresIn must be <= 31536000 seconds",
+    })),
   )),
 });
 export type CreateEditorTokenInput = typeof CreateEditorTokenInput.Type;

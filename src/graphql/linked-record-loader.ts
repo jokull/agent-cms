@@ -1,5 +1,5 @@
 import type { Effect } from "effect";
-import type { SqlClient } from "@effect/sql";
+import type { SqlClient } from "effect/unstable/sql";
 import type { DynamicRow, GqlContext } from "./gql-types.js";
 import { batchResolveLinkedRecords } from "./structured-text-resolver.js";
 

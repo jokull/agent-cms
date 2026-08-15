@@ -12,7 +12,7 @@ import { existsSync, statSync } from "node:fs";
 import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Effect, Layer } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { cmsRuntimeLayer, ensureSchema, SchemaIO } from "agent-cms/lib";
 import { ok } from "result-rpc";

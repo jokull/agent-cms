@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import { NotFoundError, AggregateValidationError, type ValidationIssue } from "../errors.js";
 import { selectById } from "../schema-engine/sql-records.js";
 import type { ModelRow, FieldRow } from "../db/row-types.js";

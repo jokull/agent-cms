@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import { extractBlockIds, extractInlineBlockIds, extractLinkIds } from "../dast/index.js";
 import type { DynamicRow, DastDocInput, GqlContext } from "./gql-types.js";
 import { deserializeRecord, toTypeName, decodeSnapshot } from "./gql-utils.js";

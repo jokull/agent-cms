@@ -4,7 +4,7 @@
  * Defines the declarative API shape — handlers are implemented separately
  * via HttpApiBuilder.group().
  */
-import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "@effect/platform";
+import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi";
 import { Schema } from "effect";
 import {
   CreateAssetInput,
@@ -17,66 +17,73 @@ export const assetsGroup = HttpApiGroup.make("assets")
   .annotate(OpenApi.Title, "Assets")
   .annotate(OpenApi.Description, "Asset management")
   .add(
-    HttpApiEndpoint.get("listAssets", "/assets")
-      .annotate(OpenApi.Summary, "List or search assets")
-      .setUrlParams(
-        Schema.Struct({
-          q: Schema.optional(Schema.String),
-          limit: Schema.optional(Schema.String),
-          offset: Schema.optional(Schema.String),
-          orderBy: Schema.optional(Schema.String),
-        }),
-      )
-      .addSuccess(Schema.Unknown),
+    HttpApiEndpoint.get("listAssets", "/assets", {
+      query: Schema.Struct({
+        q: Schema.optional(Schema.String),
+        limit: Schema.optional(Schema.String),
+        offset: Schema.optional(Schema.String),
+        orderBy: Schema.optional(Schema.String),
+      }),
+      success: Schema.Unknown,
+    })
+      .annotate(OpenApi.Summary, "List or search assets"),
   )
   .add(
-    HttpApiEndpoint.get("getAssetUsages", "/assets/:id/usages")
-      .annotate(OpenApi.Summary, "List records referencing an asset")
-      .setPath(Schema.Struct({ id: Schema.String }))
-      .addSuccess(Schema.Unknown),
+    HttpApiEndpoint.get("getAssetUsages", "/assets/:id/usages", {
+      params: Schema.Struct({ id: Schema.String }),
+      success: Schema.Unknown,
+    })
+      .annotate(OpenApi.Summary, "List records referencing an asset"),
   )
   .add(
-    HttpApiEndpoint.post("createAsset", "/assets")
-      .annotate(OpenApi.Summary, "Create a new asset")
-      .setPayload(CreateAssetInput)
-      .addSuccess(Schema.Unknown, { status: 201 }),
+    HttpApiEndpoint.post("createAsset", "/assets", {
+      payload: CreateAssetInput,
+      success: HttpApiSchema.status(201)(Schema.Unknown),
+    })
+      .annotate(OpenApi.Summary, "Create a new asset"),
   )
   .add(
-    HttpApiEndpoint.post("importAssetFromUrl", "/assets/import-from-url")
-      .annotate(OpenApi.Summary, "Import a remote asset into R2 and register it")
-      .setPayload(ImportAssetFromUrlInput)
-      .addSuccess(Schema.Unknown, { status: 201 }),
+    HttpApiEndpoint.post("importAssetFromUrl", "/assets/import-from-url", {
+      payload: ImportAssetFromUrlInput,
+      success: HttpApiSchema.status(201)(Schema.Unknown),
+    })
+      .annotate(OpenApi.Summary, "Import a remote asset into R2 and register it"),
   )
   .add(
-    HttpApiEndpoint.get("getAsset", "/assets/:id")
-      .annotate(OpenApi.Summary, "Get an asset by ID")
-      .setPath(Schema.Struct({ id: Schema.String }))
-      .addSuccess(Schema.Unknown),
+    HttpApiEndpoint.get("getAsset", "/assets/:id", {
+      params: Schema.Struct({ id: Schema.String }),
+      success: Schema.Unknown,
+    })
+      .annotate(OpenApi.Summary, "Get an asset by ID"),
   )
   .add(
-    HttpApiEndpoint.put("replaceAsset", "/assets/:id")
-      .annotate(OpenApi.Summary, "Replace an asset")
-      .setPath(Schema.Struct({ id: Schema.String }))
-      .setPayload(CreateAssetInput)
-      .addSuccess(Schema.Unknown),
+    HttpApiEndpoint.put("replaceAsset", "/assets/:id", {
+      params: Schema.Struct({ id: Schema.String }),
+      payload: CreateAssetInput,
+      success: Schema.Unknown,
+    })
+      .annotate(OpenApi.Summary, "Replace an asset"),
   )
   .add(
-    HttpApiEndpoint.patch("updateAssetMetadata", "/assets/:id")
-      .annotate(OpenApi.Summary, "Update asset metadata")
-      .setPath(Schema.Struct({ id: Schema.String }))
-      .setPayload(UpdateAssetMetadataInput)
-      .addSuccess(Schema.Unknown),
+    HttpApiEndpoint.patch("updateAssetMetadata", "/assets/:id", {
+      params: Schema.Struct({ id: Schema.String }),
+      payload: UpdateAssetMetadataInput,
+      success: Schema.Unknown,
+    })
+      .annotate(OpenApi.Summary, "Update asset metadata"),
   )
   .add(
-    HttpApiEndpoint.del("deleteAsset", "/assets/:id")
-      .annotate(OpenApi.Summary, "Delete an asset (409 if referenced unless force=true)")
-      .setPath(Schema.Struct({ id: Schema.String }))
-      .setUrlParams(Schema.Struct({ force: Schema.optional(Schema.String) }))
-      .addSuccess(Schema.Unknown),
+    HttpApiEndpoint.make("DELETE")("deleteAsset", "/assets/:id", {
+      params: Schema.Struct({ id: Schema.String }),
+      query: Schema.Struct({ force: Schema.optional(Schema.String) }),
+      success: Schema.Unknown,
+    })
+      .annotate(OpenApi.Summary, "Delete an asset (409 if referenced unless force=true)"),
   )
   .add(
-    HttpApiEndpoint.post("createUploadUrl", "/assets/upload-url")
-      .annotate(OpenApi.Summary, "Create a presigned upload URL")
-      .setPayload(CreateUploadUrlInput)
-      .addSuccess(Schema.Unknown),
+    HttpApiEndpoint.post("createUploadUrl", "/assets/upload-url", {
+      payload: CreateUploadUrlInput,
+      success: Schema.Unknown,
+    })
+      .annotate(OpenApi.Summary, "Create a presigned upload URL"),
   );

@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import type { SqlClient } from "@effect/sql";
+import type { SqlClient } from "effect/unstable/sql";
 import type { GqlContext } from "./gql-types.js";
 import { materializeStructuredTextValues } from "../services/structured-text-service.js";
 

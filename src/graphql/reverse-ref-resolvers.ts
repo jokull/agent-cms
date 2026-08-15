@@ -3,7 +3,7 @@
  * For each target model with incoming link/links references, add _allReferencing<Source>s fields.
  */
 import { Effect } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import { getLinkTargets, getLinksTargets } from "../db/validators.js";
 import { compileFilterToSql, compileOrderBy, type FilterCompilerOpts } from "./filter-compiler.js";
 import type { ModelRow, ParsedFieldRow } from "../db/row-types.js";

@@ -112,7 +112,7 @@ export function createDatoClient({
           }),
         );
       }).pipe(
-      Effect.catchAll((error) => {
+      Effect.catch((error) => {
         if (error instanceof DatoRateLimitError) {
           return Effect.logWarning(
             `Dato CMA rate limited for ${url.pathname}; retrying in ${Math.max(error.resetSeconds ?? 1, 1)}s`,

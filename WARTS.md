@@ -62,3 +62,31 @@ package we author. Each entry: what it is, why it hurts, a suggested fix.
   consumer (codegen, admin, this demo) must declare `better-result` explicitly or
   `pnpm install` leaves `Result.isOk`/`isErr` unresolved. Suggested: document the
   requirement prominently, or consider a regular dep.
+
+## Effect 4
+
+- **`Schema.Schema<T>`/`Schema.Codec<A>` annotations widen `DecodingServices` to
+  `unknown`.** `Schema<T>` extends `Top` whose `DecodingServices` is `unknown`;
+  annotating a value with it poisons every `decodeUnknown*` caller's `R` channel
+  (`effect(missingEffectContext unknown)`). Use `Schema.Codec<T>` (DS=never) for
+  schema-typed values, and annotate recursive `Schema.suspend` callbacks
+  (`(): Schema.Codec<T> => …`) so mutual recursion resolves without DS=unknown.
+- **`Schema.Codec<A>` as a *parameter* annotation infers the weak supertype of
+  Type | Encoded** (optional fields leak in). Keep generic params schema-typed
+  (`<S extends Schema.Constraint>(schema: S, …: S["Type"])`) instead.
+- **`@effect/sql-sqlite-node@4` is backed by `node:sqlite`, not better-sqlite3.**
+  The v3 test trick of patching `Database.prototype.prepare` (better-sqlite3) no
+  longer intercepts queries; trace `node:sqlite`'s `DatabaseSync.prototype.prepare`
+  instead. `@types/better-sqlite3` dep is now vestigial.
+- **`HttpRouter.toWebHandler(Layer.provide(app, svc))` does NOT satisfy
+  `Request.From<"Requires", …>`-marked requirements.** Provide services inside the
+  handler effects, or flatten via `Effect.flatten(HttpRouter.toHttpEffect(app))`
+  and `Effect.provide` the app effect before `HttpEffect.toWebHandlerLayer`.
+- **MCP `CallToolResult.structuredContent` is a Json codec.** Class instances
+  (e.g. `Data.TaggedError`) thrown from tool handlers fail its validation at
+  construction → surface as `-32603 Internal error`. Normalize to plain JSON
+  (`JSON.parse(encodeJson(v))`) before constructing results.
+- **MCP sessions live in the per-router `McpServer` service context.** Building a
+  fresh `createMcpHttpHandler` per request (the v3 editor-token path) makes every
+  follow-up request 404 (session not found). Cache the handler per app and
+  resolve the actor per request from headers.

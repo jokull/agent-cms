@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import { generateId } from "../id.js";
 import { FIELD_TYPES, isFieldType } from "../types.js";
 import { NotFoundError, ValidationError, DuplicateError, ReferenceConflictError } from "../errors.js";

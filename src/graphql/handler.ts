@@ -13,7 +13,7 @@ import {
   validate,
   visit,
 } from "graphql";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import { buildGraphQLSchema } from "./schema-builder.js";
 import { enforceQueryLimits } from "./query-limits.js";
 import { getSqlMetrics, withSqlMetrics } from "./sql-metrics.js";
@@ -193,7 +193,7 @@ export function createGraphQLHandler(
   sqlLayer: Layer.Layer<SqlClient.SqlClient>,
   options?: GraphQLHandlerOptions
 ) {
-  const runtimeLayer = Layer.merge(sqlLayer, Logger.json);
+  const runtimeLayer = Layer.merge(sqlLayer, Logger.layer([Logger.formatJson]));
   const queryLimits = {
     maxDepth: 12,
     maxSelections: 250,

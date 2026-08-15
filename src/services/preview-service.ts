@@ -3,7 +3,7 @@
  * Follows the same SHA-256 hashing pattern as token-service.ts.
  */
 import { Effect } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import { generateId } from "../id.js";
 import { ValidationError } from "../errors.js";
 import { stringifyTemplateValue } from "../value-utils.js";
@@ -80,7 +80,7 @@ export function validatePreviewToken(token: string) {
     // they expired. Note: the `datetime('now')` DEFAULT clauses in src/migrations.ts are
     // never compared against anything, so that space-separated format is cosmetic only;
     // left untouched there because versioned migration SQL must stay byte-stable.
-    yield* Effect.fork(
+    yield* Effect.forkChild(
       sql.unsafe(
         `DELETE FROM preview_tokens WHERE id IN (SELECT id FROM preview_tokens WHERE expires_at < ? LIMIT 100)`,
         [new Date().toISOString()]

@@ -65,7 +65,7 @@ describe("shared schema_version counter", () => {
     // NOT invalidated, mirroring a mutation handled by a different isolate.
     await Effect.runPromise(
       Effect.gen(function* () {
-        const { SqlClient } = yield* Effect.promise(() => import("@effect/sql"));
+        const { SqlClient } = yield* Effect.promise(() => import("effect/unstable/sql"));
         const sql = yield* SqlClient.SqlClient;
         const now = new Date().toISOString();
         yield* sql.unsafe(

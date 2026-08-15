@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import type { DynamicRow, GqlContext, ReverseRef } from "./gql-types.js";
 import { decodeJsonIfString } from "../json.js";
 import { decodeSnapshot, deserializeRecord } from "./gql-utils.js";

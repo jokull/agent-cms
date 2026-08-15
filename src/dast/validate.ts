@@ -1,4 +1,4 @@
-import { ParseResult, Schema } from "effect";
+import { Cause, Option, Schema, SchemaIssue } from "effect";
 import { DastDocumentSchema } from "./schema.js";
 import type {
   BlockLevelNode,
@@ -13,12 +13,14 @@ export interface ValidationError {
   message: string;
 }
 
-function formatIssuePath(path: ReadonlyArray<PropertyKey>): string {
+function formatIssuePath(path: ReadonlyArray<unknown>): string {
   return path.reduce<string>((acc, segment) => {
     if (typeof segment === "number") return `${acc}[${segment}]`;
-    if (typeof segment === "symbol") return acc;
-    if (acc.length === 0) return segment;
-    return `${acc}.${segment}`;
+    if (typeof segment === "string") {
+      if (acc.length === 0) return segment;
+      return `${acc}.${segment}`;
+    }
+    return acc;
   }, "");
 }
 
@@ -27,13 +29,14 @@ function formatIssuePath(path: ReadonlyArray<PropertyKey>): string {
  * Returns an array of errors (empty = valid).
  */
 export function validateDast(doc: unknown): ValidationError[] {
-  const result = Schema.decodeUnknownEither(DastDocumentSchema)(doc);
+  const result = Schema.decodeUnknownExit(DastDocumentSchema)(doc);
 
-  if (result._tag === "Right") return [];
+  if (result._tag === "Success") return [];
 
-  const formatted = ParseResult.ArrayFormatter.formatErrorSync(result.left);
+  const error = Cause.findErrorOption(result.cause).pipe(Option.getOrThrow);
+  const formatted = SchemaIssue.makeFormatterStandardSchemaV1()(error.issue).issues;
   return formatted.map((issue) => ({
-    path: formatIssuePath(issue.path),
+    path: formatIssuePath(issue.path ?? []),
     message: issue.message,
   }));
 }
@@ -42,10 +45,10 @@ export function validateDast(doc: unknown): ValidationError[] {
  * Validate that a DAST document only contains block nodes at root level.
  */
 export function validateBlocksOnly(doc: unknown): ValidationError[] {
-  const decoded = Schema.decodeUnknownEither(DastDocumentSchema)(doc);
-  if (decoded._tag === "Left") return [];
+  const decoded = Schema.decodeUnknownExit(DastDocumentSchema)(doc);
+  if (decoded._tag === "Failure") return [];
 
-  return decoded.right.document.children.flatMap((child, index) =>
+  return decoded.value.document.children.flatMap((child, index) =>
     child.type === "block"
       ? []
       : [{

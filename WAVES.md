@@ -38,3 +38,29 @@
 - [x] verify (agent-browser): expand/collapse; typeahead lists 3 authors;
       "From Library" table filters by name; "Create new" made Alan Turing;
       headline edit updates header title; save → reload persists author + title
+
+## Wave 7 — Effect 4 migration (PR)
+
+- [x] Bump `effect` + all `@effect/*` to `4.0.0-rc.109` (single version); drop
+      packages merged into core (`@effect/sql`, `@effect/rpc`, `@effect/ai`,
+      `@effect/cli`, `@effect/experimental`, `@effect/platform`, `@effect/typeclass`,
+      `@effect/printer`, `@effect/printer-ansi`)
+- [x] Import map: `effect/unstable/{sql,http,httpapi,ai,cli}`, `effect/Result`,
+      `@effect/sql-d1` + `@effect/sql-sqlite-node` + `@effect/platform-node` @ rc
+- [x] Core renames: `Context.Tag` → `Context.Service`, `Either` → `Result`,
+      `ParseResult` → `SchemaIssue`, `catchAll*` → `catch*`, `fork` → `forkChild`,
+      `validateAll` → `validate`, `tapErrorCause` → `tapCause`, `zipRight` → `andThen`
+- [x] Schema v4: `Union/Literals/Tuple` array forms, `filter` → `check(makeFilter)`,
+      `refine` for type guards, `optionalWith` → `optionalKey`/`withDecodingDefaultType`,
+      `is*` filter renames, `isBetween({min,max})`, `message` strings not thunks
+- [x] HTTP: `HttpRouter.use((router) => …)` registration layers, endpoint options
+      (`params/query/payload/success`), `HttpEffect.toWebHandlerLayer` +
+      per-route `Effect.catch` error mapping, actor headers threaded per request
+- [x] MCP: `McpServer.layerHttp` + `McpProtocol.v2025_06_18`, `Toolkit` handler
+      streams (`Stream.runLast`), `CallToolResult` Json-safe `structuredContent`
+- [x] Recursive schemas: `Schema.Codec<T>` callback annotations (fixes
+      DecodingServices=unknown); registry `inputSchema` typed `Schema.Codec<any>`
+- [x] Verification: `tsc --noEmit` clean (root), 910/910 tests, tsdown build,
+      blocks-editor vite build, codegen 61/61, dast 7/7, editor-react 28/28
+- [x] Test infra: `@effect/sql` imports → `effect/unstable/sql`; fast-path SQL
+      tracing switched better-sqlite3 → `node:sqlite` (v4 sql-sqlite-node backend)

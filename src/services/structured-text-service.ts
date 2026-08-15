@@ -1,5 +1,5 @@
-import { Effect, ParseResult, Schema } from "effect";
-import { SqlClient, SqlError } from "@effect/sql";
+import { Effect, Schema, SchemaIssue } from "effect";
+import { SqlClient, SqlError } from "effect/unstable/sql";
 import { validateBlocksOnly, extractAllBlockIds, extractBlockIds, extractLinkIds } from "../dast/index.js";
 import { ValidationError } from "../errors.js";
 import { DastDocumentInput, DastDocumentSchema, StructuredTextWriteInput } from "../dast/schema.js";
@@ -86,7 +86,7 @@ function deserializeValue(value: unknown): unknown {
 }
 
 function decodeStructuredTextInput(fieldApiKey: string, value: unknown) {
-  return Schema.decodeUnknown(StructuredTextWriteInput)(value).pipe(
+  return Schema.decodeUnknownEffect(StructuredTextWriteInput)(value).pipe(
     Effect.mapError((e) => new ValidationError({
       message: `Invalid StructuredText for field '${fieldApiKey}': ${e.message}`,
       field: fieldApiKey,
@@ -177,14 +177,14 @@ function runHotBlockQueries<T extends object>(queries: ReadonlyArray<BatchedQuer
   return runBatchedQueries<T>(queries, { phase: "st_frontier" });
 }
 
-function formatDastParseErrors(error: ParseResult.ParseError): string {
-  const formatted = ParseResult.ArrayFormatter.formatErrorSync(error);
-  return formatted.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ");
+function formatDastParseErrors(error: Schema.SchemaError): string {
+  const formatted = SchemaIssue.makeFormatterStandardSchemaV1()(error.issue).issues;
+  return formatted.map((issue) => `${(issue.path ?? []).join(".")}: ${issue.message}`).join("; ");
 }
 
 function validateDastForField(fieldApiKey: string, value: unknown, blocksOnly: boolean) {
   return Effect.gen(function* () {
-    const dast = yield* Schema.decodeUnknown(DastDocumentSchema)(value).pipe(
+    const dast = yield* Schema.decodeUnknownEffect(DastDocumentSchema)(value).pipe(
       Effect.mapError((e) => new ValidationError({
         message: `Invalid DAST document: ${formatDastParseErrors(e)}`,
         field: fieldApiKey,
@@ -422,7 +422,7 @@ function compileStructuredText(
         if (isFieldType(field.field_type)) {
           const fieldDef = getFieldTypeDef(field.field_type);
           if (fieldDef.inputSchema) {
-            yield* Schema.decodeUnknown(fieldDef.inputSchema)(value).pipe(
+            yield* Schema.decodeUnknownEffect(fieldDef.inputSchema)(value).pipe(
               Effect.mapError((e) => new ValidationError({
                 message: `Invalid ${field.field_type} for block field '${field.api_key}': ${e.message}`,
                 field: field.api_key,
@@ -1144,7 +1144,7 @@ function writeRichTextBlocks(params: {
   fieldApiKey: string;
   blocks: RichTextWriteBlock[];
   allowedBlockTypes: string[];
-}): Effect.Effect<{ blockIds: string[]; rowsByTable: Map<string, DynamicRow[]> }, ValidationError | import("@effect/sql").SqlError.SqlError> {
+}): Effect.Effect<{ blockIds: string[]; rowsByTable: Map<string, DynamicRow[]> }, ValidationError | import("effect/unstable/sql").SqlError.SqlError> {
   return Effect.gen(function* () {
     const { sql, fieldApiKey, blocks, allowedBlockTypes, seenBlockIds } = params;
     const rowsByTable = new Map<string, DynamicRow[]>();
@@ -1253,7 +1253,7 @@ function writeRichTextBlocks(params: {
         if (isFieldType(field.field_type)) {
           const fieldDef = getFieldTypeDef(field.field_type);
           if (fieldDef.inputSchema) {
-            yield* Schema.decodeUnknown(fieldDef.inputSchema)(value).pipe(
+            yield* Schema.decodeUnknownEffect(fieldDef.inputSchema)(value).pipe(
               Effect.mapError((e) => new ValidationError({
                 message: `Invalid ${field.field_type} for block field '${field.api_key}': ${e.message}`,
                 field: field.api_key,

@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import { generateId } from "../id.js";
 import { NotFoundError, ValidationError, AggregateValidationError, DuplicateError, isCmsError, errorToResponse, type ValidationIssue } from "../errors.js";
 import { generateSlug } from "../slug.js";
@@ -148,8 +148,8 @@ function requiredFieldIssues(
 }
 
 function decodeLocalizedStructuredTextMap(field: ParsedFieldRow, rawValue: unknown) {
-  return Schema.decodeUnknown(
-    Schema.Record({ key: Schema.String, value: Schema.NullOr(Schema.Unknown) })
+  return Schema.decodeUnknownEffect(
+    Schema.Record(Schema.String, Schema.NullOr(Schema.Unknown))
   )(rawValue).pipe(
     Effect.mapError((e) => new ValidationError({
       message: `Invalid localized StructuredText for field '${field.api_key}': ${e.message}`,
@@ -159,8 +159,8 @@ function decodeLocalizedStructuredTextMap(field: ParsedFieldRow, rawValue: unkno
 }
 
 function decodeLocalizedFieldMap(field: ParsedFieldRow, rawValue: unknown) {
-  return Schema.decodeUnknown(
-    Schema.Record({ key: Schema.String, value: Schema.Unknown })
+  return Schema.decodeUnknownEffect(
+    Schema.Record(Schema.String, Schema.Unknown)
   )(rawValue).pipe(
     Effect.map((localeMap) => sanitizeLocaleMap(localeMap)),
     Effect.mapError((e) => new ValidationError({
@@ -446,7 +446,7 @@ function processCreateLikeRecordFields({
 
             const expandedLocale = expandStructuredTextShorthand(localeValue);
 
-            const stInput = yield* Schema.decodeUnknown(StructuredTextWriteInput)(scopeStructuredTextIds(expandedLocale, `${field.api_key}:${localeCode}`)).pipe(
+            const stInput = yield* Schema.decodeUnknownEffect(StructuredTextWriteInput)(scopeStructuredTextIds(expandedLocale, `${field.api_key}:${localeCode}`)).pipe(
               Effect.mapError((e) => new ValidationError({
                 message: createFieldErrorMessage(errorPrefix, `Invalid StructuredText for field '${field.api_key}' locale '${localeCode}': ${e.message}`),
                 field: field.api_key,
@@ -482,7 +482,7 @@ function processCreateLikeRecordFields({
 
         const expanded = expandStructuredTextShorthand(data[field.api_key]);
 
-        const stInput = yield* Schema.decodeUnknown(StructuredTextWriteInput)(expanded).pipe(
+        const stInput = yield* Schema.decodeUnknownEffect(StructuredTextWriteInput)(expanded).pipe(
           Effect.mapError((e) => new ValidationError({
             message: createFieldErrorMessage(errorPrefix, `Invalid StructuredText for field '${field.api_key}': ${e.message}`),
             field: field.api_key,
@@ -636,7 +636,7 @@ function processCreateLikeRecordFields({
             );
             for (const [localeCode, localeValue] of Object.entries(localeMap)) {
               if (localeValue === null) continue;
-              yield* Schema.decodeUnknown(fieldDef.inputSchema)(localeValue).pipe(
+              yield* Schema.decodeUnknownEffect(fieldDef.inputSchema)(localeValue).pipe(
                 Effect.mapError((e) => new ValidationError({
                   message: createFieldErrorMessage(errorPrefix, `Invalid ${field.field_type} for field '${field.api_key}' locale '${localeCode}': ${e.message}`),
                   field: field.api_key,
@@ -645,7 +645,7 @@ function processCreateLikeRecordFields({
               );
             }
           } else {
-            yield* Schema.decodeUnknown(fieldDef.inputSchema)(data[field.api_key]).pipe(
+            yield* Schema.decodeUnknownEffect(fieldDef.inputSchema)(data[field.api_key]).pipe(
               Effect.mapError((e) => new ValidationError({
                 message: createFieldErrorMessage(errorPrefix, `Invalid ${field.field_type} for field '${field.api_key}': ${e.message}`),
                 field: field.api_key,
@@ -709,7 +709,7 @@ function processCreateLikeRecordFields({
       }
       });
 
-    yield* Effect.validateAll(modelFields, processField, { concurrency: 1 }).pipe(
+    yield* Effect.validate(modelFields, processField, { concurrency: 1 }).pipe(
       Effect.mapError(foldFieldValidationErrors),
     );
   });
@@ -1030,7 +1030,7 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
 
               const expandedLocale = expandStructuredTextShorthand(localeValue);
 
-              const stInput = yield* Schema.decodeUnknown(StructuredTextWriteInput)(scopeStructuredTextIds(expandedLocale, `${field.api_key}:${localeCode}`)).pipe(
+              const stInput = yield* Schema.decodeUnknownEffect(StructuredTextWriteInput)(scopeStructuredTextIds(expandedLocale, `${field.api_key}:${localeCode}`)).pipe(
                 Effect.mapError((e) => new ValidationError({
                   message: `Invalid StructuredText for field '${field.api_key}' locale '${localeCode}': ${e.message}`,
                   field: field.api_key,
@@ -1063,7 +1063,7 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
 
           const expanded = expandStructuredTextShorthand(data[field.api_key]);
 
-          const stInput = yield* Schema.decodeUnknown(StructuredTextWriteInput)(expanded).pipe(
+          const stInput = yield* Schema.decodeUnknownEffect(StructuredTextWriteInput)(expanded).pipe(
             Effect.mapError((e) => new ValidationError({
               message: `Invalid StructuredText for field '${field.api_key}': ${e.message}`,
               field: field.api_key,
@@ -1216,7 +1216,7 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
             const nextLocaleMap = { ...existingLocaleMap, ...localeMap };
             for (const [localeCode, localeValue] of Object.entries(localeMap)) {
               if (localeValue === null) continue;
-              yield* Schema.decodeUnknown(fieldDef.inputSchema)(localeValue).pipe(
+              yield* Schema.decodeUnknownEffect(fieldDef.inputSchema)(localeValue).pipe(
                 Effect.mapError((e) => new ValidationError({
                   message: `Invalid ${field.field_type} for field '${field.api_key}' locale '${localeCode}': ${e.message}`,
                   field: field.api_key,
@@ -1225,7 +1225,7 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
             }
             data[field.api_key] = nextLocaleMap;
           } else {
-            yield* Schema.decodeUnknown(fieldDef.inputSchema)(data[field.api_key]).pipe(
+            yield* Schema.decodeUnknownEffect(fieldDef.inputSchema)(data[field.api_key]).pipe(
               Effect.mapError((e) => new ValidationError({
                 message: `Invalid ${field.field_type} for field '${field.api_key}': ${e.message}`,
                 field: field.api_key,
@@ -1268,7 +1268,7 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
       }
       });
 
-    yield* Effect.validateAll(modelFields, processField, { concurrency: 1 }).pipe(
+    yield* Effect.validate(modelFields, processField, { concurrency: 1 }).pipe(
       Effect.mapError(foldFieldValidationErrors),
     );
 
@@ -2283,7 +2283,7 @@ function runBulkOp<R>(
     (id) =>
       op(id).pipe(
         Effect.as<BulkOpResult>({ id, ok: true }),
-        Effect.catchAll((error) => Effect.succeed<BulkOpResult>({ id, ok: false, error: describeCmsError(error) })),
+        Effect.catch((error) => Effect.succeed<BulkOpResult>({ id, ok: false, error: describeCmsError(error) })),
       ),
     { concurrency: 1 },
   );

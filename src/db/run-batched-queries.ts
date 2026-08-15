@@ -1,4 +1,4 @@
-import { SqlClient, SqlError } from "@effect/sql";
+import { SqlClient, SqlError } from "effect/unstable/sql";
 import { Effect } from "effect";
 import type { D1Database } from "@cloudflare/workers-types";
 import { recordSqlMetrics } from "../graphql/sql-metrics.js";
@@ -57,7 +57,7 @@ export function runBatchedQueries<T extends object>(
           });
           return results.map((result) => result.results);
         },
-        catch: (cause) => new SqlError.SqlError({ cause, message: "Failed to execute D1 batch query" }),
+        catch: (cause) => new SqlError.SqlError({ reason: new SqlError.UnknownError({ cause, message: "Failed to execute D1 batch query" }) }),
       });
     }
 

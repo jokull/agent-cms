@@ -3,7 +3,7 @@
  * Asset.responsiveImage, SeoField.image, ColorField.hex.
  */
 import { Effect } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import type { AssetRow } from "../db/row-types.js";
 import { compileFilterToSql, compileOrderBy } from "./filter-compiler.js";
 import { UPLOAD_TYPE_DEFS } from "./sdl-constants.js";

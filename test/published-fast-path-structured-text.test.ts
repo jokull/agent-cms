@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { createPublishedFastPath } from "../src/graphql/published-fast-path.js";
 import { createGraphQLHandler } from "../src/graphql/handler.js";
 import { createTestApp, gqlQuery, jsonRequest } from "./app-helpers.js";
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 
 describe("Published fast path StructuredText", () => {
   let handler: (req: Request) => Promise<Response>;
@@ -164,8 +164,8 @@ describe("Published fast path StructuredText", () => {
 
   it("bulk-loads repeated linked records across the whole published tree", async () => {
     const tracedStatements: string[] = [];
-    const originalPrepare = Database.prototype.prepare;
-    Database.prototype.prepare = function patchedPrepare(sqlText: string, ...rest: unknown[]) {
+    const originalPrepare = DatabaseSync.prototype.prepare;
+    DatabaseSync.prototype.prepare = function patchedPrepare(sqlText: string, ...rest: unknown[]) {
       const statement = originalPrepare.call(this, sqlText, ...rest);
       const originalAll = statement.all;
       statement.all = function patchedAll(...params: unknown[]) {
@@ -263,14 +263,14 @@ describe("Published fast path StructuredText", () => {
       const authorQueries = tracedStatements.filter((statement) => statement.includes('SELECT * FROM "content_author" WHERE id IN (?)'));
       expect(authorQueries).toHaveLength(1);
     } finally {
-      Database.prototype.prepare = originalPrepare;
+      DatabaseSync.prototype.prepare = originalPrepare;
     }
   });
 
   it("bulk-loads repeated assets once across recursive roots", async () => {
     const tracedStatements: string[] = [];
-    const originalPrepare = Database.prototype.prepare;
-    Database.prototype.prepare = function patchedPrepare(sqlText: string, ...rest: unknown[]) {
+    const originalPrepare = DatabaseSync.prototype.prepare;
+    DatabaseSync.prototype.prepare = function patchedPrepare(sqlText: string, ...rest: unknown[]) {
       const statement = originalPrepare.call(this, sqlText, ...rest);
       const originalAll = statement.all;
       statement.all = function patchedAll(...params: unknown[]) {
@@ -374,7 +374,7 @@ describe("Published fast path StructuredText", () => {
       expect(assetQueries).toHaveLength(1);
       expect(result?.metrics.byCategory.root?.statementCount).toBe(1);
     } finally {
-      Database.prototype.prepare = originalPrepare;
+      DatabaseSync.prototype.prepare = originalPrepare;
     }
   });
 

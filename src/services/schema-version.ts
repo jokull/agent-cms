@@ -16,7 +16,7 @@
  * every isolate converges within ~TTL of any schema change.
  */
 import { Effect, Layer } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 
 /**
  * How long a built schema/metadata cache is trusted without re-checking the
@@ -65,7 +65,7 @@ export function readSchemaVersionSafe(sqlLayer: Layer.Layer<SqlClient.SqlClient>
   return Effect.runPromise(
     getSchemaVersion().pipe(
       Effect.provide(sqlLayer),
-      Effect.catchAll(() => Effect.succeed(0)),
+      Effect.catch(() => Effect.succeed(0)),
     ),
   );
 }

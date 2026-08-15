@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import { decodeJsonRecordStringOr } from "../json.js";
 import { parseMediaFieldReference } from "../media-field.js";
 import { isObjectRecord } from "../value-utils.js";

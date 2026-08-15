@@ -23,7 +23,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Effect, Layer } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import { createBrowserClient, batchFetchTransport } from "result-rpc/client";
 import { createFetchHandler, serverRpc } from "result-rpc/server";
 import { rpc, wire, ok, err, error } from "result-rpc";

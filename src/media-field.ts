@@ -1,5 +1,5 @@
 import { Context, Effect, Option } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import { decodeJsonIfString, decodeJsonStringOr } from "./json.js";
 import type { AssetRow } from "./db/row-types.js";
 import type { AssetObject } from "./graphql/gql-types.js";
@@ -109,10 +109,10 @@ export interface AssetUrlConfig {
  * builds its layer once per Worker but only learns the request origin per
  * request.
  */
-export class AssetUrlContext extends Context.Tag("AssetUrlContext")<
+export class AssetUrlContext extends Context.Service<
   AssetUrlContext,
   { readonly current: () => AssetUrlConfig }
->() {}
+>()("AssetUrlContext") {}
 
 /** The minimum an asset row needs for URL resolution. */
 export interface AssetUrlSource {

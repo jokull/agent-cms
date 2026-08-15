@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { Effect } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import { createTestApp, jsonRequest, gqlQuery } from "./app-helpers.js";
 
 describe("P2.4: Responsive image + _site query", () => {

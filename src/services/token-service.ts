@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import { NotFoundError, UnauthorizedError, ValidationError } from "../errors.js";
 import type { EditorTokenRow, StoredEditorTokenRow } from "../db/row-types.js";
 

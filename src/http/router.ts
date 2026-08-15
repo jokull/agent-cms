@@ -1,12 +1,11 @@
 import {
+  HttpEffect,
   HttpRouter,
   HttpServerRequest,
   HttpServerResponse,
-  HttpApp,
-  HttpServerError,
-} from "@effect/platform";
+} from "effect/unstable/http";
 import { Cause, Effect, Layer, Logger, Schema, Option } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import * as ModelService from "../services/model-service.js";
 import * as FieldService from "../services/field-service.js";
 import * as RecordService from "../services/record-service.js";
@@ -74,21 +73,21 @@ function handle<A, R>(
 ) {
   return effect.pipe(
     Effect.flatMap((result) => HttpServerResponse.json(result, { status })),
-    Effect.tapErrorCause((cause) => Effect.logError("REST effect failed", Cause.pretty(cause))),
-    Effect.catchAll((error: unknown) => {
+    Effect.tapCause((cause) => Effect.logError("REST effect failed", Cause.pretty(cause))),
+    Effect.catch((error: unknown) => {
       if (isCmsError(error)) {
         const mapped = errorToResponse(error);
         return HttpServerResponse.json(mapped.body, { status: mapped.status });
       }
       return Effect.logError("Unhandled REST error").pipe(
         Effect.annotateLogs({ error: describeUnknown(error) }),
-        Effect.zipRight(HttpServerResponse.json({ error: "Internal server error" }, { status: 500 })),
+        Effect.andThen(HttpServerResponse.json({ error: "Internal server error" }, { status: 500 })),
       );
     }),
-    Effect.catchAllDefect((defect: unknown) => {
+    Effect.catchDefect((defect: unknown) => {
       return Effect.logError("REST defect").pipe(
         Effect.annotateLogs({ defect: describeUnknown(defect) }),
-        Effect.zipRight(HttpServerResponse.json({ error: "Internal server error" }, { status: 500 })),
+        Effect.andThen(HttpServerResponse.json({ error: "Internal server error" }, { status: 500 })),
       );
     })
   );
@@ -103,22 +102,22 @@ function handle<A, R>(
  */
 function handleNoContent<A, R>(effect: Effect.Effect<A, unknown, R>) {
   return effect.pipe(
-    Effect.flatMap(() => HttpServerResponse.empty({ status: 204 })),
-    Effect.tapErrorCause((cause) => Effect.logError("REST effect failed", Cause.pretty(cause))),
-    Effect.catchAll((error: unknown) => {
+    Effect.map(() => HttpServerResponse.empty({ status: 204 })),
+    Effect.tapCause((cause) => Effect.logError("REST effect failed", Cause.pretty(cause))),
+    Effect.catch((error: unknown) => {
       if (isCmsError(error)) {
         const mapped = errorToResponse(error);
         return HttpServerResponse.json(mapped.body, { status: mapped.status });
       }
       return Effect.logError("Unhandled REST error").pipe(
         Effect.annotateLogs({ error: describeUnknown(error) }),
-        Effect.zipRight(HttpServerResponse.json({ error: "Internal server error" }, { status: 500 })),
+        Effect.andThen(HttpServerResponse.json({ error: "Internal server error" }, { status: 500 })),
       );
     }),
-    Effect.catchAllDefect((defect: unknown) =>
+    Effect.catchDefect((defect: unknown) =>
       Effect.logError("REST defect").pipe(
         Effect.annotateLogs({ defect: describeUnknown(defect) }),
-        Effect.zipRight(HttpServerResponse.json({ error: "Internal server error" }, { status: 500 })),
+        Effect.andThen(HttpServerResponse.json({ error: "Internal server error" }, { status: 500 })),
       ),
     ),
   );
@@ -138,12 +137,12 @@ function queryParam(name: string) {
   });
 }
 
-function decodeUnknownInput<A, I, R>(
-  schema: Schema.Schema<A, I, R>,
+function decodeUnknownInput<S extends Schema.Constraint>(
+  schema: S,
   input: unknown,
   message: string = "Invalid input",
 ) {
-  return Schema.decodeUnknown(schema)(input).pipe(
+  return Schema.decodeUnknownEffect(schema)(input).pipe(
     Effect.mapError((e) => new ValidationError({ message: `${message}: ${e.message}` }))
   );
 }
@@ -167,10 +166,12 @@ function currentActor() {
 }
 
 // --- Models ---
-const modelsRouter = HttpRouter.empty.pipe(
-  HttpRouter.get("/", handle(ModelService.listModels())),
+const modelsRouter = HttpRouter.use((router) => {
+  const api = router.prefixed("/api/models");
+  return Effect.all([
+  api.add("GET", "/", handle(ModelService.listModels())),
 
-  HttpRouter.post(
+  api.add("POST", 
     "/",
     Effect.gen(function* () {
       const body = yield* readJsonBody();
@@ -179,7 +180,7 @@ const modelsRouter = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.get(
+  api.add("GET", 
     "/:id",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
@@ -187,7 +188,7 @@ const modelsRouter = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.patch(
+  api.add("PATCH", 
     "/:id",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
@@ -197,18 +198,21 @@ const modelsRouter = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.del(
+  api.add("DELETE", 
     "/:id",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
       return yield* handle(ModelService.deleteModel(param(params, "id")));
     })
   )
-);
+  ]);
+});
 
 // --- Fields ---
-const fieldsRouter = HttpRouter.empty.pipe(
-  HttpRouter.get(
+const fieldsRouter = HttpRouter.use((router) => {
+  const api = router.prefixed("/api");
+  return Effect.all([
+  api.add("GET", 
     "/models/:modelId/fields",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
@@ -216,7 +220,7 @@ const fieldsRouter = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.post(
+  api.add("POST", 
     "/models/:modelId/fields",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
@@ -226,7 +230,7 @@ const fieldsRouter = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.patch(
+  api.add("PATCH", 
     "/models/:modelId/fields/:fieldId",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
@@ -236,18 +240,21 @@ const fieldsRouter = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.del(
+  api.add("DELETE", 
     "/models/:modelId/fields/:fieldId",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
       return yield* handle(FieldService.deleteField(param(params, "fieldId")));
     })
   )
-);
+  ]);
+});
 
 // --- Records ---
-const recordsRouter1 = HttpRouter.empty.pipe(
-  HttpRouter.post(
+const recordsRouter1 = HttpRouter.use((router) => {
+  const api = router.prefixed("/api");
+  return Effect.all([
+  api.add("POST", 
     "/records/bulk",
     Effect.gen(function* () {
       const body = yield* readJsonBody();
@@ -257,7 +264,7 @@ const recordsRouter1 = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.post(
+  api.add("POST", 
     "/records",
     Effect.gen(function* () {
       const body = yield* readJsonBody();
@@ -267,7 +274,7 @@ const recordsRouter1 = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.get(
+  api.add("GET", 
     "/records",
     Effect.gen(function* () {
       const modelApiKey = yield* queryParam("modelApiKey");
@@ -276,7 +283,7 @@ const recordsRouter1 = HttpRouter.empty.pipe(
   ),
 
   // --- Queryable list / picker / bulk (static paths, before /records/:id) ---
-  HttpRouter.post(
+  api.add("POST", 
     "/records/query",
     Effect.gen(function* () {
       const body = yield* readJsonBody();
@@ -291,7 +298,7 @@ const recordsRouter1 = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.get(
+  api.add("GET", 
     "/records/picker-search",
     Effect.gen(function* () {
       const req = yield* HttpServerRequest.HttpServerRequest;
@@ -308,7 +315,7 @@ const recordsRouter1 = HttpRouter.empty.pipe(
   ),
 
   // Validation dry-run (create-shaped) — 204 valid / 400 issues, no persistence
-  HttpRouter.post(
+  api.add("POST", 
     "/records/validate",
     Effect.gen(function* () {
       const body = yield* readJsonBody();
@@ -317,7 +324,7 @@ const recordsRouter1 = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.post(
+  api.add("POST", 
     "/records/bulk-publish",
     Effect.gen(function* () {
       const body = yield* readJsonBody();
@@ -327,7 +334,7 @@ const recordsRouter1 = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.post(
+  api.add("POST", 
     "/records/bulk-unpublish",
     Effect.gen(function* () {
       const body = yield* readJsonBody();
@@ -337,7 +344,7 @@ const recordsRouter1 = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.post(
+  api.add("POST", 
     "/records/bulk-delete",
     Effect.gen(function* () {
       const body = yield* readJsonBody();
@@ -346,11 +353,14 @@ const recordsRouter1 = HttpRouter.empty.pipe(
       return yield* handle(RecordService.deleteRecords(input.modelApiKey, input.ids, actor));
     })
   ),
-);
+  ]);
+});
 
-const recordsRouter2 = HttpRouter.empty.pipe(
+const recordsRouter2 = HttpRouter.use((router) => {
+  const api = router.prefixed("/api");
+  return Effect.all([
   // --- Versions (must be before /records/:id) ---
-  HttpRouter.get(
+  api.add("GET", 
     "/records/:id/versions",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
@@ -359,7 +369,7 @@ const recordsRouter2 = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.get(
+  api.add("GET", 
     "/records/:id/versions/:versionId",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
@@ -367,7 +377,7 @@ const recordsRouter2 = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.post(
+  api.add("POST", 
     "/records/:id/versions/:versionId/restore",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
@@ -378,7 +388,7 @@ const recordsRouter2 = HttpRouter.empty.pipe(
   ),
 
   // Inbound references (backlinks) — before /records/:id
-  HttpRouter.get(
+  api.add("GET", 
     "/records/:id/links",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
@@ -388,7 +398,7 @@ const recordsRouter2 = HttpRouter.empty.pipe(
   ),
 
   // Duplicate a record
-  HttpRouter.post(
+  api.add("POST", 
     "/records/:id/duplicate",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
@@ -403,7 +413,7 @@ const recordsRouter2 = HttpRouter.empty.pipe(
   ),
 
   // Validation dry-run (patch-shaped) — 204 valid / 400 issues / 404 missing
-  HttpRouter.post(
+  api.add("POST", 
     "/records/:id/validate",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
@@ -414,7 +424,7 @@ const recordsRouter2 = HttpRouter.empty.pipe(
   ),
 
   // Sync state — sidebar status cluster (publish/schedule timestamps + diff)
-  HttpRouter.get(
+  api.add("GET", 
     "/records/:id/sync-state",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
@@ -423,7 +433,7 @@ const recordsRouter2 = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.get(
+  api.add("GET", 
     "/records/:id",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
@@ -432,7 +442,7 @@ const recordsRouter2 = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.patch(
+  api.add("PATCH", 
     "/records/:id",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
@@ -444,7 +454,7 @@ const recordsRouter2 = HttpRouter.empty.pipe(
   ),
 
   // Partial block update for structured text fields
-  HttpRouter.patch(
+  api.add("PATCH", 
     "/records/:id/blocks",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
@@ -458,7 +468,7 @@ const recordsRouter2 = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.del(
+  api.add("DELETE", 
     "/records/:id",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
@@ -468,7 +478,7 @@ const recordsRouter2 = HttpRouter.empty.pipe(
   ),
 
   // Publish / Unpublish
-  HttpRouter.post(
+  api.add("POST", 
     "/records/:id/publish",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
@@ -478,7 +488,7 @@ const recordsRouter2 = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.post(
+  api.add("POST", 
     "/records/:id/unpublish",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
@@ -488,7 +498,7 @@ const recordsRouter2 = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.post(
+  api.add("POST", 
     "/records/:id/schedule-publish",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
@@ -499,7 +509,7 @@ const recordsRouter2 = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.post(
+  api.add("POST", 
     "/records/:id/schedule-unpublish",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
@@ -510,7 +520,7 @@ const recordsRouter2 = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.post(
+  api.add("POST", 
     "/records/:id/clear-schedule",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
@@ -522,7 +532,7 @@ const recordsRouter2 = HttpRouter.empty.pipe(
   ),
 
   // Reorder
-  HttpRouter.post(
+  api.add("POST", 
     "/reorder",
     Effect.gen(function* () {
       const rawBody = yield* readJsonBody();
@@ -535,14 +545,17 @@ const recordsRouter2 = HttpRouter.empty.pipe(
       );
     })
   )
-);
+  ]);
+});
 
-const recordsRouter = recordsRouter1.pipe(HttpRouter.concat(recordsRouter2));
+const recordsRouter = Layer.merge(recordsRouter1, recordsRouter2);
 
 // --- Assets ---
 // Upload URL endpoint is handled in fetchHandler (needs r2Credentials from options)
-const assetsRouter = HttpRouter.empty.pipe(
-  HttpRouter.get(
+const assetsRouter = HttpRouter.use((router) => {
+  const api = router.prefixed("/api/assets");
+  return Effect.all([
+  api.add("GET", 
     "/",
     Effect.gen(function* () {
       const req = yield* HttpServerRequest.HttpServerRequest;
@@ -567,7 +580,7 @@ const assetsRouter = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.post(
+  api.add("POST", 
     "/",
     Effect.gen(function* () {
       const body = yield* readJsonBody();
@@ -577,7 +590,7 @@ const assetsRouter = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.post(
+  api.add("POST", 
     "/import-from-url",
     Effect.gen(function* () {
       const body = yield* readJsonBody();
@@ -587,7 +600,7 @@ const assetsRouter = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.get(
+  api.add("GET", 
     "/:id",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
@@ -595,7 +608,7 @@ const assetsRouter = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.get(
+  api.add("GET", 
     "/:id/usages",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
@@ -605,7 +618,7 @@ const assetsRouter = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.put(
+  api.add("PUT", 
     "/:id",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
@@ -616,7 +629,7 @@ const assetsRouter = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.patch(
+  api.add("PATCH", 
     "/:id",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
@@ -627,7 +640,7 @@ const assetsRouter = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.del(
+  api.add("DELETE", 
     "/:id",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
@@ -636,12 +649,15 @@ const assetsRouter = HttpRouter.empty.pipe(
       return yield* handle(AssetService.deleteAsset(param(params, "id"), force));
     })
   )
-);
+  ]);
+});
 
 // --- Locales ---
-const localesRouter = HttpRouter.empty.pipe(
-  HttpRouter.get("/", handle(LocaleService.listLocales())),
-  HttpRouter.post(
+const localesRouter = HttpRouter.use((router) => {
+  const api = router.prefixed("/api/locales");
+  return Effect.all([
+  api.add("GET", "/", handle(LocaleService.listLocales())),
+  api.add("POST", 
     "/",
     Effect.gen(function* () {
       const body = yield* readJsonBody();
@@ -649,20 +665,23 @@ const localesRouter = HttpRouter.empty.pipe(
       return yield* handle(LocaleService.createLocale(input), 201);
     })
   ),
-  HttpRouter.del(
+  api.add("DELETE", 
     "/:id",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
       return yield* handle(LocaleService.deleteLocale(param(params, "id")));
     })
   )
-);
+  ]);
+});
 
 // --- Schema Import/Export ---
-const schemaRouter = HttpRouter.empty.pipe(
-  HttpRouter.get("/", handle(SchemaIO.exportSchema())),
+const schemaRouter = HttpRouter.use((router) => {
+  const api = router.prefixed("/api/schema");
+  return Effect.all([
+  api.add("GET", "/", handle(SchemaIO.exportSchema())),
 
-  HttpRouter.post(
+  api.add("POST", 
     "/",
     Effect.gen(function* () {
       const body = yield* readJsonBody();
@@ -670,11 +689,14 @@ const schemaRouter = HttpRouter.empty.pipe(
       return yield* handle(SchemaIO.importSchema(input), 201);
     })
   )
-);
+  ]);
+});
 
 // --- Search ---
-const searchRouter = HttpRouter.empty.pipe(
-  HttpRouter.post(
+const searchRouter = HttpRouter.use((router) => {
+  const api = router.prefixed("/api/search");
+  return Effect.all([
+  api.add("POST", 
     "/",
     Effect.gen(function* () {
       const body = yield* readJsonBody();
@@ -683,7 +705,7 @@ const searchRouter = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.post(
+  api.add("POST", 
     "/reindex",
     Effect.gen(function* () {
       const body = yield* readJsonBody();
@@ -692,13 +714,16 @@ const searchRouter = HttpRouter.empty.pipe(
       return yield* handle(SearchService.reindexAll(modelApiKey));
     })
   )
-);
+  ]);
+});
 
 // --- Tokens ---
-const tokensRouter = HttpRouter.empty.pipe(
-  HttpRouter.get("/", handle(TokenService.listEditorTokens())),
+const tokensRouter = HttpRouter.use((router) => {
+  const api = router.prefixed("/api/tokens");
+  return Effect.all([
+  api.add("GET", "/", handle(TokenService.listEditorTokens())),
 
-  HttpRouter.post(
+  api.add("POST", 
     "/",
     Effect.gen(function* () {
       const body = yield* readJsonBody();
@@ -707,18 +732,21 @@ const tokensRouter = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.del(
+  api.add("DELETE", 
     "/:id",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
       return yield* handle(TokenService.revokeEditorToken(param(params, "id")));
     })
   )
-);
+  ]);
+});
 
 // --- Preview Tokens ---
-const previewTokensRouter = HttpRouter.empty.pipe(
-  HttpRouter.post(
+const previewTokensRouter = HttpRouter.use((router) => {
+  const api = router.prefixed("/api/preview-tokens");
+  return Effect.all([
+  api.add("POST", 
     "/",
     Effect.gen(function* () {
       const body = yield* readJsonBody();
@@ -729,60 +757,71 @@ const previewTokensRouter = HttpRouter.empty.pipe(
     })
   ),
 
-  HttpRouter.get(
+  api.add("GET", 
     "/validate",
     Effect.gen(function* () {
       const token = yield* queryParam("token");
       return yield* handle(PreviewService.validatePreviewToken(token));
     })
   ),
-);
+  ]);
+});
 
 // --- Canonical paths ---
-const pathsRouter = HttpRouter.empty.pipe(
-  HttpRouter.get(
+const pathsRouter = HttpRouter.use((router) => {
+  const api = router.prefixed("/paths");
+  return Effect.all([
+  api.add("GET", 
     "/:modelApiKey",
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
       return yield* handle(PathService.resolveCanonicalPaths(param(params, "modelApiKey")));
     })
   ),
-);
+  ]);
+});
 
 // --- Setup / bootstrap ---
-const setupRouter = HttpRouter.empty.pipe(
-  HttpRouter.post(
+const setupRouter = HttpRouter.use((router) => {
+  const api = router.prefixed("/api");
+  return Effect.all([
+  api.add("POST", 
     "/setup",
     handle(ensureSchema().pipe(Effect.as({ ok: true })))
   )
-);
+  ]);
+});
 
 // --- Health ---
-const healthRouter = HttpRouter.empty.pipe(
-  HttpRouter.get("/health", HttpServerResponse.json({ status: "ok" }))
+const healthRouter = HttpRouter.use((router) =>
+  Effect.all([
+  router.add("GET", "/health", HttpServerResponse.json({ status: "ok" }))
+  ])
 );
 
 // --- OpenAPI spec ---
 import { openApiSpec } from "./api/index.js";
-const openApiRouter = HttpRouter.empty.pipe(
-  HttpRouter.get("/openapi.json", HttpServerResponse.json(openApiSpec))
+const openApiRouter = HttpRouter.use((router) =>
+  Effect.all([
+  router.add("GET", "/openapi.json", HttpServerResponse.json(openApiSpec))
+  ])
 );
 
 // --- Combine all routes ---
-export const appRouter = HttpRouter.empty.pipe(
-  HttpRouter.concat(openApiRouter),
-  HttpRouter.concat(healthRouter),
-  HttpRouter.concat(modelsRouter.pipe(HttpRouter.prefixAll("/api/models"))),
-  HttpRouter.concat(fieldsRouter.pipe(HttpRouter.prefixAll("/api"))),
-  HttpRouter.concat(recordsRouter.pipe(HttpRouter.prefixAll("/api"))),
-  HttpRouter.concat(assetsRouter.pipe(HttpRouter.prefixAll("/api/assets"))),
-  HttpRouter.concat(localesRouter.pipe(HttpRouter.prefixAll("/api/locales"))),
-  HttpRouter.concat(schemaRouter.pipe(HttpRouter.prefixAll("/api/schema"))),
-  HttpRouter.concat(searchRouter.pipe(HttpRouter.prefixAll("/api/search"))),
-  HttpRouter.concat(tokensRouter.pipe(HttpRouter.prefixAll("/api/tokens"))),
-  HttpRouter.concat(previewTokensRouter.pipe(HttpRouter.prefixAll("/api/preview-tokens"))),
-  HttpRouter.concat(setupRouter.pipe(HttpRouter.prefixAll("/api"))),
-  HttpRouter.concat(pathsRouter.pipe(HttpRouter.prefixAll("/paths"))),
+export const appRouter = Layer.mergeAll(
+  openApiRouter,
+  healthRouter,
+  modelsRouter,
+  fieldsRouter,
+  recordsRouter,
+  assetsRouter,
+  localesRouter,
+  schemaRouter,
+  searchRouter,
+  tokensRouter,
+  previewTokensRouter,
+  setupRouter,
+  pathsRouter,
 );
 
 /**
@@ -848,7 +887,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
   const assetUrlLayer = Layer.succeed(AssetUrlContext, {
     current: (): AssetUrlConfig => assetUrlConfig,
   });
-  const fullLayer = Layer.mergeAll(sqlLayer, vectorizeLayer, hooksLayer, assetImportLayer, assetUrlLayer, Logger.json);
+  const fullLayer = Layer.mergeAll(sqlLayer, vectorizeLayer, hooksLayer, assetImportLayer, assetUrlLayer, Logger.layer([Logger.formatJson]));
 
   const runLoggedEffect = (effect: Effect.Effect<unknown, unknown>) => {
     Effect.runFork(effect.pipe(Effect.provide(fullLayer), Effect.orDie));
@@ -862,25 +901,24 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
     runLoggedEffect(Effect.logError(message).pipe(Effect.annotateLogs(fields)));
   };
 
-  const restApp = Effect.flatten(HttpRouter.toHttpApp(appRouter)).pipe(
-    Effect.catchAll((error: unknown) => {
-      if (isCmsError(error)) {
-        const mapped = errorToResponse(error);
-        return HttpServerResponse.json(mapped.body, { status: mapped.status });
-      }
-      // RouteNotFound from @effect/platform router
-      if (error instanceof HttpServerError.RouteNotFound) {
-        return HttpServerResponse.json({ error: "Not found" }, { status: 404 });
-      }
-      return Effect.logError("REST handler error").pipe(
-        Effect.annotateLogs({ error: describeUnknown(error) }),
-        Effect.zipRight(HttpServerResponse.json({ error: "Internal server error" }, { status: 500 })),
-      );
-    }),
-    Effect.provide(fullLayer)
-  );
-  // @effect/platform router type variance requires this assertion
-  const restHandler = HttpApp.toWebHandler(restApp as HttpApp.Default);
+  const restHandler = HttpEffect.toWebHandlerLayer(
+    Effect.provide(
+      Effect.flatten(HttpRouter.toHttpEffect(appRouter)).pipe(
+        Effect.catch((error: unknown) => {
+          if (isCmsError(error)) {
+            const mapped = errorToResponse(error);
+            return HttpServerResponse.json(mapped.body, { status: mapped.status });
+          }
+          return Effect.logError("REST handler error").pipe(
+            Effect.annotateLogs({ error: describeUnknown(error) }),
+            Effect.andThen(HttpServerResponse.json({ error: "Internal server error" }, { status: 500 })),
+          );
+        }),
+      ),
+      fullLayer,
+    ),
+    Layer.empty,
+  ).handler;
 
   // Lazy-import handlers to avoid circular deps
   let graphqlInstance: {
@@ -1212,25 +1250,20 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
         // Standard MCP fallback (no loader)
         const { createMcpHttpHandler } = await import("../mcp/http-transport.js");
         const actor = await getRequestActor(instrumentedRequest);
-        const handler = actor?.type === "admin"
-          ? (mcpHandler ??= createMcpHttpHandler(fullLayer, {
-              mode: "admin",
-              path: "/mcp",
-              r2Bucket: options?.r2Bucket,
-              r2Credentials: options?.r2Credentials,
-              assetBaseUrl: options?.assetBaseUrl,
-              siteUrl: options?.siteUrl,
-              actor,
-            }))
-          : createMcpHttpHandler(fullLayer, {
-              mode: "admin",
-              path: "/mcp",
-              r2Bucket: options?.r2Bucket,
-              r2Credentials: options?.r2Credentials,
-              assetBaseUrl: options?.assetBaseUrl,
-              siteUrl: options?.siteUrl,
-              actor,
-            });
+        const mcpHeaders = new Headers(instrumentedRequest.headers);
+        for (const [key, value] of Object.entries(actorHeaders(actor))) {
+          mcpHeaders.set(key, value);
+        }
+        instrumentedRequest = new Request(instrumentedRequest, { headers: mcpHeaders });
+        const handler = mcpHandler ??= createMcpHttpHandler(fullLayer, {
+          mode: "admin",
+          path: "/mcp",
+          r2Bucket: options?.r2Bucket,
+          r2Credentials: options?.r2Credentials,
+          assetBaseUrl: options?.assetBaseUrl,
+          siteUrl: options?.siteUrl,
+          actor,
+        });
         return finish(await handler(instrumentedRequest));
       }
 
@@ -1263,25 +1296,20 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
         // Standard MCP fallback (no loader)
         const { createMcpHttpHandler } = await import("../mcp/http-transport.js");
         const actor = await getRequestActor(instrumentedRequest);
-        const handler = actor?.type === "editor"
-          ? createMcpHttpHandler(fullLayer, {
-              mode: "editor",
-              path: "/mcp/editor",
-              r2Bucket: options?.r2Bucket,
-              r2Credentials: options?.r2Credentials,
-              assetBaseUrl: options?.assetBaseUrl,
-              siteUrl: options?.siteUrl,
-              actor,
-            })
-          : (mcpEditorHandler ??= createMcpHttpHandler(fullLayer, {
-              mode: "editor",
-              path: "/mcp/editor",
-              r2Bucket: options?.r2Bucket,
-              r2Credentials: options?.r2Credentials,
-              assetBaseUrl: options?.assetBaseUrl,
-              siteUrl: options?.siteUrl,
-              actor,
-            }));
+        const mcpHeaders = new Headers(instrumentedRequest.headers);
+        for (const [key, value] of Object.entries(actorHeaders(actor))) {
+          mcpHeaders.set(key, value);
+        }
+        instrumentedRequest = new Request(instrumentedRequest, { headers: mcpHeaders });
+        const handler = mcpEditorHandler ??= createMcpHttpHandler(fullLayer, {
+          mode: "editor",
+          path: "/mcp/editor",
+          r2Bucket: options?.r2Bucket,
+          r2Credentials: options?.r2Credentials,
+          assetBaseUrl: options?.assetBaseUrl,
+          siteUrl: options?.siteUrl,
+          actor,
+        });
         return finish(await handler(instrumentedRequest));
       }
 

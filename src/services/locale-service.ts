@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import { generateId } from "../id.js";
 import { DuplicateError } from "../errors.js";
 import type { LocaleRow } from "../db/row-types.js";

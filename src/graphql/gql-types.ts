@@ -2,7 +2,7 @@
  * Shared types for the GraphQL schema builder modules.
  */
 import type { Effect } from "effect";
-import type { SqlClient } from "@effect/sql";
+import type { SqlClient } from "effect/unstable/sql";
 import type { AssetRow, ModelRow, ParsedFieldRow } from "../db/row-types.js";
 
 /** A dynamic row from a content/block table */

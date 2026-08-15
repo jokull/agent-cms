@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { Effect, Layer } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import { createTestApp, jsonRequest } from "./app-helpers.js";
 
 /** Count rows in a table using the app's shared SQL layer. */

@@ -2,7 +2,7 @@
  * Build GraphQL types and field resolvers for content models.
  */
 import { Effect } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import { getLinkTargets, getLinksTargets, computeIsValid, findUniqueConstraintViolations } from "../db/validators.js";
 import type { SchemaBuilderContext, ModelQueryMeta, DynamicRow, GqlContext, AssetObject } from "./gql-types.js";
 import { toTypeName, toCamelCase, fieldToSDL, getRegistryDef, deserializeRecord, decodeSnapshot, resolveVideoField } from "./gql-utils.js";

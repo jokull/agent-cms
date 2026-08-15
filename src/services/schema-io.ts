@@ -5,7 +5,7 @@
  * Import creates all locales, models, and fields in dependency order.
  */
 import { Effect } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import { ValidationError } from "../errors.js";
 import type { ModelRow, FieldRow, LocaleRow } from "../db/row-types.js";
 import * as ModelService from "./model-service.js";

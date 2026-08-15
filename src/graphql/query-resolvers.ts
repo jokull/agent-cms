@@ -3,7 +3,7 @@
  * list queries, single queries, meta queries, and filter/orderBy type defs.
  */
 import { Effect } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import { compileFilterToSql, compileOrderBy, type FilterCompilerOpts } from "./filter-compiler.js";
 import { computeIsValid, findUniqueConstraintViolations, getBlockWhitelist } from "../db/validators.js";
 import type { GraphQLResolveInfo } from "graphql";

@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import { generateId } from "../id.js";
 import { NotFoundError, ValidationError } from "../errors.js";
 import { selectById } from "../schema-engine/sql-records.js";

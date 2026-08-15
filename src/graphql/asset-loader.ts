@@ -17,7 +17,7 @@
  * and those overlay rules differ between content fields, block fields and SEO.
  */
 import { Effect } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import type { AssetRow } from "../db/row-types.js";
 import type { GqlContext } from "./gql-types.js";
 

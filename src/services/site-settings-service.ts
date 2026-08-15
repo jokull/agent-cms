@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import { SchemaEngineError, ValidationError } from "../errors.js";
 
 type SiteSettingsInput = {

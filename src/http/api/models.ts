@@ -4,7 +4,7 @@
  * Defines the declarative API shape — handlers are implemented separately
  * via HttpApiBuilder.group().
  */
-import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "@effect/platform";
+import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi";
 import { Schema } from "effect";
 import {
   CreateModelInput,
@@ -51,32 +51,37 @@ export const modelsGroup = HttpApiGroup.make("models")
   .annotate(OpenApi.Title, "Models")
   .annotate(OpenApi.Description, "Content model management")
   .add(
-    HttpApiEndpoint.get("listModels", "/models")
-      .annotate(OpenApi.Summary, "List all content models")
-      .addSuccess(Schema.Array(ModelResponse)),
+    HttpApiEndpoint.get("listModels", "/models", {
+      success: Schema.Array(ModelResponse),
+    })
+      .annotate(OpenApi.Summary, "List all content models"),
   )
   .add(
-    HttpApiEndpoint.post("createModel", "/models")
-      .annotate(OpenApi.Summary, "Create a new content model")
-      .setPayload(CreateModelInput)
-      .addSuccess(ModelResponse, { status: 201 }),
+    HttpApiEndpoint.post("createModel", "/models", {
+      payload: CreateModelInput,
+      success: HttpApiSchema.status(201)(ModelResponse),
+    })
+      .annotate(OpenApi.Summary, "Create a new content model"),
   )
   .add(
-    HttpApiEndpoint.get("getModel", "/models/:id")
-      .annotate(OpenApi.Summary, "Get a content model by ID or api_key")
-      .setPath(Schema.Struct({ id: Schema.String }))
-      .addSuccess(ModelWithFieldsResponse),
+    HttpApiEndpoint.get("getModel", "/models/:id", {
+      params: Schema.Struct({ id: Schema.String }),
+      success: ModelWithFieldsResponse,
+    })
+      .annotate(OpenApi.Summary, "Get a content model by ID or api_key"),
   )
   .add(
-    HttpApiEndpoint.patch("updateModel", "/models/:id")
-      .annotate(OpenApi.Summary, "Update a content model")
-      .setPath(Schema.Struct({ id: Schema.String }))
-      .setPayload(UpdateModelInput)
-      .addSuccess(ModelResponse),
+    HttpApiEndpoint.patch("updateModel", "/models/:id", {
+      params: Schema.Struct({ id: Schema.String }),
+      payload: UpdateModelInput,
+      success: ModelResponse,
+    })
+      .annotate(OpenApi.Summary, "Update a content model"),
   )
   .add(
-    HttpApiEndpoint.del("deleteModel", "/models/:id")
-      .annotate(OpenApi.Summary, "Delete a content model")
-      .setPath(Schema.Struct({ id: Schema.String }))
-      .addSuccess(DeleteModelResponse),
+    HttpApiEndpoint.make("DELETE")("deleteModel", "/models/:id", {
+      params: Schema.Struct({ id: Schema.String }),
+      success: DeleteModelResponse,
+    })
+      .annotate(OpenApi.Summary, "Delete a content model"),
   );
