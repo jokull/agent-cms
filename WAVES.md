@@ -88,3 +88,34 @@ Remaining gens (next sweeps): router.ts routes/helpers (~57), mcp handlers,
 graphql resolvers, inner arrow gens (`const f = (x) => Effect.gen(...)`).
 Also flagged from docs: DateTime module (6 Date sites), RequestResolver
 (4 hand-rolled graphql loaders), Model.Class (does not fit dynamic models).
+
+## Wave 9 — DateTime, RequestResolver, Effect.fn remainder (PLAN.md)
+
+Three docs-driven sweeps, four commits:
+
+1. **DateTime** (`5c19816`): ai-docs 07_datetime "use the DateTime module
+   instead of Date and Date.now". rc.109 facts (probe-verified): DateTime is
+   NOT a Date subclass anymore (Utc = Proto{epochMilliseconds}); formatIso ==
+   toISOString byte-for-byte; make() parses date-only/full/partial ISO;
+   nowUnsafe is the LazyArg form; nowAsDate/fromDateUnsafe bridge Date
+   boundaries. Sites: router request timing -> performance.now (duration,
+   not calendar); runScheduledTransitions Date param -> DateTime.DateTime +
+   formatIso; index.ts Date boundary bridges via fromDateUnsafe; field-types/
+   validators parse via DateTime.make Option; write-path toISOString ->
+   formatIso(yield* DateTime.now) (Clock-testable); preview expiry via
+   DateTime.add. Kept raw: JWT epoch arithmetic, host-Date serialization.
+2. **RequestResolver** (`a1927df` + `1f0a0c5`): ai-docs 05_batching —
+   Request.Class + RequestResolver + setDelay + withCache replaces all four
+   hand-rolled promise loaders (asset, linked-record, reverse-ref,
+   structured-text). rc.109 facts: make/setDelay -> value; withCache ->
+   Effect<RequestResolver> (evaluate ONCE — passing the Effect form rebuilds
+   the cache per request); requests dedupe/cache structurally
+   (StructuralProto). Race fix: resolver caches store the build PROMISE —
+   lazy value caching let concurrent first callers scatter the batch
+   (12 statements instead of 3; batching test caught it). Behavior delta:
+   withCache caches failures (old loaders evicted) — accepted, documented.
+   GqlContext loader-machinery fields deleted.
+3. **Effect.fn named helpers** (`97a435d`): router queryParam/readJsonBody/
+   currentActor + mcp requestActor/addPreviewPath/addPreviewPathToList.
+   Inline closures (route handlers, withDecoded tool bodies) stay — names
+   live in route/tool registries.
