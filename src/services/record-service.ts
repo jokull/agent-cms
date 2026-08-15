@@ -72,27 +72,23 @@ function applyActorColumns(
   if (options?.published) target._published_by = actor.label;
 }
 
-function getModelByApiKey(apiKey: string) {
-  return Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    const models = yield* sql.unsafe<ModelRow>(
-      "SELECT * FROM models WHERE api_key = ?",
-      [apiKey]
-    );
-    return models.length > 0 ? models[0] : null;
-  });
-}
+const getModelByApiKey = Effect.fn("getModelByApiKey")(function* (apiKey: string) {
+  const sql = yield* SqlClient.SqlClient;
+  const models = yield* sql.unsafe<ModelRow>(
+    "SELECT * FROM models WHERE api_key = ?",
+    [apiKey]
+  );
+  return models.length > 0 ? models[0] : null;
+});
 
-function getModelFields(modelId: string) {
-  return Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    const fields = yield* sql.unsafe<FieldRow>(
-      "SELECT * FROM fields WHERE model_id = ? ORDER BY position",
-      [modelId]
-    );
-    return fields.map(parseFieldValidators);
-  });
-}
+const getModelFields = Effect.fn("getModelFields")(function* (modelId: string) {
+  const sql = yield* SqlClient.SqlClient;
+  const fields = yield* sql.unsafe<FieldRow>(
+    "SELECT * FROM fields WHERE model_id = ? ORDER BY position",
+    [modelId]
+  );
+  return fields.map(parseFieldValidators);
+});
 
 function isEmptyFieldValue(value: unknown): boolean {
   return value === undefined || value === null || value === "";
@@ -330,86 +326,82 @@ function getAssetIds(fieldType: string, value: unknown): string[] {
   return [];
 }
 
-function validateAssetFieldValue(
+const validateAssetFieldValue = Effect.fn("validateAssetFieldValue")(function* (
   sql: SqlClient.SqlClient,
   field: ParsedFieldRow,
   value: unknown,
   errorPrefix?: string,
 ) {
-  return Effect.gen(function* () {
-    const assetIds = getAssetIds(field.field_type, value);
-    if (assetIds.length === 0) {
-      return;
-    }
+  const assetIds = getAssetIds(field.field_type, value);
+  if (assetIds.length === 0) {
+    return;
+  }
 
-    const placeholders = assetIds.map(() => "?").join(", ");
-    const found = yield* sql.unsafe<{ id: string }>(
-      `SELECT id FROM assets WHERE id IN (${placeholders})`,
-      assetIds,
-    );
-    const foundIds = new Set(found.map((row) => row.id));
-    const missing = assetIds.filter((id) => !foundIds.has(id));
-    if (missing.length > 0) {
-      return yield* new ValidationError({
-        message: createFieldErrorMessage(errorPrefix, `Asset(s) not found for field '${field.api_key}': ${missing.join(", ")}`),
-        field: field.api_key,
-        code: "type",
-      });
-    }
-  });
-}
+  const placeholders = assetIds.map(() => "?").join(", ");
+  const found = yield* sql.unsafe<{ id: string }>(
+    `SELECT id FROM assets WHERE id IN (${placeholders})`,
+    assetIds,
+  );
+  const foundIds = new Set(found.map((row) => row.id));
+  const missing = assetIds.filter((id) => !foundIds.has(id));
+  if (missing.length > 0) {
+    return yield* new ValidationError({
+      message: createFieldErrorMessage(errorPrefix, `Asset(s) not found for field '${field.api_key}': ${missing.join(", ")}`),
+      field: field.api_key,
+      code: "type",
+    });
+  }
+});
 
-function validateReferenceFieldValue(
+const validateReferenceFieldValue = Effect.fn("validateReferenceFieldValue")(function* (
   sql: SqlClient.SqlClient,
   field: ParsedFieldRow,
   value: unknown,
   errorPrefix?: string,
 ) {
-  return Effect.gen(function* () {
-    const targetModelApiKeys = field.field_type === "link"
-      ? getLinkTargets(field.validators)
-      : field.field_type === "links"
-        ? getLinksTargets(field.validators)
-        : undefined;
-    const referenceIds = getReferenceIds(field.field_type, value);
+  const targetModelApiKeys = field.field_type === "link"
+    ? getLinkTargets(field.validators)
+    : field.field_type === "links"
+      ? getLinksTargets(field.validators)
+      : undefined;
+  const referenceIds = getReferenceIds(field.field_type, value);
 
-    if (!targetModelApiKeys || referenceIds.length === 0) {
-      return;
-    }
+  if (!targetModelApiKeys || referenceIds.length === 0) {
+    return;
+  }
 
-    const placeholders = targetModelApiKeys.map(() => "?").join(", ");
-    const targetModels = yield* sql.unsafe<ModelRow>(
-      `SELECT * FROM models WHERE api_key IN (${placeholders})`,
-      targetModelApiKeys,
+  const placeholders = targetModelApiKeys.map(() => "?").join(", ");
+  const targetModels = yield* sql.unsafe<ModelRow>(
+    `SELECT * FROM models WHERE api_key IN (${placeholders})`,
+    targetModelApiKeys,
+  );
+
+  const foundIds = new Set<string>();
+  for (const model of targetModels) {
+    const idPlaceholders = referenceIds.map(() => "?").join(", ");
+    const rows = yield* sql.unsafe<{ id: string }>(
+      `SELECT id FROM "content_${model.api_key}" WHERE id IN (${idPlaceholders})`,
+      referenceIds,
     );
-
-    const foundIds = new Set<string>();
-    for (const model of targetModels) {
-      const idPlaceholders = referenceIds.map(() => "?").join(", ");
-      const rows = yield* sql.unsafe<{ id: string }>(
-        `SELECT id FROM "content_${model.api_key}" WHERE id IN (${idPlaceholders})`,
-        referenceIds,
-      );
-      for (const row of rows) {
-        foundIds.add(row.id);
-      }
+    for (const row of rows) {
+      foundIds.add(row.id);
     }
+  }
 
-    const missingIds = referenceIds.filter((id) => !foundIds.has(id));
-    if (missingIds.length > 0) {
-      return yield* new ValidationError({
-        message: createFieldErrorMessage(
-          errorPrefix,
-          `Linked record(s) not found for field '${field.api_key}': ${missingIds.join(", ")}`,
-        ),
-        field: field.api_key,
-        code: "link_target",
-      });
-    }
-  });
-}
+  const missingIds = referenceIds.filter((id) => !foundIds.has(id));
+  if (missingIds.length > 0) {
+    return yield* new ValidationError({
+      message: createFieldErrorMessage(
+        errorPrefix,
+        `Linked record(s) not found for field '${field.api_key}': ${missingIds.join(", ")}`,
+      ),
+      field: field.api_key,
+      code: "link_target",
+    });
+  }
+});
 
-function processCreateLikeRecordFields({
+const processCreateLikeRecordFields = Effect.fn("processCreateLikeRecordFields")(function* ({
   modelApiKey,
   tableName,
   recordId,
@@ -420,302 +412,300 @@ function processCreateLikeRecordFields({
   skipReferenceValidation,
   dryRun,
 }: CreateLikeFieldProcessingParams) {
-  return Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
+  const sql = yield* SqlClient.SqlClient;
 
-    // Validate/process every field, ACCUMULATING per-field failures across the
-    // whole loop instead of aborting on the first bad field (Dato-style
-    // whole-form error mapping). `Effect.validateAll` runs each field's effect
-    // (sequential — side effects like structured-text block writes must keep
-    // their order) and collects all failures; `foldFieldValidationErrors` then
-    // fails once with an AggregateValidationError carrying every issue.
-    const processField = (field: ParsedFieldRow) =>
-      Effect.gen(function* () {
-      if (field.field_type === "structured_text" && data[field.api_key] !== undefined && data[field.api_key] !== null) {
-        if (field.localized) {
-          const localeMap = yield* decodeLocalizedStructuredTextMap(field, data[field.api_key]).pipe(
-            Effect.mapError((error) => new ValidationError({
-              message: createFieldErrorMessage(errorPrefix, error.message),
-              field: error.field,
-            }))
-          );
-          const localizedDast: Record<string, unknown> = {};
-          for (const [localeCode, localeValue] of Object.entries(localeMap)) {
-            if (localeValue === null) {
-              localizedDast[localeCode] = null;
-              continue;
-            }
-
-            const expandedLocale = expandStructuredTextShorthand(localeValue);
-
-            const stInput = yield* Schema.decodeUnknownEffect(StructuredTextWriteInput)(scopeStructuredTextIds(expandedLocale, `${field.api_key}:${localeCode}`)).pipe(
-              Effect.mapError((e) => new ValidationError({
-                message: createFieldErrorMessage(errorPrefix, `Invalid StructuredText for field '${field.api_key}' locale '${localeCode}': ${e.message}`),
-                field: field.api_key,
-              }))
-            );
-
-            const allowedBlockTypes = getBlockWhitelist(field.validators);
-            const blocksOnly = getBlocksOnly(field.validators);
-
-            const stParams = {
-              rootModelApiKey: modelApiKey,
-              fieldApiKey: field.api_key,
-              rootFieldStorageKey: getStructuredTextStorageKey(field.api_key, localeCode),
-              rootRecordId: recordId,
-              value: stInput.value,
-              blocks: stInput.blocks,
-              allowedBlockTypes: allowedBlockTypes ?? [],
-              allowedInlineBlockTypes: getInlineBlockWhitelist(field.validators),
-              allowedLinkModels: getStructuredTextLinkModels(field.validators),
-              blocksOnly,
-            };
-            if (dryRun) {
-              yield* validateStructuredText(stParams);
-            } else {
-              localizedDast[localeCode] = yield* writeStructuredText(stParams);
-            }
-          }
-
-          data[field.api_key] = localizedDast;
-          record[field.api_key] = localizedDast;
-          return;
-        }
-
-        const expanded = expandStructuredTextShorthand(data[field.api_key]);
-
-        const stInput = yield* Schema.decodeUnknownEffect(StructuredTextWriteInput)(expanded).pipe(
-          Effect.mapError((e) => new ValidationError({
-            message: createFieldErrorMessage(errorPrefix, `Invalid StructuredText for field '${field.api_key}': ${e.message}`),
-            field: field.api_key,
+  // Validate/process every field, ACCUMULATING per-field failures across the
+  // whole loop instead of aborting on the first bad field (Dato-style
+  // whole-form error mapping). `Effect.validateAll` runs each field's effect
+  // (sequential — side effects like structured-text block writes must keep
+  // their order) and collects all failures; `foldFieldValidationErrors` then
+  // fails once with an AggregateValidationError carrying every issue.
+  const processField = (field: ParsedFieldRow) =>
+    Effect.gen(function* () {
+    if (field.field_type === "structured_text" && data[field.api_key] !== undefined && data[field.api_key] !== null) {
+      if (field.localized) {
+        const localeMap = yield* decodeLocalizedStructuredTextMap(field, data[field.api_key]).pipe(
+          Effect.mapError((error) => new ValidationError({
+            message: createFieldErrorMessage(errorPrefix, error.message),
+            field: error.field,
           }))
         );
+        const localizedDast: Record<string, unknown> = {};
+        for (const [localeCode, localeValue] of Object.entries(localeMap)) {
+          if (localeValue === null) {
+            localizedDast[localeCode] = null;
+            continue;
+          }
 
-        const allowedBlockTypes = getBlockWhitelist(field.validators);
-        const blocksOnly = getBlocksOnly(field.validators);
+          const expandedLocale = expandStructuredTextShorthand(localeValue);
 
-        const stParams = {
-          rootModelApiKey: modelApiKey,
-          fieldApiKey: field.api_key,
-          rootRecordId: recordId,
-          value: stInput.value,
-          blocks: stInput.blocks,
-          allowedBlockTypes: allowedBlockTypes ?? [],
-          allowedInlineBlockTypes: getInlineBlockWhitelist(field.validators),
-          allowedLinkModels: getStructuredTextLinkModels(field.validators),
-          blocksOnly,
-        };
-        if (dryRun) {
-          yield* validateStructuredText(stParams);
-        } else {
-          data[field.api_key] = yield* writeStructuredText(stParams);
+          const stInput = yield* Schema.decodeUnknownEffect(StructuredTextWriteInput)(scopeStructuredTextIds(expandedLocale, `${field.api_key}:${localeCode}`)).pipe(
+            Effect.mapError((e) => new ValidationError({
+              message: createFieldErrorMessage(errorPrefix, `Invalid StructuredText for field '${field.api_key}' locale '${localeCode}': ${e.message}`),
+              field: field.api_key,
+            }))
+          );
+
+          const allowedBlockTypes = getBlockWhitelist(field.validators);
+          const blocksOnly = getBlocksOnly(field.validators);
+
+          const stParams = {
+            rootModelApiKey: modelApiKey,
+            fieldApiKey: field.api_key,
+            rootFieldStorageKey: getStructuredTextStorageKey(field.api_key, localeCode),
+            rootRecordId: recordId,
+            value: stInput.value,
+            blocks: stInput.blocks,
+            allowedBlockTypes: allowedBlockTypes ?? [],
+            allowedInlineBlockTypes: getInlineBlockWhitelist(field.validators),
+            allowedLinkModels: getStructuredTextLinkModels(field.validators),
+            blocksOnly,
+          };
+          if (dryRun) {
+            yield* validateStructuredText(stParams);
+          } else {
+            localizedDast[localeCode] = yield* writeStructuredText(stParams);
+          }
         }
+
+        data[field.api_key] = localizedDast;
+        record[field.api_key] = localizedDast;
+        return;
       }
 
-      if (field.field_type === "rich_text" && data[field.api_key] !== undefined && data[field.api_key] !== null) {
-        const allowedBlockTypes = getRichTextBlockWhitelist(field.validators) ?? [];
+      const expanded = expandStructuredTextShorthand(data[field.api_key]);
 
+      const stInput = yield* Schema.decodeUnknownEffect(StructuredTextWriteInput)(expanded).pipe(
+        Effect.mapError((e) => new ValidationError({
+          message: createFieldErrorMessage(errorPrefix, `Invalid StructuredText for field '${field.api_key}': ${e.message}`),
+          field: field.api_key,
+        }))
+      );
+
+      const allowedBlockTypes = getBlockWhitelist(field.validators);
+      const blocksOnly = getBlocksOnly(field.validators);
+
+      const stParams = {
+        rootModelApiKey: modelApiKey,
+        fieldApiKey: field.api_key,
+        rootRecordId: recordId,
+        value: stInput.value,
+        blocks: stInput.blocks,
+        allowedBlockTypes: allowedBlockTypes ?? [],
+        allowedInlineBlockTypes: getInlineBlockWhitelist(field.validators),
+        allowedLinkModels: getStructuredTextLinkModels(field.validators),
+        blocksOnly,
+      };
+      if (dryRun) {
+        yield* validateStructuredText(stParams);
+      } else {
+        data[field.api_key] = yield* writeStructuredText(stParams);
+      }
+    }
+
+    if (field.field_type === "rich_text" && data[field.api_key] !== undefined && data[field.api_key] !== null) {
+      const allowedBlockTypes = getRichTextBlockWhitelist(field.validators) ?? [];
+
+      if (field.localized) {
+        const localeMap = yield* decodeLocalizedFieldMap(field, data[field.api_key]).pipe(
+          Effect.mapError((error) => new ValidationError({
+            message: createFieldErrorMessage(errorPrefix, error.message),
+            field: error.field,
+          }))
+        );
+        const localizedBlockIds: Record<string, unknown> = {};
+        for (const [localeCode, localeValue] of Object.entries(localeMap)) {
+          if (localeValue === null) {
+            localizedBlockIds[localeCode] = null;
+            continue;
+          }
+          if (!Array.isArray(localeValue)) {
+            return yield* new ValidationError({
+              message: createFieldErrorMessage(errorPrefix, `rich_text field '${field.api_key}' locale '${localeCode}' must be an array of block objects`),
+              field: field.api_key,
+            });
+          }
+          const rtParams = {
+            rootModelApiKey: modelApiKey,
+            fieldApiKey: field.api_key,
+            rootFieldStorageKey: getStructuredTextStorageKey(field.api_key, localeCode),
+            rootRecordId: recordId,
+            blocks: localeValue as RichTextWriteBlock[],
+            allowedBlockTypes,
+          };
+          if (dryRun) {
+            yield* validateRichText(rtParams);
+          } else {
+            localizedBlockIds[localeCode] = yield* writeRichText(rtParams);
+          }
+        }
+        data[field.api_key] = localizedBlockIds;
+        record[field.api_key] = localizedBlockIds;
+        return;
+      }
+
+      const rawBlocks = data[field.api_key];
+      if (!Array.isArray(rawBlocks)) {
+        return yield* new ValidationError({
+          message: createFieldErrorMessage(errorPrefix, `rich_text field '${field.api_key}' must be an array of block objects`),
+          field: field.api_key,
+        });
+      }
+      const rtParams = {
+        rootModelApiKey: modelApiKey,
+        fieldApiKey: field.api_key,
+        rootRecordId: recordId,
+        blocks: rawBlocks as RichTextWriteBlock[],
+        allowedBlockTypes,
+      };
+      if (dryRun) {
+        yield* validateRichText(rtParams);
+      } else {
+        data[field.api_key] = yield* writeRichText(rtParams);
+      }
+    }
+
+    if (field.field_type === "slug") {
+      const sourceFieldKey = getSlugSource(field.validators);
+      const sourceValue = sourceFieldKey ? toSlugSourceString(data[sourceFieldKey]) : null;
+      const currentValue = toSlugSourceString(data[field.api_key]);
+      if (!data[field.api_key] && sourceValue) {
+        data[field.api_key] = generateSlug(sourceValue);
+      } else if (currentValue) {
+        data[field.api_key] = generateSlug(currentValue);
+      }
+      if (data[field.api_key]) {
+        let slug = String(data[field.api_key]);
+        const baseSlug = slug;
+        let suffix = 1;
+        for (;;) {
+          const existing = yield* sql.unsafe<{ id: string }>(
+            `SELECT id FROM "${tableName}" WHERE "${field.api_key}" = ?`,
+            [slug]
+          );
+          if (existing.length === 0) break;
+          suffix++;
+          slug = `${baseSlug}-${suffix}`;
+        }
+        data[field.api_key] = slug;
+      }
+    }
+
+    if (isFieldType(field.field_type) && data[field.api_key] !== undefined && data[field.api_key] !== null) {
+      const fieldDef = getFieldTypeDef(field.field_type);
+      if (field.field_type === "media" && isMistakenMediaObject(data[field.api_key])) {
+        return yield* new ValidationError({
+          message: createFieldErrorMessage(errorPrefix, `Invalid media for field '${field.api_key}': use an asset ID string or {"upload_id":"<asset_id>"}, not {"id":"..."}`),
+          field: field.api_key,
+        });
+      }
+      if (field.field_type === "link" && isMistakenLinkObject(data[field.api_key])) {
+        return yield* new ValidationError({
+          message: createFieldErrorMessage(errorPrefix, `Invalid link for field '${field.api_key}': use a record ID string, not {"id":"..."}`),
+          field: field.api_key,
+        });
+      }
+      if (field.field_type === "links" && hasMistakenLinkObject(data[field.api_key])) {
+        return yield* new ValidationError({
+          message: createFieldErrorMessage(errorPrefix, `Invalid links for field '${field.api_key}': use an array of record ID strings, not objects like {"id":"..."}`),
+          field: field.api_key,
+        });
+      }
+      if (!field.localized && isLocalizedValueMap(data[field.api_key])) {
+        return yield* new ValidationError({
+          message: createFieldErrorMessage(errorPrefix, `Field '${field.api_key}' is not localized and cannot accept locale-keyed values`),
+          field: field.api_key,
+          code: "locale",
+        });
+      }
+      if (fieldDef.inputSchema) {
         if (field.localized) {
           const localeMap = yield* decodeLocalizedFieldMap(field, data[field.api_key]).pipe(
             Effect.mapError((error) => new ValidationError({
               message: createFieldErrorMessage(errorPrefix, error.message),
               field: error.field,
+              code: "locale",
             }))
           );
-          const localizedBlockIds: Record<string, unknown> = {};
           for (const [localeCode, localeValue] of Object.entries(localeMap)) {
-            if (localeValue === null) {
-              localizedBlockIds[localeCode] = null;
-              continue;
-            }
-            if (!Array.isArray(localeValue)) {
-              return yield* new ValidationError({
-                message: createFieldErrorMessage(errorPrefix, `rich_text field '${field.api_key}' locale '${localeCode}' must be an array of block objects`),
-                field: field.api_key,
-              });
-            }
-            const rtParams = {
-              rootModelApiKey: modelApiKey,
-              fieldApiKey: field.api_key,
-              rootFieldStorageKey: getStructuredTextStorageKey(field.api_key, localeCode),
-              rootRecordId: recordId,
-              blocks: localeValue as RichTextWriteBlock[],
-              allowedBlockTypes,
-            };
-            if (dryRun) {
-              yield* validateRichText(rtParams);
-            } else {
-              localizedBlockIds[localeCode] = yield* writeRichText(rtParams);
-            }
-          }
-          data[field.api_key] = localizedBlockIds;
-          record[field.api_key] = localizedBlockIds;
-          return;
-        }
-
-        const rawBlocks = data[field.api_key];
-        if (!Array.isArray(rawBlocks)) {
-          return yield* new ValidationError({
-            message: createFieldErrorMessage(errorPrefix, `rich_text field '${field.api_key}' must be an array of block objects`),
-            field: field.api_key,
-          });
-        }
-        const rtParams = {
-          rootModelApiKey: modelApiKey,
-          fieldApiKey: field.api_key,
-          rootRecordId: recordId,
-          blocks: rawBlocks as RichTextWriteBlock[],
-          allowedBlockTypes,
-        };
-        if (dryRun) {
-          yield* validateRichText(rtParams);
-        } else {
-          data[field.api_key] = yield* writeRichText(rtParams);
-        }
-      }
-
-      if (field.field_type === "slug") {
-        const sourceFieldKey = getSlugSource(field.validators);
-        const sourceValue = sourceFieldKey ? toSlugSourceString(data[sourceFieldKey]) : null;
-        const currentValue = toSlugSourceString(data[field.api_key]);
-        if (!data[field.api_key] && sourceValue) {
-          data[field.api_key] = generateSlug(sourceValue);
-        } else if (currentValue) {
-          data[field.api_key] = generateSlug(currentValue);
-        }
-        if (data[field.api_key]) {
-          let slug = String(data[field.api_key]);
-          const baseSlug = slug;
-          let suffix = 1;
-          for (;;) {
-            const existing = yield* sql.unsafe<{ id: string }>(
-              `SELECT id FROM "${tableName}" WHERE "${field.api_key}" = ?`,
-              [slug]
-            );
-            if (existing.length === 0) break;
-            suffix++;
-            slug = `${baseSlug}-${suffix}`;
-          }
-          data[field.api_key] = slug;
-        }
-      }
-
-      if (isFieldType(field.field_type) && data[field.api_key] !== undefined && data[field.api_key] !== null) {
-        const fieldDef = getFieldTypeDef(field.field_type);
-        if (field.field_type === "media" && isMistakenMediaObject(data[field.api_key])) {
-          return yield* new ValidationError({
-            message: createFieldErrorMessage(errorPrefix, `Invalid media for field '${field.api_key}': use an asset ID string or {"upload_id":"<asset_id>"}, not {"id":"..."}`),
-            field: field.api_key,
-          });
-        }
-        if (field.field_type === "link" && isMistakenLinkObject(data[field.api_key])) {
-          return yield* new ValidationError({
-            message: createFieldErrorMessage(errorPrefix, `Invalid link for field '${field.api_key}': use a record ID string, not {"id":"..."}`),
-            field: field.api_key,
-          });
-        }
-        if (field.field_type === "links" && hasMistakenLinkObject(data[field.api_key])) {
-          return yield* new ValidationError({
-            message: createFieldErrorMessage(errorPrefix, `Invalid links for field '${field.api_key}': use an array of record ID strings, not objects like {"id":"..."}`),
-            field: field.api_key,
-          });
-        }
-        if (!field.localized && isLocalizedValueMap(data[field.api_key])) {
-          return yield* new ValidationError({
-            message: createFieldErrorMessage(errorPrefix, `Field '${field.api_key}' is not localized and cannot accept locale-keyed values`),
-            field: field.api_key,
-            code: "locale",
-          });
-        }
-        if (fieldDef.inputSchema) {
-          if (field.localized) {
-            const localeMap = yield* decodeLocalizedFieldMap(field, data[field.api_key]).pipe(
-              Effect.mapError((error) => new ValidationError({
-                message: createFieldErrorMessage(errorPrefix, error.message),
-                field: error.field,
-                code: "locale",
-              }))
-            );
-            for (const [localeCode, localeValue] of Object.entries(localeMap)) {
-              if (localeValue === null) continue;
-              yield* Schema.decodeUnknownEffect(fieldDef.inputSchema)(localeValue).pipe(
-                Effect.mapError((e) => new ValidationError({
-                  message: createFieldErrorMessage(errorPrefix, `Invalid ${field.field_type} for field '${field.api_key}' locale '${localeCode}': ${e.message}`),
-                  field: field.api_key,
-                  code: "type",
-                }))
-              );
-            }
-          } else {
-            yield* Schema.decodeUnknownEffect(fieldDef.inputSchema)(data[field.api_key]).pipe(
+            if (localeValue === null) continue;
+            yield* Schema.decodeUnknownEffect(fieldDef.inputSchema)(localeValue).pipe(
               Effect.mapError((e) => new ValidationError({
-                message: createFieldErrorMessage(errorPrefix, `Invalid ${field.field_type} for field '${field.api_key}': ${e.message}`),
+                message: createFieldErrorMessage(errorPrefix, `Invalid ${field.field_type} for field '${field.api_key}' locale '${localeCode}': ${e.message}`),
                 field: field.api_key,
                 code: "type",
               }))
             );
           }
-        }
-      }
-
-      // Validate linked-record existence for link/links fields
-      if (
-        !skipReferenceValidation
-        && (field.field_type === "link" || field.field_type === "links")
-        && data[field.api_key] !== undefined
-        && data[field.api_key] !== null
-      ) {
-        if (field.localized) {
-          const localeMap = yield* decodeLocalizedFieldMap(field, data[field.api_key]).pipe(
-            Effect.mapError((error) => new ValidationError({
-              message: createFieldErrorMessage(errorPrefix, error.message),
-              field: error.field,
+        } else {
+          yield* Schema.decodeUnknownEffect(fieldDef.inputSchema)(data[field.api_key]).pipe(
+            Effect.mapError((e) => new ValidationError({
+              message: createFieldErrorMessage(errorPrefix, `Invalid ${field.field_type} for field '${field.api_key}': ${e.message}`),
+              field: field.api_key,
+              code: "type",
             }))
           );
-          for (const localeValue of Object.values(localeMap)) {
-            if (localeValue === null) continue;
-            yield* validateReferenceFieldValue(sql, field, localeValue, errorPrefix);
-          }
-        } else {
-          yield* validateReferenceFieldValue(sql, field, data[field.api_key], errorPrefix);
         }
       }
+    }
 
-      // Validate asset existence for asset-backed fields
-      if (
-        (field.field_type === "media" || field.field_type === "media_gallery" || field.field_type === "seo")
-        && data[field.api_key] !== undefined
-        && data[field.api_key] !== null
-      ) {
-        if (field.localized) {
-          const localeMap = yield* decodeLocalizedFieldMap(field, data[field.api_key]).pipe(
-            Effect.mapError((error) => new ValidationError({
-              message: createFieldErrorMessage(errorPrefix, error.message),
-              field: error.field,
-            }))
-          );
-          for (const localeValue of Object.values(localeMap)) {
-            if (localeValue === null) continue;
-            yield* validateAssetFieldValue(sql, field, localeValue, errorPrefix);
-          }
-        } else {
-          yield* validateAssetFieldValue(sql, field, data[field.api_key], errorPrefix);
+    // Validate linked-record existence for link/links fields
+    if (
+      !skipReferenceValidation
+      && (field.field_type === "link" || field.field_type === "links")
+      && data[field.api_key] !== undefined
+      && data[field.api_key] !== null
+    ) {
+      if (field.localized) {
+        const localeMap = yield* decodeLocalizedFieldMap(field, data[field.api_key]).pipe(
+          Effect.mapError((error) => new ValidationError({
+            message: createFieldErrorMessage(errorPrefix, error.message),
+            field: error.field,
+          }))
+        );
+        for (const localeValue of Object.values(localeMap)) {
+          if (localeValue === null) continue;
+          yield* validateReferenceFieldValue(sql, field, localeValue, errorPrefix);
         }
+      } else {
+        yield* validateReferenceFieldValue(sql, field, data[field.api_key], errorPrefix);
       }
+    }
 
-      if (data[field.api_key] !== undefined) {
-        // Reads enrich media values with resolved asset metadata; writing one
-        // straight back must not persist that (stale URL) — strip it here so
-        // read-modify-write round-trips to exactly what was stored.
-        record[field.api_key] = stripMediaEnrichment(field.field_type, data[field.api_key]);
+    // Validate asset existence for asset-backed fields
+    if (
+      (field.field_type === "media" || field.field_type === "media_gallery" || field.field_type === "seo")
+      && data[field.api_key] !== undefined
+      && data[field.api_key] !== null
+    ) {
+      if (field.localized) {
+        const localeMap = yield* decodeLocalizedFieldMap(field, data[field.api_key]).pipe(
+          Effect.mapError((error) => new ValidationError({
+            message: createFieldErrorMessage(errorPrefix, error.message),
+            field: error.field,
+          }))
+        );
+        for (const localeValue of Object.values(localeMap)) {
+          if (localeValue === null) continue;
+          yield* validateAssetFieldValue(sql, field, localeValue, errorPrefix);
+        }
+      } else {
+        yield* validateAssetFieldValue(sql, field, data[field.api_key], errorPrefix);
       }
-      });
+    }
 
-    yield* Effect.validate(modelFields, processField, { concurrency: 1 }).pipe(
-      Effect.mapError(foldFieldValidationErrors),
-    );
-  });
-}
+    if (data[field.api_key] !== undefined) {
+      // Reads enrich media values with resolved asset metadata; writing one
+      // straight back must not persist that (stale URL) — strip it here so
+      // read-modify-write round-trips to exactly what was stored.
+      record[field.api_key] = stripMediaEnrichment(field.field_type, data[field.api_key]);
+    }
+    });
+
+  yield* Effect.validate(modelFields, processField, { concurrency: 1 }).pipe(
+    Effect.mapError(foldFieldValidationErrors),
+  );
+});
 
 export function createRecord(body: CreateRecordInput, actor?: RequestActor | null) {
   return Effect.gen(function* () {
@@ -881,49 +871,45 @@ function enrichRecordSetMedia(
   return enrichMediaSites(sites);
 }
 
-export function listRecords(modelApiKey: string) {
-  return Effect.gen(function* () {
-    if (!modelApiKey)
-      return yield* new ValidationError({ message: "modelApiKey query parameter is required" });
-    const model = yield* getModelByApiKey(modelApiKey);
-    if (!model) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
-    const records = yield* selectAll(`content_${model.api_key}`);
-    const fields = yield* getModelFields(model.id);
-    const mediaSites: MediaSite[] = [];
-    const materialized = yield* Effect.all(
-      records.map((record) => materializeRecordStructuredTextFields({
-        modelApiKey: model.api_key,
-        record: normalizeBooleanFields(record, fields),
-        fields,
-        mediaSites,
-      })),
-      { concurrency: "unbounded" }
-    );
-    yield* enrichRecordSetMedia(materialized, fields, mediaSites);
-    return materialized;
-  });
-}
-
-export function getRecord(modelApiKey: string, id: string) {
-  return Effect.gen(function* () {
-    if (!modelApiKey)
-      return yield* new ValidationError({ message: "modelApiKey query parameter is required" });
-    const model = yield* getModelByApiKey(modelApiKey);
-    if (!model) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
-    const record = yield* selectById(`content_${model.api_key}`, id);
-    if (!record) return yield* new NotFoundError({ entity: "Record", id });
-    const fields = yield* getModelFields(model.id);
-    const mediaSites: MediaSite[] = [];
-    const materialized = yield* materializeRecordStructuredTextFields({
+export const listRecords = Effect.fn("listRecords")(function* (modelApiKey: string) {
+  if (!modelApiKey)
+    return yield* new ValidationError({ message: "modelApiKey query parameter is required" });
+  const model = yield* getModelByApiKey(modelApiKey);
+  if (!model) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
+  const records = yield* selectAll(`content_${model.api_key}`);
+  const fields = yield* getModelFields(model.id);
+  const mediaSites: MediaSite[] = [];
+  const materialized = yield* Effect.all(
+    records.map((record) => materializeRecordStructuredTextFields({
       modelApiKey: model.api_key,
       record: normalizeBooleanFields(record, fields),
       fields,
       mediaSites,
-    });
-    yield* enrichRecordSetMedia([materialized], fields, mediaSites);
-    return materialized;
+    })),
+    { concurrency: "unbounded" }
+  );
+  yield* enrichRecordSetMedia(materialized, fields, mediaSites);
+  return materialized;
+});
+
+export const getRecord = Effect.fn("getRecord")(function* (modelApiKey: string, id: string) {
+  if (!modelApiKey)
+    return yield* new ValidationError({ message: "modelApiKey query parameter is required" });
+  const model = yield* getModelByApiKey(modelApiKey);
+  if (!model) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
+  const record = yield* selectById(`content_${model.api_key}`, id);
+  if (!record) return yield* new NotFoundError({ entity: "Record", id });
+  const fields = yield* getModelFields(model.id);
+  const mediaSites: MediaSite[] = [];
+  const materialized = yield* materializeRecordStructuredTextFields({
+    modelApiKey: model.api_key,
+    record: normalizeBooleanFields(record, fields),
+    fields,
+    mediaSites,
   });
-}
+  yield* enrichRecordSetMedia([materialized], fields, mediaSites);
+  return materialized;
+});
 
 export function updateSingletonRecord(modelApiKey: string, data: Record<string, unknown>, actor?: RequestActor | null) {
   return Effect.gen(function* () {
@@ -1342,128 +1328,124 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
   );
 }
 
-export function removeRecord(modelApiKey: string, id: string) {
-  return Effect.gen(function* () {
-    if (!modelApiKey)
-      return yield* new ValidationError({ message: "modelApiKey query parameter is required" });
-    const model = yield* getModelByApiKey(modelApiKey);
-    if (!model) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
+export const removeRecord = Effect.fn("removeRecord")(function* (modelApiKey: string, id: string) {
+  if (!modelApiKey)
+    return yield* new ValidationError({ message: "modelApiKey query parameter is required" });
+  const model = yield* getModelByApiKey(modelApiKey);
+  if (!model) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
 
-    const tableName = `content_${model.api_key}`;
-    const existing = yield* selectById(tableName, id);
-    if (!existing) return yield* new NotFoundError({ entity: "Record", id });
+  const tableName = `content_${model.api_key}`;
+  const existing = yield* selectById(tableName, id);
+  if (!existing) return yield* new NotFoundError({ entity: "Record", id });
 
-    // Clean up orphan blocks owned by this record (across all block tables)
-    const sql = yield* SqlClient.SqlClient;
-    const blockModels = yield* sql.unsafe<{ api_key: string }>(
-      "SELECT api_key FROM models WHERE is_block = 1"
+  // Clean up orphan blocks owned by this record (across all block tables)
+  const sql = yield* SqlClient.SqlClient;
+  const blockModels = yield* sql.unsafe<{ api_key: string }>(
+    "SELECT api_key FROM models WHERE is_block = 1"
+  );
+  for (const bm of blockModels) {
+    yield* sql.unsafe(
+      `DELETE FROM "block_${bm.api_key}" WHERE _root_record_id = ?`, [id]
     );
-    for (const bm of blockModels) {
-      yield* sql.unsafe(
-        `DELETE FROM "block_${bm.api_key}" WHERE _root_record_id = ?`, [id]
-      );
-    }
+  }
 
-    yield* sqlDeleteRecord(tableName, id);
-    yield* VersionService.deleteVersionsForRecord(modelApiKey, id).pipe(Effect.ignore);
-    yield* SearchService.deindexRecord(modelApiKey, id).pipe(Effect.ignore);
-    yield* fireHook("onRecordDelete", { modelApiKey, recordId: id });
-    return { deleted: true };
-  });
-}
+  yield* sqlDeleteRecord(tableName, id);
+  yield* VersionService.deleteVersionsForRecord(modelApiKey, id).pipe(Effect.ignore);
+  yield* SearchService.deindexRecord(modelApiKey, id).pipe(Effect.ignore);
+  yield* fireHook("onRecordDelete", { modelApiKey, recordId: id });
+  return { deleted: true };
+});
 
 /**
  * Bulk create records in a single operation.
  * All records must belong to the same model. Runs in a logical batch
  * (individual inserts, but avoids per-record overhead of schema lookups).
  */
-export function bulkCreateRecords({ modelApiKey, records }: BulkCreateRecordsInput, actor?: RequestActor | null) {
-  return Effect.gen(function* () {
-    if (records.length === 0)
-      return yield* new ValidationError({ message: "records must be a non-empty array" });
-    if (records.length > 1000)
-      return yield* new ValidationError({ message: "Maximum 1000 records per bulk operation" });
+export const bulkCreateRecords = Effect.fn("bulkCreateRecords")(function* ({ modelApiKey, records }: BulkCreateRecordsInput, actor?: RequestActor | null) {
+  if (records.length === 0)
+    return yield* new ValidationError({ message: "records must be a non-empty array" });
+  if (records.length > 1000)
+    return yield* new ValidationError({ message: "Maximum 1000 records per bulk operation" });
 
-    const model = yield* getModelByApiKey(modelApiKey);
-    if (!model) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
-    if (model.is_block)
-      return yield* new ValidationError({ message: "Cannot create records for block types directly" });
-    if (model.singleton)
-      return yield* new ValidationError({ message: "Cannot bulk create on singleton models" });
+  const model = yield* getModelByApiKey(modelApiKey);
+  if (!model) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
+  if (model.is_block)
+    return yield* new ValidationError({ message: "Cannot create records for block types directly" });
+  if (model.singleton)
+    return yield* new ValidationError({ message: "Cannot bulk create on singleton models" });
 
-    const tableName = `content_${model.api_key}`;
-    const modelFields = yield* getModelFields(model.id);
-    const sql = yield* SqlClient.SqlClient;
-    const now = new Date().toISOString();
-    const initialStatus = model.has_draft ? "draft" : "published";
-    const created: Array<{ id: string }> = [];
+  const tableName = `content_${model.api_key}`;
+  const modelFields = yield* getModelFields(model.id);
+  const sql = yield* SqlClient.SqlClient;
+  const now = new Date().toISOString();
+  const initialStatus = model.has_draft ? "draft" : "published";
+  const created: Array<{ id: string }> = [];
 
-    // Get current max position for sortable models
-    let nextPosition = 0;
+  // Get current max position for sortable models
+  let nextPosition = 0;
+  if (model.sortable || model.tree) {
+    const maxPos = yield* sql.unsafe<{ max_pos: number | null }>(
+      `SELECT MAX("_position") as max_pos FROM "${tableName}"`
+    );
+    nextPosition = (maxPos[0]?.max_pos ?? -1) + 1;
+  }
+
+  for (let idx = 0; idx < records.length; idx++) {
+    const rawRecord = records[idx];
+    const data: Record<string, unknown> = { ...rawRecord };
+
+    // Validate required fields only for non-draft models (accumulated per record)
+    if (!model.has_draft) {
+      const missing = requiredFieldIssues(modelFields, data, `Record ${idx}`);
+      if (missing.length > 0) return yield* new AggregateValidationError({ issues: missing });
+    }
+
+    const requestedId = typeof data.id === "string" && data.id.trim().length > 0 ? data.id : undefined;
+    if (requestedId) delete data.id;
+    const id = requestedId ?? generateId();
+    const duplicateId = yield* sql.unsafe<{ id: string }>(
+      `SELECT id FROM "${tableName}" WHERE id = ?`,
+      [id]
+    );
+    if (duplicateId.length > 0) {
+      return yield* new DuplicateError({ message: `Record ${idx}: id '${id}' already exists on model '${modelApiKey}'` });
+    }
+    const record: Record<string, unknown> = {
+      id,
+      _status: initialStatus,
+      _created_at: now,
+      _updated_at: now,
+      ...(!model.has_draft ? { _published_at: now, _first_published_at: now } : {}),
+    };
+    applyActorColumns(record, actor, {
+      created: true,
+      updated: true,
+      published: !model.has_draft,
+    });
+    applyRecordOverrides(record, undefined);
+
     if (model.sortable || model.tree) {
-      const maxPos = yield* sql.unsafe<{ max_pos: number | null }>(
-        `SELECT MAX("_position") as max_pos FROM "${tableName}"`
-      );
-      nextPosition = (maxPos[0]?.max_pos ?? -1) + 1;
+      record._position = nextPosition++;
     }
 
-    for (let idx = 0; idx < records.length; idx++) {
-      const rawRecord = records[idx];
-      const data: Record<string, unknown> = { ...rawRecord };
+    yield* processCreateLikeRecordFields({
+      modelApiKey: model.api_key,
+      tableName,
+      recordId: id,
+      data,
+      record,
+      modelFields,
+      errorPrefix: `Record ${idx}`,
+    });
 
-      // Validate required fields only for non-draft models (accumulated per record)
-      if (!model.has_draft) {
-        const missing = requiredFieldIssues(modelFields, data, `Record ${idx}`);
-        if (missing.length > 0) return yield* new AggregateValidationError({ issues: missing });
-      }
+    yield* insertRecord(tableName, record);
+    yield* SearchService.indexRecord(modelApiKey, id, record, modelFields).pipe(Effect.ignore);
+    yield* fireHook("onRecordCreate", { modelApiKey, recordId: id });
+    created.push({ id });
+  }
 
-      const requestedId = typeof data.id === "string" && data.id.trim().length > 0 ? data.id : undefined;
-      if (requestedId) delete data.id;
-      const id = requestedId ?? generateId();
-      const duplicateId = yield* sql.unsafe<{ id: string }>(
-        `SELECT id FROM "${tableName}" WHERE id = ?`,
-        [id]
-      );
-      if (duplicateId.length > 0) {
-        return yield* new DuplicateError({ message: `Record ${idx}: id '${id}' already exists on model '${modelApiKey}'` });
-      }
-      const record: Record<string, unknown> = {
-        id,
-        _status: initialStatus,
-        _created_at: now,
-        _updated_at: now,
-        ...(!model.has_draft ? { _published_at: now, _first_published_at: now } : {}),
-      };
-      applyActorColumns(record, actor, {
-        created: true,
-        updated: true,
-        published: !model.has_draft,
-      });
-      applyRecordOverrides(record, undefined);
-
-      if (model.sortable || model.tree) {
-        record._position = nextPosition++;
-      }
-
-      yield* processCreateLikeRecordFields({
-        modelApiKey: model.api_key,
-        tableName,
-        recordId: id,
-        data,
-        record,
-        modelFields,
-        errorPrefix: `Record ${idx}`,
-      });
-
-      yield* insertRecord(tableName, record);
-      yield* SearchService.indexRecord(modelApiKey, id, record, modelFields).pipe(Effect.ignore);
-      yield* fireHook("onRecordCreate", { modelApiKey, recordId: id });
-      created.push({ id });
-    }
-
-    return { created: created.length, records: created };
-  });
-}
+  return { created: created.length, records: created };
+});
 
 function isStructuredTextEnvelopeLike(value: unknown): value is { value: unknown; blocks: Record<string, unknown> } {
   return isJsonRecord(value) && "value" in value && isJsonRecord(value.blocks);
@@ -1539,62 +1521,86 @@ function applyPatchToNestedStructuredText(
  * Optionally accepts a new DAST `value`. If omitted, keeps existing DAST
  * (with deleted blocks auto-pruned).
  */
-export function patchBlocksForField(body: PatchBlocksInput, actor?: RequestActor | null) {
-  return Effect.gen(function* () {
+export const patchBlocksForField = Effect.fn("patchBlocksForField")(function* (body: PatchBlocksInput, actor?: RequestActor | null) {
 
-    const model = yield* getModelByApiKey(body.modelApiKey);
-    if (!model) return yield* new NotFoundError({ entity: "Model", id: body.modelApiKey });
+  const model = yield* getModelByApiKey(body.modelApiKey);
+  if (!model) return yield* new NotFoundError({ entity: "Model", id: body.modelApiKey });
 
-    const tableName = `content_${model.api_key}`;
-    const existing = yield* selectById(tableName, body.recordId);
-    if (!existing) return yield* new NotFoundError({ entity: "Record", id: body.recordId });
+  const tableName = `content_${model.api_key}`;
+  const existing = yield* selectById(tableName, body.recordId);
+  if (!existing) return yield* new NotFoundError({ entity: "Record", id: body.recordId });
 
-    const modelFields = yield* getModelFields(model.id);
-    const field = modelFields.find((f) => f.api_key === body.fieldApiKey);
-    if (!field) return yield* new NotFoundError({ entity: "Field", id: body.fieldApiKey });
-    if (field.field_type !== "structured_text") {
-      return yield* new ValidationError({
-        message: `Field '${body.fieldApiKey}' is not a structured_text field`,
-        field: body.fieldApiKey,
-      });
-    }
-
-    // Materialize existing structured text to get current blocks
-    const existingEnvelope = yield* materializeStructuredTextValue({
-      allowedBlockApiKeys: getBlockWhitelist(field.validators) ?? [],
-      parentContainerModelApiKey: model.api_key,
-      parentBlockId: null,
-      parentFieldApiKey: field.api_key,
-      rootRecordId: body.recordId,
-      rootFieldApiKey: field.api_key,
-      rawValue: existing[field.api_key],
+  const modelFields = yield* getModelFields(model.id);
+  const field = modelFields.find((f) => f.api_key === body.fieldApiKey);
+  if (!field) return yield* new NotFoundError({ entity: "Field", id: body.fieldApiKey });
+  if (field.field_type !== "structured_text") {
+    return yield* new ValidationError({
+      message: `Field '${body.fieldApiKey}' is not a structured_text field`,
+      field: body.fieldApiKey,
     });
+  }
 
-    if (!existingEnvelope) {
+  // Materialize existing structured text to get current blocks
+  const existingEnvelope = yield* materializeStructuredTextValue({
+    allowedBlockApiKeys: getBlockWhitelist(field.validators) ?? [],
+    parentContainerModelApiKey: model.api_key,
+    parentBlockId: null,
+    parentFieldApiKey: field.api_key,
+    rootRecordId: body.recordId,
+    rootFieldApiKey: field.api_key,
+    rawValue: existing[field.api_key],
+  });
+
+  if (!existingEnvelope) {
+    return yield* new ValidationError({
+      message: `Field '${body.fieldApiKey}' has no structured text content to patch`,
+      field: body.fieldApiKey,
+    });
+  }
+
+  const existingBlocks = existingEnvelope.blocks;
+  const blockIdsToDelete = new Set<string>();
+  const mergedBlocks: Record<string, Record<string, unknown>> = {};
+
+  // Start with all existing blocks as-is
+  for (const [blockId, blockData] of Object.entries(existingBlocks)) {
+    mergedBlocks[blockId] = blockData as Record<string, unknown>;
+  }
+
+  // Apply patch
+  for (const [blockId, patchValue] of Object.entries(body.blocks)) {
+    if (patchValue === null) {
+      if (Object.hasOwn(existingBlocks, blockId)) {
+        blockIdsToDelete.add(blockId);
+        delete mergedBlocks[blockId];
+        continue;
+      }
+
+      let nestedMatched = false;
+      for (const topLevelBlock of Object.values(mergedBlocks)) {
+        const result = applyPatchToNestedStructuredText(topLevelBlock, blockId, patchValue);
+        if (result.ambiguous) {
+          return yield* new ValidationError({
+            message: `Block '${blockId}' matched multiple nested structured_text locations in field '${body.fieldApiKey}'. Patch the parent block explicitly instead.`,
+            field: body.fieldApiKey,
+          });
+        }
+        nestedMatched = nestedMatched || result.applied;
+      }
+      if (!nestedMatched) {
+        return yield* new ValidationError({
+          message: `Block '${blockId}' does not exist in field '${body.fieldApiKey}'.`,
+          field: body.fieldApiKey,
+        });
+      }
+    } else if (typeof patchValue === "string") {
       return yield* new ValidationError({
-        message: `Field '${body.fieldApiKey}' has no structured text content to patch`,
+        message: `Invalid patch value for block '${blockId}': use an object to update fields, null to delete, or omit the key to keep unchanged.`,
         field: body.fieldApiKey,
       });
-    }
-
-    const existingBlocks = existingEnvelope.blocks;
-    const blockIdsToDelete = new Set<string>();
-    const mergedBlocks: Record<string, Record<string, unknown>> = {};
-
-    // Start with all existing blocks as-is
-    for (const [blockId, blockData] of Object.entries(existingBlocks)) {
-      mergedBlocks[blockId] = blockData as Record<string, unknown>;
-    }
-
-    // Apply patch
-    for (const [blockId, patchValue] of Object.entries(body.blocks)) {
-      if (patchValue === null) {
-        if (Object.hasOwn(existingBlocks, blockId)) {
-          blockIdsToDelete.add(blockId);
-          delete mergedBlocks[blockId];
-          continue;
-        }
-
+    } else if (typeof patchValue === "object" && !Array.isArray(patchValue)) {
+      // Partial merge
+      if (!Object.hasOwn(existingBlocks, blockId)) {
         let nestedMatched = false;
         for (const topLevelBlock of Object.values(mergedBlocks)) {
           const result = applyPatchToNestedStructuredText(topLevelBlock, blockId, patchValue);
@@ -1612,224 +1618,196 @@ export function patchBlocksForField(body: PatchBlocksInput, actor?: RequestActor
             field: body.fieldApiKey,
           });
         }
-      } else if (typeof patchValue === "string") {
+        continue;
+      }
+      const existingBlock = existingBlocks[blockId];
+      if (!isJsonRecord(existingBlock)) {
         return yield* new ValidationError({
-          message: `Invalid patch value for block '${blockId}': use an object to update fields, null to delete, or omit the key to keep unchanged.`,
-          field: body.fieldApiKey,
-        });
-      } else if (typeof patchValue === "object" && !Array.isArray(patchValue)) {
-        // Partial merge
-        if (!Object.hasOwn(existingBlocks, blockId)) {
-          let nestedMatched = false;
-          for (const topLevelBlock of Object.values(mergedBlocks)) {
-            const result = applyPatchToNestedStructuredText(topLevelBlock, blockId, patchValue);
-            if (result.ambiguous) {
-              return yield* new ValidationError({
-                message: `Block '${blockId}' matched multiple nested structured_text locations in field '${body.fieldApiKey}'. Patch the parent block explicitly instead.`,
-                field: body.fieldApiKey,
-              });
-            }
-            nestedMatched = nestedMatched || result.applied;
-          }
-          if (!nestedMatched) {
-            return yield* new ValidationError({
-              message: `Block '${blockId}' does not exist in field '${body.fieldApiKey}'.`,
-              field: body.fieldApiKey,
-            });
-          }
-          continue;
-        }
-        const existingBlock = existingBlocks[blockId];
-        if (!isJsonRecord(existingBlock)) {
-          return yield* new ValidationError({
-            message: `Block '${blockId}' has invalid stored data and cannot be patched.`,
-            field: body.fieldApiKey,
-          });
-        }
-        // Merge: existing block data + patch (patch wins)
-        mergedBlocks[blockId] = {
-          ...existingBlock,
-          ...patchValue,
-        };
-      } else {
-        return yield* new ValidationError({
-          message: `Invalid patch value for block '${blockId}': expected string, object, or null`,
+          message: `Block '${blockId}' has invalid stored data and cannot be patched.`,
           field: body.fieldApiKey,
         });
       }
-    }
-
-    // Process append entries — add new blocks with auto-generated IDs
-    const appendedIds: string[] = [];
-    for (const entry of body.append ?? []) {
-      const id = generateId();
-      appendedIds.push(id);
-      mergedBlocks[id] = entry as Record<string, unknown>;
-    }
-
-    // Build final DAST value
-    let finalDastValue: unknown;
-    if (body.order) {
-      // order is only valid on blocks_only fields
-      const blocksOnlyFlag = getBlocksOnly(field.validators);
-      if (!blocksOnlyFlag) {
-        return yield* new ValidationError({
-          message: "The 'order' parameter is only supported on blocks_only structured_text fields. Use the 'value' parameter to provide a custom DAST for mixed prose+block fields.",
-          field: body.fieldApiKey,
-        });
-      }
-      // order and value are mutually exclusive
-      if (body.value !== undefined) {
-        return yield* new ValidationError({
-          message: "Cannot use both 'order' and 'value' — they both control the DAST document structure.",
-          field: body.fieldApiKey,
-        });
-      }
-      // Build DAST from order
-      finalDastValue = {
-        schema: "dast",
-        document: {
-          type: "root",
-          children: body.order.map((id) => ({ type: "block", item: id })),
-        },
+      // Merge: existing block data + patch (patch wins)
+      mergedBlocks[blockId] = {
+        ...existingBlock,
+        ...patchValue,
       };
-    } else if (body.value !== undefined && appendedIds.length > 0) {
+    } else {
       return yield* new ValidationError({
-        message: "Cannot use both 'value' and 'append' — appended blocks need auto-generated DAST nodes which conflict with a custom DAST value.",
+        message: `Invalid patch value for block '${blockId}': expected string, object, or null`,
         field: body.fieldApiKey,
       });
-    } else if (body.value !== undefined) {
-      finalDastValue = body.value;
-    } else if (blockIdsToDelete.size > 0 || appendedIds.length > 0) {
-      // Clone existing DAST, prune deleted blocks, append new block nodes
-      const existingDast = existingEnvelope.value as {
+    }
+  }
+
+  // Process append entries — add new blocks with auto-generated IDs
+  const appendedIds: string[] = [];
+  for (const entry of body.append ?? []) {
+    const id = generateId();
+    appendedIds.push(id);
+    mergedBlocks[id] = entry as Record<string, unknown>;
+  }
+
+  // Build final DAST value
+  let finalDastValue: unknown;
+  if (body.order) {
+    // order is only valid on blocks_only fields
+    const blocksOnlyFlag = getBlocksOnly(field.validators);
+    if (!blocksOnlyFlag) {
+      return yield* new ValidationError({
+        message: "The 'order' parameter is only supported on blocks_only structured_text fields. Use the 'value' parameter to provide a custom DAST for mixed prose+block fields.",
+        field: body.fieldApiKey,
+      });
+    }
+    // order and value are mutually exclusive
+    if (body.value !== undefined) {
+      return yield* new ValidationError({
+        message: "Cannot use both 'order' and 'value' — they both control the DAST document structure.",
+        field: body.fieldApiKey,
+      });
+    }
+    // Build DAST from order
+    finalDastValue = {
+      schema: "dast",
+      document: {
+        type: "root",
+        children: body.order.map((id) => ({ type: "block", item: id })),
+      },
+    };
+  } else if (body.value !== undefined && appendedIds.length > 0) {
+    return yield* new ValidationError({
+      message: "Cannot use both 'value' and 'append' — appended blocks need auto-generated DAST nodes which conflict with a custom DAST value.",
+      field: body.fieldApiKey,
+    });
+  } else if (body.value !== undefined) {
+    finalDastValue = body.value;
+  } else if (blockIdsToDelete.size > 0 || appendedIds.length > 0) {
+    // Clone existing DAST, prune deleted blocks, append new block nodes
+    const existingDast = existingEnvelope.value as {
+      schema: string;
+      document: { type: string; children: readonly unknown[] };
+    };
+    const pruned = blockIdsToDelete.size > 0
+      ? pruneBlockNodes(existingDast, blockIdsToDelete)
+      : existingDast;
+    if (appendedIds.length > 0) {
+      const prunedDoc = pruned as {
         schema: string;
         document: { type: string; children: readonly unknown[] };
       };
-      const pruned = blockIdsToDelete.size > 0
-        ? pruneBlockNodes(existingDast, blockIdsToDelete)
-        : existingDast;
-      if (appendedIds.length > 0) {
-        const prunedDoc = pruned as {
-          schema: string;
-          document: { type: string; children: readonly unknown[] };
-        };
-        finalDastValue = {
-          ...prunedDoc,
-          document: {
-            ...prunedDoc.document,
-            children: [
-              ...prunedDoc.document.children,
-              ...appendedIds.map((id) => ({ type: "block", item: id })),
-            ],
-          },
-        };
-      } else {
-        finalDastValue = pruned;
-      }
+      finalDastValue = {
+        ...prunedDoc,
+        document: {
+          ...prunedDoc.document,
+          children: [
+            ...prunedDoc.document.children,
+            ...appendedIds.map((id) => ({ type: "block", item: id })),
+          ],
+        },
+      };
     } else {
-      finalDastValue = existingEnvelope.value;
+      finalDastValue = pruned;
     }
+  } else {
+    finalDastValue = existingEnvelope.value;
+  }
 
-    // Now do the standard delete-all + rewrite using the merged data
-    yield* deleteBlocksForField({ rootRecordId: body.recordId, fieldApiKey: field.api_key });
+  // Now do the standard delete-all + rewrite using the merged data
+  yield* deleteBlocksForField({ rootRecordId: body.recordId, fieldApiKey: field.api_key });
 
-    const allowedBlockTypes = getBlockWhitelist(field.validators);
-    const blocksOnly = getBlocksOnly(field.validators);
+  const allowedBlockTypes = getBlockWhitelist(field.validators);
+  const blocksOnly = getBlocksOnly(field.validators);
 
-    const dast = yield* writeStructuredText({
-      rootModelApiKey: model.api_key,
-      fieldApiKey: field.api_key,
-      rootRecordId: body.recordId,
-      value: finalDastValue,
-      blocks: mergedBlocks,
-      allowedBlockTypes: allowedBlockTypes ?? [],
-      allowedInlineBlockTypes: getInlineBlockWhitelist(field.validators),
-      allowedLinkModels: getStructuredTextLinkModels(field.validators),
-      blocksOnly,
-    });
+  const dast = yield* writeStructuredText({
+    rootModelApiKey: model.api_key,
+    fieldApiKey: field.api_key,
+    rootRecordId: body.recordId,
+    value: finalDastValue,
+    blocks: mergedBlocks,
+    allowedBlockTypes: allowedBlockTypes ?? [],
+    allowedInlineBlockTypes: getInlineBlockWhitelist(field.validators),
+    allowedLinkModels: getStructuredTextLinkModels(field.validators),
+    blocksOnly,
+  });
 
-    // Update the content table
-    const sql = yield* SqlClient.SqlClient;
-    const now = new Date().toISOString();
+  // Update the content table
+  const sql = yield* SqlClient.SqlClient;
+  const now = new Date().toISOString();
+  yield* sql.unsafe(
+    `UPDATE "${tableName}" SET "${field.api_key}" = ?, _updated_at = ?, _updated_by = ? WHERE id = ?`,
+    [encodeJson(dast), now, actor?.label ?? null, body.recordId]
+  );
+
+  // Status transition: published → updated on content edit (draft models only)
+  if (isContentRow(existing) && existing._status === "published" && model.has_draft) {
     yield* sql.unsafe(
-      `UPDATE "${tableName}" SET "${field.api_key}" = ?, _updated_at = ?, _updated_by = ? WHERE id = ?`,
-      [encodeJson(dast), now, actor?.label ?? null, body.recordId]
+      `UPDATE "${tableName}" SET _status = 'updated' WHERE id = ?`,
+      [body.recordId]
     );
+  }
 
-    // Status transition: published → updated on content edit (draft models only)
-    if (isContentRow(existing) && existing._status === "published" && model.has_draft) {
+  // Auto-re-publish for has_draft=false models
+  if (!model.has_draft) {
+    if (existing._published_snapshot) {
+      const prevSnapshot = typeof existing._published_snapshot === "string"
+        ? existing._published_snapshot
+        : encodeJson(existing._published_snapshot);
+      yield* VersionService.createVersion(body.modelApiKey, body.recordId, prevSnapshot, {
+        action: "auto_republish",
+        actor,
+      });
+    }
+    const updated = yield* selectById(tableName, body.recordId);
+    if (updated) {
+      const snap: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(updated)) {
+        if (!key.startsWith("_") && key !== "id") snap[key] = value;
+      }
       yield* sql.unsafe(
-        `UPDATE "${tableName}" SET _status = 'updated' WHERE id = ?`,
-        [body.recordId]
+        `UPDATE "${tableName}" SET _published_snapshot = ?, _published_at = ?, _published_by = ?, _status = 'published' WHERE id = ?`,
+        [encodeJson(snap), now, actor?.label ?? null, body.recordId]
       );
     }
+  }
 
-    // Auto-re-publish for has_draft=false models
-    if (!model.has_draft) {
-      if (existing._published_snapshot) {
-        const prevSnapshot = typeof existing._published_snapshot === "string"
-          ? existing._published_snapshot
-          : encodeJson(existing._published_snapshot);
-        yield* VersionService.createVersion(body.modelApiKey, body.recordId, prevSnapshot, {
-          action: "auto_republish",
-          actor,
-        });
-      }
-      const updated = yield* selectById(tableName, body.recordId);
-      if (updated) {
-        const snap: Record<string, unknown> = {};
-        for (const [key, value] of Object.entries(updated)) {
-          if (!key.startsWith("_") && key !== "id") snap[key] = value;
-        }
-        yield* sql.unsafe(
-          `UPDATE "${tableName}" SET _published_snapshot = ?, _published_at = ?, _published_by = ?, _status = 'published' WHERE id = ?`,
-          [encodeJson(snap), now, actor?.label ?? null, body.recordId]
-        );
-      }
-    }
+  yield* SearchService.reindexRecord(body.modelApiKey, body.recordId, modelFields).pipe(Effect.ignore);
+  yield* fireHook("onRecordUpdate", { modelApiKey: body.modelApiKey, recordId: body.recordId });
 
-    yield* SearchService.reindexRecord(body.modelApiKey, body.recordId, modelFields).pipe(Effect.ignore);
-    yield* fireHook("onRecordUpdate", { modelApiKey: body.modelApiKey, recordId: body.recordId });
-
-    const updatedRecord = yield* selectById(tableName, body.recordId);
-    if (!updatedRecord) return null;
-    const materialized = yield* materializeRecordStructuredTextFields({
-      modelApiKey: model.api_key,
-      record: normalizeBooleanFields(updatedRecord, modelFields),
-      fields: modelFields,
-    });
-    if (appendedIds.length > 0) {
-      return { ...materialized, _appendedIds: appendedIds };
-    }
-    return materialized;
+  const updatedRecord = yield* selectById(tableName, body.recordId);
+  if (!updatedRecord) return null;
+  const materialized = yield* materializeRecordStructuredTextFields({
+    modelApiKey: model.api_key,
+    record: normalizeBooleanFields(updatedRecord, modelFields),
+    fields: modelFields,
   });
-}
+  if (appendedIds.length > 0) {
+    return { ...materialized, _appendedIds: appendedIds };
+  }
+  return materialized;
+});
 
 /**
  * Reorder records for a sortable/tree model.
  * Accepts an ordered array of record IDs — sets _position = index.
  */
-export function reorderRecords(modelApiKey: string, recordIds: readonly string[], actor?: RequestActor | null) {
-  return Effect.gen(function* () {
-    const model = yield* getModelByApiKey(modelApiKey);
-    if (!model) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
-    if (!model.sortable && !model.tree)
-      return yield* new ValidationError({ message: `Model '${modelApiKey}' is not sortable` });
+export const reorderRecords = Effect.fn("reorderRecords")(function* (modelApiKey: string, recordIds: readonly string[], actor?: RequestActor | null) {
+  const model = yield* getModelByApiKey(modelApiKey);
+  if (!model) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
+  if (!model.sortable && !model.tree)
+    return yield* new ValidationError({ message: `Model '${modelApiKey}' is not sortable` });
 
-    const sql = yield* SqlClient.SqlClient;
-    const tableName = `content_${model.api_key}`;
+  const sql = yield* SqlClient.SqlClient;
+  const tableName = `content_${model.api_key}`;
 
-    for (let i = 0; i < recordIds.length; i++) {
-      yield* sql.unsafe(
-        `UPDATE "${tableName}" SET "_position" = ?, "_updated_at" = ?, "_updated_by" = ? WHERE id = ?`,
-        [i, new Date().toISOString(), actor?.label ?? null, recordIds[i]]
-      );
-    }
+  for (let i = 0; i < recordIds.length; i++) {
+    yield* sql.unsafe(
+      `UPDATE "${tableName}" SET "_position" = ?, "_updated_at" = ?, "_updated_by" = ? WHERE id = ?`,
+      [i, new Date().toISOString(), actor?.label ?? null, recordIds[i]]
+    );
+  }
 
-    return { reordered: recordIds.length };
-  });
-}
+  return { reordered: recordIds.length };
+});
 
 // ===========================================================================
 // Queryable list — filtered/paginated/sorted list with total count
@@ -1877,39 +1855,35 @@ function allowedQueryColumns(fields: readonly ParsedFieldRow[]): ReadonlySet<str
 }
 
 /** Reject filter keys that are not real field api_keys or system meta columns. */
-function assertFilterColumns(filter: unknown, allowed: ReadonlySet<string>): Effect.Effect<void, ValidationError> {
-  return Effect.gen(function* () {
-    if (!isJsonRecord(filter)) return;
-    for (const [key, value] of Object.entries(filter)) {
-      if (key === "AND" || key === "OR") {
-        if (Array.isArray(value)) {
-          for (const sub of value) yield* assertFilterColumns(sub, allowed);
-        }
-        continue;
+const assertFilterColumns = Effect.fn("assertFilterColumns")(function* (filter: unknown, allowed: ReadonlySet<string>): Effect.fn.Return<void, ValidationError> {
+  if (!isJsonRecord(filter)) return;
+  for (const [key, value] of Object.entries(filter)) {
+    if (key === "AND" || key === "OR") {
+      if (Array.isArray(value)) {
+        for (const sub of value) yield* assertFilterColumns(sub, allowed);
       }
-      if (key === "_locales") continue;
-      if (!allowed.has(key)) {
-        return yield* new ValidationError({ message: `Unknown filter field '${key}'`, field: key });
-      }
+      continue;
     }
-  });
-}
+    if (key === "_locales") continue;
+    if (!allowed.has(key)) {
+      return yield* new ValidationError({ message: `Unknown filter field '${key}'`, field: key });
+    }
+  }
+});
 
 /** Reject orderBy specs whose field is not a real field api_key or meta column. */
-function assertOrderByColumns(orderBy: readonly string[] | undefined, allowed: ReadonlySet<string>): Effect.Effect<void, ValidationError> {
-  return Effect.gen(function* () {
-    for (const spec of orderBy ?? []) {
-      const match = spec.match(/^(.+)_(ASC|DESC)$/);
-      if (!match) {
-        return yield* new ValidationError({ message: `Invalid orderBy spec '${spec}' (expected '<field>_ASC' or '<field>_DESC')` });
-      }
-      const field = match[1];
-      if (field === "_locales" || !allowed.has(field)) {
-        return yield* new ValidationError({ message: `Unknown orderBy field '${field}'` });
-      }
+const assertOrderByColumns = Effect.fn("assertOrderByColumns")(function* (orderBy: readonly string[] | undefined, allowed: ReadonlySet<string>): Effect.fn.Return<void, ValidationError> {
+  for (const spec of orderBy ?? []) {
+    const match = spec.match(/^(.+)_(ASC|DESC)$/);
+    if (!match) {
+      return yield* new ValidationError({ message: `Invalid orderBy spec '${spec}' (expected '<field>_ASC' or '<field>_DESC')` });
     }
-  });
-}
+    const field = match[1];
+    if (field === "_locales" || !allowed.has(field)) {
+      return yield* new ValidationError({ message: `Unknown orderBy field '${field}'` });
+    }
+  }
+});
 
 export interface QueryRecordsOptions {
   filter?: Record<string, unknown>;
@@ -2418,7 +2392,7 @@ export function getRecordBacklinks(modelApiKey: string, id: string) {
  * `requireAllRequired` distinguishes create-shaped (every required field must be
  * present) from patch-shaped (only fields present in `data` are checked).
  */
-function runDryRunValidation(params: {
+const runDryRunValidation = Effect.fn("runDryRunValidation")(function* (params: {
   model: ModelRow;
   modelFields: readonly ParsedFieldRow[];
   tableName: string;
@@ -2427,70 +2401,68 @@ function runDryRunValidation(params: {
   excludeId: string | null;
   requireAllRequired: boolean;
 }) {
-  return Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    const issues: ValidationIssue[] = [];
+  const sql = yield* SqlClient.SqlClient;
+  const issues: ValidationIssue[] = [];
 
-    const localeRows = yield* sql.unsafe<{ code: string }>("SELECT code FROM locales ORDER BY position", []);
-    const defaultLocale = localeRows.length > 0 ? localeRows[0].code : null;
-    const allLocales = params.model.all_locales_required && localeRows.length > 0
-      ? localeRows.map((l) => l.code)
-      : undefined;
+  const localeRows = yield* sql.unsafe<{ code: string }>("SELECT code FROM locales ORDER BY position", []);
+  const defaultLocale = localeRows.length > 0 ? localeRows[0].code : null;
+  const allLocales = params.model.all_locales_required && localeRows.length > 0
+    ? localeRows.map((l) => l.code)
+    : undefined;
 
-    // 1. Scalar-value validation. Create-shaped enforces required on every field;
-    // patch-shaped only inspects the fields actually present in the payload.
-    const valueCheckFields = params.requireAllRequired
-      ? params.modelFields
-      : params.modelFields.filter((field) => field.api_key in params.data);
-    for (const issue of collectValueValidationIssues(params.data, valueCheckFields, defaultLocale, allLocales)) {
-      issues.push({
-        field: issue.field,
-        code: issue.code,
-        message: `Field '${issue.field}' failed '${issue.code}' validation`,
-      });
-    }
+  // 1. Scalar-value validation. Create-shaped enforces required on every field;
+  // patch-shaped only inspects the fields actually present in the payload.
+  const valueCheckFields = params.requireAllRequired
+    ? params.modelFields
+    : params.modelFields.filter((field) => field.api_key in params.data);
+  for (const issue of collectValueValidationIssues(params.data, valueCheckFields, defaultLocale, allLocales)) {
+    issues.push({
+      field: issue.field,
+      code: issue.code,
+      message: `Field '${issue.field}' failed '${issue.code}' validation`,
+    });
+  }
 
-    // 2. Field processing (no persistence). Uses a private copy of `data` because
-    // the create path mutates it (slug generation etc.); the scalar checks above
-    // ran against the untouched original.
-    const record: Record<string, unknown> = {};
-    const processIssues = yield* processCreateLikeRecordFields({
-      modelApiKey: params.model.api_key,
+  // 2. Field processing (no persistence). Uses a private copy of `data` because
+  // the create path mutates it (slug generation etc.); the scalar checks above
+  // ran against the untouched original.
+  const record: Record<string, unknown> = {};
+  const processIssues = yield* processCreateLikeRecordFields({
+    modelApiKey: params.model.api_key,
+    tableName: params.tableName,
+    recordId: params.recordId,
+    data: { ...params.data },
+    record,
+    modelFields: params.modelFields,
+    dryRun: true,
+  }).pipe(
+    Effect.as<ValidationIssue[]>([]),
+    Effect.catchTag("AggregateValidationError", (error) => Effect.succeed([...error.issues])),
+  );
+  issues.push(...processIssues);
+
+  // 3. Unique constraints — only for unique fields present in the payload
+  // (matching the write paths), excluding the record itself on update.
+  const uniqueFields = new Set(
+    params.modelFields
+      .filter((field) => isUnique(field.validators) && params.data[field.api_key] !== undefined)
+      .map((field) => field.api_key),
+  );
+  if (uniqueFields.size > 0) {
+    const uniqueViolations = yield* findUniqueConstraintViolations({
       tableName: params.tableName,
-      recordId: params.recordId,
-      data: { ...params.data },
       record,
-      modelFields: params.modelFields,
-      dryRun: true,
-    }).pipe(
-      Effect.as<ValidationIssue[]>([]),
-      Effect.catchTag("AggregateValidationError", (error) => Effect.succeed([...error.issues])),
-    );
-    issues.push(...processIssues);
-
-    // 3. Unique constraints — only for unique fields present in the payload
-    // (matching the write paths), excluding the record itself on update.
-    const uniqueFields = new Set(
-      params.modelFields
-        .filter((field) => isUnique(field.validators) && params.data[field.api_key] !== undefined)
-        .map((field) => field.api_key),
-    );
-    if (uniqueFields.size > 0) {
-      const uniqueViolations = yield* findUniqueConstraintViolations({
-        tableName: params.tableName,
-        record,
-        fields: params.modelFields,
-        excludeId: params.excludeId,
-        onlyFieldApiKeys: uniqueFields,
-      });
-      for (const field of uniqueViolations) {
-        issues.push({ field, code: "unique", message: `Unique constraint violation for field '${field}'` });
-      }
+      fields: params.modelFields,
+      excludeId: params.excludeId,
+      onlyFieldApiKeys: uniqueFields,
+    });
+    for (const field of uniqueViolations) {
+      issues.push({ field, code: "unique", message: `Unique constraint violation for field '${field}'` });
     }
+  }
 
-    return issues;
-  });
-}
+  return issues;
+});
 
 /**
  * Create-shaped validation dry-run: answers "would creating a record with this

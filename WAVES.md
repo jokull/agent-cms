@@ -64,3 +64,27 @@
       blocks-editor vite build, codegen 61/61, dast 7/7, editor-react 28/28
 - [x] Test infra: `@effect/sql` imports → `effect/unstable/sql`; fast-path SQL
       tracing switched better-sqlite3 → `node:sqlite` (v4 sql-sqlite-node backend)
+
+## Wave 8 — Effect.fn (docs-canonical function idiom)
+
+Harvested `ai-docs/src/01_effect/01_basics/02_effect-fn.ts`: "Avoid creating
+functions that return an Effect.gen, use Effect.fn instead." Effect.fn names
+the function, auto-attaches a tracing span, and takes combinators as trailing
+args (no .pipe on the fn).
+
+Converted 86 service functions across 14 `src/services/*.ts` files:
+`export function X(...) { return Effect.gen(function* () { ... }); }` →
+`export const X = Effect.fn("X")(function* (...) { ... });` (script-driven,
+paren-balanced signature detection; return-type annotations become
+`Effect.fn.Return<...>`).
+
+Deliberately NOT converted (documented exception): functions whose piped
+combinators reference the fn's own args (e.g. `Effect.annotateSpans({
+modelApiKey, ... })` in createRecord/publishRecord/importAssetFromUrl/...):
+the trailing-combinator position is outside the generator scope, so those
+keep `Effect.gen` + `.pipe` (span attributes need the args).
+
+Remaining gens (next sweeps): router.ts routes/helpers (~57), mcp handlers,
+graphql resolvers, inner arrow gens (`const f = (x) => Effect.gen(...)`).
+Also flagged from docs: DateTime module (6 Date sites), RequestResolver
+(4 hand-rolled graphql loaders), Model.Class (does not fit dynamic models).

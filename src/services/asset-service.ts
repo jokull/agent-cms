@@ -120,87 +120,83 @@ function isRedirectStatus(status: number) {
   return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
 }
 
-function fetchRemoteAsset(url: URL, fetchFn: typeof globalThis.fetch) {
-  return Effect.gen(function* () {
-    let currentUrl = url;
+const fetchRemoteAsset = Effect.fn("fetchRemoteAsset")(function* (url: URL, fetchFn: typeof globalThis.fetch) {
+  let currentUrl = url;
 
-    for (let redirectCount = 0; redirectCount <= MAX_REMOTE_ASSET_REDIRECTS; redirectCount += 1) {
-      const response = yield* Effect.tryPromise({
-        try: () => fetchFn(currentUrl, { redirect: "manual" }),
-        catch: () => new ValidationError({ message: `Failed to fetch asset URL: ${currentUrl}` }),
-      });
+  for (let redirectCount = 0; redirectCount <= MAX_REMOTE_ASSET_REDIRECTS; redirectCount += 1) {
+    const response = yield* Effect.tryPromise({
+      try: () => fetchFn(currentUrl, { redirect: "manual" }),
+      catch: () => new ValidationError({ message: `Failed to fetch asset URL: ${currentUrl}` }),
+    });
 
-      if (!isRedirectStatus(response.status)) {
-        return { response, resolvedUrl: currentUrl };
-      }
-
-      const location = response.headers.get("location");
-      if (!location) {
-        return yield* new ValidationError({
-          message: `Asset URL redirect is missing a Location header: ${currentUrl}`,
-        });
-      }
-
-      if (redirectCount === MAX_REMOTE_ASSET_REDIRECTS) {
-        return yield* new ValidationError({
-          message: `Asset URL redirected too many times (>${MAX_REMOTE_ASSET_REDIRECTS}): ${url}`,
-        });
-      }
-
-      const nextUrl = yield* validateRemoteAssetUrl(new URL(location, currentUrl).toString());
-      currentUrl = nextUrl;
+    if (!isRedirectStatus(response.status)) {
+      return { response, resolvedUrl: currentUrl };
     }
 
-    return yield* new ValidationError({ message: `Failed to resolve asset URL: ${url}` });
-  });
-}
-
-function readResponseBytes(response: Response, url: string) {
-  return Effect.gen(function* () {
-    const contentLength = parseContentLength(response.headers.get("content-length"));
-    if (contentLength !== null && contentLength > MAX_REMOTE_ASSET_BYTES) {
+    const location = response.headers.get("location");
+    if (!location) {
       return yield* new ValidationError({
-        message: `Asset URL is too large to import (${contentLength} bytes > ${MAX_REMOTE_ASSET_BYTES} byte limit)`,
+        message: `Asset URL redirect is missing a Location header: ${currentUrl}`,
       });
     }
 
-    if (!response.body) {
-      return new Uint8Array();
-    }
-
-    const reader = response.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let total = 0;
-
-    let done = false;
-    while (!done) {
-      const chunk = yield* Effect.tryPromise({
-        try: () => reader.read(),
-        catch: () => new ValidationError({ message: `Failed to read asset bytes from: ${url}` }),
+    if (redirectCount === MAX_REMOTE_ASSET_REDIRECTS) {
+      return yield* new ValidationError({
+        message: `Asset URL redirected too many times (>${MAX_REMOTE_ASSET_REDIRECTS}): ${url}`,
       });
-      if (chunk.done) {
-        done = true;
-        continue;
-      }
-      const value = chunk.value;
-      total += value.byteLength;
-      if (total > MAX_REMOTE_ASSET_BYTES) {
-        return yield* new ValidationError({
-          message: `Asset URL is too large to import (${total} bytes > ${MAX_REMOTE_ASSET_BYTES} byte limit)`,
-        });
-      }
-      chunks.push(value);
     }
 
-    const bytes = new Uint8Array(total);
-    let offset = 0;
-    for (const chunk of chunks) {
-      bytes.set(chunk, offset);
-      offset += chunk.byteLength;
+    const nextUrl = yield* validateRemoteAssetUrl(new URL(location, currentUrl).toString());
+    currentUrl = nextUrl;
+  }
+
+  return yield* new ValidationError({ message: `Failed to resolve asset URL: ${url}` });
+});
+
+const readResponseBytes = Effect.fn("readResponseBytes")(function* (response: Response, url: string) {
+  const contentLength = parseContentLength(response.headers.get("content-length"));
+  if (contentLength !== null && contentLength > MAX_REMOTE_ASSET_BYTES) {
+    return yield* new ValidationError({
+      message: `Asset URL is too large to import (${contentLength} bytes > ${MAX_REMOTE_ASSET_BYTES} byte limit)`,
+    });
+  }
+
+  if (!response.body) {
+    return new Uint8Array();
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+
+  let done = false;
+  while (!done) {
+    const chunk = yield* Effect.tryPromise({
+      try: () => reader.read(),
+      catch: () => new ValidationError({ message: `Failed to read asset bytes from: ${url}` }),
+    });
+    if (chunk.done) {
+      done = true;
+      continue;
     }
-    return bytes;
-  });
-}
+    const value = chunk.value;
+    total += value.byteLength;
+    if (total > MAX_REMOTE_ASSET_BYTES) {
+      return yield* new ValidationError({
+        message: `Asset URL is too large to import (${total} bytes > ${MAX_REMOTE_ASSET_BYTES} byte limit)`,
+      });
+    }
+    chunks.push(value);
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+});
 
 /**
  * Extract image dimensions by reading file headers.
@@ -341,26 +337,24 @@ export function createAsset(body: CreateAssetInput, actor?: RequestActor | null)
  * convention as `record-service.ts`'s `assertOrderByColumns`). */
 const ASSET_ORDER_BY_COLUMNS: ReadonlySet<string> = new Set(["created_at", "updated_at", "filename", "size"]);
 
-function compileAssetOrderBy(orderBy: readonly string[] | undefined) {
-  return Effect.gen(function* () {
-    if (!orderBy || orderBy.length === 0) {
-      return `"created_at" DESC`;
+const compileAssetOrderBy = Effect.fn("compileAssetOrderBy")(function* (orderBy: readonly string[] | undefined) {
+  if (!orderBy || orderBy.length === 0) {
+    return `"created_at" DESC`;
+  }
+  const clauses: string[] = [];
+  for (const spec of orderBy) {
+    const match = spec.match(/^(.+)_(ASC|DESC)$/);
+    if (!match) {
+      return yield* new ValidationError({ message: `Invalid orderBy spec '${spec}' (expected '<field>_ASC' or '<field>_DESC')` });
     }
-    const clauses: string[] = [];
-    for (const spec of orderBy) {
-      const match = spec.match(/^(.+)_(ASC|DESC)$/);
-      if (!match) {
-        return yield* new ValidationError({ message: `Invalid orderBy spec '${spec}' (expected '<field>_ASC' or '<field>_DESC')` });
-      }
-      const [, field, direction] = match;
-      if (!ASSET_ORDER_BY_COLUMNS.has(field)) {
-        return yield* new ValidationError({ message: `Unknown asset orderBy field '${field}'` });
-      }
-      clauses.push(`"${field}" ${direction}`);
+    const [, field, direction] = match;
+    if (!ASSET_ORDER_BY_COLUMNS.has(field)) {
+      return yield* new ValidationError({ message: `Unknown asset orderBy field '${field}'` });
     }
-    return clauses.join(", ");
-  });
-}
+    clauses.push(`"${field}" ${direction}`);
+  }
+  return clauses.join(", ");
+});
 
 export interface ListAssetsOptions {
   readonly query?: string;
@@ -401,89 +395,83 @@ export function listAssets(opts?: ListAssetsOptions) {
   );
 }
 
-export function getAsset(id: string) {
-  return Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    const rows = yield* sql.unsafe<AssetRow>("SELECT * FROM assets WHERE id = ?", [id]);
-    if (rows.length === 0) return yield* new NotFoundError({ entity: "Asset", id });
-    return yield* withAssetUrl(rows[0]);
-  });
-}
+export const getAsset = Effect.fn("getAsset")(function* (id: string) {
+  const sql = yield* SqlClient.SqlClient;
+  const rows = yield* sql.unsafe<AssetRow>("SELECT * FROM assets WHERE id = ?", [id]);
+  if (rows.length === 0) return yield* new NotFoundError({ entity: "Asset", id });
+  return yield* withAssetUrl(rows[0]);
+});
 
 /**
  * Replace an asset's file while keeping the same ID and URL.
  * Updates metadata (filename, mimeType, size, dimensions, r2Key) but the asset ID
  * and all content references remain stable. DatoCMS can't do this (imgix regenerates URLs).
  */
-export function replaceAsset(id: string, body: CreateAssetInput, actor?: RequestActor | null) {
-  return Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
+export const replaceAsset = Effect.fn("replaceAsset")(function* (id: string, body: CreateAssetInput, actor?: RequestActor | null) {
+  const sql = yield* SqlClient.SqlClient;
 
-    const rows = yield* sql.unsafe<AssetRow>("SELECT * FROM assets WHERE id = ?", [id]);
-    if (rows.length === 0) return yield* new NotFoundError({ entity: "Asset", id });
+  const rows = yield* sql.unsafe<AssetRow>("SELECT * FROM assets WHERE id = ?", [id]);
+  if (rows.length === 0) return yield* new NotFoundError({ entity: "Asset", id });
 
-    const r2Key = body.r2Key ?? `uploads/${id}/${body.filename}`;
+  const r2Key = body.r2Key ?? `uploads/${id}/${body.filename}`;
 
-    const now = new Date().toISOString();
-    yield* sql.unsafe(
-      `UPDATE assets SET filename = ?, basename = ?, format = ?, mime_type = ?, size = ?, width = ?, height = ?,
-       alt = ?, title = ?, r2_key = ?, blurhash = ?, colors = ?, focal_point = ?, tags = ?, updated_at = ?, updated_by = ?
-       WHERE id = ?`,
-      [
-        body.filename, getAssetBasename(body.filename), getAssetFormat(body.filename, body.mimeType), body.mimeType, body.size,
-        body.width ?? null, body.height ?? null,
-        body.alt ?? rows[0].alt, body.title ?? rows[0].title,
-        r2Key,
-        body.blurhash ?? null,
-        body.colors ? encodeJson(body.colors) : null,
-        body.focalPoint ? encodeJson(body.focalPoint) : null,
-        encodeJson(body.tags),
-        now,
-        actor?.label ?? null,
-        id,
-      ]
-    );
+  const now = new Date().toISOString();
+  yield* sql.unsafe(
+    `UPDATE assets SET filename = ?, basename = ?, format = ?, mime_type = ?, size = ?, width = ?, height = ?,
+     alt = ?, title = ?, r2_key = ?, blurhash = ?, colors = ?, focal_point = ?, tags = ?, updated_at = ?, updated_by = ?
+     WHERE id = ?`,
+    [
+      body.filename, getAssetBasename(body.filename), getAssetFormat(body.filename, body.mimeType), body.mimeType, body.size,
+      body.width ?? null, body.height ?? null,
+      body.alt ?? rows[0].alt, body.title ?? rows[0].title,
+      r2Key,
+      body.blurhash ?? null,
+      body.colors ? encodeJson(body.colors) : null,
+      body.focalPoint ? encodeJson(body.focalPoint) : null,
+      encodeJson(body.tags),
+      now,
+      actor?.label ?? null,
+      id,
+    ]
+  );
 
-    const resolveUrl = yield* assetUrlResolver;
+  const resolveUrl = yield* assetUrlResolver;
 
-    return {
-      id, filename: body.filename, mimeType: body.mimeType, size: body.size,
-      width: body.width, height: body.height,
-      alt: body.alt ?? rows[0].alt, title: body.title ?? rows[0].title,
-      r2Key, url: resolveUrl({ id, filename: body.filename, r2_key: r2Key }),
-      replaced: true, updatedAt: now, updatedBy: actor?.label ?? null,
-    };
-  });
-}
+  return {
+    id, filename: body.filename, mimeType: body.mimeType, size: body.size,
+    width: body.width, height: body.height,
+    alt: body.alt ?? rows[0].alt, title: body.title ?? rows[0].title,
+    r2Key, url: resolveUrl({ id, filename: body.filename, r2_key: r2Key }),
+    replaced: true, updatedAt: now, updatedBy: actor?.label ?? null,
+  };
+});
 
-export function updateAssetMetadata(id: string, body: { alt?: string; title?: string; width?: number; height?: number }, actor?: RequestActor | null) {
-  return Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
+export const updateAssetMetadata = Effect.fn("updateAssetMetadata")(function* (id: string, body: { alt?: string; title?: string; width?: number; height?: number }, actor?: RequestActor | null) {
+  const sql = yield* SqlClient.SqlClient;
 
-    const rows = yield* sql.unsafe<AssetRow>("SELECT * FROM assets WHERE id = ?", [id]);
-    if (rows.length === 0) return yield* new NotFoundError({ entity: "Asset", id });
+  const rows = yield* sql.unsafe<AssetRow>("SELECT * FROM assets WHERE id = ?", [id]);
+  if (rows.length === 0) return yield* new NotFoundError({ entity: "Asset", id });
 
-    const alt = body.alt !== undefined ? body.alt : rows[0].alt;
-    const title = body.title !== undefined ? body.title : rows[0].title;
-    const width = body.width !== undefined ? body.width : rows[0].width;
-    const height = body.height !== undefined ? body.height : rows[0].height;
+  const alt = body.alt !== undefined ? body.alt : rows[0].alt;
+  const title = body.title !== undefined ? body.title : rows[0].title;
+  const width = body.width !== undefined ? body.width : rows[0].width;
+  const height = body.height !== undefined ? body.height : rows[0].height;
 
-    const now = new Date().toISOString();
-    yield* sql.unsafe(
-      "UPDATE assets SET alt = ?, title = ?, width = ?, height = ?, updated_at = ?, updated_by = ? WHERE id = ?",
-      [alt, title, width, height, now, actor?.label ?? null, id]
-    );
+  const now = new Date().toISOString();
+  yield* sql.unsafe(
+    "UPDATE assets SET alt = ?, title = ?, width = ?, height = ?, updated_at = ?, updated_by = ? WHERE id = ?",
+    [alt, title, width, height, now, actor?.label ?? null, id]
+  );
 
-    const resolveUrl = yield* assetUrlResolver;
+  const resolveUrl = yield* assetUrlResolver;
 
-    return {
-      id, alt, title, width, height,
-      url: resolveUrl({ id, filename: rows[0].filename, r2_key: rows[0].r2_key }),
-      updatedAt: now,
-      updatedBy: actor?.label ?? null,
-    };
-  });
-}
+  return {
+    id, alt, title, width, height,
+    url: resolveUrl({ id, filename: rows[0].filename, r2_key: rows[0].r2_key }),
+    updatedAt: now,
+    updatedBy: actor?.label ?? null,
+  };
+});
 
 /**
  * Delete an asset. Guarded by the SAME `getAssetUsages` scan the `/usages`
@@ -646,45 +634,43 @@ export function getAssetUsages(id: string) {
   );
 }
 
-export function createAssetUploadUrl(input: CreateUploadUrlInput) {
-  return Effect.gen(function* () {
-    const { r2Credentials } = yield* AssetImportContext;
-    if (!r2Credentials) {
-      return yield* new ValidationError({ message: "Presigned uploads not configured" });
-    }
+export const createAssetUploadUrl = Effect.fn("createAssetUploadUrl")(function* (input: CreateUploadUrlInput) {
+  const { r2Credentials } = yield* AssetImportContext;
+  if (!r2Credentials) {
+    return yield* new ValidationError({ message: "Presigned uploads not configured" });
+  }
 
-    const { S3Client, PutObjectCommand } = yield* Effect.tryPromise({
-      try: () => import("@aws-sdk/client-s3"),
-      catch: () => new ValidationError({ message: "Failed to load R2 signing client" }),
-    });
-    const { getSignedUrl } = yield* Effect.tryPromise({
-      try: () => import("@aws-sdk/s3-request-presigner"),
-      catch: () => new ValidationError({ message: "Failed to load R2 signing helper" }),
-    });
-
-    const assetId = crypto.randomUUID();
-    const r2Key = `uploads/${assetId}/${input.filename}`;
-    const s3 = new S3Client({
-      region: "auto",
-      endpoint: `https://${r2Credentials.accountId}.r2.cloudflarestorage.com`,
-      credentials: {
-        accessKeyId: r2Credentials.accessKeyId,
-        secretAccessKey: r2Credentials.secretAccessKey,
-      },
-    });
-    const command = new PutObjectCommand({
-      Bucket: r2Credentials.bucketName,
-      Key: r2Key,
-      ContentType: input.mimeType,
-    });
-    const uploadUrl = yield* Effect.tryPromise({
-      try: () => getSignedUrl(s3, command, { expiresIn: 3600 }),
-      catch: () => new ValidationError({ message: "Failed to create R2 upload URL" }),
-    });
-
-    return { uploadUrl, r2Key, assetId };
+  const { S3Client, PutObjectCommand } = yield* Effect.tryPromise({
+    try: () => import("@aws-sdk/client-s3"),
+    catch: () => new ValidationError({ message: "Failed to load R2 signing client" }),
   });
-}
+  const { getSignedUrl } = yield* Effect.tryPromise({
+    try: () => import("@aws-sdk/s3-request-presigner"),
+    catch: () => new ValidationError({ message: "Failed to load R2 signing helper" }),
+  });
+
+  const assetId = crypto.randomUUID();
+  const r2Key = `uploads/${assetId}/${input.filename}`;
+  const s3 = new S3Client({
+    region: "auto",
+    endpoint: `https://${r2Credentials.accountId}.r2.cloudflarestorage.com`,
+    credentials: {
+      accessKeyId: r2Credentials.accessKeyId,
+      secretAccessKey: r2Credentials.secretAccessKey,
+    },
+  });
+  const command = new PutObjectCommand({
+    Bucket: r2Credentials.bucketName,
+    Key: r2Key,
+    ContentType: input.mimeType,
+  });
+  const uploadUrl = yield* Effect.tryPromise({
+    try: () => getSignedUrl(s3, command, { expiresIn: 3600 }),
+    catch: () => new ValidationError({ message: "Failed to create R2 upload URL" }),
+  });
+
+  return { uploadUrl, r2Key, assetId };
+});
 
 export function importAssetFromUrl(input: ImportAssetFromUrlInput, actor?: RequestActor | null) {
   return Effect.gen(function* () {

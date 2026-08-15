@@ -33,28 +33,24 @@ const SCHEMA_VERSION_KEY = "schema_version";
  * schema for longer than {@link SCHEMA_VERSION_TTL_MS}. Uses an UPSERT so the
  * row is created on first bump even if the seed migration has not run.
  */
-export function bumpSchemaVersion() {
-  return Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    yield* sql.unsafe(
-      `INSERT INTO "_cms_meta" ("key", "value") VALUES (?, 1)
-       ON CONFLICT("key") DO UPDATE SET "value" = "value" + 1`,
-      [SCHEMA_VERSION_KEY],
-    );
-  });
-}
+export const bumpSchemaVersion = Effect.fn("bumpSchemaVersion")(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql.unsafe(
+    `INSERT INTO "_cms_meta" ("key", "value") VALUES (?, 1)
+     ON CONFLICT("key") DO UPDATE SET "value" = "value" + 1`,
+    [SCHEMA_VERSION_KEY],
+  );
+});
 
 /** Read the shared schema version. Returns 0 when unset. */
-export function getSchemaVersion() {
-  return Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    const rows = yield* sql.unsafe<{ value: number }>(
-      `SELECT "value" FROM "_cms_meta" WHERE "key" = ?`,
-      [SCHEMA_VERSION_KEY],
-    );
-    return rows[0]?.value ?? 0;
-  });
-}
+export const getSchemaVersion = Effect.fn("getSchemaVersion")(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const rows = yield* sql.unsafe<{ value: number }>(
+    `SELECT "value" FROM "_cms_meta" WHERE "key" = ?`,
+    [SCHEMA_VERSION_KEY],
+  );
+  return rows[0]?.value ?? 0;
+});
 
 /**
  * Read the schema version as a Promise, defaulting to 0 on any error (e.g. the
