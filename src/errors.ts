@@ -101,17 +101,23 @@ export type CmsError =
   | SchemaEngineError
   | UnauthorizedError;
 
-/** Runtime type guard for CmsError — uses instanceof, no duck-typing */
+/**
+ * The error classes that make up {@link CmsError}, kept in one place so the
+ * guard below can never drift from the union. instanceof, not duck-typing.
+ */
+const cmsErrorClasses = [
+  NotFoundError,
+  ValidationError,
+  AggregateValidationError,
+  ReferenceConflictError,
+  DuplicateError,
+  SchemaEngineError,
+  UnauthorizedError,
+] as const;
+
+/** Runtime type guard for CmsError */
 export function isCmsError(error: unknown): error is CmsError {
-  return (
-    error instanceof NotFoundError ||
-    error instanceof ValidationError ||
-    error instanceof AggregateValidationError ||
-    error instanceof ReferenceConflictError ||
-    error instanceof DuplicateError ||
-    error instanceof SchemaEngineError ||
-    error instanceof UnauthorizedError
-  );
+  return cmsErrorClasses.some((cls) => error instanceof cls);
 }
 
 /** JSON body shapes emitted by errorToResponse, keyed by error tag */
