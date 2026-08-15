@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { contentTableName } from "../dynamic/tables.js";
 import { SqlClient } from "effect/unstable/sql";
 import type { FieldType } from "../types.js";
 import { getFieldTypeDef } from "../field-types.js";
@@ -129,11 +130,11 @@ function shouldIndexField(fieldType: FieldType): boolean {
 }
 
 function contentFieldIndexName(modelApiKey: string, fieldApiKey: string): string {
-  return `idx_content_${modelApiKey}_${fieldApiKey}`;
+  return `idx_${contentTableName(modelApiKey)}_${fieldApiKey}`;
 }
 
 function contentCompositeIndexName(modelApiKey: string, leftFieldApiKey: string, rightFieldApiKey: string): string {
-  return `idx_content_${modelApiKey}_${leftFieldApiKey}_${rightFieldApiKey}`;
+  return `idx_${contentTableName(modelApiKey)}_${leftFieldApiKey}_${rightFieldApiKey}`;
 }
 
 /** The full set of index names `ensureContentFieldIndexes` wants to exist for `fields`. */
@@ -157,7 +158,7 @@ function desiredContentIndexNames(modelApiKey: string, fields: FieldDef[]): Set<
 export function ensureContentFieldIndexes(modelApiKey: string, fields: FieldDef[]) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const tableName = `content_${modelApiKey}`;
+    const tableName = contentTableName(modelApiKey);
 
     // Reconcile before (re)creating: drops indexes left behind under old names by a
     // model/field rename (#62), and indexes for fields whose type changed to one
@@ -196,7 +197,7 @@ interface CreateContentTableOptions {
 export function createContentTable(modelApiKey: string, fields: FieldDef[], options?: CreateContentTableOptions) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const tableName = `content_${modelApiKey}`;
+    const tableName = contentTableName(modelApiKey);
     const fieldCols = fields.map(
       (f) => `"${f.apiKey}" ${fieldTypeToSQLite(f.fieldType)}`
     );
@@ -298,7 +299,7 @@ export function migrateContentTable(
   options?: CreateContentTableOptions
 ) {
   return Effect.gen(function* () {
-    const tableName = isBlock ? `block_${modelApiKey}` : `content_${modelApiKey}`;
+    const tableName = isBlock ? `block_${modelApiKey}` : contentTableName(modelApiKey);
     const exists = yield* tableExists(tableName);
 
     if (!exists) {

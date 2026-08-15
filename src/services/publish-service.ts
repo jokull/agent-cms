@@ -1,4 +1,5 @@
 import { DateTime, Effect } from "effect";
+import { contentTableName } from "../dynamic/tables.js";
 import { SqlClient } from "effect/unstable/sql";
 import { NotFoundError, AggregateValidationError, type ValidationIssue } from "../errors.js";
 import { selectById } from "../schema-engine/sql-records.js";
@@ -23,7 +24,7 @@ export function publishRecord(modelApiKey: string, recordId: string, actor?: Req
     if (models.length === 0) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
 
     const model = models[0];
-    const tableName = `content_${model.api_key}`;
+    const tableName = contentTableName(model.api_key);
     const record = yield* selectById(tableName, recordId);
     if (!record) return yield* new NotFoundError({ entity: "Record", id: recordId });
 
@@ -150,7 +151,7 @@ export function unpublishRecord(modelApiKey: string, recordId: string, actor?: R
     );
     if (models.length === 0) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
 
-    const tableName = `content_${models[0].api_key}`;
+    const tableName = contentTableName(models[0].api_key);
     const record = yield* selectById(tableName, recordId);
     if (!record) return yield* new NotFoundError({ entity: "Record", id: recordId });
 

@@ -10,6 +10,7 @@
  * Unresolvable tokens (null link, missing field) are left as-is: {token}.
  */
 import { Effect } from "effect";
+import { contentTableName } from "../dynamic/tables.js";
 import { SqlClient } from "effect/unstable/sql";
 import { NotFoundError, ValidationError } from "../errors.js";
 import type { ModelRow, FieldRow } from "../db/row-types.js";
@@ -93,7 +94,7 @@ export const resolveCanonicalPaths = Effect.fn("resolveCanonicalPaths")(function
   }
   const columnList = [...neededColumns].map((c) => `"${c}"`).join(", ");
   const records = yield* sql.unsafe<Record<string, unknown>>(
-    `SELECT ${columnList} FROM "content_${modelApiKey}" WHERE "_status" IN ('published', 'updated')`,
+    `SELECT ${columnList} FROM "${contentTableName(modelApiKey)}" WHERE "_status" IN ('published', 'updated')`,
   );
 
   if (records.length === 0) return [];
@@ -246,7 +247,7 @@ const resolveLinkedTokens = Effect.fn("resolveLinkedTokens")(function* (
           if (idsToFetch.length === 0) break;
           const placeholders = idsToFetch.map(() => "?").join(", ");
           const rows = yield* sql.unsafe<Record<string, unknown>>(
-            `SELECT * FROM "content_${targetApiKey}" WHERE "id" IN (${placeholders})`,
+            `SELECT * FROM "${contentTableName(targetApiKey)}" WHERE "id" IN (${placeholders})`,
             idsToFetch,
           );
           for (const row of rows) {

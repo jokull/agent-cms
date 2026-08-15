@@ -1,4 +1,5 @@
 import { DateTime, Context, Effect } from "effect";
+import { contentTableName } from "../dynamic/tables.js";
 import { SqlClient } from "effect/unstable/sql";
 import { generateId } from "../id.js";
 import { NotFoundError, ValidationError, ReferenceConflictError } from "../errors.js";
@@ -574,7 +575,7 @@ export function getAssetUsages(id: string) {
       if (cached !== undefined) return cached;
       for (const contentModel of contentModels) {
         const rows = yield* sql.unsafe<{ id: string }>(
-          `SELECT id FROM "content_${contentModel.api_key}" WHERE id = ?`,
+          `SELECT id FROM "${contentTableName(contentModel.api_key)}" WHERE id = ?`,
           [recordId],
         );
         if (rows.length > 0) {
@@ -596,7 +597,7 @@ export function getAssetUsages(id: string) {
       if (fields.length === 0) continue;
 
       const isBlock = model.is_block === 1;
-      const tableName = isBlock ? `block_${model.api_key}` : `content_${model.api_key}`;
+      const tableName = isBlock ? `block_${model.api_key}` : contentTableName(model.api_key);
       const rootColumns = isBlock ? `, "_root_record_id", "_root_field_api_key"` : "";
       const rows = yield* sql.unsafe<Record<string, unknown>>(
         `SELECT "id"${rootColumns}, ${fields.map((f) => `"${f.api_key}"`).join(", ")} FROM "${tableName}"`

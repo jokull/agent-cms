@@ -1,4 +1,5 @@
 import { DateTime, Effect } from "effect";
+import { contentTableName } from "../dynamic/tables.js";
 import { SqlClient } from "effect/unstable/sql";
 import { generateId } from "../id.js";
 import { NotFoundError, ValidationError } from "../errors.js";
@@ -113,7 +114,7 @@ export const restoreVersion = Effect.fn("restoreVersion")(function* (modelApiKey
   );
   if (models.length === 0) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
   const model = models[0];
-  const tableName = `content_${model.api_key}`;
+  const tableName = contentTableName(model.api_key);
 
   // Fetch current record
   const current = yield* selectById(tableName, recordId);
@@ -210,7 +211,7 @@ export const compareVersions = Effect.fn("compareVersions")(function* (modelApiK
   );
   if (models.length === 0) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
   const model = models[0];
-  const tableName = `content_${model.api_key}`;
+  const tableName = contentTableName(model.api_key);
   const current = yield* selectById(tableName, recordId);
   if (!current) return yield* new NotFoundError({ entity: "Record", id: recordId });
 

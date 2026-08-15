@@ -3,6 +3,7 @@
  * These go beyond simple CRUD and handle content-level cascades.
  */
 import { Effect } from "effect";
+import { contentTableName } from "../dynamic/tables.js";
 import { SqlClient } from "effect/unstable/sql";
 import { NotFoundError, ValidationError } from "../errors.js";
 import type { ModelRow, FieldRow } from "../db/row-types.js";
@@ -43,7 +44,7 @@ export const removeBlockType = Effect.fn("removeBlockType")(function* (blockApiK
     );
     if (model.length === 0) continue;
 
-    const tableName = model[0].is_block ? `block_${model[0].api_key}` : `content_${model[0].api_key}`;
+    const tableName = model[0].is_block ? `block_${model[0].api_key}` : contentTableName(model[0].api_key);
     const records = yield* sql.unsafe<Record<string, unknown>>(
       `SELECT id, "${field.api_key}", _published_snapshot FROM "${tableName}" WHERE "${field.api_key}" IS NOT NULL OR _published_snapshot IS NOT NULL`
     );
@@ -137,7 +138,7 @@ export const removeBlockFromWhitelist = Effect.fn("removeBlockFromWhitelist")(fu
   const model = yield* sql.unsafe<ModelRow>("SELECT * FROM models WHERE id = ?", [field.model_id]);
   if (model.length === 0) return yield* new NotFoundError({ entity: "Model", id: field.model_id });
 
-  const tableName = model[0].is_block ? `block_${model[0].api_key}` : `content_${model[0].api_key}`;
+  const tableName = model[0].is_block ? `block_${model[0].api_key}` : contentTableName(model[0].api_key);
 
   // Find block IDs of this type for records of this model/field (scoped to this model's records)
   const blockIds = yield* sql.unsafe<{ id: string }>(
@@ -212,7 +213,7 @@ export const removeLocale = Effect.fn("removeLocale")(function* (localeId: strin
     );
     if (model.length === 0) continue;
 
-    const tableName = model[0].is_block ? `block_${model[0].api_key}` : `content_${model[0].api_key}`;
+    const tableName = model[0].is_block ? `block_${model[0].api_key}` : contentTableName(model[0].api_key);
     const records = yield* sql.unsafe<Record<string, unknown>>(
       `SELECT id, "${field.api_key}" FROM "${tableName}" WHERE "${field.api_key}" IS NOT NULL`
     );

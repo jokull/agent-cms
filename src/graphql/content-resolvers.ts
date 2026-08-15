@@ -2,6 +2,7 @@
  * Build GraphQL types and field resolvers for content models.
  */
 import { Effect } from "effect";
+import { contentTableName } from "../dynamic/tables.js";
 import { SqlClient } from "effect/unstable/sql";
 import { getLinkTargets, getLinksTargets, computeIsValid, findUniqueConstraintViolations } from "../db/validators.js";
 import type { SchemaBuilderContext, ModelQueryMeta, GqlContext, AssetObject } from "./gql-types.js";
@@ -84,7 +85,7 @@ export function buildContentModelResolvers(
     const fields = fieldsByModelId.get(model.id) ?? [];
     const baseTypeName = toTypeName(model.api_key);
     const typeName = typeNames.get(model.api_key)!;
-    const tableName = `content_${model.api_key}`;
+    const tableName = contentTableName(model.api_key);
 
     // Build camelCase <-> snake_case mappings for this model's fields
     const camelToSnake = new Map<string, string>();

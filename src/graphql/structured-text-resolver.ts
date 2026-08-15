@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { contentTableName } from "../dynamic/tables.js";
 import { SqlClient } from "effect/unstable/sql";
 import { extractBlockIds, extractInlineBlockIds, extractLinkIds } from "../dast/index.js";
 import type { DastDocInput, GqlContext } from "./gql-types.js";
@@ -33,7 +34,7 @@ export async function batchFetchRecords(params: {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       return yield* sql.unsafe<DynamicRow>(
-        `SELECT * FROM "content_${params.tableApiKey}" WHERE id IN (${placeholders})`,
+        `SELECT * FROM "${contentTableName(params.tableApiKey)}" WHERE id IN (${placeholders})`,
         params.ids
       );
     })

@@ -1,4 +1,5 @@
 import { SqlClient } from "effect/unstable/sql";
+import { contentTableName } from "../dynamic/tables.js";
 import { Effect, Layer } from "effect";
 import {
   Kind,
@@ -842,7 +843,7 @@ async function fetchExecutorMetadata(
     const localizedCamelKeys = new Set(modelFields.filter((field) => field.localized).map((field) => toCamelCase(field.api_key)));
     const meta = {
       model,
-      tableName: `content_${model.api_key}`,
+      tableName: contentTableName(model.api_key),
       typeName: toContentTypeName(model.api_key),
       singleName: toCamelCase(model.api_key),
       listName: `all${pluralize(toTypeName(model.api_key))}`,

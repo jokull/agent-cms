@@ -1,4 +1,5 @@
 import { DateTime, Effect } from "effect";
+import { contentTableName } from "../dynamic/tables.js";
 import { SqlClient } from "effect/unstable/sql";
 import { NotFoundError, ValidationError } from "../errors.js";
 import type { ModelRow } from "../db/row-types.js";
@@ -29,7 +30,7 @@ const validateScheduleAt = Effect.fn("validateScheduleAt")(function* (at: string
 export const schedulePublish = Effect.fn("schedulePublish")(function* (modelApiKey: string, recordId: string, at: string | null, actor?: RequestActor | null) {
   const model = yield* getContentModel(modelApiKey);
   const sql = yield* SqlClient.SqlClient;
-  const tableName = `content_${model.api_key}`;
+  const tableName = contentTableName(model.api_key);
   const scheduleAt = yield* validateScheduleAt(at);
 
   const rows = yield* sql.unsafe<{ id: string }>(`SELECT id FROM "${tableName}" WHERE id = ?`, [recordId]);
@@ -48,7 +49,7 @@ export const schedulePublish = Effect.fn("schedulePublish")(function* (modelApiK
 export const scheduleUnpublish = Effect.fn("scheduleUnpublish")(function* (modelApiKey: string, recordId: string, at: string | null, actor?: RequestActor | null) {
   const model = yield* getContentModel(modelApiKey);
   const sql = yield* SqlClient.SqlClient;
-  const tableName = `content_${model.api_key}`;
+  const tableName = contentTableName(model.api_key);
   const scheduleAt = yield* validateScheduleAt(at);
 
   const rows = yield* sql.unsafe<{ id: string }>(`SELECT id FROM "${tableName}" WHERE id = ?`, [recordId]);
@@ -67,7 +68,7 @@ export const scheduleUnpublish = Effect.fn("scheduleUnpublish")(function* (model
 export const clearSchedule = Effect.fn("clearSchedule")(function* (modelApiKey: string, recordId: string, actor?: RequestActor | null) {
   const model = yield* getContentModel(modelApiKey);
   const sql = yield* SqlClient.SqlClient;
-  const tableName = `content_${model.api_key}`;
+  const tableName = contentTableName(model.api_key);
 
   const rows = yield* sql.unsafe<{ id: string }>(`SELECT id FROM "${tableName}" WHERE id = ?`, [recordId]);
   if (rows.length === 0) {
@@ -93,7 +94,7 @@ export const runScheduledTransitions = Effect.fn("runScheduledTransitions")(func
   const unpublished: Array<{ modelApiKey: string; recordId: string }> = [];
 
   for (const model of models) {
-    const tableName = `content_${model.api_key}`;
+    const tableName = contentTableName(model.api_key);
     const duePublish = yield* sql.unsafe<{ id: string }>(
       `SELECT id FROM "${tableName}" WHERE _scheduled_publish_at IS NOT NULL AND _scheduled_publish_at <= ? ORDER BY _scheduled_publish_at ASC`,
       [nowIso]
@@ -105,7 +106,7 @@ export const runScheduledTransitions = Effect.fn("runScheduledTransitions")(func
   }
 
   for (const model of models) {
-    const tableName = `content_${model.api_key}`;
+    const tableName = contentTableName(model.api_key);
     const dueUnpublish = yield* sql.unsafe<{ id: string }>(
       `SELECT id FROM "${tableName}" WHERE _scheduled_unpublish_at IS NOT NULL AND _scheduled_unpublish_at <= ? AND _status IN ('published', 'updated') ORDER BY _scheduled_unpublish_at ASC`,
       [nowIso]

@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { contentTableName } from "../dynamic/tables.js";
 import { SqlClient } from "effect/unstable/sql";
 import { generateId } from "../id.js";
 import {
@@ -369,7 +370,7 @@ export const deleteModel = Effect.fn("deleteModel")(function* (id: string) {
     }
   }
 
-  const tableName = model.is_block ? `block_${model.api_key}` : `content_${model.api_key}`;
+  const tableName = model.is_block ? `block_${model.api_key}` : contentTableName(model.api_key);
 
   // Count records before dropping
   const countResult = yield* sql.unsafe<{ c: number }>(

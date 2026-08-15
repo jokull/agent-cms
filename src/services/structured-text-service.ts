@@ -1,4 +1,5 @@
 import { Effect, Schema, SchemaIssue } from "effect";
+import { contentTableName } from "../dynamic/tables.js";
 import { SqlClient, SqlError } from "effect/unstable/sql";
 import { validateBlocksOnly, extractAllBlockIds, extractBlockIds, extractLinkIds } from "../dast/index.js";
 import { ValidationError } from "../errors.js";
@@ -225,7 +226,7 @@ const enforceStructuredTextLinks = Effect.fn("enforceStructuredTextLinks")(funct
   const idPlaceholders = linkIds.map(() => "?").join(", ");
   for (const model of allowedModels) {
     const rows = yield* sql.unsafe<{ id: string }>(
-      `SELECT id FROM "content_${model.api_key}" WHERE id IN (${idPlaceholders})`,
+      `SELECT id FROM "${contentTableName(model.api_key)}" WHERE id IN (${idPlaceholders})`,
       [...linkIds],
     );
     for (const row of rows) foundIds.add(row.id);

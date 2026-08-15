@@ -3,6 +3,7 @@
  * For each target model with incoming link/links references, add _allReferencing<Source>s fields.
  */
 import { Effect } from "effect";
+import { contentTableName } from "../dynamic/tables.js";
 import { SqlClient } from "effect/unstable/sql";
 import { getLinkTargets, getLinksTargets } from "../db/validators.js";
 import { compileFilterToSql, compileOrderBy, type FilterCompilerOpts } from "./filter-compiler.js";
@@ -40,7 +41,7 @@ export function buildReverseRefs(
         arr.push({
           sourceModelApiKey: m.api_key,
           sourceTypeName: toTypeName(m.api_key),
-          sourceTableName: `content_${m.api_key}`,
+          sourceTableName: contentTableName(m.api_key),
           fieldApiKey: f.api_key,
           fieldType: f.field_type,
         });

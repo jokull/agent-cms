@@ -1,4 +1,5 @@
 import { Effect, Schema } from "effect";
+import { contentTableName } from "../dynamic/tables.js";
 import { SqlClient } from "effect/unstable/sql";
 import { generateId } from "../id.js";
 import { NotFoundError, ValidationError, AggregateValidationError, DuplicateError, CmsErrorSchema, isCmsError, errorToResponse, type ValidationIssue } from "../errors.js";
@@ -380,7 +381,7 @@ const validateReferenceFieldValue = Effect.fn("validateReferenceFieldValue")(fun
   for (const model of targetModels) {
     const idPlaceholders = referenceIds.map(() => "?").join(", ");
     const rows = yield* sql.unsafe<{ id: string }>(
-      `SELECT id FROM "content_${model.api_key}" WHERE id IN (${idPlaceholders})`,
+      `SELECT id FROM "${contentTableName(model.api_key)}" WHERE id IN (${idPlaceholders})`,
       referenceIds,
     );
     for (const row of rows) {
@@ -715,7 +716,7 @@ export function createRecord(body: CreateRecordInput, actor?: RequestActor | nul
     if (model.is_block)
       return yield* new ValidationError({ message: "Cannot create records for block types directly" });
 
-    const tableName = `content_${model.api_key}`;
+    const tableName = contentTableName(model.api_key);
 
     // Singleton check
     if (model.singleton) {
@@ -876,7 +877,7 @@ export const listRecords = Effect.fn("listRecords")(function* (modelApiKey: stri
     return yield* new ValidationError({ message: "modelApiKey query parameter is required" });
   const model = yield* getModelByApiKey(modelApiKey);
   if (!model) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
-  const records = yield* selectAll(`content_${model.api_key}`);
+  const records = yield* selectAll(contentTableName(model.api_key));
   const fields = yield* getModelFields(model.id);
   const mediaSites: MediaSite[] = [];
   const materialized = yield* Effect.all(
@@ -897,7 +898,7 @@ export const getRecord = Effect.fn("getRecord")(function* (modelApiKey: string, 
     return yield* new ValidationError({ message: "modelApiKey query parameter is required" });
   const model = yield* getModelByApiKey(modelApiKey);
   if (!model) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
-  const record = yield* selectById(`content_${model.api_key}`, id);
+  const record = yield* selectById(contentTableName(model.api_key), id);
   if (!record) return yield* new NotFoundError({ entity: "Record", id });
   const fields = yield* getModelFields(model.id);
   const mediaSites: MediaSite[] = [];
@@ -919,7 +920,7 @@ export function updateSingletonRecord(modelApiKey: string, data: Record<string, 
       return yield* new ValidationError({ message: `Model '${modelApiKey}' is not a singleton` });
     }
 
-    const records = yield* selectAll(`content_${model.api_key}`);
+    const records = yield* selectAll(contentTableName(model.api_key));
     if (records.length === 0) {
       return yield* new NotFoundError({ entity: "Record", id: `${modelApiKey} singleton` });
     }
@@ -943,7 +944,7 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
     const model = yield* getModelByApiKey(body.modelApiKey);
     if (!model) return yield* new NotFoundError({ entity: "Model", id: body.modelApiKey });
 
-    const tableName = `content_${model.api_key}`;
+    const tableName = contentTableName(model.api_key);
     const existing = yield* selectById(tableName, id);
     if (!existing) return yield* new NotFoundError({ entity: "Record", id });
 
@@ -1334,7 +1335,7 @@ export const removeRecord = Effect.fn("removeRecord")(function* (modelApiKey: st
   const model = yield* getModelByApiKey(modelApiKey);
   if (!model) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
 
-  const tableName = `content_${model.api_key}`;
+  const tableName = contentTableName(model.api_key);
   const existing = yield* selectById(tableName, id);
   if (!existing) return yield* new NotFoundError({ entity: "Record", id });
 
@@ -1374,7 +1375,7 @@ export const bulkCreateRecords = Effect.fn("bulkCreateRecords")(function* ({ mod
   if (model.singleton)
     return yield* new ValidationError({ message: "Cannot bulk create on singleton models" });
 
-  const tableName = `content_${model.api_key}`;
+  const tableName = contentTableName(model.api_key);
   const modelFields = yield* getModelFields(model.id);
   const sql = yield* SqlClient.SqlClient;
   const now = new Date().toISOString();
@@ -1526,7 +1527,7 @@ export const patchBlocksForField = Effect.fn("patchBlocksForField")(function* (b
   const model = yield* getModelByApiKey(body.modelApiKey);
   if (!model) return yield* new NotFoundError({ entity: "Model", id: body.modelApiKey });
 
-  const tableName = `content_${model.api_key}`;
+  const tableName = contentTableName(model.api_key);
   const existing = yield* selectById(tableName, body.recordId);
   if (!existing) return yield* new NotFoundError({ entity: "Record", id: body.recordId });
 
@@ -1797,7 +1798,7 @@ export const reorderRecords = Effect.fn("reorderRecords")(function* (modelApiKey
     return yield* new ValidationError({ message: `Model '${modelApiKey}' is not sortable` });
 
   const sql = yield* SqlClient.SqlClient;
-  const tableName = `content_${model.api_key}`;
+  const tableName = contentTableName(model.api_key);
 
   for (let i = 0; i < recordIds.length; i++) {
     yield* sql.unsafe(
@@ -1912,7 +1913,7 @@ export function queryRecords(modelApiKey: string, opts: QueryRecordsOptions) {
     yield* assertOrderByColumns(opts.orderBy, allowed);
 
     const sql = yield* SqlClient.SqlClient;
-    const tableName = `content_${model.api_key}`;
+    const tableName = contentTableName(model.api_key);
     const filterOpts = buildFilterCompilerOpts(fields, opts.locale);
 
     const conditions: string[] = [];
@@ -2033,7 +2034,7 @@ export function searchRecords(modelApiKey: string, q: string, page?: PickerSearc
     const imageKey = resolveImageFieldKey(model, fields);
 
     const sql = yield* SqlClient.SqlClient;
-    const tableName = `content_${model.api_key}`;
+    const tableName = contentTableName(model.api_key);
 
     const conditions: string[] = [];
     const params: unknown[] = [];
@@ -2184,7 +2185,7 @@ export function duplicateRecord(modelApiKey: string, id: string, actor?: Request
     if (model.singleton)
       return yield* new ValidationError({ message: "Cannot duplicate a singleton record" });
 
-    const tableName = `content_${model.api_key}`;
+    const tableName = contentTableName(model.api_key);
     const source = yield* selectById(tableName, id);
     if (!source) return yield* new NotFoundError({ entity: "Record", id });
 
@@ -2336,7 +2337,7 @@ export function getRecordBacklinks(modelApiKey: string, id: string) {
       return yield* new ValidationError({ message: "modelApiKey is required" });
     const model = yield* getModelByApiKey(modelApiKey);
     if (!model) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
-    const existing = yield* selectById(`content_${model.api_key}`, id);
+    const existing = yield* selectById(contentTableName(model.api_key), id);
     if (!existing) return yield* new NotFoundError({ entity: "Record", id });
 
     const sql = yield* SqlClient.SqlClient;
@@ -2355,7 +2356,7 @@ export function getRecordBacklinks(modelApiKey: string, id: string) {
 
         const condition = backlinkCondition(field, id);
         const rows = yield* sql.unsafe<{ id: string }>(
-          `SELECT id FROM "content_${sourceModel.api_key}" WHERE ${condition.sql}`,
+          `SELECT id FROM "${contentTableName(sourceModel.api_key)}" WHERE ${condition.sql}`,
           condition.params,
         );
         for (const row of rows) {
@@ -2486,7 +2487,7 @@ export function validateRecord(modelApiKey: string, data: Record<string, unknown
     const issues = yield* runDryRunValidation({
       model,
       modelFields,
-      tableName: `content_${model.api_key}`,
+      tableName: contentTableName(model.api_key),
       data,
       recordId: generateId(),
       excludeId: null,
@@ -2517,7 +2518,7 @@ export function validateRecordUpdate(modelApiKey: string, id: string, data: Reco
     const model = yield* getModelByApiKey(modelApiKey);
     if (!model) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
 
-    const tableName = `content_${model.api_key}`;
+    const tableName = contentTableName(model.api_key);
     const existing = yield* selectById(tableName, id);
     if (!existing) return yield* new NotFoundError({ entity: "Record", id });
 
@@ -2596,7 +2597,7 @@ export function getSyncState(modelApiKey: string, id: string) {
     const model = yield* getModelByApiKey(modelApiKey);
     if (!model) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
 
-    const tableName = `content_${model.api_key}`;
+    const tableName = contentTableName(model.api_key);
     const existing = yield* selectById(tableName, id);
     if (!existing) return yield* new NotFoundError({ entity: "Record", id });
 

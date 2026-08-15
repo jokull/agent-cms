@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { contentTableName } from "../dynamic/tables.js";
 import { SqlClient } from "effect/unstable/sql";
 import { generateId } from "../id.js";
 import { FIELD_TYPES, isFieldType } from "../types.js";
@@ -484,7 +485,7 @@ export const createField = Effect.fn("createField")(function* (modelId: string, 
       "SELECT api_key, is_block FROM models WHERE id = ?", [modelId]
     );
     if (modelInfo.length > 0) {
-      const tableName = modelInfo[0].is_block ? `block_${modelInfo[0].api_key}` : `content_${modelInfo[0].api_key}`;
+      const tableName = modelInfo[0].is_block ? `block_${modelInfo[0].api_key}` : contentTableName(modelInfo[0].api_key);
       const recordCount = yield* sql.unsafe<{ c: number }>(
         `SELECT COUNT(*) as c FROM "${tableName}"`,
       );
@@ -522,7 +523,7 @@ export const createField = Effect.fn("createField")(function* (modelId: string, 
       "SELECT api_key, is_block FROM models WHERE id = ?", [modelId]
     );
     if (modelInfo.length > 0) {
-      const tableName = modelInfo[0].is_block ? `block_${modelInfo[0].api_key}` : `content_${modelInfo[0].api_key}`;
+      const tableName = modelInfo[0].is_block ? `block_${modelInfo[0].api_key}` : contentTableName(modelInfo[0].api_key);
       const serialized = serializeDefaultValueForRecordColumn(body.defaultValue);
       yield* sql.unsafe(
         `UPDATE "${tableName}" SET "${body.apiKey}" = ? WHERE "${body.apiKey}" IS NULL`,
@@ -563,7 +564,7 @@ export const updateField = Effect.fn("updateField")(function* (fieldId: string, 
       [field.model_id]
     );
     if (model.length > 0) {
-      const tableName = model[0].is_block ? `block_${model[0].api_key}` : `content_${model[0].api_key}`;
+      const tableName = model[0].is_block ? `block_${model[0].api_key}` : contentTableName(model[0].api_key);
       const rows = yield* sql.unsafe<{ c: number }>(
         `SELECT COUNT(*) as c FROM "${tableName}" WHERE "${field.api_key}" IS NOT NULL`,
       );
@@ -608,7 +609,7 @@ export const updateField = Effect.fn("updateField")(function* (fieldId: string, 
       "SELECT api_key, is_block FROM models WHERE id = ?", [field.model_id]
     );
     if (modelInfo.length > 0) {
-      const tableName = modelInfo[0].is_block ? `block_${modelInfo[0].api_key}` : `content_${modelInfo[0].api_key}`;
+      const tableName = modelInfo[0].is_block ? `block_${modelInfo[0].api_key}` : contentTableName(modelInfo[0].api_key);
       yield* sql.unsafe(`ALTER TABLE "${tableName}" RENAME COLUMN "${field.api_key}" TO "${newApiKey}"`);
     }
 
@@ -690,7 +691,7 @@ export const deleteField = Effect.fn("deleteField")(function* (fieldId: string) 
       yield* sql.unsafe(`UPDATE models SET ${hintClears.join(", ")} WHERE id = ?`, [modelId]);
     }
 
-    const tableName = modelInfo[0].is_block ? `block_${modelInfo[0].api_key}` : `content_${modelInfo[0].api_key}`;
+    const tableName = modelInfo[0].is_block ? `block_${modelInfo[0].api_key}` : contentTableName(modelInfo[0].api_key);
 
     // Strip deleted field from all published snapshots
     const publishedRecords = yield* sql.unsafe<{ id: string; _published_snapshot: string }>(
