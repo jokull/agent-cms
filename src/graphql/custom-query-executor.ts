@@ -23,8 +23,10 @@ import {
   type StructuredTextMaterializePlan,
 } from "../services/structured-text-service.js";
 import { compileFilterToSql, compileOrderBy, type FilterCompilerOpts } from "./filter-compiler.js";
-import type { DynamicRow, DastDocInput } from "./gql-types.js";
-import { decodeSnapshot, deserializeRecord, pluralize, toCamelCase, toContentTypeName, toTypeName } from "./gql-utils.js";
+import type { DastDocInput } from "./gql-types.js";
+import type { DynamicRow } from "../dynamic/row-types.js";
+import { pluralize, toCamelCase, toContentTypeName, toTypeName } from "./gql-utils.js";
+import { decodeSnapshot, deserializeRecord } from "../dynamic/decode.js";
 import { recordSqlMetrics } from "./sql-metrics.js";
 import { createVersionedCache } from "../services/schema-version.js";
 

@@ -82,7 +82,7 @@ export const clearSchedule = Effect.fn("clearSchedule")(function* (modelApiKey: 
   return yield* selectById(tableName, recordId);
 });
 
-export const runScheduledTransitions = Effect.fn("runScheduledTransitions")(function* (now = DateTime.nowUnsafe(), actor: RequestActor = { type: "admin", label: "scheduler" }) {
+export const runScheduledTransitions = Effect.fn("runScheduledTransitions")(function* (now: DateTime.DateTime = DateTime.nowUnsafe(), actor: RequestActor = { type: "admin", label: "scheduler" }) {
   const sql = yield* SqlClient.SqlClient;
   const nowIso = DateTime.formatIso(now);
   const models = yield* sql.unsafe<Pick<ModelRow, "api_key">>(

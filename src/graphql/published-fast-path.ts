@@ -18,7 +18,8 @@ import { extractBlockIds, extractInlineBlockIds, extractLinkIds } from "../dast/
 import { compileFilterToSql, compileOrderBy, type FilterCompilerOpts } from "./filter-compiler.js";
 import { decodeJsonIfString } from "../json.js";
 import { batchResolveLinkedRecordsCached } from "./structured-text-resolver.js";
-import { decodeSnapshot, pluralize, toCamelCase, toContentTypeName, toTypeName } from "./gql-utils.js";
+import { pluralize, toCamelCase, toContentTypeName, toTypeName } from "./gql-utils.js";
+import { decodeSnapshot } from "../dynamic/decode.js";
 import { mergeAssetWithMediaReference, parseMediaFieldReference, parseMediaGalleryReferences } from "../media-field.js";
 import type { AssetObject } from "./gql-types.js";
 import { getRegistryDef } from "./gql-utils.js";

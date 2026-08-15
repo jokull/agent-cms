@@ -15,7 +15,7 @@ import { NotFoundError, ValidationError } from "../errors.js";
 import type { ModelRow, FieldRow } from "../db/row-types.js";
 import { getLinkTargets } from "../db/validators.js";
 import { decodeJsonRecordStringOr } from "../json.js";
-import { stringifyTemplateValue } from "../value-utils.js";
+import { stringifyTemplateValue } from "../dynamic/row-types.js";
 
 const MAX_DEPTH = 10;
 

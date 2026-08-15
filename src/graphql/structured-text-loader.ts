@@ -33,8 +33,7 @@ interface MaterializeParams {
 export class GetStructuredTextEnvelope extends Request.Class<
   { readonly requestKey: string } & MaterializeParams,
   unknown,
-  unknown,
-  never
+  unknown
 > {}
 
 export type StructuredTextResolver = RequestResolver.RequestResolver<GetStructuredTextEnvelope>;
@@ -70,7 +69,7 @@ function getRequestKey(params: MaterializeParams) {
  */
 export function buildStructuredTextResolver(
   runSql: RunSql,
-): Effect.Effect<StructuredTextResolver, unknown, never> {
+): Effect.Effect<StructuredTextResolver, unknown> {
   return RequestResolver.make<GetStructuredTextEnvelope>(
     Effect.fn(function* (entries) {
       const results = yield* Effect.tryPromise(() =>

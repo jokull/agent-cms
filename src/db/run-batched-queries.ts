@@ -2,7 +2,7 @@ import { SqlClient, SqlError } from "effect/unstable/sql";
 import { Effect } from "effect";
 import type { D1Database } from "@cloudflare/workers-types";
 import { recordSqlMetrics } from "../graphql/sql-metrics.js";
-import { isObjectRecord } from "../value-utils.js";
+import { isObjectRecord } from "../dynamic/row-types.js";
 
 export interface BatchedQuery {
   readonly sql: string;

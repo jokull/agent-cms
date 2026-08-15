@@ -4,7 +4,7 @@ import {
   HttpServerRequest,
   HttpServerResponse,
 } from "effect/unstable/http";
-import { isObjectRecord } from "../value-utils.js";
+import { isObjectRecord } from "../dynamic/row-types.js";
 import { Cause, DateTime, Effect, Layer, Logger, Schema, SchemaIssue, Option } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import * as ModelService from "../services/model-service.js";

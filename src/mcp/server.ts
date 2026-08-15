@@ -42,7 +42,7 @@ import type { ModelRow, FieldRow, LocaleRow } from "../db/row-types.js";
 import { VectorizeContext } from "../search/vectorize-context.js";
 import { HooksContext } from "../hooks.js";
 import { decodeJsonRecordStringOr, encodeJson, tryDecodeJsonString } from "../json.js";
-import { isObjectRecord } from "../value-utils.js";
+import { isObjectRecord } from "../dynamic/row-types.js";
 import { likeContains } from "../sql-util.js";
 
 import { actorFromHeaders, type RequestActor } from "../attribution.js";
@@ -594,7 +594,7 @@ const EditorToolkit = Toolkit.make(...EditorTools);
 /** Tool metadata for Code Mode — extracted without MCP protocol overhead */
 export function getToolMeta(mode: "admin" | "editor" = "admin") {
   const toolkit = mode === "editor" ? EditorToolkit : CmsToolkit;
-  return Object.values(toolkit.tools).map((tool: AiTool.Any) => ({
+  return Object.values(toolkit.tools).map((tool) => ({
     name: tool.name,
     description: tool.description ?? "",
     inputSchema: toMcpInputSchema(tool),

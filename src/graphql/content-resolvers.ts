@@ -4,8 +4,10 @@
 import { Effect } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { getLinkTargets, getLinksTargets, computeIsValid, findUniqueConstraintViolations } from "../db/validators.js";
-import type { SchemaBuilderContext, ModelQueryMeta, DynamicRow, GqlContext, AssetObject } from "./gql-types.js";
-import { toTypeName, toCamelCase, fieldToSDL, getRegistryDef, deserializeRecord, decodeSnapshot, resolveVideoField } from "./gql-utils.js";
+import type { SchemaBuilderContext, ModelQueryMeta, GqlContext, AssetObject } from "./gql-types.js";
+import type { DynamicRow } from "../dynamic/row-types.js";
+import { toTypeName, toCamelCase, fieldToSDL, getRegistryDef, resolveVideoField } from "./gql-utils.js";
+import { decodeSnapshot, deserializeRecord } from "../dynamic/decode.js";
 import { resolveStructuredTextValue } from "./structured-text-resolver.js";
 import { loadLinkedRecords } from "./linked-record-loader.js";
 import { loadAsset, loadAssets } from "./asset-loader.js";

@@ -9,7 +9,7 @@ import { materializeRecordStructuredTextFields } from "./structured-text-service
 import { fireHook } from "../hooks.js";
 import { decodeJsonRecordStringOr, decodeJsonString, encodeJson } from "../json.js";
 import type { RequestActor, VersionAttribution } from "../attribution.js";
-import { isObjectRecord } from "../value-utils.js";
+import { isObjectRecord } from "../dynamic/row-types.js";
 
 /**
  * Create a version snapshot for a record.

@@ -1,8 +1,10 @@
 import { Effect } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { extractBlockIds, extractInlineBlockIds, extractLinkIds } from "../dast/index.js";
-import type { DynamicRow, DastDocInput, GqlContext } from "./gql-types.js";
-import { deserializeRecord, toTypeName, decodeSnapshot } from "./gql-utils.js";
+import type { DastDocInput, GqlContext } from "./gql-types.js";
+import type { DynamicRow } from "../dynamic/row-types.js";
+import { toTypeName } from "./gql-utils.js";
+import { decodeSnapshot, deserializeRecord } from "../dynamic/decode.js";
 import { loadLinkedRecords } from "./linked-record-loader.js";
 import { materializeStructuredTextValue as materializeStructuredTextEnvelope } from "../services/structured-text-service.js";
 

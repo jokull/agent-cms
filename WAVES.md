@@ -119,3 +119,32 @@ Three docs-driven sweeps, four commits:
    currentActor + mcp requestActor/addPreviewPath/addPreviewPathToList.
    Inline closures (route handlers, withDecoded tool bodies) stay — names
    live in route/tool registries.
+
+## Wave 9.5 — src/dynamic zone (untyped-shape extraction boundary)
+
+New `src/dynamic/` directory: the ONLY place that touches inherently-untyped
+content-table shape. Models are runtime-defined/migrated, so `content_<model>`
+rows are `DynamicRow = Record<string, unknown>` and value shapes are only
+knowable by duck-typing — the "type sandwich" middle layer (which fields on
+which models is dynamic; top and bottom layers are statically typed).
+
+Moved into the zone:
+- `dynamic/row-types.ts`: DynamicRow + the named guard set (isObjectRecord,
+  stringArrayFrom, stringifyTemplateValue) — from value-utils.ts (deleted)
+- `dynamic/decode.ts`: deserializeRecord + decodeSnapshot (boundary decode:
+  stored JSON TEXT parsed once at the extraction edge) — from gql-utils.ts
+
+`.oxlintrc.json` gains an `overrides` block relaxing the strict type-aware
+rules (no-unsafe-*, restrict-template-expressions, no-unnecessary-*) for
+`src/dynamic/**` only. Rest of the codebase stays strict. Anti-slop rules can
+be added to the same override later.
+
+Also fixed the lint backlog that had accumulated since Wave 8 (oxlint was
+never run in the wave commits): loaders' `Effect.Effect<X, unknown, never>`
+(default `never` omitted), schedule-service `now` param annotation, and
+pre-existing mcp getToolMeta / codemode-handler `tool.name` unsafe
+assignments (the `(tool: AiTool.Any)` annotation WIDENED the inferred
+specific tool union to `Tool.Any`, whose name is erased to any — dropped the
+annotation) + structured-text `issue.path` join (map String).
+
+Verified: tsc 0, oxlint 0 warnings/0 errors, 910/910.

@@ -3,7 +3,7 @@ import { SqlClient } from "effect/unstable/sql";
 import { decodeJsonIfString, decodeJsonStringOr } from "./json.js";
 import type { AssetRow } from "./db/row-types.js";
 import type { AssetObject } from "./graphql/gql-types.js";
-import { isObjectRecord, stringArrayFrom } from "./value-utils.js";
+import { isObjectRecord, stringArrayFrom } from "./dynamic/row-types.js";
 
 export interface MediaFieldReference {
   readonly uploadId: string;

@@ -1,6 +1,6 @@
 import { createYoga, type YogaSchemaDefinition } from "graphql-yoga";
 import { Effect, Layer, Logger } from "effect";
-import type { DynamicRow } from "./gql-types.js";
+import type { DynamicRow } from "../dynamic/row-types.js";
 import {
   Kind,
   type DocumentNode,

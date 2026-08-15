@@ -11,7 +11,7 @@ import { deleteBlockSubtrees } from "./structured-text-service.js";
 import { isUnique, supportsUniqueValidation } from "../db/validators.js";
 import { decodeJsonRecordStringOr, encodeJson } from "../json.js";
 import { bumpSchemaVersion } from "./schema-version.js";
-import { isObjectRecord } from "../value-utils.js";
+import { isObjectRecord } from "../dynamic/row-types.js";
 
 const ALLOWED_FIELD_VALIDATOR_KEYS = new Set([
   "required",

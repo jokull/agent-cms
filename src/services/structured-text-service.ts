@@ -171,7 +171,7 @@ function runHotBlockQueries<T extends object>(queries: ReadonlyArray<BatchedQuer
 
 function formatDastParseErrors(error: Schema.SchemaError): string {
   const formatted = SchemaIssue.makeFormatterStandardSchemaV1()(error.issue).issues;
-  return formatted.map((issue) => `${(issue.path ?? []).join(".")}: ${issue.message}`).join("; ");
+  return formatted.map((issue) => `${(issue.path ?? []).map(String).join(".")}: ${issue.message}`).join("; ");
 }
 
 const validateDastForField = Effect.fn("validateDastForField")(function* (fieldApiKey: string, value: unknown, blocksOnly: boolean) {

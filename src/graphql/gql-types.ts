@@ -5,11 +5,10 @@ import type { Effect } from "effect";
 import type { SqlClient } from "effect/unstable/sql";
 import type { ModelRow, ParsedFieldRow } from "../db/row-types.js";
 
-/** A dynamic row from a content/block table */
-export type DynamicRow = Record<string, unknown>;
-
 /** The minimal DAST document shape expected by extract*Ids helpers */
 export type DastDocInput = { document: { children: readonly unknown[] } };
+
+import type { DynamicRow } from "../dynamic/row-types.js";
 
 /** GraphQL resolver context passed through from Yoga */
 export interface GqlContext {

@@ -4,8 +4,8 @@
 import { FIELD_TYPE_REGISTRY, type FieldTypeDefinition } from "../field-types.js";
 import { isFieldType } from "../types.js";
 import { getLinkTargets, getLinksTargets } from "../db/validators.js";
-import type { DynamicRow } from "./gql-types.js";
-import { decodeJsonIfString, decodeJsonStringOr } from "../json.js";
+import type { DynamicRow } from "../dynamic/row-types.js";
+import { decodeJsonIfString } from "../json.js";
 
 /** Convert snake_case api_key to PascalCase GraphQL type name */
 export function toTypeName(apiKey: string): string {
@@ -133,13 +133,6 @@ export function applyOrdering(records: DynamicRow[], orderBy: string[] | undefin
  * Handles: missing/null snapshot, non-string snapshot already parsed, and malformed JSON.
  * When includeDrafts is true, or the snapshot is absent/unparseable, returns the record unchanged.
  */
-export function decodeSnapshot(record: DynamicRow, includeDrafts: boolean): DynamicRow {
-  if (includeDrafts || !record._published_snapshot) return record;
-  const snapshot = decodeJsonIfString(record._published_snapshot);
-  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return record;
-  return { ...record, ...(snapshot as DynamicRow) };
-}
-
 /** Resolve a video field value into a VideoField object */
 export function resolveVideoField(raw: unknown): Record<string, unknown> | null {
   if (!raw) return null;
@@ -162,15 +155,3 @@ export function resolveVideoField(raw: unknown): Record<string, unknown> | null 
   return null;
 }
 
-/** Deserialize JSON string fields in a record */
-export function deserializeRecord(record: DynamicRow): DynamicRow {
-  const result: DynamicRow = {};
-  for (const [key, value] of Object.entries(record)) {
-    if (typeof value === "string" && (value.startsWith("{") || value.startsWith("["))) {
-      result[key] = decodeJsonStringOr(value, value);
-    } else {
-      result[key] = value;
-    }
-  }
-  return result;
-}

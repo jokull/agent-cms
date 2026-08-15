@@ -7,13 +7,14 @@ import { SqlClient } from "effect/unstable/sql";
 import type { AssetRow } from "../db/row-types.js";
 import { compileFilterToSql, compileOrderBy } from "./filter-compiler.js";
 import { UPLOAD_TYPE_DEFS } from "./sdl-constants.js";
-import type { SchemaBuilderContext, DynamicRow, GqlContext, AssetObject } from "./gql-types.js";
+import type { SchemaBuilderContext, GqlContext, AssetObject } from "./gql-types.js";
+import type { DynamicRow } from "../dynamic/row-types.js";
 import { loadAsset } from "./asset-loader.js";
 import { decodeJsonIfString } from "../json.js";
 import { mergeAssetWithMediaReference } from "../media-field.js";
 import { buildResponsiveImage } from "./responsive-image.js";
 import { normalizeImgixParams } from "./responsive-image.js";
-import { isObjectRecord, stringArrayFrom } from "../value-utils.js";
+import { isObjectRecord, stringArrayFrom } from "../dynamic/row-types.js";
 
 type RunSqlFn = SchemaBuilderContext["runSql"];
 

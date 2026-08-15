@@ -3,7 +3,8 @@
  * Also computes per-field StructuredText union types.
  */
 import { getLinkTargets, getLinksTargets, getBlockWhitelist, getRichTextBlockWhitelist } from "../db/validators.js";
-import type { SchemaBuilderContext, DynamicRow, GqlContext } from "./gql-types.js";
+import type { SchemaBuilderContext, GqlContext } from "./gql-types.js";
+import type { DynamicRow } from "../dynamic/row-types.js";
 import { toTypeName, toCamelCase, fieldToSDL, getRegistryDef, resolveVideoField } from "./gql-utils.js";
 import { resolveStructuredTextValue } from "./structured-text-resolver.js";
 import { materializeRichTextValue } from "../services/structured-text-service.js";

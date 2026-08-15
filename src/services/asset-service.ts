@@ -5,7 +5,7 @@ import { NotFoundError, ValidationError, ReferenceConflictError } from "../error
 import type { AssetRow, ModelRow } from "../db/row-types.js";
 import type { CreateAssetInput, CreateUploadUrlInput, ImportAssetFromUrlInput } from "./input-schemas.js";
 import { encodeJson, decodeJsonIfString } from "../json.js";
-import { isObjectRecord } from "../value-utils.js";
+import { isObjectRecord } from "../dynamic/row-types.js";
 import {
   assetUrlResolver,
   parseMediaFieldReference,

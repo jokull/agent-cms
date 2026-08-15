@@ -31,8 +31,7 @@ type RunSql = <A>(effect: Effect.Effect<A, unknown, SqlClient.SqlClient>) => Pro
 export class GetAsset extends Request.Class<
   { readonly id: string },
   AssetRow | null,
-  unknown,
-  never
+  unknown
 > {}
 
 export type AssetResolver = RequestResolver.RequestResolver<GetAsset>;
@@ -75,7 +74,7 @@ export async function batchFetchAssetRows(
  */
 export function buildAssetResolver(
   runSql: RunSql,
-): Effect.Effect<AssetResolver, unknown, never> {
+): Effect.Effect<AssetResolver, unknown> {
   return RequestResolver.make<GetAsset>(
     Effect.fn(function* (entries) {
       const ids = [...new Set(entries.map((entry) => entry.request.id))];

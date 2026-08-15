@@ -7,10 +7,11 @@ import { SqlClient } from "effect/unstable/sql";
 import { getLinkTargets, getLinksTargets } from "../db/validators.js";
 import { compileFilterToSql, compileOrderBy, type FilterCompilerOpts } from "./filter-compiler.js";
 import type { ModelRow, ParsedFieldRow } from "../db/row-types.js";
-import type { SchemaBuilderContext, ReverseRef, DynamicRow, GqlContext } from "./gql-types.js";
+import type { SchemaBuilderContext, ReverseRef, GqlContext } from "./gql-types.js";
+import type { DynamicRow } from "../dynamic/row-types.js";
 import { toTypeName, toCamelCase } from "./gql-utils.js";
 import { loadReverseRefs } from "./reverse-ref-loader.js";
-import { isObjectRecord } from "../value-utils.js";
+import { isObjectRecord } from "../dynamic/row-types.js";
 
 /**
  * Build the reverse reference map: target model api_key -> array of incoming link/links refs.

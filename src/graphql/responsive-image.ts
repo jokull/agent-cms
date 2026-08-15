@@ -1,5 +1,6 @@
-import type { AssetObject, DynamicRow } from "./gql-types.js";
-import { isObjectRecord } from "../value-utils.js";
+import type { AssetObject } from "./gql-types.js";
+import type { DynamicRow } from "../dynamic/row-types.js";
+import { isObjectRecord } from "../dynamic/row-types.js";
 
 function coerceStringListValue(value: unknown): string[] {
   if (Array.isArray(value)) {

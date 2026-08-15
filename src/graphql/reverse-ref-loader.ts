@@ -15,9 +15,10 @@
  */
 import { Effect, Exit, Request, RequestResolver } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import type { DynamicRow, GqlContext, ReverseRef } from "./gql-types.js";
+import type { GqlContext, ReverseRef } from "./gql-types.js";
+import type { DynamicRow } from "../dynamic/row-types.js";
 import { decodeJsonIfString } from "../json.js";
-import { decodeSnapshot, deserializeRecord } from "./gql-utils.js";
+import { decodeSnapshot, deserializeRecord } from "../dynamic/decode.js";
 
 type RunSql = <A>(effect: Effect.Effect<A, unknown, SqlClient.SqlClient>) => Promise<A>;
 
@@ -43,8 +44,7 @@ type ReverseRefBatchParams = Omit<ReverseRefLoaderParams, "context" | "loaderKey
 export class GetReverseRefs extends Request.Class<
   { readonly parentId: string },
   DynamicRow[],
-  unknown,
-  never
+  unknown
 > {}
 
 export type ReverseRefResolver = RequestResolver.RequestResolver<GetReverseRefs>;
@@ -152,7 +152,7 @@ async function querySingleParent(params: ReverseRefBatchParams & { parentId: str
  */
 export function buildReverseRefResolver(
   params: ReverseRefBatchParams,
-): Effect.Effect<ReverseRefResolver, unknown, never> {
+): Effect.Effect<ReverseRefResolver, unknown> {
   return RequestResolver.make<GetReverseRefs>(
     Effect.fn(function* (entries) {
       if (entries.length === 1) {

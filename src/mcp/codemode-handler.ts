@@ -19,7 +19,7 @@ import { McpServer as SdkMcpServer } from "@modelcontextprotocol/sdk/server/mcp.
 import { DynamicWorkerExecutor } from "@cloudflare/codemode";
 import { codeMcpServer } from "@cloudflare/codemode/mcp";
 import { getToolMeta } from "./server.js";
-import { isObjectRecord } from "../value-utils.js";
+import { isObjectRecord } from "../dynamic/row-types.js";
 
 export interface CreateCodeModeHandlerOptions {
   /** WorkerLoader binding from wrangler worker_loaders config */

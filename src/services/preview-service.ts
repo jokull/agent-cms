@@ -6,7 +6,7 @@ import { DateTime, Effect } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { generateId } from "../id.js";
 import { ValidationError } from "../errors.js";
-import { stringifyTemplateValue } from "../value-utils.js";
+import { stringifyTemplateValue } from "../dynamic/row-types.js";
 
 function hashToken(token: string) {
   return Effect.tryPromise({

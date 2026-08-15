@@ -7,13 +7,15 @@ import { SqlClient } from "effect/unstable/sql";
 import { compileFilterToSql, compileOrderBy, type FilterCompilerOpts } from "./filter-compiler.js";
 import { computeIsValid, findUniqueConstraintViolations, getBlockWhitelist } from "../db/validators.js";
 import type { GraphQLResolveInfo } from "graphql";
-import type { SchemaBuilderContext, ModelQueryMeta, DynamicRow, GqlContext } from "./gql-types.js";
-import { toCamelCase, pluralize, getRegistryDef, deserializeRecord, decodeSnapshot } from "./gql-utils.js";
+import type { SchemaBuilderContext, ModelQueryMeta, GqlContext } from "./gql-types.js";
+import type { DynamicRow } from "../dynamic/row-types.js";
+import { toCamelCase, pluralize, getRegistryDef } from "./gql-utils.js";
+import { decodeSnapshot, deserializeRecord } from "../dynamic/decode.js";
 import { buildLinkPrefetchSpecs, collectSelectedFieldNames } from "./sqlite-json-prefetch.js";
 import { materializeStructuredTextValues } from "../services/structured-text-service.js";
 import { resolveStructuredTextValue } from "./structured-text-resolver.js";
 import { decodeJsonIfString } from "../json.js";
-import { isObjectRecord, stringArrayFrom } from "../value-utils.js";
+import { isObjectRecord, stringArrayFrom } from "../dynamic/row-types.js";
 
 /**
  * Build filter/orderBy type defs and Query resolvers for each content model.

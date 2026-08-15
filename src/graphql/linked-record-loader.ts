@@ -12,7 +12,8 @@
  */
 import { Effect, Exit, Request, RequestResolver } from "effect";
 import type { SqlClient } from "effect/unstable/sql";
-import type { DynamicRow, GqlContext } from "./gql-types.js";
+import type { GqlContext } from "./gql-types.js";
+import type { DynamicRow } from "../dynamic/row-types.js";
 import { batchResolveLinkedRecords } from "./structured-text-resolver.js";
 
 type RunSql = <A>(effect: Effect.Effect<A, unknown, SqlClient.SqlClient>) => Promise<A>;
@@ -21,8 +22,7 @@ type RunSql = <A>(effect: Effect.Effect<A, unknown, SqlClient.SqlClient>) => Pro
 export class GetLinkedRecord extends Request.Class<
   { readonly id: string },
   DynamicRow | null,
-  unknown,
-  never
+  unknown
 > {}
 
 export type LinkedRecordResolver = RequestResolver.RequestResolver<GetLinkedRecord>;
@@ -46,7 +46,7 @@ export function buildLinkedRecordResolver(params: {
   targetApiKeys: string[];
   typeNames: Map<string, string>;
   includeDrafts: boolean;
-}): Effect.Effect<LinkedRecordResolver, unknown, never> {
+}): Effect.Effect<LinkedRecordResolver, unknown> {
   return RequestResolver.make<GetLinkedRecord>(
     Effect.fn(function* (entries) {
       const ids = [...new Set(entries.map((entry) => entry.request.id))];
