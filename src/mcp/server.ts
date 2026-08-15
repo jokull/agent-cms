@@ -40,7 +40,7 @@ import {
 import type { ModelRow, FieldRow, LocaleRow } from "../db/row-types.js";
 import { VectorizeContext } from "../search/vectorize-context.js";
 import { HooksContext } from "../hooks.js";
-import { decodeJsonRecordStringOr, encodeJson } from "../json.js";
+import { decodeJsonRecordStringOr, encodeJson, tryDecodeJsonString } from "../json.js";
 import { isObjectRecord } from "../value-utils.js";
 import { likeContains } from "../sql-util.js";
 
@@ -213,17 +213,14 @@ function toStructuredContent(value: unknown) {
   // instances (e.g. Data.TaggedError) fail its validation, so normalize to a
   // plain JSON value before constructing the result.
   if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-    try {
-      return JSON.parse(encodeJson(value));
-    } catch {
-      return undefined;
-    }
+    const parsed = tryDecodeJsonString(encodeJson(value));
+    return parsed.ok ? parsed.value : undefined;
   }
   return undefined;
 }
 
 /**
- * Turn a raw Effect Schema {@link ParseResult.ParseError} (produced when tool
+ * Turn a raw Effect Schema {@link Schema.SchemaError} (produced when tool
  * arguments fail to decode) into a friendly ValidationError with a readable,
  * human-oriented message instead of dumping the internal ParseError tree to the
  * MCP client. Non-ParseError failures pass through unchanged.

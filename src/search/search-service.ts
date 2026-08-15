@@ -254,7 +254,7 @@ export function search(params: {
         // never silently: an invisible FTS error is how #30 hid for months.
         Effect.catch((cause) =>
           Effect.logError("FTS keyword search failed", cause).pipe(
-            Effect.as([] as FtsResult[])
+            Effect.as<FtsResult[]>([])
           )
         )
       );

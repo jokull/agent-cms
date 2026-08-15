@@ -4,7 +4,7 @@ import {
   HttpServerRequest,
   HttpServerResponse,
 } from "effect/unstable/http";
-import { Cause, Effect, Layer, Logger, Schema, Option } from "effect";
+import { Cause, Effect, Layer, Logger, Schema, SchemaIssue, Option } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import * as ModelService from "../services/model-service.js";
 import * as FieldService from "../services/field-service.js";
@@ -73,17 +73,17 @@ function handle<A, R>(
 ) {
   return effect.pipe(
     Effect.flatMap((result) => HttpServerResponse.json(result, { status })),
-    Effect.tapCause((cause) => Effect.logError("REST effect failed", Cause.pretty(cause))),
-    Effect.catch((error: unknown) => {
-      if (isCmsError(error)) {
-        const mapped = errorToResponse(error);
-        return HttpServerResponse.json(mapped.body, { status: mapped.status });
-      }
-      return Effect.logError("Unhandled REST error").pipe(
+    Effect.tapCause((cause) => Effect.logError("REST effect failed", cause)),
+    Effect.catchIf(isCmsError, (error) => {
+      const mapped = errorToResponse(error);
+      return HttpServerResponse.json(mapped.body, { status: mapped.status });
+    }),
+    Effect.catch((error) =>
+      Effect.logError("Unhandled REST error").pipe(
         Effect.annotateLogs({ error: describeUnknown(error) }),
         Effect.andThen(HttpServerResponse.json({ error: "Internal server error" }, { status: 500 })),
-      );
-    }),
+      )
+    ),
     Effect.catchDefect((defect: unknown) => {
       return Effect.logError("REST defect").pipe(
         Effect.annotateLogs({ defect: describeUnknown(defect) }),
@@ -103,17 +103,17 @@ function handle<A, R>(
 function handleNoContent<A, R>(effect: Effect.Effect<A, unknown, R>) {
   return effect.pipe(
     Effect.map(() => HttpServerResponse.empty({ status: 204 })),
-    Effect.tapCause((cause) => Effect.logError("REST effect failed", Cause.pretty(cause))),
-    Effect.catch((error: unknown) => {
-      if (isCmsError(error)) {
-        const mapped = errorToResponse(error);
-        return HttpServerResponse.json(mapped.body, { status: mapped.status });
-      }
-      return Effect.logError("Unhandled REST error").pipe(
+    Effect.tapCause((cause) => Effect.logError("REST effect failed", cause)),
+    Effect.catchIf(isCmsError, (error) => {
+      const mapped = errorToResponse(error);
+      return HttpServerResponse.json(mapped.body, { status: mapped.status });
+    }),
+    Effect.catch((error) =>
+      Effect.logError("Unhandled REST error").pipe(
         Effect.annotateLogs({ error: describeUnknown(error) }),
         Effect.andThen(HttpServerResponse.json({ error: "Internal server error" }, { status: 500 })),
-      );
-    }),
+      )
+    ),
     Effect.catchDefect((defect: unknown) =>
       Effect.logError("REST defect").pipe(
         Effect.annotateLogs({ defect: describeUnknown(defect) }),
@@ -904,7 +904,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
   const restHandler = HttpEffect.toWebHandlerLayer(
     Effect.provide(
       Effect.flatten(HttpRouter.toHttpEffect(appRouter)).pipe(
-        Effect.catch((error: unknown) => {
+        Effect.catch((error) => {
           if (isCmsError(error)) {
             const mapped = errorToResponse(error);
             return HttpServerResponse.json(mapped.body, { status: mapped.status });
@@ -1016,16 +1016,16 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
     }
 
     if (token && token.startsWith("etk_")) {
-      try {
-        await Effect.runPromise(
-          TokenService.validateEditorToken(token).pipe(Effect.provide(fullLayer))
-        );
-        return null;
-      } catch {
-        return new UnauthorizedError({
-          message: "Unauthorized. Invalid or expired editor token.",
-        });
-      }
+      const valid = await Effect.runPromise(
+        TokenService.validateEditorToken(token).pipe(
+          Effect.provide(fullLayer),
+          Effect.isSuccess,
+        )
+      );
+      if (valid) return null;
+      return new UnauthorizedError({
+        message: "Unauthorized. Invalid or expired editor token.",
+      });
     }
 
     return new UnauthorizedError({
@@ -1040,18 +1040,20 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
       return { type: "admin", label: "admin" };
     }
     if (token && token.startsWith("etk_")) {
-      try {
-        const editorToken = await Effect.runPromise(
-          TokenService.validateEditorToken(token).pipe(Effect.provide(fullLayer))
-        );
+      const editorToken = await Effect.runPromise(
+        TokenService.validateEditorToken(token).pipe(
+          Effect.provide(fullLayer),
+          Effect.option,
+        )
+      );
+      if (Option.isSome(editorToken)) {
         return {
           type: "editor",
-          label: editorToken.name,
-          tokenId: editorToken.id,
+          label: editorToken.value.name,
+          tokenId: editorToken.value.id,
         };
-      } catch {
-        return null;
       }
+      return null;
     }
     return null;
   }
@@ -1155,15 +1157,14 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
         // Check for X-Preview-Token header — if valid, enable draft mode
         const previewToken = instrumentedRequest.headers.get("X-Preview-Token");
         if (previewToken) {
-          try {
-            const result = await Effect.runPromise(
-              PreviewService.validatePreviewToken(previewToken).pipe(Effect.provide(fullLayer))
-            );
-            if (result.valid) {
-              h.set("X-Include-Drafts", "true");
-            }
-          } catch {
-            // Invalid preview token — ignore, don't grant draft access
+          const result = await Effect.runPromise(
+            PreviewService.validatePreviewToken(previewToken).pipe(
+              Effect.provide(fullLayer),
+              Effect.option,
+            )
+          );
+          if (Option.isSome(result) && result.value.valid) {
+            h.set("X-Include-Drafts", "true");
           }
         }
         instrumentedRequest = new Request(instrumentedRequest, { headers: h });
@@ -1362,9 +1363,18 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
           }));
         }
         const body = await instrumentedRequest.json();
-        const parsed = Schema.decodeUnknownSync(CreateUploadUrlInput)(body);
+        const decoded = Schema.decodeUnknownExit(CreateUploadUrlInput)(body);
+        if (decoded._tag === "Failure") {
+          const error = Cause.findErrorOption(decoded.cause).pipe(Option.getOrThrow);
+          return finish(new Response(JSON.stringify({
+            error: `Invalid upload URL request: ${SchemaIssue.makeFormatterDefault()(error.issue)}`,
+          }), {
+            status: 400,
+            headers: { "Content-Type": "application/json" },
+          }));
+        }
         const result = await Effect.runPromise(
-          AssetService.createAssetUploadUrl(parsed).pipe(Effect.provide(fullLayer))
+          AssetService.createAssetUploadUrl(decoded.value).pipe(Effect.provide(fullLayer))
         );
         return finish(new Response(JSON.stringify(result), {
           status: 200,

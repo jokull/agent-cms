@@ -8,8 +8,9 @@ export function encodeJson(value: unknown): string {
   return Schema.encodeSync(UnknownJson)(value);
 }
 
+/** Total decode — invalid JSON yields null; callers check the shape. */
 export function decodeJsonString(input: string): unknown {
-  return Schema.decodeUnknownSync(UnknownJson)(input);
+  return decodeJsonStringOr(input, null);
 }
 
 export function tryDecodeJsonString(input: string) {

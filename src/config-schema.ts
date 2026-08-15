@@ -13,14 +13,7 @@ const OptionalNonEmptyString = Schema.optional(Schema.NonEmptyString);
 const AssetBaseUrl = Schema.String.pipe(
   Schema.check(
     Schema.makeFilter(
-      (value) => {
-        try {
-          new URL(value);
-          return true;
-        } catch {
-          return false;
-        }
-      },
+      (value: string) => Schema.decodeUnknownOption(Schema.URLFromString)(value)._tag === "Some",
       { message: "assetBaseUrl must be a valid URL" },
     ),
   ),

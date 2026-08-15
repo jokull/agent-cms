@@ -97,3 +97,8 @@ package we author. Each entry: what it is, why it hurts, a suggested fix.
   `Effect.provide(effect, fullLayer)` first and pass `Layer.empty` as the
   layer argument. Type-level `ReqR = never` is not proof the services are
   provided.
+
+- **`Schema.URL` is broken in 4.0.0-rc.109**: `decodeUnknownOption(Schema.URL)`
+  returns `None` for every input (valid URLs included) — its filter rejects
+  everything. Use `Schema.URLFromString` for URL validation (string in, URL
+  instance out; decodes correctly). Do NOT use `Schema.is(Schema.URL)`.

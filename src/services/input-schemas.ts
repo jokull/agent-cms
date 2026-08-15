@@ -33,14 +33,12 @@ const UnitIntervalNumber = finiteNumber("Expected a finite number").pipe(
 );
 
 const HttpUrlString = Schema.String.pipe(
-  Schema.check(Schema.makeFilter((value) => {
-    try {
-      const url = new URL(value);
-      return url.protocol === "http:" || url.protocol === "https:";
-    } catch {
-      return false;
-    }
-  }, { message: "Expected a valid http:// or https:// URL" })),
+  Schema.check(
+    Schema.makeFilter((value: string) => {
+      const url = Schema.decodeUnknownOption(Schema.URLFromString)(value);
+      return url._tag === "Some" && (url.value.protocol === "http:" || url.value.protocol === "https:");
+    }, { message: "Expected a valid http:// or https:// URL" }),
+  ),
 );
 
 export const CreateModelInput = Schema.Struct({
