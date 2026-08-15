@@ -74,7 +74,7 @@ export function updateSiteSettings(args: SiteSettingsInput) {
     const rows = yield* sql.unsafe<Record<string, unknown>>("SELECT * FROM site_settings WHERE id = 'default'");
     return rows[0];
   }).pipe(Effect.mapError((error) => {
-    if (error instanceof ValidationError) return error;
+    if (error._tag === "ValidationError") return error;
     return mapMissingTable(error);
   }));
 }

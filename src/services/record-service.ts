@@ -118,6 +118,8 @@ function foldFieldValidationErrors<E>(
 ): AggregateValidationError | E {
   const issues: ValidationIssue[] = [];
   for (const error of errors) {
+    // E is an open generic here, so discriminant narrowing on _tag is
+    // impossible — instanceof is the sound runtime identity check.
     if (error instanceof ValidationError) {
       issues.push(toValidationIssue(error));
     } else {
@@ -2400,23 +2402,6 @@ export function getRecordBacklinks(modelApiKey: string, id: string) {
 // ===========================================================================
 
 /**
- * Run an effect that either succeeds or fails with an `AggregateValidationError`,
- * returning its issues as data. Any other failure (e.g. a `SqlError`) is a real
- * defect, not a per-field validation issue, so it propagates unchanged.
- */
-function collectAggregateIssues<A, E, R>(
-  effect: Effect.Effect<A, AggregateValidationError | E, R>,
-): Effect.Effect<ValidationIssue[], E, R> {
-  return effect.pipe(
-    Effect.as<ValidationIssue[]>([]),
-    Effect.catchIf(
-      (error): error is AggregateValidationError => error instanceof AggregateValidationError,
-      (error) => Effect.succeed([...error.issues]),
-    ),
-  );
-}
-
-/**
  * The shared dry-run body behind {@link validateRecord} / {@link validateRecordUpdate}.
  * Runs exactly the checks the write paths run, accumulating issues from every
  * gate (rather than short-circuiting at the first, the way a single write does)
@@ -2469,15 +2454,21 @@ function runDryRunValidation(params: {
     // the create path mutates it (slug generation etc.); the scalar checks above
     // ran against the untouched original.
     const record: Record<string, unknown> = {};
-    const processIssues = yield* collectAggregateIssues(
-      processCreateLikeRecordFields({
-        modelApiKey: params.model.api_key,
-        tableName: params.tableName,
-        recordId: params.recordId,
-        data: { ...params.data },
-        record,
-        modelFields: params.modelFields,
-        dryRun: true,
+    const processIssues = yield* processCreateLikeRecordFields({
+      modelApiKey: params.model.api_key,
+      tableName: params.tableName,
+      recordId: params.recordId,
+      data: { ...params.data },
+      record,
+      modelFields: params.modelFields,
+      dryRun: true,
+    }).pipe(
+      Effect.matchEffect({
+        onSuccess: () => Effect.succeed<ValidationIssue[]>([]),
+        onFailure: (error) =>
+          error._tag === "AggregateValidationError"
+            ? Effect.succeed([...error.issues])
+            : Effect.fail(error),
       }),
     );
     issues.push(...processIssues);
