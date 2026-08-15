@@ -1,49 +1,51 @@
 /**
- * Request-scoped, microtask-batched asset loader.
+ * Request-scoped, batched asset loader backed by `RequestResolver`.
  *
- * Assets were the last relation family in the Yoga path without one: `media`
- * fields issued a query per record (and per block instance), so a list of N
- * records each with an image cost N sequential D1 round trips. `link`/`links`
- * have had `linked-record-loader.ts` for this; this is the same shape for
- * `assets`, and every asset read on the resolver path routes through it.
+ * Assets were the last relation family in the Yoga path without batching:
+ * `media` fields issued a query per record (and per block instance), so a
+ * list of N records each with an image cost N sequential D1 round trips.
  *
- * Assets need no loader key. Unlike linked records they are not affected by
- * drafts or locale, so one cache per request keyed by id is sufficient — and
- * it means a gallery, a media field and an SEO image referencing the same
- * upload collapse to a single fetch.
+ * This is the docs-canonical `RequestResolver` shape (see ai-docs
+ * 05_batching/10_request-resolver): a `Request.Class` per lookup, a resolver
+ * that batches all requests arriving within the batch window into one SQL
+ * `IN (...)` query, and `withCache` so a gallery, a media field and an SEO
+ * image referencing the same upload collapse to a single fetch.
+ *
+ * The resolver value is built once per request context (lazily, via a
+ * `WeakMap`) and shared by every resolver call in that request. Building it
+ * requires evaluating the `withCache` effect exactly once — passing the
+ * Effect form to `Effect.request` would rebuild the cache on every lookup.
  *
  * Returns raw `AssetRow`s rather than projected objects: each call site
  * overlays its own media reference (alt/title/focalPoint/customData) on top,
  * and those overlay rules differ between content fields, block fields and SEO.
  */
-import { Effect } from "effect";
+import { Effect, Exit, Request, RequestResolver } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import type { AssetRow } from "../db/row-types.js";
 import type { GqlContext } from "./gql-types.js";
 
 type RunSql = <A>(effect: Effect.Effect<A, unknown, SqlClient.SqlClient>) => Promise<A>;
 
-interface Deferred<T> {
-  promise: Promise<T>;
-  resolve: (value: T) => void;
-  reject: (error: unknown) => void;
-}
+/** A single asset lookup. `null` when the asset id does not exist. */
+export class GetAsset extends Request.Class<
+  { readonly id: string },
+  AssetRow | null,
+  unknown,
+  never
+> {}
 
-interface AssetLoader {
-  cache: Map<string, Promise<AssetRow | null>>;
-  pending: Map<string, Deferred<AssetRow | null>>;
-  scheduled: boolean;
-}
+export type AssetResolver = RequestResolver.RequestResolver<GetAsset>;
 
-function createDeferred<T>(): Deferred<T> {
-  let resolve!: (value: T) => void;
-  let reject!: (error: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
+/**
+ * Per-request resolver cache. Assets vary by neither drafts nor locale.
+ *
+ * The WeakMap stores the build PROMISE, not the value: the first concurrent
+ * sibling resolvers all miss and share one build; storing the value would
+ * let each racing caller build (and use) its own resolver, scattering the
+ * batch across instances.
+ */
+const resolverCache = new WeakMap<GqlContext, Promise<AssetResolver>>();
 
 /** One unbatched fetch. Used directly when there is no request context. */
 export async function batchFetchAssetRows(
@@ -66,47 +68,44 @@ export async function batchFetchAssetRows(
   return map;
 }
 
-function getLoader(context: GqlContext | undefined): AssetLoader | null {
-  if (!context) return null;
-  context.assetLoader ??= {
-    cache: new Map(),
-    pending: new Map(),
-    scheduled: false,
-  } satisfies AssetLoader;
-  return context.assetLoader;
+/**
+ * Build the request resolver for a given `runSql`. Batches every asset lookup
+ * that arrives within the batch window into one query and caches the result
+ * (LRU, 4096 entries) for the lifetime of the resolver.
+ */
+export function buildAssetResolver(
+  runSql: RunSql,
+): Effect.Effect<AssetResolver, unknown, never> {
+  return RequestResolver.make<GetAsset>(
+    Effect.fn(function* (entries) {
+      const ids = [...new Set(entries.map((entry) => entry.request.id))];
+      const rows = yield* Effect.tryPromise(() => batchFetchAssetRows(runSql, ids));
+      for (const entry of entries) {
+        entry.completeUnsafe(Exit.succeed(rows.get(entry.request.id) ?? null));
+      }
+    }),
+  ).pipe(
+    RequestResolver.setDelay("0 millis"),
+    RequestResolver.withCache({ capacity: 4096 }),
+  );
 }
 
-function scheduleFlush(loader: AssetLoader, runSql: RunSql) {
-  if (loader.scheduled) return;
-  loader.scheduled = true;
-
-  queueMicrotask(() => {
-    void (async () => {
-      const pending = new Map(loader.pending);
-      loader.pending.clear();
-      loader.scheduled = false;
-      if (pending.size === 0) return;
-
-      const ids = [...pending.keys()];
-      try {
-        const fetched = await batchFetchAssetRows(runSql, ids);
-        for (const [id, deferred] of pending) {
-          deferred.resolve(fetched.get(id) ?? null);
-        }
-      } catch (error) {
-        // Evict on failure so a retry within the same request can succeed.
-        for (const [id, deferred] of pending) {
-          loader.cache.delete(id);
-          deferred.reject(error);
-        }
-      }
-    })();
-  });
+function getResolver(
+  runSql: RunSql,
+  context: GqlContext | undefined,
+): Promise<AssetResolver> | null {
+  if (!context) return null;
+  let resolver = resolverCache.get(context);
+  if (!resolver) {
+    resolver = Effect.runPromise(buildAssetResolver(runSql));
+    resolverCache.set(context, resolver);
+  }
+  return resolver;
 }
 
 /**
  * Load assets by id, batching across every sibling resolver that asks within
- * the same microtask tick. Missing ids are simply absent from the result.
+ * the same batch window. Missing ids are simply absent from the result.
  */
 export async function loadAssets(params: {
   runSql: RunSql;
@@ -114,23 +113,17 @@ export async function loadAssets(params: {
   context?: GqlContext;
 }): Promise<Map<string, AssetRow>> {
   if (params.ids.length === 0) return new Map();
-
-  const loader = getLoader(params.context);
-  if (!loader) return batchFetchAssetRows(params.runSql, params.ids);
-
-  for (const id of params.ids) {
-    if (loader.cache.has(id)) continue;
-    const deferred = createDeferred<AssetRow | null>();
-    loader.cache.set(id, deferred.promise);
-    loader.pending.set(id, deferred);
-  }
-
-  scheduleFlush(loader, params.runSql);
-
+  const resolver = await getResolver(params.runSql, params.context);
+  if (!resolver) return batchFetchAssetRows(params.runSql, params.ids);
+  const rows = await Promise.all(
+    params.ids.map((id) =>
+      Effect.runPromise(Effect.request(new GetAsset({ id }), resolver)),
+    ),
+  );
   const result = new Map<string, AssetRow>();
-  for (const id of params.ids) {
-    const row = await loader.cache.get(id);
-    if (row) result.set(id, row);
+  for (let i = 0; i < params.ids.length; i++) {
+    const row = rows[i];
+    if (row) result.set(params.ids[i], row);
   }
   return result;
 }
