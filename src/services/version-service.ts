@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { DateTime, Effect } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { generateId } from "../id.js";
 import { NotFoundError, ValidationError } from "../errors.js";
@@ -30,7 +30,7 @@ export const createVersion = Effect.fn("createVersion")(function* (
   const nextVersion = (maxRows[0]?.max_v ?? 0) + 1;
 
   const id = generateId();
-  const now = new Date().toISOString();
+  const now = DateTime.formatIso(yield* DateTime.now);
   const actor = attribution?.actor;
   yield* sql.unsafe(
     `INSERT INTO record_versions (id, model_api_key, record_id, version_number, snapshot, action, actor_type, actor_label, actor_token_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -145,7 +145,7 @@ export const restoreVersion = Effect.fn("restoreVersion")(function* (modelApiKey
     }
   }
 
-  const now = new Date().toISOString();
+  const now = DateTime.formatIso(yield* DateTime.now);
   updates._updated_at = now;
   updates._updated_by = actor?.label ?? null;
 

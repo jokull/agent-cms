@@ -4,7 +4,7 @@ import {
   HttpServerRequest,
   HttpServerResponse,
 } from "effect/unstable/http";
-import { Cause, Effect, Layer, Logger, Schema, SchemaIssue, Option } from "effect";
+import { Cause, DateTime, Effect, Layer, Logger, Schema, SchemaIssue, Option } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import * as ModelService from "../services/model-service.js";
 import * as FieldService from "../services/field-service.js";
@@ -953,11 +953,11 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
     return graphqlInstance;
   }
 
-  async function runScheduledTransitions(now = new Date()) {
+  async function runScheduledTransitions(now = DateTime.nowUnsafe()) {
     const result = await Effect.runPromise(
       ScheduleService.runScheduledTransitions(now).pipe(
         Effect.withSpan("schedule.run_transitions"),
-        Effect.annotateLogs({ now: now.toISOString() }),
+        Effect.annotateLogs({ now: DateTime.formatIso(now) }),
         Effect.provide(fullLayer),
       )
     );
@@ -1068,7 +1068,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
     const headers = new Headers(request.headers);
     headers.set("x-request-id", requestId);
     let instrumentedRequest = new Request(request, { headers });
-    const startedAt = Date.now();
+    const startedAt = performance.now();
 
     const finish = (response: Response) => {
       const corsResponse = withCors(response, instrumentedRequest);
@@ -1079,7 +1079,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
         statusText: corsResponse.statusText,
         headers: responseHeaders,
       });
-      const durationMs = Date.now() - startedAt;
+      const durationMs = performance.now() - startedAt;
       if (wrapped.status >= 500 || instrumentedRequest.url.includes("/api/assets/")) {
         const logFields = {
           requestId,

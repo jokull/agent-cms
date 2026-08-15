@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { DateTime, Effect } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { NotFoundError, AggregateValidationError, type ValidationIssue } from "../errors.js";
 import { selectById } from "../schema-engine/sql-records.js";
@@ -94,7 +94,7 @@ export function publishRecord(modelApiKey: string, recordId: string, actor?: Req
       }
     }
 
-    const now = new Date().toISOString();
+    const now = DateTime.formatIso(yield* DateTime.now);
     yield* sql.unsafe(
       `UPDATE "${tableName}" SET _status = 'published', _published_at = ?, _first_published_at = COALESCE(_first_published_at, ?), _published_snapshot = ?, _updated_at = ?, _updated_by = ?, _published_by = ?, _scheduled_publish_at = NULL WHERE id = ?`,
       [now, now, encodeJson(snapshot), now, actor?.label ?? null, actor?.label ?? null, recordId]
@@ -154,7 +154,7 @@ export function unpublishRecord(modelApiKey: string, recordId: string, actor?: R
     const record = yield* selectById(tableName, recordId);
     if (!record) return yield* new NotFoundError({ entity: "Record", id: recordId });
 
-    const now = new Date().toISOString();
+    const now = DateTime.formatIso(yield* DateTime.now);
     yield* sql.unsafe(
       `UPDATE "${tableName}" SET _status = 'draft', _published_snapshot = NULL, _updated_at = ?, _updated_by = ?, _scheduled_unpublish_at = NULL WHERE id = ?`,
       [now, actor?.label ?? null, recordId]

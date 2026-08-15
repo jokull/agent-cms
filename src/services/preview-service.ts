@@ -2,7 +2,7 @@
  * Preview token service — short-lived tokens for draft preview access.
  * Follows the same SHA-256 hashing pattern as token-service.ts.
  */
-import { Effect } from "effect";
+import { DateTime, Effect } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { generateId } from "../id.js";
 import { ValidationError } from "../errors.js";
@@ -42,7 +42,7 @@ export const createPreviewToken = Effect.fn("createPreviewToken")(function* (exp
   const id = generateId();
   const token = generatePreviewToken();
   const tokenHash = yield* hashToken(token);
-  const expiresAt = new Date(Date.now() + seconds * 1000).toISOString();
+  const expiresAt = DateTime.formatIso(DateTime.add(yield* DateTime.now, { seconds }));
 
   yield* sql.unsafe(
     `INSERT INTO preview_tokens (id, token_hash, expires_at) VALUES (?, ?, ?)`,
@@ -80,7 +80,7 @@ export const validatePreviewToken = Effect.fn("validatePreviewToken")(function* 
   yield* Effect.forkChild(
     sql.unsafe(
       `DELETE FROM preview_tokens WHERE id IN (SELECT id FROM preview_tokens WHERE expires_at < ? LIMIT 100)`,
-      [new Date().toISOString()]
+      [DateTime.formatIso(yield* DateTime.now)]
     ).pipe(Effect.ignore)
   );
 

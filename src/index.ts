@@ -1,5 +1,5 @@
 import { D1Client } from "@effect/sql-d1";
-import { Layer } from "effect";
+import { DateTime, Layer } from "effect";
 import { createWebHandler } from "./http/router.js";
 import type { AiBinding, VectorizeBinding } from "./search/vectorize.js";
 import type { CmsHooks } from "./hooks.js";
@@ -156,7 +156,7 @@ function createCMSHandlerUncached(bindings: DecodedCmsBindings, hooks?: CmsHooks
     execute: webHandler.execute,
 
     /** Run due scheduled publish/unpublish transitions. Safe to call from a cron trigger. */
-    runScheduledTransitions: (now?: Date) => webHandler.runScheduledTransitions(now),
+    runScheduledTransitions: (now?: Date) => webHandler.runScheduledTransitions(now ? DateTime.fromDateUnsafe(now) : undefined),
 
     /**
      * Resolve canonical paths for all published records of a model.

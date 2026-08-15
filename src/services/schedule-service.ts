@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { DateTime, Effect } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { NotFoundError, ValidationError } from "../errors.js";
 import type { ModelRow } from "../db/row-types.js";
@@ -82,9 +82,9 @@ export const clearSchedule = Effect.fn("clearSchedule")(function* (modelApiKey: 
   return yield* selectById(tableName, recordId);
 });
 
-export const runScheduledTransitions = Effect.fn("runScheduledTransitions")(function* (now = new Date(), actor: RequestActor = { type: "admin", label: "scheduler" }) {
+export const runScheduledTransitions = Effect.fn("runScheduledTransitions")(function* (now = DateTime.nowUnsafe(), actor: RequestActor = { type: "admin", label: "scheduler" }) {
   const sql = yield* SqlClient.SqlClient;
-  const nowIso = now.toISOString();
+  const nowIso = DateTime.formatIso(now);
   const models = yield* sql.unsafe<Pick<ModelRow, "api_key">>(
     "SELECT api_key FROM models WHERE is_block = 0 ORDER BY created_at"
   );

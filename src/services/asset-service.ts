@@ -1,4 +1,4 @@
-import { Context, Effect } from "effect";
+import { DateTime, Context, Effect } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { generateId } from "../id.js";
 import { NotFoundError, ValidationError, ReferenceConflictError } from "../errors.js";
@@ -277,7 +277,7 @@ export function createAsset(body: CreateAssetInput, actor?: RequestActor | null)
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
 
-    const now = new Date().toISOString();
+    const now = DateTime.formatIso(yield* DateTime.now);
     const id = body.id ?? generateId();
 
     const existing = yield* sql.unsafe<{ id: string }>("SELECT id FROM assets WHERE id = ?", [id]);
@@ -415,7 +415,7 @@ export const replaceAsset = Effect.fn("replaceAsset")(function* (id: string, bod
 
   const r2Key = body.r2Key ?? `uploads/${id}/${body.filename}`;
 
-  const now = new Date().toISOString();
+  const now = DateTime.formatIso(yield* DateTime.now);
   yield* sql.unsafe(
     `UPDATE assets SET filename = ?, basename = ?, format = ?, mime_type = ?, size = ?, width = ?, height = ?,
      alt = ?, title = ?, r2_key = ?, blurhash = ?, colors = ?, focal_point = ?, tags = ?, updated_at = ?, updated_by = ?
@@ -457,7 +457,7 @@ export const updateAssetMetadata = Effect.fn("updateAssetMetadata")(function* (i
   const width = body.width !== undefined ? body.width : rows[0].width;
   const height = body.height !== undefined ? body.height : rows[0].height;
 
-  const now = new Date().toISOString();
+  const now = DateTime.formatIso(yield* DateTime.now);
   yield* sql.unsafe(
     "UPDATE assets SET alt = ?, title = ?, width = ?, height = ?, updated_at = ?, updated_by = ? WHERE id = ?",
     [alt, title, width, height, now, actor?.label ?? null, id]

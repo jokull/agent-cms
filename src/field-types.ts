@@ -9,7 +9,7 @@
  * - Middle: which fields exist on which models is dynamic (runtime)
  * - Bottom: each field type's shape is statically known (this file)
  */
-import { Schema } from "effect";
+import { DateTime, Option, Schema } from "effect";
 import type { FieldType } from "./types.js";
 
 /** Effect Schemas for composite field type validation */
@@ -50,13 +50,13 @@ export const MediaGalleryFieldSchema = Schema.Array(MediaFieldSchema);
 
 function isValidIsoDate(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const parsed = new Date(`${value}T00:00:00.000Z`);
-  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+  const parsed = DateTime.make(`${value}T00:00:00.000Z`);
+  return Option.isSome(parsed) && DateTime.formatIso(parsed.value).slice(0, 10) === value;
 }
 
 function isValidIsoDateTime(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}T/.test(value)) return false;
-  return !Number.isNaN(Date.parse(value));
+  return Option.isSome(DateTime.make(value));
 }
 
 const DateSchema = Schema.String.pipe(

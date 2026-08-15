@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { DateTime, Effect, Option } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { decodeJsonRecordStringOr } from "../json.js";
 import { parseMediaFieldReference } from "../media-field.js";
@@ -299,13 +299,13 @@ function passesDateRangeValidation(value: unknown, fieldType: string, validators
 }
 
 function parseDateValue(value: string): number | null {
-  const time = Date.parse(value);
-  return Number.isNaN(time) ? null : time;
+  const parsed = DateTime.make(value);
+  return Option.isSome(parsed) ? DateTime.toEpochMillis(parsed.value) : null;
 }
 
 function parseDateBoundary(value: unknown): number | null {
   if (value === undefined) return null;
-  if (value === "now") return Date.now();
+  if (value === "now") return DateTime.toEpochMillis(DateTime.nowUnsafe());
   if (typeof value !== "string") return null;
   return parseDateValue(value);
 }
