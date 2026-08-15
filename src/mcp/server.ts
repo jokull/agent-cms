@@ -213,7 +213,7 @@ function toStructuredContent(value: unknown) {
   // The MCP CallToolResult `structuredContent` field is a Json codec; class
   // instances (e.g. Data.TaggedError) fail its validation, so normalize to a
   // plain JSON value before constructing the result.
-  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+  if (isObjectRecord(value)) {
     const parsed = tryDecodeJsonString(encodeJson(value));
     return parsed.ok ? parsed.value : undefined;
   }

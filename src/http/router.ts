@@ -4,6 +4,7 @@ import {
   HttpServerRequest,
   HttpServerResponse,
 } from "effect/unstable/http";
+import { isObjectRecord } from "../value-utils.js";
 import { Cause, DateTime, Effect, Layer, Logger, Schema, SchemaIssue, Option } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import * as ModelService from "../services/model-service.js";
@@ -453,7 +454,7 @@ const recordsRouter2 = HttpRouter.use((router) => {
     Effect.gen(function* () {
       const params = yield* HttpRouter.params;
       const body = yield* readJsonBody();
-      const merged = typeof body === "object" && body !== null
+      const merged = isObjectRecord(body)
         ? { ...body, recordId: param(params, "id") }
         : { recordId: param(params, "id") };
       const input = yield* decodeUnknownInput(PatchBlocksInput, merged);
@@ -744,8 +745,8 @@ const previewTokensRouter = HttpRouter.use((router) => {
     "/",
     Effect.gen(function* () {
       const body = yield* readJsonBody();
-      const expiresIn = typeof body === "object" && body !== null && "expiresIn" in body
-        ? (body as Record<string, unknown>).expiresIn as number | undefined
+      const expiresIn = isObjectRecord(body) && typeof body.expiresIn === "number"
+        ? body.expiresIn
         : undefined;
       return yield* handle(PreviewService.createPreviewToken(expiresIn), 201);
     })
