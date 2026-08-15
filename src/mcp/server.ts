@@ -9,7 +9,8 @@ import * as AiTool from "effect/unstable/ai/Tool";
 import * as Toolkit from "effect/unstable/ai/Toolkit";
 import { Context, Effect, Layer, Option, Schema, SchemaIssue, Stream } from "effect";
 import { HttpServerRequest } from "effect/unstable/http";
-import { SqlClient } from "effect/unstable/sql";
+import { SqlClient, SqlError } from "effect/unstable/sql";
+import { NotFoundError, ValidationError } from "../errors.js";
 import * as ModelService from "../services/model-service.js";
 import * as FieldService from "../services/field-service.js";
 import * as RecordService from "../services/record-service.js";
@@ -227,10 +228,7 @@ function toStructuredContent(value: unknown) {
  */
 function formatToolError(error: unknown): unknown {
   if (Schema.isSchemaError(error)) {
-    return {
-      _tag: "ValidationError",
-      message: SchemaIssue.makeFormatterDefault()(error.issue),
-    };
+    return new ValidationError({ message: SchemaIssue.makeFormatterDefault()(error.issue) });
   }
   return error;
 }
@@ -1032,10 +1030,10 @@ export function createMcpLayer(
     record_versions: withDecoded(RecordVersionsInput, ({ action, modelApiKey, recordId, versionId }) => {
       if (action === "list") return VersionService.listVersions(modelApiKey, recordId);
       if (action === "get") {
-        if (!versionId) return Effect.fail({ _tag: "ValidationError", message: "versionId is required for get action" });
+        if (!versionId) return Effect.fail(new ValidationError({ message: "versionId is required for get action" }));
         return VersionService.getVersion(versionId);
       }
-      if (!versionId) return Effect.fail({ _tag: "ValidationError", message: "versionId is required for restore action" });
+      if (!versionId) return Effect.fail(new ValidationError({ message: "versionId is required for restore action" }));
       return Effect.gen(function* () {
         const actor = yield* requestActor();
         return yield* VersionService.restoreVersion(modelApiKey, recordId, versionId, actor);
@@ -1074,7 +1072,7 @@ export function createMcpLayer(
       })),
     schema_io: withDecoded(SchemaIOInput, ({ action, schema }) => {
       if (action === "export") return SchemaIO.exportSchema();
-      if (!schema) return Effect.fail({ _tag: "ValidationError", message: "schema is required for import action" });
+      if (!schema) return Effect.fail(new ValidationError({ message: "schema is required for import action" }));
       return SchemaIO.importSchema(schema);
     }),
     search_content: withDecoded(SearchContentInput, SearchService.search),
@@ -1085,7 +1083,7 @@ export function createMcpLayer(
       Effect.gen(function* () {
         const model = yield* ModelService.getModelByApiKey(modelApiKey);
         if (!model.canonical_path_template) {
-          return yield* Effect.fail({ _tag: "ValidationError", message: `Model '${modelApiKey}' has no canonicalPathTemplate configured` });
+          return yield* Effect.fail(new ValidationError({ message: `Model '${modelApiKey}' has no canonicalPathTemplate configured` }));
         }
         const record = yield* RecordService.getRecord(modelApiKey, recordId);
         const previewPath = PreviewService.resolvePreviewPath(model.canonical_path_template, record);
@@ -1098,13 +1096,13 @@ export function createMcpLayer(
         }
         return { previewPath, token, expiresAt };
       })),
-    editor_tokens: withDecoded(EditorTokensInput, ({ action, name, expiresIn, tokenId }) => {
+    editor_tokens: withDecoded(EditorTokensInput, ({ action, name, expiresIn, tokenId }): Effect.Effect<unknown, ValidationError | NotFoundError | SqlError.SqlError, SqlClient.SqlClient> => {
       if (action === "list") return TokenService.listEditorTokens();
       if (action === "create") {
-        if (!name) return Effect.fail({ _tag: "ValidationError", message: "name is required for create action" });
+        if (!name) return Effect.fail(new ValidationError({ message: "name is required for create action" }));
         return TokenService.createEditorToken({ name, expiresIn });
       }
-      if (!tokenId) return Effect.fail({ _tag: "ValidationError", message: "tokenId is required for revoke action" });
+      if (!tokenId) return Effect.fail(new ValidationError({ message: "tokenId is required for revoke action" }));
       return TokenService.revokeEditorToken(tokenId);
     }),
   } as const;

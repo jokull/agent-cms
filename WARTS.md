@@ -107,3 +107,10 @@ package we author. Each entry: what it is, why it hurts, a suggested fix.
   returns `None` for every input (valid URLs included) — its filter rejects
   everything. Use `Schema.URLFromString` for URL validation (string in, URL
   instance out; decodes correctly). Do NOT use `Schema.is(Schema.URL)`.
+
+- **`Schema.TaggedError` classes validate eagerly at construction** (unlike
+  `Data.TaggedError`): `new ValidationError({ ... })` throws "Schema validation
+  failed" if the args don't match the field schemas. Optional fields must be
+  `Schema.optional(...)` or construction with them absent fails. All agent-cms
+  construction sites type-check against the field schemas, so this is safe —
+  but it is a real behavior difference from the pre-migration errors.

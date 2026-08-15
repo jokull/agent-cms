@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { SchemaEngineError, ValidationError } from "../errors.js";
+import { SchemaEngineError, ValidationError, CmsErrorSchema } from "../errors.js";
 
 type SiteSettingsInput = {
   siteName?: string;
@@ -74,7 +74,7 @@ export function updateSiteSettings(args: SiteSettingsInput) {
     const rows = yield* sql.unsafe<Record<string, unknown>>("SELECT * FROM site_settings WHERE id = 'default'");
     return rows[0];
   }).pipe(Effect.mapError((error) => {
-    if (error._tag === "ValidationError") return error;
+    if (CmsErrorSchema.guards.ValidationError(error)) return error;
     return mapMissingTable(error);
   }));
 }

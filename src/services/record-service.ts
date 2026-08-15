@@ -1,7 +1,7 @@
 import { Effect, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { generateId } from "../id.js";
-import { NotFoundError, ValidationError, AggregateValidationError, DuplicateError, isCmsError, errorToResponse, type ValidationIssue } from "../errors.js";
+import { NotFoundError, ValidationError, AggregateValidationError, DuplicateError, CmsErrorSchema, isCmsError, errorToResponse, type ValidationIssue } from "../errors.js";
 import { generateSlug } from "../slug.js";
 import {
   insertRecord,
@@ -119,8 +119,8 @@ function foldFieldValidationErrors<E>(
   const issues: ValidationIssue[] = [];
   for (const error of errors) {
     // E is an open generic here, so discriminant narrowing on _tag is
-    // impossible — instanceof is the sound runtime identity check.
-    if (error instanceof ValidationError) {
+    // impossible; the tagged-union guard is the schema-based membership check.
+    if (CmsErrorSchema.guards.ValidationError(error)) {
       issues.push(toValidationIssue(error));
     } else {
       return error;
@@ -2463,13 +2463,8 @@ function runDryRunValidation(params: {
       modelFields: params.modelFields,
       dryRun: true,
     }).pipe(
-      Effect.matchEffect({
-        onSuccess: () => Effect.succeed<ValidationIssue[]>([]),
-        onFailure: (error) =>
-          error._tag === "AggregateValidationError"
-            ? Effect.succeed([...error.issues])
-            : Effect.fail(error),
-      }),
+      Effect.as<ValidationIssue[]>([]),
+      Effect.catchTag("AggregateValidationError", (error) => Effect.succeed([...error.issues])),
     );
     issues.push(...processIssues);
 
