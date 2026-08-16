@@ -183,3 +183,29 @@ as-casts are spread across services/graphql/dast — the zone primitives
 (guards/decode/table naming) are contained, but the call sites aren't.
 Open decision: migration wave vs rule calibration (allowInTypeGuards) vs
 keep rules off until the wave.
+
+## Wave 10-15 — anti-slop migration complete (all 15 rules at error, lint 0/0)
+
+PLAN.md implementation, Waves 10-15 (each committed + pushed on effect-4):
+
+- W10 (3e2d9b2) casts: 142 assertions guard-narrowed or SAFETY-annotated
+- W11 (6341d64) row schema: buildModelRowSchema + tolerant boundary decode,
+  corpus-parity test, tree-resolver wiring
+- W12 (40065f9) typeof: zone guards isString/isNumber/isBoolean/isObject,
+  300+ conversions, allowInTypeGuards
+- W13 (d88124c) dicts: DynamicRow owner contract replaces all 234
+  Record<string, unknown> sites
+- W14 (4e985f4) unknowns: StoredFieldValue zone type, 201 sites
+- W15 (98b3968) tail: no-reflect-get direct access, spread discipline
+  (DAST round-trip caught the property-form regression), widening/
+  chained/object-params resolved; no-module-mocking + 3 more enabled at 0
+
+Zone exceptions: SAFETY/casts/guards relaxations scoped to src/dynamic/**
+only; documented disables (17 total) at genuine boundaries (opaque error
+channels, JSON-RPC wire payloads, index-signature-typed maps, DAST
+absent-key semantics) with one-line rationales.
+
+Wave 16 (HttpApi) assessment: 57 routes, 12 HttpRouter.use groups, inputs
+already schema-validated per route, errorToResponse at 8 boundary sites.
+Migration is the decision-gated capstone (PLAN Q4: in-roadmap vs separate
+product decision — touches the public API surface). Not started.
