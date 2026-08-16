@@ -126,9 +126,10 @@ function parseToolCallResponse(
   requestId: number,
   text: string,
   contentType: string | null,
+  // oxlint-disable-next-line anti-slop/no-known-value-widening -- the literal content type is the response contract.
 ): { content: Array<{ type: "text"; text: string }>; isError?: boolean } {
-  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- untrusted JSON-RPC wire payload: this duck-typing helper IS the boundary parser for the tool-call result.
-  function parseToolCallResult(value: unknown): { content: Array<{ type: "text"; text: string }>; isError?: boolean } | null {
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- untrusted JSON-RPC wire payload: this duck-typing helper IS the boundary parser.oundary parser for the tool-call result.
+  function parseToolCallResult(value: unknown) {
     if (!isObjectRecord(value) || !Array.isArray(value.content)) return null;
     const content = value.content.filter((entry): entry is { type: "text"; text: string } =>
       isObjectRecord(entry) && entry.type === "text" && isString(entry.text)
@@ -136,7 +137,7 @@ function parseToolCallResponse(
     if (content.length !== value.content.length) return null;
     return {
       content,
-      ...(isBoolean(value.isError) ? { isError: value.isError } : {}),
+      isError: isBoolean(value.isError) ? value.isError : undefined,
     };
   }
 
@@ -190,6 +191,7 @@ function parseToolCallResponse(
     // Fall through
   }
 
+  // oxlint-disable-next-line anti-slop/no-known-value-widening -- literal response contract for the tool-call fallback.
   return {
     content: [{ type: "text", text: `Failed to parse MCP response: ${text.slice(0, 200)}` }],
     isError: true,

@@ -69,7 +69,7 @@ export interface TextSection {
 export function extractRecordText(
   record: DynamicRow,
   fields: ParsedFieldRow[]
-): { title: string; body: string } {
+) {
   let title = "";
   const bodyParts: string[] = [];
 

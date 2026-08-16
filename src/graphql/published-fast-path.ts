@@ -240,8 +240,8 @@ function parseJsonValue(value: StoredFieldValue): StoredFieldValue {
 
 function isStructuredTextEnvelope(value: StoredFieldValue): value is { value: DynamicRow; blocks: DynamicRow } {
   if (!isObjectRecord(value)) return false;
-  const rawValue = Reflect.get(value, "value");
-  const rawBlocks = Reflect.get(value, "blocks");
+  const rawValue = value.value;
+  const rawBlocks = value.blocks;
   return isObjectRecord(rawValue) && isObjectRecord(rawBlocks);
 }
 
@@ -253,9 +253,9 @@ interface DastLikeDocument extends DynamicRow {
 
 function isDastLikeDocument(value: StoredFieldValue): value is DastLikeDocument {
   if (!isObjectRecord(value)) return false;
-  const document = Reflect.get(value, "document");
+  const document = value.document;
   if (!isObjectRecord(document)) return false;
-  const children = Reflect.get(document, "children");
+  const children = document.children;
   return Array.isArray(children);
 }
 
@@ -459,7 +459,7 @@ function buildPublishedFilterOpts(meta: FastPathModelMeta): FilterCompilerOpts {
 function localeMapEntry(localeMap: DynamicRow, key: string): StoredFieldValue | undefined {
   // SAFETY: locale maps hold per-locale cell values, which are the
   // StoredFieldValue universe; a record cell stays a DynamicRow.
-  return Reflect.get(localeMap, key) as StoredFieldValue | undefined;
+  return localeMap[key] as StoredFieldValue | undefined;
 }
 
 /** Read a content cell from a row as the stored-value universe. */
@@ -467,7 +467,7 @@ function storedCell(row: DynamicRow, key: string): StoredFieldValue {
   // SAFETY: content cells hold StoredFieldValue scalars or JSON strings; parsed
   // composite values surface as DynamicRow. JSON arrays remain JSON strings
   // until a caller decodes them.
-  return Reflect.get(row, key) as StoredFieldValue;
+  return row[key] as StoredFieldValue;
 }
 
 function pickLocalizedFastPathValue(
@@ -1364,7 +1364,7 @@ function collectStructuredTextDependencies(
     for (const id of extractBlockIds(dast)) {
       const rawBlock = envelopeBlocks[id];
       if (!isObjectRecord(rawBlock)) continue;
-      const blockApiKey = Reflect.get(rawBlock, "_type");
+      const blockApiKey = rawBlock._type;
       if (!isString(blockApiKey)) continue;
       const nestedPlan = plan.blocksPlan.selectionsByBlockApiKey.get(blockApiKey);
       if (nestedPlan) {
@@ -1377,7 +1377,7 @@ function collectStructuredTextDependencies(
     for (const id of extractInlineBlockIds(dast)) {
       const rawBlock = envelopeBlocks[id];
       if (!isObjectRecord(rawBlock)) continue;
-      const blockApiKey = Reflect.get(rawBlock, "_type");
+      const blockApiKey = rawBlock._type;
       if (!isString(blockApiKey)) continue;
       const nestedPlan = plan.inlineBlocksPlan.selectionsByBlockApiKey.get(blockApiKey);
       if (nestedPlan) {
@@ -1467,7 +1467,7 @@ function pickAssetField(asset: AssetObject, fieldName: string): StoredFieldValue
     default:
       // SAFETY: asset field values are scalars, JSON objects, or records —
       // the StoredFieldValue universe; unknown field names fall through here.
-      return Reflect.get(asset, fieldName) as StoredFieldValue;
+      return asset[fieldName as keyof AssetObject] as StoredFieldValue;
   }
 }
 
@@ -1479,7 +1479,7 @@ function projectLatLonField(
   if (!isObjectRecord(parsed)) return null;
   const result: DynamicRow = {};
   for (const field of plan.fields) {
-    result[field.responseKey] = Reflect.get(parsed, field.fieldName) ?? null;
+    result[field.responseKey] = parsed[field.fieldName] ?? null;
   }
   return result;
 }
@@ -1505,8 +1505,9 @@ async function projectAsset(
       plan.responsiveImage.args,
       (assetPath, params) => buildCfImageUrl(ctx.assetBaseUrl, ctx.isProduction, assetPath, params),
     );
+    // SAFETY: field.fieldName is a responsive-image object key (plan-built).
     result[plan.responsiveImage.responseKey] = responsiveImage
-      ? Object.fromEntries(plan.responsiveImage.fields.map((field) => [field.responseKey, Reflect.get(responsiveImage, field.fieldName) ?? null]))
+      ? Object.fromEntries(plan.responsiveImage.fields.map((field) => [field.responseKey, (responsiveImage as DynamicRow)[field.fieldName] ?? null]))
       : null;
   }
   return result;
@@ -1536,8 +1537,9 @@ async function projectAssetGallery(
         plan.responsiveImage.args,
         (assetPath, params) => buildCfImageUrl(ctx.assetBaseUrl, ctx.isProduction, assetPath, params),
       );
+      // SAFETY: field.fieldName is a responsive-image object key (plan-built).
       projected[plan.responsiveImage.responseKey] = responsiveImage
-        ? Object.fromEntries(plan.responsiveImage.fields.map((field) => [field.responseKey, Reflect.get(responsiveImage, field.fieldName) ?? null]))
+        ? Object.fromEntries(plan.responsiveImage.fields.map((field) => [field.responseKey, (responsiveImage as DynamicRow)[field.fieldName] ?? null]))
         : null;
     }
     result.push(projected);
@@ -1735,15 +1737,13 @@ async function projectStructuredTextBlockArray(
   for (const id of ids) {
     const raw = envelopeBlocks[id];
     if (!isObjectRecord(raw)) continue;
-    const blockApiKeyValue = Reflect.get(raw, "_type");
+    const blockApiKeyValue = raw._type;
     const typename = isString(blockApiKeyValue) ? `${toTypeName(blockApiKeyValue)}Record` : undefined;
 
     if (plan.kind === "generic") {
-      result.push({
-        id,
-        ...raw,
-        ...(typename ? { __typename: typename } : {}),
-      });
+      const genericRow: DynamicRow = { id, ...raw };
+      if (typename) genericRow.__typename = typename;
+      result.push(genericRow);
       continue;
     }
 
@@ -1886,7 +1886,7 @@ function buildRootResultSql(
 function buildRecursiveRootFetchSql(
   root: Extract<RootPlan, { kind: "list" | "singleton" }>,
   variables: DynamicRow,
-): { readonly sql: string; readonly params: readonly unknown[] } {
+) {
   const locale = resolveStringArg(root.locale, variables);
   const filter = buildFilterSql(root.filter, variables, root.meta, locale);
 
@@ -1990,11 +1990,11 @@ async function executePlan(
     if (isObjectRecord(sqlData)) {
       for (const root of sqlRoots) {
         if (Object.prototype.hasOwnProperty.call(sqlData, root.responseKey)) {
-          data[root.responseKey] = Reflect.get(sqlData, root.responseKey);
+          data[root.responseKey] = sqlData[root.responseKey];
         }
       }
       for (const root of recursiveRoots) {
-        const rawPayload = Reflect.get(sqlData, `__rows__${root.responseKey}`);
+        const rawPayload = sqlData[`__rows__${root.responseKey}`];
         if (root.kind === "list") {
           const rowsPayload = Array.isArray(rawPayload)
             ? rawPayload.filter((entry): entry is DynamicRow => isObjectRecord(entry))

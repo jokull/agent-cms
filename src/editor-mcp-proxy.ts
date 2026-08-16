@@ -1,5 +1,5 @@
 import { createCmsAdminClient, type CmsAdminClientConfig } from "./admin-client.js";
-import { isString, type StoredFieldValue } from "./dynamic/row-types.js";
+import { isString, type DynamicRow, type StoredFieldValue } from "./dynamic/row-types.js";
 import { tryDecodeJsonString } from "./json.js";
 
 export interface EditorMcpPrincipal {
@@ -100,7 +100,7 @@ async function importHmacKey(secret: string) {
   );
 }
 
-async function signJwt(secret: string, claims: object): Promise<string> {
+async function signJwt(secret: string, claims: DynamicRow): Promise<string> {
   const key = await importHmacKey(secret);
   const header = base64UrlEncodeText(JSON.stringify({ alg: "HS256", typ: "JWT" }));
   const payload = base64UrlEncodeText(JSON.stringify(claims));

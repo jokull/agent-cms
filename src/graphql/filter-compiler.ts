@@ -103,6 +103,7 @@ export function compileFilterToSql(
 }
 
 // Map GraphQL camelCase system fields to snake_case DB columns
+// oxlint-disable-next-line anti-slop/no-known-value-widening -- indexed by dynamic camelCase keys; the open type IS the contract.
 const META_COLUMN_MAP: Partial<Record<string, string>> = {
   _createdAt: "_created_at",
   _updatedAt: "_updated_at",

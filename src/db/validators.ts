@@ -108,7 +108,7 @@ export function computeIsValid(
   fields: ReadonlyArray<{ api_key: string; field_type: string; localized: number; validators: DynamicRow }>,
   defaultLocale: string | null,
   allLocales?: readonly string[]
-): { valid: boolean; missingFields: string[] } {
+) {
   const missingFields: string[] = [];
   for (const field of fields) {
     // SAFETY: DynamicRow cells are StoredFieldValue by the dynamic-zone contract

@@ -128,7 +128,9 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
     // Initialize shared state
     const typeDefs: string[] = [];
     const queryFieldDefs: string[] = [];
-    const resolvers: Record<string, DynamicRow> = { Query: {} };
+    // SAFETY: the resolver registry is built dynamically across model/field loops.
+    // oxlint-disable-next-line anti-slop/no-known-value-widening -- the cast is the honest contract.
+    const resolvers = { Query: {} } as Record<string, DynamicRow>;
 
     typeDefs.push(BASE_TYPE_DEFS);
     if (locales.length > 0) {
@@ -174,6 +176,9 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
       resolvers: {
         ...resolvers,
         ItemId: GraphQLItemId,
+        // SiteLocale only exists in the schema when no locales are configured;
+        // the empty branch keeps the literal assignable to IResolvers.
+        // oxlint-disable-next-line anti-slop/no-conditional-empty-object-spread
         ...(locales.length > 0 ? {} : { SiteLocale: GraphQLSiteLocale }),
       },
     });

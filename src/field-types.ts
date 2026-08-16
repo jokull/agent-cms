@@ -102,7 +102,7 @@ export interface FieldTypeDefinition {
  * The field type registry — one entry per field type.
  * Add a new field type here and TypeScript will enforce all properties are defined.
  */
-export const FIELD_TYPE_REGISTRY: Record<FieldType, FieldTypeDefinition> = {
+export const FIELD_TYPE_REGISTRY = {
   string: {
     sqliteType: "TEXT",
     graphqlType: "String",
@@ -293,8 +293,7 @@ export const FIELD_TYPE_REGISTRY: Record<FieldType, FieldTypeDefinition> = {
     jsonStored: true,
     hasCustomResolver: true,
   },
-};
-
+} satisfies Record<FieldType, FieldTypeDefinition>;
 /** Get the registry definition for a field type */
 export function getFieldTypeDef(fieldType: FieldType): FieldTypeDefinition {
   return FIELD_TYPE_REGISTRY[fieldType];

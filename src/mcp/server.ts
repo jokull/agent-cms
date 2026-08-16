@@ -228,9 +228,10 @@ function toStructuredContent(value: StoredFieldValue) {
  * human-oriented message instead of dumping the internal ParseError tree to the
  * MCP client. Non-ParseError failures pass through unchanged.
  */
-// oxlint-disable-next-line anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns -- Effect's error channel is opaque; SchemaErrors map to ValidationError, all other failures pass through unchanged.
+// oxlint-disable-next-line anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/no-known-value-widening -- Effect's error channel is opaque; SchemaErrors map to ValidationError, all other failures pass through unchanged.
 function formatToolError(error: unknown): unknown {
   if (Schema.isSchemaError(error)) {
+    // oxlint-disable-next-line anti-slop/no-known-value-widening -- error channel is opaque by contract (see above).
     return new ValidationError({ message: SchemaIssue.makeFormatterDefault()(error.issue) });
   }
   return error;
@@ -369,6 +370,7 @@ function pickToolkitHandlers<K extends Record<string, AiTool.Any>>(
   // SAFETY: `filtered` holds exactly one entry per name in Object.keys(toolkit.tools),
   // and every toolkit tool name is a key of `K`, so the widened
   // Record<string, LooseToolHandler> typing is only for incremental assignment.
+  // oxlint-disable-next-line anti-slop/no-known-value-widening -- filtered holds exactly one entry per Object.keys(toolkit.tools); structural alternatives fail assignability (see Wave 10).
   return filtered as Record<keyof K, LooseToolHandler>;
 }
 
@@ -893,7 +895,7 @@ export function createMcpLayer(
     });
   });
 
-  const toolHandlers: Record<string, LooseToolHandler> = {
+  const toolHandlers = {
     schema_info: withDecoded(SchemaInfoInput, ({ filterByName, filterByType, includeFieldDetails }) =>
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;

@@ -135,6 +135,7 @@ export function buildResponsiveImage(
   }
 
   function transformUrl(targetWidth: number, targetFormat?: string): string {
+    // oxlint-disable-next-line anti-slop/no-known-value-widening -- the params object is built incrementally by key.
     const p: Record<string, string | number> = { width: targetWidth, fit };
     if (requestedH) p.height = Math.round(targetWidth / outAspect);
     if (quality) p.quality = quality;

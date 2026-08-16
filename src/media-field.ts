@@ -66,6 +66,7 @@ export function mergeAssetWithMediaReference(
       ? reference.customData
       : (isJsonRecord(defaultCustomData) ? defaultCustomData : null),
     // SAFETY: a missing/invalid tags JSON decodes to the empty array, a StoredFieldValue per the json contract.
+    // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- fallback literal for an absent tags cell; the union bridge is the honest typed default.
     tags: stringArrayFrom(decodeJsonStringOr(asset.tags, [] as unknown as StoredFieldValue)),
     url: assetUrl(asset.r2_key),
     _createdAt: asset.created_at,

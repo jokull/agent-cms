@@ -884,6 +884,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
    * CMS is reachable on. With neither, reads fall back to the relative
    * `/assets/:id/:filename` path this router serves from R2.
    */
+  // oxlint-disable-next-line anti-slop/no-known-value-widening -- the object is mutated later (assetUrlLayer closure) and read through AssetUrlConfig.
   const assetUrlConfig: { baseUrl: string | undefined; origin: string | undefined } = {
     baseUrl: options?.assetBaseUrl,
     origin: undefined,
@@ -1252,6 +1253,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
           // SAFETY: agents/mcp's createMcpHandler only reads ctx.props (absent → no auth context)
           // and calls ctx.waitUntil on SSE teardown; the stub provides both waitUntil and
           // passThroughOnException, so this minimal object satisfies the runtime contract.
+          // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- agents' MCP runtime types ctx as opaque; the stub satisfies the ExecutionContext surface used here.
           const stubCtx = { waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext;
           return finish(await handler(instrumentedRequest, {}, stubCtx));
         }
@@ -1301,6 +1303,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
           // SAFETY: agents/mcp's createMcpHandler only reads ctx.props (absent → no auth context)
           // and calls ctx.waitUntil on SSE teardown; the stub provides both waitUntil and
           // passThroughOnException, so this minimal object satisfies the runtime contract.
+          // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- agents' MCP runtime types ctx as opaque; the stub satisfies the ExecutionContext surface used here.
           const stubCtx = { waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext;
           return finish(await handler(instrumentedRequest, {}, stubCtx));
         }

@@ -177,15 +177,15 @@ function isStringArray(value: QueryVariableValue | undefined): value is string[]
 // oxlint-disable-next-line anti-slop/no-unknown-parameters -- type guard: validates arbitrary cell/row values against the DAST document shape; the input contract is "anything" by construction.
 function isDastDocument(value: unknown): value is DastDocInput {
   if (!isObjectRecord(value)) return false;
-  const document = Reflect.get(value, "document");
+  const document = value.document;
   if (!isObjectRecord(document)) return false;
-  return Array.isArray(Reflect.get(document, "children"));
+  return Array.isArray(document.children);
 }
 
 // oxlint-disable-next-line anti-slop/no-unknown-parameters -- type guard: validates arbitrary cell/row values against the structured-text envelope shape; the input contract is "anything" by construction.
 function isStructuredTextEnvelope(value: unknown): value is StructuredTextEnvelope {
   if (!isObjectRecord(value)) return false;
-  return isDastDocument(Reflect.get(value, "value")) && isObjectRecord(Reflect.get(value, "blocks"));
+  return isDastDocument(value.value) && isObjectRecord(value.blocks);
 }
 
 function getStructuredTextBlockIds(value: StructuredTextEnvelope) {
@@ -216,7 +216,7 @@ function pickLocalizedValue(
 
   const locale = localeOptions.locale;
   if (locale) {
-    const localized = Reflect.get(rawValue, locale);
+    const localized = rawValue[locale];
     if (localized !== undefined && localized !== null) {
       // SAFETY: locale maps hold per-locale cell values, which are the
       // StoredFieldValue universe; a record cell stays a DynamicRow.
@@ -225,7 +225,7 @@ function pickLocalizedValue(
   }
 
   for (const fallback of localeOptions.fallbackLocales ?? []) {
-    const localized = Reflect.get(rawValue, fallback);
+    const localized = rawValue[fallback];
     if (localized !== undefined && localized !== null) {
       // SAFETY: locale maps hold per-locale cell values, which are the
       // StoredFieldValue universe; a record cell stays a DynamicRow.
@@ -577,7 +577,7 @@ function projectBlock(
   localeOptions: LocaleProjectionOptions,
 ): DynamicRow | null {
   if (!isObjectRecord(rawBlock)) return null;
-  const blockType = Reflect.get(rawBlock, "_type");
+  const blockType = rawBlock._type;
   if (!isString(blockType)) return null;
   const blockSelections = plan.selectionsByBlockApiKey.get(blockType) ?? [];
   const result: DynamicRow = {};
@@ -600,12 +600,12 @@ function projectBlock(
       continue;
     }
     if (selection.kind === "structured_text") {
-      const nestedValue = Reflect.get(rawBlock, selection.field.api_key);
+      const nestedValue = rawBlock[selection.field.api_key];
       if (!isStructuredTextEnvelope(nestedValue)) return null;
       result[selection.responseKey] = projectStructuredText(nestedValue, selection, linkBuckets, localeOptions);
       continue;
     }
-    const linkedId = Reflect.get(rawBlock, selection.field.api_key);
+    const linkedId = rawBlock[selection.field.api_key];
     if (!isString(linkedId)) {
       result[selection.responseKey] = null;
       continue;
@@ -1142,12 +1142,12 @@ function collectStructuredTextLinkIds(
     for (const blockId of blockIds) {
       const rawBlock = value.blocks[blockId];
       if (!isObjectRecord(rawBlock)) continue;
-      const blockType = Reflect.get(rawBlock, "_type");
+      const blockType = rawBlock._type;
       if (!isString(blockType)) continue;
       const blockSelections = blocksPlan.selectionsByBlockApiKey.get(blockType) ?? [];
       for (const selection of blockSelections) {
         if (selection.kind === "link") {
-          const linkedId = Reflect.get(rawBlock, selection.field.api_key);
+          const linkedId = rawBlock[selection.field.api_key];
           if (!isString(linkedId)) continue;
           const bucketKey = getLinkBucketKey(selection.field.api_key, selection.target.model.api_key);
           const bucket = idsByBucket.get(bucketKey) ?? new Set<string>();
@@ -1162,7 +1162,7 @@ function collectStructuredTextLinkIds(
           continue;
         }
         if (selection.kind === "structured_text") {
-          const nestedValue = Reflect.get(rawBlock, selection.field.api_key);
+          const nestedValue = rawBlock[selection.field.api_key];
           if (!isStructuredTextEnvelope(nestedValue)) continue;
           collectStructuredTextLinkIds(nestedValue, selection, idsByBucket, descriptorsByBucket);
         }

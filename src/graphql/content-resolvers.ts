@@ -54,10 +54,10 @@ function pickLocalizedValue(rawValue: StoredFieldValue, context: GqlContext, def
 function withFieldLocaleArgs(context: GqlContext, args: DynamicRow): GqlContext {
   if (!isObjectRecord(args)) return context;
   // SAFETY: args guarded as a plain object above; locale keys are GraphQL field args.
-  const rawLocale: unknown = Reflect.get(args, "locale");
+  const rawLocale: unknown = args.locale;
   const locale = isString(rawLocale) ? rawLocale : context.locale;
   // SAFETY: same args-object guarantee for fallbackLocales.
-  const rawFallbackLocales: unknown = Reflect.get(args, "fallbackLocales");
+  const rawFallbackLocales: unknown = args.fallbackLocales;
   const fallbackLocales = Array.isArray(rawFallbackLocales)
     ? rawFallbackLocales.filter((value): value is string => isString(value))
     : context.fallbackLocales;

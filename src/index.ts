@@ -61,6 +61,7 @@ const objectIds = new WeakMap<object, number>();
 let nextObjectId = 1;
 const handlerCache = new Map<string, CachedCmsHandler>();
 
+// oxlint-disable-next-line anti-slop/no-object-parameters -- cache-key identity over heterogeneous binding objects (D1/R2/Ai/Vectorize); no property access.
 function getObjectId(value: object | undefined): number {
   if (!value) return 0;
   const existing = objectIds.get(value);

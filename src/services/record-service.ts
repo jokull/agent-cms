@@ -781,8 +781,11 @@ export function createRecord(body: CreateRecordInput, actor?: RequestActor | nul
       _status: initialStatus,
       _created_at: now,
       _updated_at: now,
-      ...(!model.has_draft ? { _published_at: now, _first_published_at: now } : {}),
     };
+    if (!model.has_draft) {
+      record._published_at = now;
+      record._first_published_at = now;
+    }
     applyActorColumns(record, actor, {
       created: true,
       updated: true,
@@ -1446,8 +1449,11 @@ export const bulkCreateRecords = Effect.fn("bulkCreateRecords")(function* ({ mod
       _status: initialStatus,
       _created_at: now,
       _updated_at: now,
-      ...(!model.has_draft ? { _published_at: now, _first_published_at: now } : {}),
     };
+    if (!model.has_draft) {
+      record._published_at = now;
+      record._first_published_at = now;
+    }
     applyActorColumns(record, actor, {
       created: true,
       updated: true,
@@ -1502,7 +1508,7 @@ function applyPatchToNestedStructuredText(
   target: DynamicRow,
   blockId: string,
   patchValue: StoredFieldValue,
-): { applied: boolean; ambiguous: boolean } {
+) {
   let matches = 0;
 
   const visitObject = (value: DynamicRow) => {
@@ -1683,7 +1689,7 @@ export const patchBlocksForField = Effect.fn("patchBlocksForField")(function* (b
   }
 
   // Build final DAST value
-  let finalDastValue: unknown;
+  let finalDastValue: DynamicRow | null = null;
   if (body.order) {
     // order is only valid on blocks_only fields
     const blocksOnlyFlag = getBlocksOnly(field.validators);
@@ -1714,7 +1720,8 @@ export const patchBlocksForField = Effect.fn("patchBlocksForField")(function* (b
       field: body.fieldApiKey,
     });
   } else if (body.value !== undefined) {
-    finalDastValue = body.value;
+    // SAFETY: body.value is a validated DAST payload (input schema) — guard for shape.
+    finalDastValue = isObjectRecord(body.value) ? body.value : null;
   } else if (blockIdsToDelete.size > 0 || appendedIds.length > 0) {
     // Clone existing DAST, prune deleted blocks, append new block nodes
     const existingDast = existingEnvelope.value;
@@ -2139,7 +2146,7 @@ function isRichTextBlockArray(value: unknown): value is Array<DynamicRow> {
  */
 function remapStructuredTextEnvelopeIds(
   envelope: { value: unknown; blocks: DynamicRow },
-): { value: unknown; blocks: DynamicRow } {
+) {
   const idMap = new Map(Object.keys(envelope.blocks).map((oldId) => [oldId, generateId()]));
 
   const rewriteNode = (node: StoredFieldValue | unknown[]): StoredFieldValue | unknown[] => {
@@ -2355,7 +2362,7 @@ export interface RecordBacklink {
  * uses). Localized columns store a { locale: value } map, so a substring match
  * on the JSON text is used (best-effort).
  */
-function backlinkCondition(field: ParsedFieldRow, recordId: string): { sql: string; params: unknown[] } {
+function backlinkCondition(field: ParsedFieldRow, recordId: string) {
   if (field.localized) {
     return { sql: `"${field.api_key}" LIKE ?`, params: [`%"${recordId}"%`] };
   }

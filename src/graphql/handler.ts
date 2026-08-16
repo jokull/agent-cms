@@ -465,7 +465,7 @@ export function createGraphQLHandler(
 
     return {
       data: mergedData,
-      ...(mergedErrors.length > 0 ? { errors: mergedErrors } : {}),
+      errors: mergedErrors.length > 0 ? mergedErrors : undefined,
       _trace: {
         path: unsupportedSelections.length > 0 ? "partial" : "fast-path",
         rootPaths,

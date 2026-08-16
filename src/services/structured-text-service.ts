@@ -867,7 +867,7 @@ export const materializeStructuredTextValues = Effect.fn("materializeStructuredT
       const selectedFieldPlans = request.params.selectedNestedFieldsPlan?.fieldsByBlockApiKey.get(blockApiKey);
       for (const field of blockModel.fields) {
         // SAFETY: block payload cells are stored cell values; a missing key surfaces as undefined, checked below.
-        const rawValue = deserializeValue(Reflect.get(rawPayload, field.api_key) as StoredFieldValue | undefined);
+        const rawValue = deserializeValue(rawPayload[field.api_key] as StoredFieldValue | undefined);
         if (rawValue === undefined) continue;
         if (field.field_type === "structured_text" && rawValue !== null) {
           const nestedPlan = selectedFieldPlans?.get(field.api_key);
@@ -1332,7 +1332,7 @@ export const materializeRichTextValue = Effect.fn("materializeRichTextValue")(fu
       const payload: DynamicRow = { _type: blockApiKey, id: rowId };
       for (const field of blockModel.fields) {
         // SAFETY: block payload cells are stored cell values; a missing key surfaces as undefined, checked below.
-        const rawValue = deserializeValue(Reflect.get(rawPayload, field.api_key) as StoredFieldValue | undefined);
+        const rawValue = deserializeValue(rawPayload[field.api_key] as StoredFieldValue | undefined);
         if (rawValue === undefined) continue;
 
         if (field.field_type === "structured_text" && rawValue !== null) {
