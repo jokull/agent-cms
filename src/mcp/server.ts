@@ -359,6 +359,9 @@ function pickToolkitHandlers<K extends Record<string, AiTool.Any>>(
   }
   // Object.keys is dynamic; the selected names are exactly the toolkit's tool
   // names, so the narrowed key set is sound.
+  // SAFETY: `filtered` holds exactly one entry per name in Object.keys(toolkit.tools),
+  // and every toolkit tool name is a key of `K`, so the widened
+  // Record<string, LooseToolHandler> typing is only for incremental assignment.
   return filtered as Record<keyof K, LooseToolHandler>;
 }
 
@@ -833,6 +836,8 @@ export function createMcpLayer(
     name: mode === "editor" ? "agent-cms-editor" : "agent-cms",
     version: "0.1.0",
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Effect MCP path is typed as a route literal, but this server accepts a runtime-configured route.
+    // SAFETY: the resolved path is always a `/`-prefixed route (defaults `/mcp` and `/mcp/editor`;
+    // every call site passes a `/`-prefixed literal), which satisfies PathInput = `/${string}` | "*".
     path: path as never,
     protocols: [McpProtocol.v2025_06_18],
   });
@@ -1150,6 +1155,11 @@ export function createMcpLayer(
             );
           }
           // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- dynamic MCP registry dispatch crosses Effect Toolkit's generated tool-name/payload types.
+          // SAFETY: `tool` comes from registeredTools, which is either CmsToolkit's own
+          // tools or EditorToolkit's tools (the editor list is the same consts as a subset
+          // of admin tools), so `tool.name` is always a key of CmsToolkit's tools; `params`
+          // is the raw JSON payload, which handle() validates and decodes at runtime via
+          // the tool's parameter schema.
           return built.handle(tool.name as never, params as never).pipe(
             Effect.provide(context),
             Effect.flatMap((stream) => Stream.runLast(stream)),

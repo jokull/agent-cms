@@ -1,4 +1,4 @@
-import { createYoga, type YogaSchemaDefinition } from "graphql-yoga";
+import { createYoga } from "graphql-yoga";
 import { Effect, Layer, Logger } from "effect";
 import type { DynamicRow } from "../dynamic/row-types.js";
 import {
@@ -18,6 +18,7 @@ import { buildGraphQLSchema } from "./schema-builder.js";
 import { enforceQueryLimits } from "./query-limits.js";
 import { getSqlMetrics, withSqlMetrics } from "./sql-metrics.js";
 import { createPublishedFastPath } from "./published-fast-path.js";
+import type { FastPathSqlMetrics } from "./published-fast-path.js";
 import { createCustomQueryExecutor } from "./custom-query-executor.js";
 import { createVersionedCache } from "../services/schema-version.js";
 
@@ -49,6 +50,11 @@ interface GraphqlRequestBody {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readCredentialType(request: Request): CredentialType {
+  const raw = request.headers.get("X-Credential-Type");
+  return raw === "admin" || raw === "editor" ? raw : null;
 }
 
 function isGraphqlRequestBody(value: unknown): value is GraphqlRequestBody {
@@ -252,8 +258,7 @@ export function createGraphQLHandler(
   const customQueryExecutor = createCustomQueryExecutor(sqlLayer);
 
   const yoga = createYoga({
-    // Yoga's schema function type expects the full context, but our schema is context-agnostic
-    schema: (() => getSchema()) as YogaSchemaDefinition<object, GraphQLContext>,
+    schema: () => getSchema(),
     graphqlEndpoint: "/graphql",
     landingPage: true,
     plugins: [{
@@ -266,7 +271,7 @@ export function createGraphQLHandler(
       },
     }],
     context: ({ request }: { request: Request }) => {
-      const credentialType = request.headers.get("X-Credential-Type") as CredentialType;
+      const credentialType = readCredentialType(request);
       const headerDrafts = request.headers.get("X-Include-Drafts") === "true";
       // Editor tokens always see drafts; admin respects header; no credential = published only
       const includeDrafts = credentialType === "editor" ? true
@@ -332,7 +337,9 @@ export function createGraphQLHandler(
         linkedRecordCache: new Map(),
       },
     });
-    return result as { data: unknown; errors?: ReadonlyArray<{ message: string }> };
+    // GraphQL execution results are structurally { data?, errors? } objects whose
+    // errors carry a `message` field, matching this function's return shape.
+    return { data: result.data, errors: result.errors };
   }
 
   async function executeWithRootFallback(
@@ -415,7 +422,7 @@ export function createGraphQLHandler(
 
     const mergedData: Record<string, unknown> = {};
     const mergedErrors: Array<{ message: string }> = [];
-    let fastPathMetrics: Record<string, unknown> | undefined;
+    let fastPathMetrics: FastPathSqlMetrics | undefined;
 
     const supportedDocument = buildSubsetDocument(document, operation, supportedSelections);
     const supportedCombinedResult = await publishedFastPath.tryExecute({
@@ -429,7 +436,7 @@ export function createGraphQLHandler(
 
     if (supportedCombinedResult) {
       Object.assign(mergedData, supportedCombinedResult.response.data);
-      fastPathMetrics = supportedCombinedResult.metrics as unknown as Record<string, unknown>;
+      fastPathMetrics = supportedCombinedResult.metrics;
     } else {
       for (const selection of supportedSelections) {
         const subsetDocument = buildSubsetDocument(document, operation, [selection]);
@@ -450,8 +457,8 @@ export function createGraphQLHandler(
     if (unsupportedSelections.length > 0) {
       const unsupportedDocument = buildSubsetDocument(document, operation, unsupportedSelections);
       const unsupportedResult = await executeDocument(unsupportedDocument, variables, context);
-      if (unsupportedResult.data && typeof unsupportedResult.data === "object") {
-        Object.assign(mergedData, unsupportedResult.data as Record<string, unknown>);
+      if (isRecord(unsupportedResult.data)) {
+        Object.assign(mergedData, unsupportedResult.data);
       }
       if (unsupportedResult.errors) {
         mergedErrors.push(...unsupportedResult.errors);
@@ -475,7 +482,7 @@ export function createGraphQLHandler(
     const traceEnabled = request.headers.get("X-Bench-Trace") === "1" || debugSql;
 
     if (!traceEnabled) {
-      const credentialType = request.headers.get("X-Credential-Type") as CredentialType;
+      const credentialType = readCredentialType(request);
       const headerDrafts = request.headers.get("X-Include-Drafts") === "true";
       const includeDrafts = credentialType === "editor" ? true
         : credentialType === "admin" ? headerDrafts

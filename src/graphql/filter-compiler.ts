@@ -13,6 +13,7 @@
  */
 
 import { buildPatternMatch } from "../sql-util.js";
+import { isObjectRecord } from "../dynamic/row-types.js";
 
 /**
  * A locale code is interpolated into a JSON path literal (`'$.<locale>'`) — it
@@ -174,16 +175,16 @@ function buildSqlConditions(
     }
 
     // --- _locales special filter ---
-    if (key === "_locales" && typeof value === "object" && value !== null) {
+    if (key === "_locales" && isObjectRecord(value)) {
       const locCols = opts?.localizedDbColumns ?? [];
       if (locCols.length > 0) {
-        const locCondition = compileLocalesFilter(value as Record<string, unknown>, locCols);
+        const locCondition = compileLocalesFilter(value, locCols);
         if (locCondition) conditions.push(locCondition);
       }
       continue;
     }
 
-    if (typeof value !== "object" || value === null) continue;
+    if (!isObjectRecord(value)) continue;
 
     const dbKey = resolveDbKey(key, opts);
     const col = resolveCol(key, dbKey, opts);
@@ -191,7 +192,7 @@ function buildSqlConditions(
     const isJsonArray = opts?.jsonArrayFields?.has(key) ?? false;
     const isJsonObjectId = opts?.jsonObjectIdFields?.has(key) ?? false;
 
-    for (const [op, expected] of Object.entries(value as Record<string, unknown>)) {
+    for (const [op, expected] of Object.entries(value)) {
       if (expected === undefined) continue;
       const cond = compileOperator(op, expected, col, resolveDbExpr(key, dbKey, opts), isJsonArray, isJsonObjectId);
       if (cond) conditions.push(cond);
@@ -302,8 +303,8 @@ function compileOperator(
         return { sql: m.sql, params: [m.param] };
       }
       // DatoCMS-style { pattern, caseSensitive } object
-      if (typeof expected === "object" && expected !== null && "pattern" in expected) {
-        const obj = expected as Record<string, unknown>;
+      if (isObjectRecord(expected) && "pattern" in expected) {
+        const obj = expected;
         const m = buildPatternMatch(col, String(obj.pattern), { caseSensitive: Boolean(obj.caseSensitive) });
         return { sql: m.sql, params: [m.param] };
       }
@@ -313,8 +314,8 @@ function compileOperator(
         const m = buildPatternMatch(col, expected, { negated: true });
         return { sql: m.sql, params: [m.param] };
       }
-      if (typeof expected === "object" && expected !== null && "pattern" in expected) {
-        const obj = expected as Record<string, unknown>;
+      if (isObjectRecord(expected) && "pattern" in expected) {
+        const obj = expected;
         const m = buildPatternMatch(col, String(obj.pattern), { caseSensitive: Boolean(obj.caseSensitive), negated: true });
         return { sql: m.sql, params: [m.param] };
       }
@@ -341,8 +342,8 @@ function compileOperator(
 
     // --- Geolocation: near { latitude, longitude, radius } ---
     case "near": {
-      if (typeof expected !== "object" || expected === null) return null;
-      const geo = expected as Record<string, unknown>;
+      if (!isObjectRecord(expected)) return null;
+      const geo = expected;
       const latitude = typeof geo.latitude === "number" ? geo.latitude : undefined;
       const longitude = typeof geo.longitude === "number" ? geo.longitude : undefined;
       const radius = typeof geo.radius === "number" ? geo.radius : undefined;
@@ -368,8 +369,8 @@ function compileOperator(
 
     // Legacy: matchesObject (kept for backwards compat, prefer unified "matches")
     case "matchesObject":
-      if (typeof expected === "object" && expected !== null && "pattern" in expected) {
-        const obj = expected as Record<string, unknown>;
+      if (isObjectRecord(expected) && "pattern" in expected) {
+        const obj = expected;
         const m = buildPatternMatch(col, String(obj.pattern), { caseSensitive: Boolean(obj.caseSensitive) });
         return { sql: m.sql, params: [m.param] };
       }
@@ -405,9 +406,9 @@ function compileLocalesFilter(
   value: Record<string, unknown>,
   localizedDbColumns: string[]
 ): SqlCondition | null {
-  const allIn = Array.isArray(value.allIn) ? value.allIn as string[] : undefined;
-  const anyIn = Array.isArray(value.anyIn) ? value.anyIn as string[] : undefined;
-  const notIn = Array.isArray(value.notIn) ? value.notIn as string[] : undefined;
+  const allIn = Array.isArray(value.allIn) ? value.allIn.filter((v): v is string => typeof v === "string") : undefined;
+  const anyIn = Array.isArray(value.anyIn) ? value.anyIn.filter((v): v is string => typeof v === "string") : undefined;
+  const notIn = Array.isArray(value.notIn) ? value.notIn.filter((v): v is string => typeof v === "string") : undefined;
 
   const parts: SqlCondition[] = [];
 

@@ -71,12 +71,12 @@ async function buildFaviconMetaTags(runSql: RunSqlFn, faviconId: string) {
 }
 
 /** Upload field name map for filter/order compilation */
-const uploadFieldMap: Record<string, string> = {
+const uploadFieldMap = {
   basename: "basename",
   format: "format",
   mimeType: "mime_type",
   _createdAt: "created_at",
-};
+} satisfies Record<string, string>;
 
 function getAssetBasename(filename: string) {
   const lastDot = filename.lastIndexOf(".");

@@ -1240,6 +1240,9 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
             mcpHandler: adminMcpHandler,
           });
           const handler = createMcpHandler(codeModeServer, { route: "/mcp" });
+          // SAFETY: agents/mcp's createMcpHandler only reads ctx.props (absent → no auth context)
+          // and calls ctx.waitUntil on SSE teardown; the stub provides both waitUntil and
+          // passThroughOnException, so this minimal object satisfies the runtime contract.
           const stubCtx = { waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext;
           return finish(await handler(instrumentedRequest, {}, stubCtx));
         }
@@ -1286,6 +1289,9 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
             mcpPath: "/mcp/editor",
           });
           const handler = createMcpHandler(codeModeServer, { route: "/mcp/editor" });
+          // SAFETY: agents/mcp's createMcpHandler only reads ctx.props (absent → no auth context)
+          // and calls ctx.waitUntil on SSE teardown; the stub provides both waitUntil and
+          // passThroughOnException, so this minimal object satisfies the runtime contract.
           const stubCtx = { waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext;
           return finish(await handler(instrumentedRequest, {}, stubCtx));
         }

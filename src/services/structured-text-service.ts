@@ -1,5 +1,6 @@
 import { Effect, Schema, SchemaIssue } from "effect";
 import { contentTableName } from "../dynamic/tables.js";
+import { isObjectRecord, type DynamicRow } from "../dynamic/row-types.js";
 import { SqlClient, SqlError } from "effect/unstable/sql";
 import { validateBlocksOnly, extractAllBlockIds, extractBlockIds, extractLinkIds } from "../dast/index.js";
 import { ValidationError } from "../errors.js";
@@ -12,8 +13,6 @@ import { getFieldTypeDef } from "../field-types.js";
 import { isFieldType } from "../types.js";
 import { decodeJsonIfString, decodeJsonStringOr, encodeJson } from "../json.js";
 import { collectMediaSite, type MediaSite } from "../media-field.js";
-
-type DynamicRow = Record<string, unknown>;
 
 interface CompileContext {
   sql: SqlClient.SqlClient;
@@ -313,13 +312,13 @@ const compileStructuredText = Effect.fn("compileStructuredText")(function* (
     seenBlockIds.add(blockId);
 
     const rawBlock = input.blocks[blockId];
-    if (typeof rawBlock !== "object" || rawBlock === null || Array.isArray(rawBlock)) {
+    if (!isObjectRecord(rawBlock)) {
       return yield* new ValidationError({
         message: `Block '${blockId}' must be an object`,
         field: fieldApiKey,
       });
     }
-    const blockData = rawBlock as DynamicRow;
+    const blockData = rawBlock;
     if (typeof blockData._type !== "string" || blockData._type.length === 0) {
       return yield* new ValidationError({
         message: `Block '${blockId}' must have a _type property`,
@@ -399,7 +398,9 @@ const compileStructuredText = Effect.fn("compileStructuredText")(function* (
           parentFieldApiKey: field.api_key,
           depth: container.depth + 1,
           fieldApiKey: field.api_key,
-          blocks: value as RichTextWriteBlock[],
+          // SAFETY: the block-write path validated block shapes on the way in
+          // (decodeStructuredTextInput); the array guard handles null/absent.
+          blocks: Array.isArray(value) ? value as RichTextWriteBlock[] : [],
           allowedBlockTypes: getRichTextBlockWhitelist(field.validators) ?? [],
         });
         row[field.api_key] = nestedResult.blockIds;
@@ -623,6 +624,9 @@ function parseMaterializeStructuredTextRequest(request: MaterializeStructuredTex
     return null;
   }
 
+  // SAFETY: stored structured_text values are full DAST documents (schema: 'dast',
+  // document with children) written by this pipeline; the guard above verified the
+  // document/children envelope, and extractAllBlockIds only walks that shape.
   const doc = dast as DastDocumentInput;
   const blockIds = extractAllBlockIds(doc);
   return {
@@ -952,9 +956,9 @@ export const materializeRecordStructuredTextFields = Effect.fn("materializeRecor
     if (field.field_type === "rich_text") {
       if (field.localized) {
         const localeMap = decodeJsonIfString(rawValue);
-        if (typeof localeMap !== "object" || localeMap === null || Array.isArray(localeMap)) continue;
+        if (!isObjectRecord(localeMap)) continue;
         const localized: Record<string, unknown> = {};
-        for (const [localeCode, localeValue] of Object.entries(localeMap as Record<string, unknown>)) {
+        for (const [localeCode, localeValue] of Object.entries(localeMap)) {
           if (localeValue === null || localeValue === undefined) {
             localized[localeCode] = localeValue;
             continue;
@@ -991,12 +995,12 @@ export const materializeRecordStructuredTextFields = Effect.fn("materializeRecor
     // structured_text
     if (field.localized) {
       const localeMap = decodeJsonIfString(rawValue);
-      if (typeof localeMap !== "object" || localeMap === null || Array.isArray(localeMap)) {
+      if (!isObjectRecord(localeMap)) {
         continue;
       }
 
       const localized: Record<string, unknown> = {};
-      for (const [localeCode, localeValue] of Object.entries(localeMap as Record<string, unknown>)) {
+      for (const [localeCode, localeValue] of Object.entries(localeMap)) {
         if (localeValue === null || localeValue === undefined) {
           localized[localeCode] = localeValue;
           continue;
@@ -1206,7 +1210,9 @@ const writeRichTextBlocks = Effect.fn("writeRichTextBlocks")(function* (params: 
           parentFieldApiKey: field.api_key,
           depth: params.depth + 1,
           fieldApiKey: field.api_key,
-          blocks: value as RichTextWriteBlock[],
+          // SAFETY: block shapes validated by the write path (decodeStructuredTextInput);
+          // the array guard handles null/absent.
+          blocks: Array.isArray(value) ? value as RichTextWriteBlock[] : [],
           allowedBlockTypes: getRichTextBlockWhitelist(field.validators) ?? [],
         });
         row[field.api_key] = nestedResult.blockIds;
@@ -1399,9 +1405,9 @@ export const materializeRecordRichTextFields = Effect.fn("materializeRecordRichT
 
     if (field.localized) {
       const localeMap = decodeJsonIfString(rawValue);
-      if (typeof localeMap !== "object" || localeMap === null || Array.isArray(localeMap)) continue;
+      if (!isObjectRecord(localeMap)) continue;
       const localized: Record<string, unknown> = {};
-      for (const [localeCode, localeValue] of Object.entries(localeMap as Record<string, unknown>)) {
+      for (const [localeCode, localeValue] of Object.entries(localeMap)) {
         if (localeValue === null || localeValue === undefined) {
           localized[localeCode] = localeValue;
           continue;

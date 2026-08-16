@@ -116,7 +116,9 @@ export function buildReverseRefResolvers(
           .map((sf) => toCamelCase(sf.api_key))
       );
 
-      // Ensure resolver map exists for target type
+      // Ensure resolver map exists for target type. Index-signature typing
+      // claims the key is always present, but runtime key presence is dynamic.
+      // oxlint-disable-next-line typescript-eslint/no-unnecessary-condition
       if (!resolvers[targetTypeName]) resolvers[targetTypeName] = {};
 
       (resolvers[targetTypeName])[fieldName] = async (parent: DynamicRow, args: DynamicRow, context: GqlContext) => {

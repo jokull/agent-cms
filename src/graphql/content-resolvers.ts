@@ -26,11 +26,11 @@ function pickLocalizedEntry(rawValue: unknown, context: GqlContext, defaultLocal
   if (rawValue === null || rawValue === undefined) return { locale: null, value: null };
 
   const localeMap = decodeJsonIfString(rawValue);
-  if (typeof localeMap !== "object" || localeMap === null || Array.isArray(localeMap)) {
+  if (!isDynamicRow(localeMap)) {
     return { locale: null, value: rawValue };
   }
 
-  const locMap = localeMap as Record<string, unknown>;
+  const locMap = localeMap;
   const locale = context.locale ?? defaultLocale;
   const fallbacks = context.fallbackLocales ?? [];
 
@@ -55,9 +55,13 @@ function pickLocalizedValue(rawValue: unknown, context: GqlContext, defaultLocal
 
 function withFieldLocaleArgs(context: GqlContext, args: unknown): GqlContext {
   if (typeof args !== "object" || args === null || Array.isArray(args)) return context;
-  const locale = typeof Reflect.get(args, "locale") === "string" ? Reflect.get(args, "locale") as string : context.locale;
-  const fallbackLocales = Array.isArray(Reflect.get(args, "fallbackLocales"))
-    ? (Reflect.get(args, "fallbackLocales") as unknown[]).filter((value): value is string => typeof value === "string")
+  // SAFETY: args guarded as a plain object above; locale keys are GraphQL field args.
+  const rawLocale = Reflect.get(args, "locale") as unknown;
+  const locale = typeof rawLocale === "string" ? rawLocale : context.locale;
+  // SAFETY: same args-object guarantee for fallbackLocales.
+  const rawFallbackLocales = Reflect.get(args, "fallbackLocales") as unknown;
+  const fallbackLocales = Array.isArray(rawFallbackLocales)
+    ? rawFallbackLocales.filter((value): value is string => typeof value === "string")
     : context.fallbackLocales;
   return {
     ...context,
@@ -190,8 +194,8 @@ export function buildContentModelResolvers(
           ? pickLocalizedValue(parent[seoField.api_key], context, defaultLocale)
           : parent[seoField.api_key];
         if (typeof seo === "string") seo = decodeJsonStringOr(seo, null);
-        if (seo && typeof seo === "object") {
-          const seoObj = seo as DynamicRow;
+        if (isDynamicRow(seo)) {
+          const seoObj = seo;
           title = typeof seoObj.title === "string" ? seoObj.title : null;
           description = typeof seoObj.description === "string" ? seoObj.description : null;
           twitterCard = typeof seoObj.twitterCard === "string" ? seoObj.twitterCard : null;
@@ -239,8 +243,9 @@ export function buildContentModelResolvers(
       }
       tags.push({ tag: "meta", attributes: { property: "og:type", content: "article" }, content: null });
       tags.push({ tag: "meta", attributes: { name: "twitter:card", content: twitterCard ?? "summary" }, content: null });
-      if (parent._updated_at) {
-        tags.push({ tag: "meta", attributes: { property: "article:modified_time", content: parent._updated_at as string }, content: null });
+      const updatedAt = parent._updated_at;
+      if (typeof updatedAt === "string" && updatedAt) {
+        tags.push({ tag: "meta", attributes: { property: "article:modified_time", content: updatedAt }, content: null });
       }
 
       return tags;
@@ -287,8 +292,8 @@ export function buildContentModelResolvers(
           if (typeof localeMap === "string") {
             localeMap = decodeJsonIfString(localeMap);
           }
-          if (typeof localeMap === "object" && localeMap !== null) {
-            for (const [locale, value] of Object.entries(localeMap as Record<string, unknown>)) {
+          if (isDynamicRow(localeMap)) {
+            for (const [locale, value] of Object.entries(localeMap)) {
               if (value !== null && value !== undefined && value !== "") {
                 foundLocales.add(locale);
               }
@@ -310,8 +315,8 @@ export function buildContentModelResolvers(
         if (typeof localeMap === "string") {
           localeMap = decodeJsonIfString(localeMap);
         }
-        if (typeof localeMap !== "object" || localeMap === null) return [];
-        return Object.entries(localeMap as Record<string, unknown>)
+        if (!isDynamicRow(localeMap)) return [];
+        return Object.entries(localeMap)
           .filter(([, value]) => value !== null && value !== undefined)
           .map(([locale, value]) => ({ locale, value }));
       };
@@ -358,15 +363,15 @@ export function buildContentModelResolvers(
               return decodeSnapshot(prefetched, context.includeDrafts ?? false);
             }
             const linkedId = parent[f.api_key];
-            if (!linkedId) return null;
+            if (typeof linkedId !== "string" || !linkedId) return null;
             return await loadLinkedRecords({
               runSql,
               targetApiKeys: targets,
-              ids: [linkedId as string],
+              ids: [linkedId],
               typeNames,
               includeDrafts: context.includeDrafts ?? false,
               context,
-            }).then((resolved) => resolved.get(linkedId as string) ?? null);
+            }).then((resolved) => resolved.get(linkedId) ?? null);
           };
         }
       }
@@ -379,16 +384,17 @@ export function buildContentModelResolvers(
               linkedIds = decodeJsonIfString(linkedIds);
             }
             if (!Array.isArray(linkedIds)) return [];
+            const linkedIdStrings = linkedIds.filter((id): id is string => typeof id === "string");
             const resolved = await loadLinkedRecords({
               runSql,
               targetApiKeys: targets,
-              ids: linkedIds as string[],
+              ids: linkedIdStrings,
               typeNames,
               includeDrafts: context.includeDrafts ?? false,
               context,
             });
             // Return in original order, preserving insertion order
-            return (linkedIds as string[]).map((id: string) => resolved.get(id) ?? null).filter(Boolean);
+            return linkedIdStrings.map((id: string) => resolved.get(id) ?? null).filter(Boolean);
           };
         }
       }
@@ -484,8 +490,8 @@ export function buildContentModelResolvers(
           if (!dast) return null;
           const includeDrafts = context.includeDrafts ?? false;
           const isEnvelope = typeof dast === "object" && !Array.isArray(dast)
-            && "value" in (dast as Record<string, unknown>)
-            && "blocks" in (dast as Record<string, unknown>);
+            && "value" in dast
+            && "blocks" in dast;
           const resolvedLocale = f.localized ? localized.locale : null;
           const rootFieldApiKey = f.localized
             ? `${f.api_key}:${resolvedLocale ?? defaultLocale ?? ""}`.replace(/:$/, "")
@@ -547,7 +553,9 @@ export function buildContentModelResolvers(
           if (!blocks) return [];
           return blocks.map((block) => ({
             ...block,
-            __typename: block._type ? (typeNames.get(block._type as string) ?? blockTypeNames.get(block._type as string) ?? block._type) : undefined,
+            __typename: typeof block._type === "string"
+              ? (typeNames.get(block._type) ?? blockTypeNames.get(block._type) ?? block._type)
+              : undefined,
             _modelApiKey: block._type,
           }));
         };

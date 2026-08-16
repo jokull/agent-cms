@@ -4,7 +4,7 @@
 import { FIELD_TYPE_REGISTRY, type FieldTypeDefinition } from "../field-types.js";
 import { isFieldType } from "../types.js";
 import { getLinkTargets, getLinksTargets } from "../db/validators.js";
-import type { DynamicRow } from "../dynamic/row-types.js";
+import { isObjectRecord, type DynamicRow } from "../dynamic/row-types.js";
 import { decodeJsonIfString } from "../json.js";
 
 /** Convert snake_case api_key to PascalCase GraphQL type name */
@@ -70,21 +70,31 @@ export function getRegistryDef(fieldType: string): FieldTypeDefinition | null {
 /** In-memory filter for records (fallback/legacy path) */
 export function applyFilters(records: DynamicRow[], filter: DynamicRow): DynamicRow[] {
   if (filter.AND) {
-    const andFilters = filter.AND as DynamicRow[];
-    for (const sub of andFilters) records = applyFilters(records, sub);
+    // SAFETY: AND/OR filter values are always arrays (filter-compiler emits them that way);
+    // guard anyway so a malformed filter degrades to unfiltered rather than crashing.
+    const andFilters = filter.AND;
+    if (!Array.isArray(andFilters)) return records;
+    for (const sub of andFilters) {
+      // SAFETY: AND elements are sub-filter records (filter-compiler emits them).
+      records = applyFilters(records, sub as DynamicRow);
+    }
     return records;
   }
   if (filter.OR) {
-    const orFilters = filter.OR as DynamicRow[];
+    const orFilters = filter.OR;
+    if (!Array.isArray(orFilters)) return records;
     const r = new Set<DynamicRow>();
-    for (const sub of orFilters) for (const x of applyFilters([...records], sub)) r.add(x);
+    for (const sub of orFilters) {
+      // SAFETY: see AND branch — OR elements are sub-filter records.
+      for (const x of applyFilters([...records], sub as DynamicRow)) r.add(x);
+    }
     return [...r];
   }
   return records.filter((rec) => {
     for (const [key, ff] of Object.entries(filter)) {
-      if (key === "AND" || key === "OR" || typeof ff !== "object" || ff === null) continue;
+      if (key === "AND" || key === "OR" || !isObjectRecord(ff)) continue;
       const v = rec[key];
-      for (const [op, exp] of Object.entries(ff as Record<string, unknown>)) {
+      for (const [op, exp] of Object.entries(ff)) {
         switch (op) {
           case "eq": {
             // Handle boolean coercion (SQLite stores 0/1)
@@ -97,11 +107,13 @@ export function applyFilters(records: DynamicRow[], filter: DynamicRow): Dynamic
             if (v === ev || v === exp) return false;
             break;
           }
-          case "gt": if (!((v as number) > (exp as number))) return false; break;
-          case "lt": if (!((v as number) < (exp as number))) return false; break;
-          case "gte": if (!((v as number) >= (exp as number))) return false; break;
-          case "lte": if (!((v as number) <= (exp as number))) return false; break;
-          case "matches": if (typeof v !== "string" || !new RegExp(exp as string, "i").test(v)) return false; break;
+          // SAFETY: gt/lt/gte/lte ops only compile for numeric columns (filter-compiler);
+          // non-numeric values are a malformed filter and fail the predicate.
+          case "gt": if (typeof v !== "number" || typeof exp !== "number" || !(v > exp)) return false; break;
+          case "lt": if (typeof v !== "number" || typeof exp !== "number" || !(v < exp)) return false; break;
+          case "gte": if (typeof v !== "number" || typeof exp !== "number" || !(v >= exp)) return false; break;
+          case "lte": if (typeof v !== "number" || typeof exp !== "number" || !(v <= exp)) return false; break;
+          case "matches": if (typeof v !== "string" || typeof exp !== "string" || !new RegExp(exp, "i").test(v)) return false; break;
           case "isBlank": if (exp && v != null && v !== "") return false; if (!exp && (v == null || v === "")) return false; break;
           case "exists": if (exp && v == null) return false; if (!exp && v != null) return false; break;
         }
@@ -122,6 +134,8 @@ export function applyOrdering(records: DynamicRow[], orderBy: string[] | undefin
       if (a[f] === b[f]) continue;
       if (a[f] == null) return d === "ASC" ? -1 : 1;
       if (b[f] == null) return d === "ASC" ? 1 : -1;
+      // SAFETY: JS relational comparison is well-defined for both the numeric and
+      // string row values that orderBy specs can target.
       return ((a[f] as number) < (b[f] as number) ? -1 : 1) * (d === "ASC" ? 1 : -1);
     }
     return 0;
@@ -140,8 +154,8 @@ export function resolveVideoField(raw: unknown): Record<string, unknown> | null 
   if (typeof val === "string") {
     return { url: val, title: null, provider: null, providerUid: null, thumbnailUrl: null, width: null, height: null };
   }
-  if (typeof val === "object" && val !== null && !Array.isArray(val)) {
-    const obj = val as Record<string, unknown>;
+  if (isObjectRecord(val)) {
+    const obj = val;
     return {
       url: obj.url ?? null,
       title: obj.title ?? null,

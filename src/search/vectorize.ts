@@ -38,11 +38,15 @@ const EMBED_MODEL = "@cf/baai/bge-small-en-v1.5";
  * Generate embeddings for text chunks using Workers AI.
  */
 export function embedTexts(ai: AiBinding, texts: string[]) {
-  if (texts.length === 0) return Effect.succeed([] as number[][]);
+  if (texts.length === 0) return Effect.succeed<number[][]>([]);
   return Effect.tryPromise({
     try: () => ai.run(EMBED_MODEL, { text: texts }),
     catch: (error) => new VectorizeError({ message: `Embedding failed: ${describeUnknown(error)}` }),
-  }).pipe(Effect.map((result) => (result as { data: number[][] }).data));
+  }).pipe(
+    // SAFETY: Workers AI returns { data: number[][] } for the
+    // @cf/baai/bge-small-en-v1.5 text-embeddings model (Cloudflare API contract).
+    Effect.map((result) => (result as { data: number[][] }).data),
+  );
 }
 
 /**
@@ -106,6 +110,8 @@ export function vectorizeSearch(
       try: () => vectorize.query(embeddings[0], { topK, returnMetadata: "all" }),
       catch: (error) => new VectorizeError({ message: `Search failed: ${describeUnknown(error)}` }),
     });
+    // SAFETY: Vectorize query responses always carry a matches array of
+    // { id, score, metadata? } entries (Cloudflare Vectorize API contract).
     const results = raw as { matches: Array<{ id: string; score: number; metadata?: Record<string, string> }> };
     return results.matches.map((m) => ({
       recordId: m.metadata?.recordId ?? m.id.split(":")[1],

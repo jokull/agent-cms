@@ -158,7 +158,7 @@ export const restoreVersion = Effect.fn("restoreVersion")(function* (modelApiKey
     const parsedFields = fieldRows.map(parseFieldValidators);
 
     // Build a temporary record with restored values for materialization
-    const tempRecord: Record<string, unknown> = { ...current };
+    const tempRecord = { ...current };
     for (const [key, value] of Object.entries(updates)) {
       tempRecord[key] = value;
     }
@@ -226,7 +226,9 @@ export const compareVersions = Effect.fn("compareVersions")(function* (modelApiK
     return yield* new ValidationError({ message: `Version '${leftVersionId}' has an invalid snapshot` });
   }
 
-  let rightMeta: Record<string, unknown>;
+  let rightMeta:
+    | { source: "version"; id: string; versionNumber: number; createdAt: string; action: string }
+    | { source: "current_published"; recordId: string; publishedAt: unknown };
   let rightSnapshot: unknown;
   if (rightVersionId) {
     const rightRows = yield* sql.unsafe<VersionRow>(

@@ -199,7 +199,7 @@ interface FastPathSupportAnalysis {
 
 type FastPathSqlCategory = "metadata" | "root" | "meta" | "linked_record" | "asset";
 
-interface FastPathSqlMetrics {
+export interface FastPathSqlMetrics {
   statementCount: number;
   totalDurationMs: number;
   byCategory: Partial<Record<FastPathSqlCategory, { statementCount: number; totalDurationMs: number }>>;
@@ -443,7 +443,8 @@ function buildFilterOpts(meta: FastPathModelMeta): FilterCompilerOpts {
 }
 
 function buildPublishedFilterOpts(meta: FastPathModelMeta): FilterCompilerOpts {
-  const fieldSqlExprMap: Record<string, string> = { id: "row_data.id" };
+  const fieldSqlExprMap: Record<string, string> = {};
+  fieldSqlExprMap.id = "row_data.id";
   for (const [gqlName, field] of meta.fieldsByGqlName) {
     fieldSqlExprMap[gqlName] = `json_extract(row_data."_published_snapshot", '$.${field.api_key}')`;
   }
@@ -1239,11 +1240,11 @@ function buildFilterSql(
   meta: FastPathModelMeta,
   locale?: string,
 ) {
-  if (!filter) return { sql: "", params: [] as unknown[] };
+  if (!filter) return { sql: "", params: [] };
   const resolved = resolveFilterValuePlan(filter, variables);
-  if (!isRecord(resolved)) return { sql: "", params: [] as unknown[] };
+  if (!isRecord(resolved)) return { sql: "", params: [] };
   const compiled = compileFilterToSql(resolved, { ...buildPublishedFilterOpts(meta), locale });
-  if (!compiled) return { sql: "", params: [] as unknown[] };
+  if (!compiled) return { sql: "", params: [] };
   return {
     sql: ` AND ${compiled.where}`,
     params: compiled.params,

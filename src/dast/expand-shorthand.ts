@@ -12,16 +12,18 @@
 
 import { agentTextToDast } from "./agent-text.js";
 import { markdownToDast } from "./markdown.js";
+import type { InlineNode, ListItemNode, ParagraphNode, TableRowNode } from "./types.js";
+import { isObjectRecord } from "../dynamic/row-types.js";
 
 /**
  * Parse a text string with inline markdown into DAST inline (span) nodes.
  * Returns the children of the first paragraph, or a single span fallback.
  */
-export function parseInlineSpans(text: string): readonly unknown[] {
+export function parseInlineSpans(text: string): readonly (InlineNode | ListItemNode | ParagraphNode | TableRowNode)[] {
   const doc = markdownToDast(text);
   const first = doc.document.children.at(0);
   if (first != null && "children" in first) {
-    return first.children as readonly unknown[];
+    return first.children;
   }
   return [{ type: "span", value: text }];
 }
@@ -36,8 +38,8 @@ export function parseInlineSpans(text: string): readonly unknown[] {
 function buildBlockMapFromArray(blocks: readonly unknown[]): Record<string, unknown> {
   const map: Record<string, unknown> = {};
   for (const b of blocks) {
-    if (b == null || typeof b !== "object") continue;
-    const entry = b as Record<string, unknown>;
+    if (!isObjectRecord(b)) continue;
+    const entry = b;
     const id = entry.id;
     if (typeof id !== "string") continue;
 
@@ -52,9 +54,7 @@ function buildBlockMapFromArray(blocks: readonly unknown[]): Record<string, unkn
     const type = entry.type;
     if (typeof type === "string") {
       const data = entry.data;
-      const rest = (data != null && typeof data === "object" && !Array.isArray(data))
-        ? data as Record<string, unknown>
-        : {};
+      const rest = isObjectRecord(data) ? data : {};
       map[id] = { _type: type, ...rest };
     }
   }
@@ -70,14 +70,8 @@ function buildBlockMapFromArray(blocks: readonly unknown[]): Record<string, unkn
  */
 function normalizeBlocks(blocks: unknown): Record<string, unknown> {
   if (Array.isArray(blocks)) return buildBlockMapFromArray(blocks);
-  if (blocks != null && typeof blocks === "object" && !Array.isArray(blocks)) {
-    return blocks as Record<string, unknown>;
-  }
+  if (isObjectRecord(blocks)) return blocks;
   return {};
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return v != null && typeof v === "object" && !Array.isArray(v);
 }
 
 /**
@@ -94,7 +88,7 @@ export function expandStructuredTextShorthand(rawValue: unknown): unknown {
     return { value: doc, blocks: {} };
   }
 
-  if (!isRecord(rawValue)) return rawValue;
+  if (!isObjectRecord(rawValue)) return rawValue;
 
   // 2 & 3. Object with "text" or "agentText" key → Agent Text + optional blocks wrapper
   const agentText = typeof rawValue.text === "string"

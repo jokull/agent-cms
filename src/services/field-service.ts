@@ -57,7 +57,7 @@ const BOOLEAN_VALIDATOR_KEYS = new Set(["required", "unique", "searchable"]);
  * must be a boolean".
  */
 function normalizeBooleanValidators(validators: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = { ...validators };
+  const out = { ...validators };
   for (const key of BOOLEAN_VALIDATOR_KEYS) {
     const v = out[key];
     if (v !== null && typeof v === "object" && !Array.isArray(v)) out[key] = true;
@@ -75,7 +75,7 @@ function normalizeBooleanValidators(validators: Record<string, unknown>): Record
  * used to hit "validator must be an array of strings".
  */
 function unwrapWrappedListValidators(validators: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = { ...validators };
+  const out = { ...validators };
   const enumValue = out.enum;
   if (isObjectRecord(enumValue) && Array.isArray(enumValue.values)) out.enum = enumValue.values;
   for (const key of ITEM_TYPE_VALIDATOR_KEYS) {
@@ -96,7 +96,7 @@ function unwrapWrappedListValidators(validators: Record<string, unknown>): Recor
  */
 const normalizeItemTypeValidators = Effect.fn("normalizeItemTypeValidators")(function* (validators: Record<string, unknown>) {
   const sql = yield* SqlClient.SqlClient;
-  const out: Record<string, unknown> = { ...validators };
+  const out = { ...validators };
   for (const key of ITEM_TYPE_VALIDATOR_KEYS) {
     const v = out[key];
     if (!Array.isArray(v)) continue;
@@ -181,13 +181,13 @@ const validateFieldValidators = Effect.fn("validateFieldValidators")(function* (
         field: apiKey,
       });
     }
-    if (typeof length !== "object" || length === null || Array.isArray(length)) {
+    if (!isObjectRecord(length)) {
       return yield* new ValidationError({
         message: `length validator must be an object`,
         field: apiKey,
       });
     }
-    const lengthConfig = length as { min?: unknown; max?: unknown };
+    const lengthConfig = length;
     if (lengthConfig.min !== undefined && (typeof lengthConfig.min !== "number" || lengthConfig.min < 0)) {
       return yield* new ValidationError({
         message: `length.min must be a non-negative number`,
@@ -338,13 +338,13 @@ const validateFieldValidators = Effect.fn("validateFieldValidators")(function* (
         field: apiKey,
       });
     }
-    if (typeof numberRange !== "object" || numberRange === null || Array.isArray(numberRange)) {
+    if (!isObjectRecord(numberRange)) {
       return yield* new ValidationError({
         message: `number_range validator must be an object`,
         field: apiKey,
       });
     }
-    const rangeConfig = numberRange as { min?: unknown; max?: unknown };
+    const rangeConfig = numberRange;
     if (rangeConfig.min !== undefined && typeof rangeConfig.min !== "number") {
       return yield* new ValidationError({
         message: `number_range.min must be a number`,
@@ -368,10 +368,8 @@ const validateFieldValidators = Effect.fn("validateFieldValidators")(function* (
       });
     }
     const isPreset = format === "email" || format === "url";
-    const isCustom = typeof format === "object"
-      && format !== null
-      && !Array.isArray(format)
-      && typeof (format as { custom_pattern?: unknown }).custom_pattern === "string";
+    const isCustom = isObjectRecord(format)
+      && typeof format.custom_pattern === "string";
     if (!isPreset && !isCustom) {
       return yield* new ValidationError({
         message: `format validator must be 'email', 'url', or { custom_pattern: string }`,
@@ -388,13 +386,13 @@ const validateFieldValidators = Effect.fn("validateFieldValidators")(function* (
         field: apiKey,
       });
     }
-    if (typeof dateRange !== "object" || dateRange === null || Array.isArray(dateRange)) {
+    if (!isObjectRecord(dateRange)) {
       return yield* new ValidationError({
         message: `date_range validator must be an object`,
         field: apiKey,
       });
     }
-    const dateRangeConfig = dateRange as { min?: unknown; max?: unknown };
+    const dateRangeConfig = dateRange;
     for (const key of ["min", "max"] as const) {
       const boundary = dateRangeConfig[key];
       if (boundary !== undefined && boundary !== "now" && typeof boundary !== "string") {

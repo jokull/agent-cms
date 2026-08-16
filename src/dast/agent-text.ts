@@ -57,8 +57,10 @@ function transformOutsideCode(source: string, transform: (segment: string) => st
 
     if (fenceMatch) {
       output.push(line);
-      fenceMarker = fenceMatch[2]?.[0] ?? null;
-      fenceLength = fenceMatch[2]?.length ?? 0;
+      // SAFETY: group 2 (the fence marker run) is always captured — the
+      // regex alternates only between backtick and tilde fences.
+      fenceMarker = fenceMatch[2].charAt(0) || null;
+      fenceLength = fenceMatch[2].length;
       continue;
     }
 
@@ -71,7 +73,8 @@ function transformOutsideCode(source: string, transform: (segment: string) => st
 function agentTextSegmentToMarkdown(source: string): string {
   const blockLine = /^([ \t]*)\[\[\s*block\s*:\s*([^\]\s|]+)\s*\]\]([ \t]*(?:\r\n|\n|\r)?)$/.exec(source);
   if (blockLine) {
-    return `${blockLine[1]}<!-- cms:block:${encodeReferenceId(blockLine[2] ?? "")} -->${blockLine[3]}`;
+    // SAFETY: group 2 (block id) is always captured — the pattern requires 1+ chars.
+    return `${blockLine[1]}<!-- cms:block:${encodeReferenceId(blockLine[2])} -->${blockLine[3]}`;
   }
 
   return source

@@ -166,7 +166,9 @@ const readResponseBytes = Effect.fn("readResponseBytes")(function* (response: Re
     return new Uint8Array();
   }
 
-  const reader = response.body.getReader();
+  // SAFETY: fetch response bodies are byte streams; the DOM ReadableStream
+  // default type param erases the chunk type, but Workers bodies yield Uint8Array.
+  const reader = response.body.getReader() as ReadableStreamDefaultReader<Uint8Array>;
   const chunks: Uint8Array[] = [];
   let total = 0;
 

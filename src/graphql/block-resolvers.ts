@@ -5,6 +5,7 @@
 import { getLinkTargets, getLinksTargets, getBlockWhitelist, getRichTextBlockWhitelist } from "../db/validators.js";
 import type { SchemaBuilderContext, GqlContext } from "./gql-types.js";
 import type { DynamicRow } from "../dynamic/row-types.js";
+import { isObjectRecord } from "../dynamic/row-types.js";
 import { toTypeName, toCamelCase, fieldToSDL, getRegistryDef, resolveVideoField } from "./gql-utils.js";
 import { resolveStructuredTextValue } from "./structured-text-resolver.js";
 import { materializeRichTextValue } from "../services/structured-text-service.js";
@@ -16,11 +17,11 @@ import { mergeAssetWithMediaReference, parseMediaFieldReference, parseMediaGalle
 function pickLocalizedEntry(rawValue: unknown, context: GqlContext) {
   if (rawValue === null || rawValue === undefined) return { locale: null, value: null };
   const localeMap = decodeJsonIfString(rawValue);
-  if (typeof localeMap !== "object" || localeMap === null || Array.isArray(localeMap)) {
+  if (!isObjectRecord(localeMap)) {
     return { locale: null, value: rawValue };
   }
 
-  const locMap = localeMap as Record<string, unknown>;
+  const locMap = localeMap;
   const locale = context.locale ?? null;
   const fallbacks = context.fallbackLocales ?? [];
   if (locale && locMap[locale] !== undefined && locMap[locale] !== null && locMap[locale] !== "") {
@@ -37,9 +38,13 @@ function pickLocalizedEntry(rawValue: unknown, context: GqlContext) {
 
 function withFieldLocaleArgs(context: GqlContext, args: unknown): GqlContext {
   if (typeof args !== "object" || args === null || Array.isArray(args)) return context;
-  const locale = typeof Reflect.get(args, "locale") === "string" ? Reflect.get(args, "locale") as string : context.locale;
-  const fallbackLocales = Array.isArray(Reflect.get(args, "fallbackLocales"))
-    ? (Reflect.get(args, "fallbackLocales") as unknown[]).filter((value): value is string => typeof value === "string")
+  // SAFETY: args guarded as a plain object above; locale keys are GraphQL field args.
+  const rawLocale = Reflect.get(args, "locale") as unknown;
+  const locale = typeof rawLocale === "string" ? rawLocale : context.locale;
+  // SAFETY: same args-object guarantee for fallbackLocales.
+  const rawFallbackLocales = Reflect.get(args, "fallbackLocales") as unknown;
+  const fallbackLocales = Array.isArray(rawFallbackLocales)
+    ? rawFallbackLocales.filter((value): value is string => typeof value === "string")
     : context.fallbackLocales;
   return {
     ...context,
@@ -109,16 +114,16 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
         if (targets && targets.length > 0) {
           bmResolvers[gqlName] = async (parent: DynamicRow, _args: unknown, context: GqlContext) => {
             const linkedId = parent[f.api_key];
-            if (!linkedId) return null;
+            if (typeof linkedId !== "string" || !linkedId) return null;
             const resolved = await loadLinkedRecords({
               runSql,
               targetApiKeys: targets,
-              ids: [linkedId as string],
+              ids: [linkedId],
               typeNames,
               includeDrafts: context.includeDrafts ?? false,
               context,
             });
-            return resolved.get(linkedId as string) ?? null;
+            return resolved.get(linkedId) ?? null;
           };
         }
       } else if (f.field_type === "structured_text") {
@@ -168,7 +173,9 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
           if (!blocks) return [];
           return blocks.map((block) => ({
             ...block,
-            __typename: block._type ? (blockTypeNames.get(block._type as string) ?? block._type) : undefined,
+            __typename: typeof block._type === "string"
+              ? (blockTypeNames.get(block._type) ?? block._type)
+              : undefined,
             _modelApiKey: block._type,
           }));
         };
@@ -179,15 +186,16 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
             let linkedIds = parent[f.api_key];
             linkedIds = decodeJsonIfString(linkedIds);
             if (!Array.isArray(linkedIds)) return [];
+            const linkedIdStrings = linkedIds.filter((id): id is string => typeof id === "string");
             const resolved = await loadLinkedRecords({
               runSql,
               targetApiKeys: targets,
-              ids: linkedIds as string[],
+              ids: linkedIdStrings,
               typeNames,
               includeDrafts: context.includeDrafts ?? false,
               context,
             });
-            return (linkedIds as string[]).map((id) => resolved.get(id) ?? null).filter(Boolean);
+            return linkedIdStrings.map((id) => resolved.get(id) ?? null).filter(Boolean);
           };
         }
       } else if (f.field_type === "video") {
@@ -240,7 +248,11 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
 
         typeDefs.push(`union ${unionName} = ${memberTypeNames.join(" | ")}`);
         typeDefs.push(`type ${fieldTypeName} {\n  value: JSON!\n  blocks: [${unionName}!]!\n  inlineBlocks: [${unionName}!]!\n  links: [JSON!]!\n}`);
-        resolvers[unionName] = { __resolveType: (obj: DynamicRow) => obj.__typename as string };
+        resolvers[unionName] = {
+          // SAFETY: __resolveType only sees block rows that the block/structured-text/
+          // rich-text resolvers constructed with a string __typename.
+          __resolveType: (obj: DynamicRow) => obj.__typename as string,
+        };
         structuredTextFieldTypes.set(`${model.api_key}.${f.api_key}`, fieldTypeName);
       }
 
@@ -259,7 +271,11 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
         const unionName = `${modelTypeName}${fieldPascal}Block`;
 
         typeDefs.push(`union ${unionName} = ${memberTypeNames.join(" | ")}`);
-        resolvers[unionName] = { __resolveType: (obj: DynamicRow) => obj.__typename as string };
+        resolvers[unionName] = {
+          // SAFETY: __resolveType only sees block rows that the block/structured-text/
+          // rich-text resolvers constructed with a string __typename.
+          __resolveType: (obj: DynamicRow) => obj.__typename as string,
+        };
         // rich_text returns [UnionType!]! directly — no wrapper type needed
         structuredTextFieldTypes.set(`${model.api_key}.${f.api_key}`, `[${unionName}!]!`);
       }

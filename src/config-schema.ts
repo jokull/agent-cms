@@ -87,12 +87,18 @@ export function decodeCmsBindings(input: unknown): DecodedCmsBindings {
   }
   const bindings = decoded.value;
   return {
+    // SAFETY: RawCmsBindingsSchema validated each binding as a non-null runtime
+    // object; the concrete interface shapes are guaranteed by the host's
+    // CmsBindings input typing (D1Database/R2Bucket/AiBinding/VectorizeBinding).
     db: bindings.db as D1Database,
+    // SAFETY: same RawCmsBindingsSchema guarantee for the R2 bucket binding.
     assets: bindings.assets as R2Bucket | undefined,
     environment: bindings.environment,
     assetBaseUrl: bindings.assetBaseUrl,
     writeKey: bindings.writeKey,
+    // SAFETY: same RawCmsBindingsSchema guarantee for the Ai binding.
     ai: bindings.ai as AiBinding | undefined,
+    // SAFETY: same RawCmsBindingsSchema guarantee for the Vectorize binding.
     vectorize: bindings.vectorize as VectorizeBinding | undefined,
     r2Credentials: bindings.r2AccessKeyId
       ? {

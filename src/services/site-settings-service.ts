@@ -59,6 +59,8 @@ export function updateSiteSettings(args: SiteSettingsInput) {
     const params: unknown[] = [];
 
     for (const [key, value] of Object.entries(args)) {
+      // SAFETY: `args` is statically typed SiteSettingsInput, so Object.entries
+      // yields exactly its keys and fieldMap has an entry for every one.
       const col = fieldMap[key as keyof SiteSettingsInput];
       sets.push(`"${col}" = ?`);
       params.push(typeof value === "boolean" ? (value ? 1 : 0) : value);

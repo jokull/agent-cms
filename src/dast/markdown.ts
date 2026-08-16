@@ -502,7 +502,7 @@ function addMark(inline: InlineNode, mark: Mark): InlineNode {
 function mdastPhrasingToSpans(nodes: readonly Mdast.PhrasingContent[], pres: PreservationMap): SpanNode[] {
   const inlines = mdastPhrasingToDastInlines(nodes, pres);
   return inlines.map((inline) =>
-    inline.type === "span" ? inline : { type: "span" as const, value: extractText(inline) }
+    inline.type === "span" ? inline : { type: "span", value: extractText(inline) } satisfies SpanNode
   );
 }
 
@@ -746,6 +746,8 @@ function mdastBlockToDast(
     }
 
     case "table":
+      // SAFETY: a GFM table always includes its header row, so remark-parse
+      // never yields an empty table; the mapped rows are therefore non-empty.
       return {
         type: "table",
         children: node.children.map((row) => mdastTableRowToDast(row, pres)) as [TableRowNode, ...TableRowNode[]],
@@ -773,6 +775,8 @@ function mdastListItemToDast(item: Mdast.ListItem, pres: PreservationMap): ListI
 }
 
 function mdastTableRowToDast(row: Mdast.TableRow, pres: PreservationMap): TableRowNode {
+  // SAFETY: remark-parse always emits at least one cell per table row
+  // (even a bare pipe yields an empty cell), so the mapped cells are non-empty.
   return {
     type: "tableRow",
     children: row.children.map((cell) => mdastTableCellToDast(cell, pres)) as [TableCellNode, ...TableCellNode[]],
@@ -859,6 +863,9 @@ export { DastdownParseError };
  * for table-bearing documents.
  */
 export function dastToDastdown(doc: DastDocument): string {
+  // SAFETY: callers pass table-free documents (documented above — tables are not part of
+  // Dato's DAST utility types), so our DastDocument is structurally Dato's Document; the
+  // hop through unknown bridges the two independent type packages.
   return serializeDastdown(doc as unknown as DatoDastDocument);
 }
 
@@ -867,5 +874,8 @@ export function dastToDastdown(doc: DastDocument): string {
  * item link references use Dato's syntax, such as <block id="..."/>.
  */
 export function dastdownToDast(dastdown: string): DastDocument {
+  // SAFETY: dastdown encodes only Dato's node set (no tables), so the parsed
+  // Dato Document is structurally our DastDocument; the hop through unknown
+  // bridges the two independent type packages.
   return parseDastdown(dastdown) as unknown as DastDocument;
 }

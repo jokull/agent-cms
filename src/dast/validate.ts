@@ -1,4 +1,5 @@
 import { Cause, Option, Schema, SchemaIssue } from "effect";
+import { isObjectRecord } from "../dynamic/row-types.js";
 import { DastDocumentSchema } from "./schema.js";
 import type {
   BlockLevelNode,
@@ -66,11 +67,32 @@ type DastLikeDocument = {
 };
 type DastNode = RootNode | BlockLevelNode | InlineNode;
 
+const BLOCK_LEVEL_NODE_TYPES = new Set<string>([
+  "paragraph",
+  "heading",
+  "list",
+  "blockquote",
+  "code",
+  "thematicBreak",
+  "block",
+  "table",
+]);
+
+/** Narrow unknown to a block-level DAST node via its type discriminant. */
+function isBlockLevelNode(value: unknown): value is BlockLevelNode {
+  return isObjectRecord(value)
+    && typeof value.type === "string"
+    && BLOCK_LEVEL_NODE_TYPES.has(value.type);
+}
+
 function visitDastNode(node: DastNode, visit: (node: DastNode) => void): void {
   visit(node);
 
   if ("children" in node) {
     for (const child of node.children) {
+      if (!isObjectRecord(child)) continue;
+      // SAFETY: every child of a DAST node is itself a DastNode per the
+      // @agent-cms/dast node definitions (all children arrays hold DastNode members).
       visitDastNode(child as DastNode, visit);
     }
   }
@@ -83,7 +105,7 @@ function visitDastNode(node: DastNode, visit: (node: DastNode) => void): void {
  */
 export function extractBlockIds(doc: DastLikeDocument): string[] {
   const ids: string[] = [];
-  visitDastNode({ type: "root", children: doc.document.children as readonly BlockLevelNode[] }, (node) => {
+  visitDastNode({ type: "root", children: doc.document.children.filter(isBlockLevelNode) }, (node) => {
     if (node.type === "block") {
       ids.push(node.item);
     }
@@ -96,7 +118,7 @@ export function extractBlockIds(doc: DastLikeDocument): string[] {
  */
 export function extractInlineBlockIds(doc: DastLikeDocument): string[] {
   const ids: string[] = [];
-  visitDastNode({ type: "root", children: doc.document.children as readonly BlockLevelNode[] }, (node) => {
+  visitDastNode({ type: "root", children: doc.document.children.filter(isBlockLevelNode) }, (node) => {
     if (node.type === "inlineBlock") {
       ids.push(node.item);
     }
@@ -110,7 +132,7 @@ export function extractInlineBlockIds(doc: DastLikeDocument): string[] {
  */
 export function extractAllBlockIds(doc: DastLikeDocument): string[] {
   const ids: string[] = [];
-  visitDastNode({ type: "root", children: doc.document.children as readonly BlockLevelNode[] }, (node) => {
+  visitDastNode({ type: "root", children: doc.document.children.filter(isBlockLevelNode) }, (node) => {
     if (node.type === "block" || node.type === "inlineBlock") {
       ids.push(node.item);
     }
@@ -123,7 +145,7 @@ export function extractAllBlockIds(doc: DastLikeDocument): string[] {
  */
 export function extractLinkIds(doc: DastLikeDocument): string[] {
   const ids: string[] = [];
-  visitDastNode({ type: "root", children: doc.document.children as readonly BlockLevelNode[] }, (node) => {
+  visitDastNode({ type: "root", children: doc.document.children.filter(isBlockLevelNode) }, (node) => {
     if (node.type === "itemLink" || node.type === "inlineItem") {
       ids.push(node.item);
     }
@@ -223,7 +245,8 @@ export function pruneBlockNodes(
     document: {
       type: "root",
       children: doc.document.children
-        .map((child) => pruneBlockLevelNode(child as BlockLevelNode))
+        .filter(isBlockLevelNode)
+        .map((child) => pruneBlockLevelNode(child))
         .filter((child): child is BlockLevelNode => child !== null),
     },
   };

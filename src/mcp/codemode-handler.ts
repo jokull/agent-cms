@@ -80,6 +80,8 @@ export async function createCodeModeMcpServer(
 
   // Wrap with Code Mode
   const executor = new DynamicWorkerExecutor({
+    // SAFETY: the loader binding is provided by Cloudflare at runtime; the cast
+    // to never satisfies the opaque DynamicWorkerExecutor options typing.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- CodeMode loader binding is provided by Cloudflare at runtime but typed as opaque user input here.
     loader: options.loader as never,
   });

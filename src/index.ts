@@ -72,11 +72,11 @@ function getObjectId(value: object | undefined): number {
 
 function cacheKey(bindings: DecodedCmsBindings, hooks: CmsHooks | undefined): string {
   return [
-    getObjectId(bindings.db as unknown as object),
-    getObjectId(bindings.assets as unknown as object | undefined),
-    getObjectId(bindings.ai as unknown as object | undefined),
-    getObjectId(bindings.vectorize as unknown as object | undefined),
-    getObjectId(hooks as unknown as object | undefined),
+    getObjectId(bindings.db),
+    getObjectId(bindings.assets),
+    getObjectId(bindings.ai),
+    getObjectId(bindings.vectorize),
+    getObjectId(hooks),
     bindings.environment ?? "",
     bindings.assetBaseUrl ?? "",
     bindings.writeKey ?? "",

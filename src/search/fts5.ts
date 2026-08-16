@@ -38,6 +38,8 @@ export function toMatchExpression(query: string): string | null {
       if (HAS_TOKEN_CHAR.test(phrase)) terms.push(`"${phrase.replace(/"/g, '""')}"`);
       continue;
     }
+    // Same alternation lie as group 1: the quoted branch leaves group 2 undefined.
+    // oxlint-disable-next-line typescript-eslint/no-unnecessary-condition
     const raw = match[2] ?? "";
     const prefix = raw.endsWith("*");
     const bare = prefix ? raw.slice(0, -1) : raw;

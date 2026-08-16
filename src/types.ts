@@ -25,7 +25,7 @@ export type FieldType = (typeof FIELD_TYPES)[number];
 
 /** Type guard for FieldType */
 export function isFieldType(value: string): value is FieldType {
-  return (FIELD_TYPES as readonly string[]).includes(value);
+  return FIELD_TYPES.some((fieldType) => fieldType === value);
 }
 
 /** Record publication status */

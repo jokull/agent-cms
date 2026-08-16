@@ -4,6 +4,7 @@
  */
 import { Effect } from "effect";
 import { contentTableName } from "../dynamic/tables.js";
+import { isObjectRecord } from "../dynamic/row-types.js";
 import { SqlClient } from "effect/unstable/sql";
 import { NotFoundError, ValidationError } from "../errors.js";
 import type { ModelRow, FieldRow } from "../db/row-types.js";
@@ -60,7 +61,7 @@ export const removeBlockType = Effect.fn("removeBlockType")(function* (blockApiK
       if (blockIdSet.size > 0) {
         // Clean draft DAST
         const dastRaw = decodeJsonIfString(record[field.api_key]);
-        const dast = dastRaw as DastLike | null;
+        const dast: DastLike | null = isObjectRecord(dastRaw) ? dastRaw : null;
         if (dast?.document?.children) {
           const cleaned = removeBlockNodesFromDast(dast, blockIdSet);
           yield* sql.unsafe(
@@ -155,7 +156,7 @@ export const removeBlockFromWhitelist = Effect.fn("removeBlockFromWhitelist")(fu
     );
     for (const record of records) {
       const dastRaw = decodeJsonIfString(record[field.api_key]);
-      const dast = dastRaw as DastLike | null;
+      const dast: DastLike | null = isObjectRecord(dastRaw) ? dastRaw : null;
       if (dast?.document?.children) {
         const cleaned = removeBlockNodesFromDast(dast, blockIdSet);
         yield* sql.unsafe(
@@ -220,9 +221,9 @@ export const removeLocale = Effect.fn("removeLocale")(function* (localeId: strin
 
     for (const record of records) {
       const parsed = decodeJsonIfString(record[field.api_key]);
-      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) continue;
+      if (!isObjectRecord(parsed)) continue;
 
-      const localeMap = parsed as Record<string, unknown>;
+      const localeMap = parsed;
       if (localeCode in localeMap) {
         delete localeMap[localeCode];
         yield* sql.unsafe(
@@ -294,8 +295,8 @@ function removeBlockNodesFromDast(dast: DastLike, blockIds: Set<string>): DastLi
 }
 
 function removeBlockNodesFromStructuredTextValue(value: unknown, blockIds: Set<string>): unknown {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
-  const obj = value as DastLike;
+  if (!isObjectRecord(value)) return value;
+  const obj: DastLike = value;
 
   if (obj.value && typeof obj.value === "object" && obj.blocks && typeof obj.blocks === "object") {
     const cleanedBlocks = { ...(obj.blocks) };

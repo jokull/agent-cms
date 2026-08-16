@@ -1,4 +1,5 @@
 import { createCmsAdminClient, type CmsAdminClientConfig } from "./admin-client.js";
+import { tryDecodeJsonString } from "./json.js";
 
 export interface EditorMcpPrincipal {
   readonly id: string;
@@ -118,7 +119,13 @@ async function verifyJwt<T extends { exp: number }>(secret: string, token: strin
   );
   const valid = await crypto.subtle.verify("HMAC", key, signatureBytes, new TextEncoder().encode(message));
   if (!valid) return null;
-  const claims = JSON.parse(base64UrlDecodeText(payload)) as T;
+  // SAFETY: the token passed HMAC verification and its payload was base64url-encoded by
+  // signJwt from JSON.stringify(claims), so it is well-formed JSON of the claims shape.
+  const parsed = tryDecodeJsonString(base64UrlDecodeText(payload));
+  if (!parsed.ok) return null;
+  // SAFETY: the payload was HMAC-verified against the shared secret before
+  // parse (verifyJwt rejects bad signatures), so claims match the JWT issuer's shape.
+  const claims = parsed.value as T;
   if (claims.exp <= Math.floor(Date.now() / 1000)) return null;
   return claims;
 }
@@ -318,6 +325,8 @@ export function createEditorMcpProxy(config: EditorMcpProxyConfig): EditorMcpPro
     }
 
     const upstreamUrl = new URL(cmsBaseUrl + "/mcp/editor");
+    // SAFETY: Workers' fetch requires duplex: "half" when forwarding a streaming request body;
+    // the DOM RequestInit type omits the property, so the literal carries it explicitly.
     const upstreamRequest = new Request(upstreamUrl, {
       method: request.method,
       headers: cloneHeadersWithoutAuthorization(request.headers),

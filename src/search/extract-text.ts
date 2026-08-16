@@ -104,7 +104,7 @@ function extractFieldText(field: ParsedFieldRow, value: unknown): string[] {
   if (field.localized && isRecord(value)) {
     const texts: string[] = [];
     for (const localeValue of Object.values(value)) {
-      texts.push(...extractFieldText({ ...field, localized: 0 } as ParsedFieldRow, localeValue));
+      texts.push(...extractFieldText({ ...field, localized: 0 }, localeValue));
     }
     return texts;
   }

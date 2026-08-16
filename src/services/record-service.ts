@@ -1,5 +1,6 @@
 import { Effect, Schema } from "effect";
 import { contentTableName } from "../dynamic/tables.js";
+import { isObjectRecord, type DynamicRow } from "../dynamic/row-types.js";
 import { SqlClient } from "effect/unstable/sql";
 import { generateId } from "../id.js";
 import { NotFoundError, ValidationError, AggregateValidationError, DuplicateError, CmsErrorSchema, isCmsError, errorToResponse, type ValidationIssue } from "../errors.js";
@@ -172,8 +173,8 @@ function decodeLocalizedFieldMap(field: ParsedFieldRow, rawValue: unknown) {
 function parseExistingLocaleMap(rawValue: unknown): Record<string, unknown> {
   if (rawValue === null || rawValue === undefined) return {};
   const parsed = decodeJsonIfString(rawValue);
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
-  return sanitizeLocaleMap(parsed as Record<string, unknown>);
+  if (!isObjectRecord(parsed)) return {};
+  return sanitizeLocaleMap(parsed);
 }
 
 function sanitizeLocaleMap(localeMap: Record<string, unknown>): Record<string, unknown> {
@@ -228,7 +229,7 @@ function normalizeBooleanValue(field: ParsedFieldRow, value: unknown): unknown {
 }
 
 function normalizeBooleanFields(record: Record<string, unknown>, fields: ReadonlyArray<ParsedFieldRow>) {
-  const normalized: Record<string, unknown> = { ...record };
+  const normalized = { ...record };
   for (const field of fields) {
     if (field.api_key in normalized) {
       normalized[field.api_key] = normalizeBooleanValue(field, normalized[field.api_key]);
@@ -241,20 +242,20 @@ function scopeStructuredTextIds<T>(value: T, scope: string): T {
   if (!value || typeof value !== "object") return value;
 
   const clone = structuredClone(value);
-  if (!isJsonRecord(clone)) return clone;
+  if (!isObjectRecord(clone)) return clone;
   const mutableClone: Record<string, unknown> = clone;
-  const blocks = isJsonRecord(mutableClone.blocks) ? mutableClone.blocks : undefined;
+  const blocks = isObjectRecord(mutableClone.blocks) ? mutableClone.blocks : undefined;
   const originalIds = Object.keys(blocks ?? {});
-  if (originalIds.length === 0) return clone as T;
+  if (originalIds.length === 0) return clone;
 
   const idMap = new Map(originalIds.map((id) => [id, `${scope}:${id}`]));
 
   const rewriteNode = (node: unknown): unknown => {
-    if (!node || typeof node !== "object") return node;
     if (Array.isArray(node)) return node.map(rewriteNode);
+    if (!isObjectRecord(node)) return node;
 
     const next: Record<string, unknown> = {};
-    for (const [key, child] of Object.entries(node as Record<string, unknown>)) {
+    for (const [key, child] of Object.entries(node)) {
       next[key] = rewriteNode(child);
     }
     if ((next.type === "block" || next.type === "inlineBlock") && typeof next.item === "string") {
@@ -273,7 +274,7 @@ function scopeStructuredTextIds<T>(value: T, scope: string): T {
     ])
   );
 
-  return clone as T;
+  return clone;
 }
 
 type CreateLikeFieldProcessingParams = {
@@ -531,7 +532,7 @@ const processCreateLikeRecordFields = Effect.fn("processCreateLikeRecordFields")
             fieldApiKey: field.api_key,
             rootFieldStorageKey: getStructuredTextStorageKey(field.api_key, localeCode),
             rootRecordId: recordId,
-            blocks: localeValue as RichTextWriteBlock[],
+            blocks: localeValue,
             allowedBlockTypes,
           };
           if (dryRun) {
@@ -556,7 +557,7 @@ const processCreateLikeRecordFields = Effect.fn("processCreateLikeRecordFields")
         rootModelApiKey: modelApiKey,
         fieldApiKey: field.api_key,
         rootRecordId: recordId,
-        blocks: rawBlocks as RichTextWriteBlock[],
+        blocks: rawBlocks,
         allowedBlockTypes,
       };
       if (dryRun) {
@@ -726,7 +727,7 @@ export function createRecord(body: CreateRecordInput, actor?: RequestActor | nul
     }
 
     const modelFields = yield* getModelFields(model.id);
-    const data: Record<string, unknown> = { ...body.data };
+    const data = { ...body.data };
 
     // Validate required fields only for non-draft models (has_draft=false auto-publishes)
     // Draft models defer required validation to publish time
@@ -750,7 +751,7 @@ export function createRecord(body: CreateRecordInput, actor?: RequestActor | nul
     }
     // Models with hasDraft=false skip draft state, publish immediately
     const initialStatus = model.has_draft ? "draft" : "published";
-    const record: Record<string, unknown> = {
+    const record: DynamicRow = {
       id,
       _status: initialStatus,
       _created_at: now,
@@ -949,8 +950,8 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
     if (!existing) return yield* new NotFoundError({ entity: "Record", id });
 
     const modelFields = yield* getModelFields(model.id);
-    const data: Record<string, unknown> = { ...body.data };
-    const updates: Record<string, unknown> = { _updated_at: new Date().toISOString() };
+    const data = { ...body.data };
+    const updates: DynamicRow = { _updated_at: new Date().toISOString() };
     applyActorColumns(updates, actor, { updated: true });
 
     const hasExplicitDataUpdates = Object.keys(data).length > 0;
@@ -1115,7 +1116,8 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
               fieldApiKey: field.api_key,
               rootFieldStorageKey: getStructuredTextStorageKey(field.api_key, localeCode),
               rootRecordId: id,
-              blocks: localeValue as RichTextWriteBlock[],
+              // SAFETY: block shapes validated on the write path; array guard for null/absent.
+              blocks: Array.isArray(localeValue) ? localeValue as RichTextWriteBlock[] : [],
               allowedBlockTypes,
             });
             nextLocaleMap[localeCode] = blockIds;
@@ -1138,7 +1140,8 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
             rootModelApiKey: model.api_key,
             fieldApiKey: field.api_key,
             rootRecordId: id,
-            blocks: rawBlocks as RichTextWriteBlock[],
+            // SAFETY: block shapes validated on the write path; array guard for null/absent.
+            blocks: Array.isArray(rawBlocks) ? rawBlocks as RichTextWriteBlock[] : [],
             allowedBlockTypes,
           });
           data[field.api_key] = blockIds;
@@ -1393,7 +1396,7 @@ export const bulkCreateRecords = Effect.fn("bulkCreateRecords")(function* ({ mod
 
   for (let idx = 0; idx < records.length; idx++) {
     const rawRecord = records[idx];
-    const data: Record<string, unknown> = { ...rawRecord };
+    const data = { ...rawRecord };
 
     // Validate required fields only for non-draft models (accumulated per record)
     if (!model.has_draft) {
@@ -1411,7 +1414,7 @@ export const bulkCreateRecords = Effect.fn("bulkCreateRecords")(function* ({ mod
     if (duplicateId.length > 0) {
       return yield* new DuplicateError({ message: `Record ${idx}: id '${id}' already exists on model '${modelApiKey}'` });
     }
-    const record: Record<string, unknown> = {
+    const record: DynamicRow = {
       id,
       _status: initialStatus,
       _created_at: now,
@@ -1565,7 +1568,7 @@ export const patchBlocksForField = Effect.fn("patchBlocksForField")(function* (b
 
   // Start with all existing blocks as-is
   for (const [blockId, blockData] of Object.entries(existingBlocks)) {
-    mergedBlocks[blockId] = blockData as Record<string, unknown>;
+    mergedBlocks[blockId] = blockData;
   }
 
   // Apply patch
@@ -1646,7 +1649,7 @@ export const patchBlocksForField = Effect.fn("patchBlocksForField")(function* (b
   for (const entry of body.append ?? []) {
     const id = generateId();
     appendedIds.push(id);
-    mergedBlocks[id] = entry as Record<string, unknown>;
+    mergedBlocks[id] = entry;
   }
 
   // Build final DAST value
@@ -1684,18 +1687,12 @@ export const patchBlocksForField = Effect.fn("patchBlocksForField")(function* (b
     finalDastValue = body.value;
   } else if (blockIdsToDelete.size > 0 || appendedIds.length > 0) {
     // Clone existing DAST, prune deleted blocks, append new block nodes
-    const existingDast = existingEnvelope.value as {
-      schema: string;
-      document: { type: string; children: readonly unknown[] };
-    };
+    const existingDast = existingEnvelope.value;
     const pruned = blockIdsToDelete.size > 0
       ? pruneBlockNodes(existingDast, blockIdsToDelete)
       : existingDast;
     if (appendedIds.length > 0) {
-      const prunedDoc = pruned as {
-        schema: string;
-        document: { type: string; children: readonly unknown[] };
-      };
+      const prunedDoc = pruned;
       finalDastValue = {
         ...prunedDoc,
         document: {
