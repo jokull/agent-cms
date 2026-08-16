@@ -238,3 +238,16 @@ health + openapi remain on HttpRouter by design (specials outside the
 API contract surface).
 
 Verified at each commit: tsc 0, oxlint 0/0, 916/916, tsdown green.
+
+## Wave 16.6 — assets group migrated; REST migration COMPLETE (5d3bdfb)
+
+The assets blocker from 16.5 root-caused by bisection: the assets
+endpoints encoded fine with simple handlers; the REAL service returns
+carried undefined-valued keys (title/alt/width/height when omitted) and
+the wrapped response transformation rejects values with ANY
+undefined-valued key (the raw Unknown codec passes them). Fixed by
+coalescing the create out to null + moving the offset/limit query
+validation to the handler (NaN limit previously 500'd the SQL).
+
+All 49 REST routes now run on HttpApi with declared contracts. Remaining
+on HttpRouter by design: /health + /openapi.json (specials).
