@@ -192,9 +192,9 @@ search, backlinks, bulk operations and the asset library are all exposed. See
 | [`@agent-cms/codegen`](./packages/codegen/) | The typed RPC emitter above, plus `@agent-cms/codegen/assets` (`assetUrl`, `assetSrcSet` for Cloudflare Image Resizing). |
 
 [result-rpc](https://result-rpc.com) is a **sibling library**, not a third-party pick — a shared
-foundation developed alongside agent-cms so that insourced systems compose into one app. Its docs
-are live; the npm package is not published yet, so consumers currently link it from a local
-checkout.
+foundation developed alongside agent-cms so that insourced systems compose into one app. Published
+on npm (`result-rpc@0.5.0`); this workspace links it from a local checkout via
+`link:../../../result-rpc` so CMS and RPC land changes land together.
 | [`@agent-cms/editor-react`](./packages/editor-react/) | Headless structured-text editor on Tiptap 3. `/bridge` is the engine layer: Tiptap extensions whose `NodeSpec.content` **is** the DAST grammar, plus a lossless DAST ↔ ProseMirror codec. `useDastEditor` adds typed commands and reactive state for your toolbar. Renders nothing, ships no CSS. |
 
 ## Draft preview

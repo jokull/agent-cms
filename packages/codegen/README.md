@@ -36,12 +36,10 @@ Emits:
 pnpm add result-rpc @agent-cms/dast
 ```
 
-> **`result-rpc` is not on npm yet.** The docs at
-> [result-rpc.com](https://result-rpc.com) are live, but the package is
-> unpublished — it is a sibling library developed alongside agent-cms as a
-> shared foundation, not a third-party dependency, and is consumed here via
-> `link:../../../result-rpc`. Hosts outside this workspace need the same link
-> until it ships.
+> **`result-rpc` is published on npm** (`result-rpc@0.5.0`). The docs at
+> [result-rpc.com](https://result-rpc.com) are live. This workspace consumes it via
+> `link:../../../result-rpc` so CMS and RPC changes land together; hosts outside the workspace
+> install the published package.
 
 ## Wire it into your own app
 
