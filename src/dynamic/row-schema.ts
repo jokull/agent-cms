@@ -106,6 +106,9 @@ export const CONTENT_SYSTEM_COLUMNS = [
 /** Sortable-model extra column. */
 const POSITION_COLUMN = "_position";
 
+/** Tree-model parent column. */
+const PARENT_COLUMN = "_parent_id";
+
 /**
  * Compose the row schema for one model: system columns + one decode schema
  * per field (columns not covered by the registry decode as plain strings —
@@ -113,7 +116,7 @@ const POSITION_COLUMN = "_position";
  */
 export function buildModelRowSchema(
   fields: ReadonlyArray<ParsedFieldRow>,
-  options: { sortable?: boolean } = {},
+  options: { sortable?: boolean; tree?: boolean } = {},
 ): Schema.Schema<Record<string, unknown>> {
   const entries: Record<string, Schema.Top> = {};
   for (const name of CONTENT_SYSTEM_COLUMNS) {
@@ -123,8 +126,11 @@ export function buildModelRowSchema(
         ? tolerantJsonField(Schema.Unknown)
         : Schema.NullOr(Schema.String);
   }
-  if (options.sortable) {
+  if (options.sortable || options.tree) {
     entries[POSITION_COLUMN] = Schema.NullOr(Schema.Number);
+  }
+  if (options.tree) {
+    entries[PARENT_COLUMN] = Schema.NullOr(Schema.String);
   }
   for (const f of fields) {
     const shape = fieldDecodeSchema(f.field_type) ?? Schema.String;

@@ -6,6 +6,7 @@
  * blob. Decoding happens ONCE here, at the extraction edge — downstream code
  * works with plain JS values, never raw stored strings.
  */
+import { Exit, Schema } from "effect";
 import { decodeJsonIfString, decodeJsonStringOr } from "../json.js";
 import { isObjectRecord, type DynamicRow } from "./row-types.js";
 
@@ -31,4 +32,20 @@ export function deserializeRecord(record: DynamicRow): DynamicRow {
     }
   }
   return result;
+}
+
+/**
+ * Decode one row with a per-model schema, falling back to the tolerant
+ * sniffing decode if the schema rejects it (uncovered legacy shapes must
+ * never fail the boundary).
+ */
+export function decodeRowWithSchema(
+  schema: Schema.Schema<Record<string, unknown>>,
+  row: DynamicRow,
+): DynamicRow {
+  // SAFETY: the per-model struct is a ConstraintDecoder over unknown input;
+  // the variance cast is the rc.109 form (DecodingServices).
+  const exit = Schema.decodeUnknownExit(schema as unknown as Schema.ConstraintDecoder<unknown>)(row);
+  if (Exit.isSuccess(exit)) return exit.value as DynamicRow;
+  return deserializeRecord(row);
 }

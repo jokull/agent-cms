@@ -8,7 +8,8 @@ import { getLinkTargets, getLinksTargets, computeIsValid, findUniqueConstraintVi
 import type { SchemaBuilderContext, ModelQueryMeta, GqlContext, AssetObject } from "./gql-types.js";
 import type { DynamicRow } from "../dynamic/row-types.js";
 import { toTypeName, toCamelCase, fieldToSDL, getRegistryDef, resolveVideoField } from "./gql-utils.js";
-import { decodeSnapshot, deserializeRecord } from "../dynamic/decode.js";
+import { decodeSnapshot, decodeRowWithSchema } from "../dynamic/decode.js";
+import { buildModelRowSchema } from "../dynamic/row-schema.js";
 import { resolveStructuredTextValue } from "./structured-text-resolver.js";
 import { loadLinkedRecords } from "./linked-record-loader.js";
 import { loadAsset, loadAssets } from "./asset-loader.js";
@@ -90,6 +91,10 @@ export function buildContentModelResolvers(
     const baseTypeName = toTypeName(model.api_key);
     const typeName = typeNames.get(model.api_key)!;
     const tableName = contentTableName(model.api_key);
+    const rowSchema = buildModelRowSchema(fields, {
+      sortable: !!model.sortable,
+      tree: !!model.tree,
+    });
 
     // Build camelCase <-> snake_case mappings for this model's fields
     const camelToSnake = new Map<string, string>();
@@ -264,7 +269,7 @@ export function buildContentModelResolvers(
             const rows = yield* s.unsafe<DynamicRow>(
               `SELECT * FROM "${tableName}" WHERE id = ?`, [parentId]
             );
-            return rows.length > 0 ? deserializeRecord(rows[0]) : null;
+            return rows.length > 0 ? decodeRowWithSchema(rowSchema, rows[0]) : null;
           })
         );
       };
@@ -275,7 +280,7 @@ export function buildContentModelResolvers(
             const rows = yield* s.unsafe<DynamicRow>(
               `SELECT * FROM "${tableName}" WHERE "_parent_id" = ? ORDER BY "_position" ASC`, [parent.id]
             );
-            return rows.map(deserializeRecord);
+            return rows.map((row) => decodeRowWithSchema(rowSchema, row));
           })
         );
       };
