@@ -152,7 +152,7 @@ export function buildContentModelResolvers(
     typeDefs.push(`type ${typeName} {\n  ${fieldDefs.join("\n  ")}\n}`);
 
     // Link resolvers
-    const typeResolvers: Record<string, unknown> = {};
+    const typeResolvers: DynamicRow = {};
     // Map _created_at -> _createdAt etc.
     typeResolvers._modelApiKey = () => model.api_key;
     typeResolvers._createdAt = (p: DynamicRow) => p._created_at;

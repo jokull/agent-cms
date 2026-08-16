@@ -1,5 +1,5 @@
 import { Exit, Schema } from "effect";
-import { isString } from "./dynamic/row-types.js";
+import { isString, type DynamicRow } from "./dynamic/row-types.js";
 
 const UnknownJson = Schema.fromJsonString(Schema.Unknown);
 const JsonRecord = Schema.Record(Schema.String, Schema.Unknown);
@@ -28,8 +28,8 @@ export function decodeJsonStringOr(input: string, fallback: unknown): unknown {
 
 export function decodeJsonRecordStringOr(
   input: string,
-  fallback: Record<string, unknown>,
-): Record<string, unknown> {
+  fallback: DynamicRow,
+): DynamicRow {
   const result = Schema.decodeUnknownExit(JsonRecordString)(input);
   return Exit.isSuccess(result) ? result.value : fallback;
 }

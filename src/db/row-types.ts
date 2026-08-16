@@ -2,6 +2,7 @@
  * Row types for system tables as returned by @effect/sql.
  * These are the snake_case column names from SQLite, not camelCase.
  */
+import type { DynamicRow } from "../dynamic/row-types.js";
 
 export interface ModelRow {
   readonly id: string;
@@ -40,7 +41,7 @@ export interface FieldRow {
 
 /** FieldRow with validators parsed from JSON */
 export interface ParsedFieldRow extends Omit<FieldRow, "validators"> {
-  readonly validators: Record<string, unknown>;
+  readonly validators: DynamicRow;
 }
 
 export interface LocaleRow {
@@ -74,7 +75,7 @@ export interface AssetRow {
 }
 
 /** A dynamic content table row — system columns are known, field columns are unknown */
-export interface ContentRow {
+export interface ContentRow extends DynamicRow {
   readonly id: string;
   readonly _status: string;
   readonly _published_at: string | null;
@@ -87,7 +88,6 @@ export interface ContentRow {
   readonly _published_by: string | null;
   readonly _scheduled_publish_at: string | null;
   readonly _scheduled_unpublish_at: string | null;
-  readonly [fieldKey: string]: unknown;
 }
 
 export interface VersionRow {
@@ -117,7 +117,7 @@ export interface StoredEditorTokenRow extends EditorTokenRow {
 }
 
 /** A dynamic block table row */
-export interface BlockRow {
+export interface BlockRow extends DynamicRow {
   readonly id: string;
   readonly _root_record_id: string;
   readonly _root_field_api_key: string;
@@ -125,7 +125,6 @@ export interface BlockRow {
   readonly _parent_block_id: string | null;
   readonly _parent_field_api_key: string;
   readonly _depth: number;
-  readonly [fieldKey: string]: unknown;
 }
 
 // --- Type guards ---
@@ -141,12 +140,12 @@ export function isContentRow(row: unknown): row is ContentRow {
 // --- Helpers ---
 
 /** Runtime check that a value is a plain object record */
-function isRecord(value: unknown): value is Record<string, unknown> {
+function isRecord(value: unknown): value is DynamicRow {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** Safely parse JSON to a Record, returning empty object on failure */
-function parseJsonRecord(json: string | null | undefined): Record<string, unknown> {
+function parseJsonRecord(json: string | null | undefined): DynamicRow {
   if (!json) return {};
   try {
     const parsed: unknown = JSON.parse(json);
@@ -166,7 +165,7 @@ export function isPublished(row: ContentRow): boolean {
 }
 
 /** Parse a published snapshot from JSON string */
-export function parseSnapshot(row: ContentRow): Record<string, unknown> | null {
+export function parseSnapshot(row: ContentRow): DynamicRow | null {
   if (!row._published_snapshot) return null;
   const result = parseJsonRecord(row._published_snapshot);
   return Object.keys(result).length > 0 ? result : null;

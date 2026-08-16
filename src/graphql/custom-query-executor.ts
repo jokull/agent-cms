@@ -171,7 +171,7 @@ function getLinkBucketKey(fieldApiKey: string, targetApiKey: string) {
   return `${fieldApiKey}:${targetApiKey}`;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+function isRecord(value: unknown): value is DynamicRow {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -253,7 +253,7 @@ function buildFragmentMap(document: DocumentNode) {
   );
 }
 
-function resolveValueNode(node: ValueNode, variables: Record<string, unknown> | undefined): unknown {
+function resolveValueNode(node: ValueNode, variables: DynamicRow | undefined): unknown {
   switch (node.kind) {
     case Kind.VARIABLE:
       return variables?.[node.name.value];
@@ -278,7 +278,7 @@ function resolveValueNode(node: ValueNode, variables: Record<string, unknown> | 
 function getArgumentValue(
   args: readonly ArgumentNode[] | undefined,
   name: string,
-  variables: Record<string, unknown> | undefined,
+  variables: DynamicRow | undefined,
 ): unknown {
   const node = args?.find((arg) => arg.name.value === name);
   return node ? resolveValueNode(node.value, variables) : undefined;
@@ -312,7 +312,7 @@ function buildStructuredTextBlocksPlan(
   selection: FieldNode,
   metadata: ExecutorMetadata,
   fragments: ReadonlyMap<string, FragmentDefinitionNode>,
-  variables: Record<string, unknown> | undefined,
+  variables: DynamicRow | undefined,
 ): StructuredTextBlocksPlan | null {
   const selections = collectSelections(selection.selectionSet, fragments);
   if (!selections) return null;
@@ -347,7 +347,7 @@ function buildFieldPlans(
   selectionSet: SelectionSetNode | undefined,
   metadata: ExecutorMetadata,
   fragments: ReadonlyMap<string, FragmentDefinitionNode>,
-  variables: Record<string, unknown> | undefined,
+  variables: DynamicRow | undefined,
 ): readonly FieldPlan[] | null {
   const selections = collectSelections(selectionSet, fragments);
   if (!selections) return null;
@@ -453,7 +453,7 @@ function buildFieldPlans(
 
 function buildRootPlan(
   document: DocumentNode,
-  variables: Record<string, unknown> | undefined,
+  variables: DynamicRow | undefined,
   metadata: ExecutorMetadata,
 ): RootPlan | null {
   const operation = getOperation(document);
@@ -533,8 +533,8 @@ function projectStructuredText(
   plan: Extract<FieldPlan, { kind: "structured_text" }>,
   linkBuckets: ReadonlyMap<string, ReadonlyMap<string, DynamicRow>>,
   localeOptions: LocaleProjectionOptions,
-): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
+): DynamicRow {
+  const result: DynamicRow = {};
   if (plan.valueSelected) {
     result.value = value.value;
   }
@@ -562,12 +562,12 @@ function projectBlock(
   plan: StructuredTextBlocksPlan,
   linkBuckets: ReadonlyMap<string, ReadonlyMap<string, DynamicRow>>,
   localeOptions: LocaleProjectionOptions,
-): Record<string, unknown> | null {
+): DynamicRow | null {
   if (!isRecord(rawBlock)) return null;
   const blockType = Reflect.get(rawBlock, "_type");
   if (!isString(blockType)) return null;
   const blockSelections = plan.selectionsByBlockApiKey.get(blockType) ?? [];
-  const result: Record<string, unknown> = {};
+  const result: DynamicRow = {};
 
   if (plan.includeTypename) {
     result.__typename = `${toTypeName(blockType)}Record`;
@@ -613,8 +613,8 @@ function projectRow(
   selections: readonly FieldPlan[],
   linkBuckets: ReadonlyMap<string, ReadonlyMap<string, DynamicRow>>,
   localeOptions: LocaleProjectionOptions,
-): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
+): DynamicRow {
+  const result: DynamicRow = {};
   for (const selection of selections) {
     if (selection.kind === "id") {
       result[selection.responseKey] = row.id ?? null;
@@ -1098,7 +1098,7 @@ async function materializeRootStructuredText(
         if (localeMap) {
           // Merge materialized envelopes back into the locale map, preserving any already-materialized locales
           const existing = row[selection.field.api_key];
-          const merged: Record<string, unknown> = isRecord(existing) ? { ...existing } : {};
+          const merged: DynamicRow = isRecord(existing) ? { ...existing } : {};
           for (const [locale, envelope] of Object.entries(localeMap)) {
             if (envelope) merged[locale] = envelope;
           }
@@ -1288,7 +1288,7 @@ export function createCustomQueryExecutor(sqlLayer: Layer.Layer<SqlClient.SqlCli
   async function tryExecute(params: {
     readonly document: DocumentNode;
     readonly schema: GraphQLSchema;
-    readonly variables?: Record<string, unknown>;
+    readonly variables?: DynamicRow;
     readonly context: CustomQueryContext;
   }): Promise<CustomExecutionResult | null> {
     const metadata = await getMetadata();

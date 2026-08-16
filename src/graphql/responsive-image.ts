@@ -13,8 +13,8 @@ function coerceStringListValue(value: unknown): string[] {
   return [];
 }
 
-export function normalizeImgixParams(raw: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
+export function normalizeImgixParams(raw: DynamicRow): DynamicRow {
+  const out: DynamicRow = {};
 
   if (raw.w != null) out.width = raw.w;
   if (raw.h != null) out.height = raw.h;

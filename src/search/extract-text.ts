@@ -1,5 +1,5 @@
 import type { ParsedFieldRow } from "../db/row-types.js";
-import { isBoolean, isNumber, isString } from "../dynamic/row-types.js";
+import { isBoolean, isNumber, isString, type DynamicRow } from "../dynamic/row-types.js";
 import { isSearchable } from "../db/validators.js";
 
 /**
@@ -67,7 +67,7 @@ export interface TextSection {
  * Returns title (for higher BM25 weight) and body (concatenated text).
  */
 export function extractRecordText(
-  record: Record<string, unknown>,
+  record: DynamicRow,
   fields: ParsedFieldRow[]
 ): { title: string; body: string } {
   let title = "";
@@ -187,11 +187,11 @@ function extractGenericText(value: unknown): string[] {
 
 // --- Helpers ---
 
-function isRecord(v: unknown): v is Record<string, unknown> {
+function isRecord(v: unknown): v is DynamicRow {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-function getArray(obj: Record<string, unknown>, key: string): unknown[] | undefined {
+function getArray(obj: DynamicRow, key: string): unknown[] | undefined {
   const v = obj[key];
   return Array.isArray(v) ? v : undefined;
 }

@@ -1,5 +1,6 @@
 import { Effect, Option } from "effect";
 import { contentTableName } from "../dynamic/tables.js";
+import type { DynamicRow } from "../dynamic/row-types.js";
 import { SqlClient } from "effect/unstable/sql";
 import { extractRecordText } from "./extract-text.js";
 import { createFtsTable as _createFtsTable, dropFtsTable, ftsIndex, ftsDeindex, ftsSearch, ftsCount } from "./fts5.js";
@@ -17,7 +18,7 @@ import { materializeRecordStructuredTextFields } from "../services/structured-te
 export function indexRecord(
   modelApiKey: string,
   recordId: string,
-  data: Record<string, unknown>,
+  data: DynamicRow,
   fields: ParsedFieldRow[]
 ) {
   return Effect.gen(function* () {
@@ -47,7 +48,7 @@ export function reindexRecord(
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     yield* ftsDeindex(modelApiKey, recordId);
-    const rows = yield* sql.unsafe<Record<string, unknown>>(
+    const rows = yield* sql.unsafe<DynamicRow>(
       `SELECT * FROM "${contentTableName(modelApiKey)}" WHERE id = ?`,
       [recordId]
     );
@@ -98,7 +99,7 @@ export function rebuildIndex(modelApiKey: string) {
       [models[0].id]
     );
     const fields = fieldRows.map(parseFieldValidators);
-    const records = yield* sql.unsafe<Record<string, unknown>>(
+    const records = yield* sql.unsafe<DynamicRow>(
       `SELECT * FROM "${contentTableName(modelApiKey)}"`
     );
     const bindings = yield* VectorizeContext;
@@ -169,7 +170,7 @@ export function reindexAll(modelApiKey?: string) {
       );
       const fields = fieldRows.map(parseFieldValidators);
 
-      const records = yield* sql.unsafe<Record<string, unknown>>(
+      const records = yield* sql.unsafe<DynamicRow>(
         `SELECT * FROM "${contentTableName(model.api_key)}"`
       );
       totalRecords += records.length;

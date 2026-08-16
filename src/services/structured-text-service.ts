@@ -488,7 +488,7 @@ export interface StructuredTextWriteParams {
   rootFieldStorageKey?: string;
   rootRecordId: string;
   value: unknown;
-  blocks?: Record<string, unknown>;
+  blocks?: DynamicRow;
   allowedBlockTypes?: string[];
   allowedInlineBlockTypes?: readonly string[] | undefined;
   allowedLinkModels?: readonly string[] | undefined;
@@ -959,7 +959,7 @@ export const materializeRecordStructuredTextFields = Effect.fn("materializeRecor
       if (field.localized) {
         const localeMap = decodeJsonIfString(rawValue);
         if (!isObjectRecord(localeMap)) continue;
-        const localized: Record<string, unknown> = {};
+        const localized: DynamicRow = {};
         for (const [localeCode, localeValue] of Object.entries(localeMap)) {
           if (localeValue === null || localeValue === undefined) {
             localized[localeCode] = localeValue;
@@ -1001,7 +1001,7 @@ export const materializeRecordStructuredTextFields = Effect.fn("materializeRecor
         continue;
       }
 
-      const localized: Record<string, unknown> = {};
+      const localized: DynamicRow = {};
       for (const [localeCode, localeValue] of Object.entries(localeMap)) {
         if (localeValue === null || localeValue === undefined) {
           localized[localeCode] = localeValue;
@@ -1042,10 +1042,9 @@ export const materializeRecordStructuredTextFields = Effect.fn("materializeRecor
 // Rich Text (Modular Content) — ordered array of blocks, no DAST
 // ===========================================================================
 
-export interface RichTextWriteBlock {
+export interface RichTextWriteBlock extends DynamicRow {
   id?: string;
   block_type: string;
-  [key: string]: unknown;
 }
 
 /**
@@ -1408,7 +1407,7 @@ export const materializeRecordRichTextFields = Effect.fn("materializeRecordRichT
     if (field.localized) {
       const localeMap = decodeJsonIfString(rawValue);
       if (!isObjectRecord(localeMap)) continue;
-      const localized: Record<string, unknown> = {};
+      const localized: DynamicRow = {};
       for (const [localeCode, localeValue] of Object.entries(localeMap)) {
         if (localeValue === null || localeValue === undefined) {
           localized[localeCode] = localeValue;

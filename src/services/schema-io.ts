@@ -8,6 +8,7 @@ import { Effect } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { ValidationError } from "../errors.js";
 import type { ModelRow, FieldRow, LocaleRow } from "../db/row-types.js";
+import type { DynamicRow } from "../dynamic/row-types.js";
 import * as ModelService from "./model-service.js";
 import * as FieldService from "./field-service.js";
 import * as LocaleService from "./locale-service.js";
@@ -26,7 +27,7 @@ export interface SchemaExportField {
   fieldType: string;
   position: number;
   localized: boolean;
-  validators: Record<string, unknown>;
+  validators: DynamicRow;
   hint: string | null;
 }
 

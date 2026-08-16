@@ -48,7 +48,7 @@ function validateRequestedId(id: string | undefined) {
   return id.trim().length > 0 ? id : null;
 }
 
-function applyRecordOverrides(target: Record<string, unknown>, overrides: {
+function applyRecordOverrides(target: DynamicRow, overrides: {
   createdAt?: string;
   updatedAt?: string;
   publishedAt?: string;
@@ -62,7 +62,7 @@ function applyRecordOverrides(target: Record<string, unknown>, overrides: {
 }
 
 function applyActorColumns(
-  target: Record<string, unknown>,
+  target: DynamicRow,
   actor: RequestActor | null | undefined,
   options?: {
     created?: boolean;
@@ -135,7 +135,7 @@ function foldFieldValidationErrors<E>(
  */
 function requiredFieldIssues(
   modelFields: readonly ParsedFieldRow[],
-  data: Record<string, unknown>,
+  data: DynamicRow,
   labelPrefix?: string,
 ): ValidationIssue[] {
   return modelFields
@@ -172,14 +172,14 @@ function decodeLocalizedFieldMap(field: ParsedFieldRow, rawValue: unknown) {
   );
 }
 
-function parseExistingLocaleMap(rawValue: unknown): Record<string, unknown> {
+function parseExistingLocaleMap(rawValue: unknown): DynamicRow {
   if (rawValue === null || rawValue === undefined) return {};
   const parsed = decodeJsonIfString(rawValue);
   if (!isObjectRecord(parsed)) return {};
   return sanitizeLocaleMap(parsed);
 }
 
-function sanitizeLocaleMap(localeMap: Record<string, unknown>): Record<string, unknown> {
+function sanitizeLocaleMap(localeMap: DynamicRow): DynamicRow {
   return Object.fromEntries(
     Object.entries(localeMap).filter(([key]) => isLocaleKey(key))
   );
@@ -189,19 +189,19 @@ function isLocaleKey(key: string): boolean {
   return /^[a-z]{2,3}(?:[_-][A-Za-z0-9]{2,8})*$/.test(key);
 }
 
-function isLocalizedValueMap(value: unknown): value is Record<string, unknown> {
+function isLocalizedValueMap(value: unknown): value is DynamicRow {
   return isJsonRecord(value) && Object.keys(value).length > 0 && Object.keys(value).every(isLocaleKey);
 }
 
-function isJsonRecord(value: unknown): value is Record<string, unknown> {
+function isJsonRecord(value: unknown): value is DynamicRow {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isMistakenMediaObject(value: unknown): value is Record<string, unknown> {
+function isMistakenMediaObject(value: unknown): value is DynamicRow {
   return isJsonRecord(value) && isString(value.id) && value.id.length > 0 && value.upload_id === undefined;
 }
 
-function isMistakenLinkObject(value: unknown): value is Record<string, unknown> {
+function isMistakenLinkObject(value: unknown): value is DynamicRow {
   return isJsonRecord(value) && isString(value.id) && value.id.length > 0;
 }
 
@@ -230,7 +230,7 @@ function normalizeBooleanValue(field: ParsedFieldRow, value: unknown): unknown {
   return value;
 }
 
-function normalizeBooleanFields(record: Record<string, unknown>, fields: ReadonlyArray<ParsedFieldRow>) {
+function normalizeBooleanFields(record: DynamicRow, fields: ReadonlyArray<ParsedFieldRow>) {
   const normalized = { ...record };
   for (const field of fields) {
     if (field.api_key in normalized) {
@@ -245,7 +245,7 @@ function scopeStructuredTextIds<T>(value: T, scope: string): T {
 
   const clone = structuredClone(value);
   if (!isObjectRecord(clone)) return clone;
-  const mutableClone: Record<string, unknown> = clone;
+  const mutableClone: DynamicRow = clone;
   const blocks = isObjectRecord(mutableClone.blocks) ? mutableClone.blocks : undefined;
   const originalIds = Object.keys(blocks ?? {});
   if (originalIds.length === 0) return clone;
@@ -256,7 +256,7 @@ function scopeStructuredTextIds<T>(value: T, scope: string): T {
     if (Array.isArray(node)) return node.map(rewriteNode);
     if (!isObjectRecord(node)) return node;
 
-    const next: Record<string, unknown> = {};
+    const next: DynamicRow = {};
     for (const [key, child] of Object.entries(node)) {
       next[key] = rewriteNode(child);
     }
@@ -283,8 +283,8 @@ type CreateLikeFieldProcessingParams = {
   modelApiKey: string;
   tableName: string;
   recordId: string;
-  data: Record<string, unknown>;
-  record: Record<string, unknown>;
+  data: DynamicRow;
+  record: DynamicRow;
   modelFields: readonly ParsedFieldRow[];
   errorPrefix?: string;
   skipReferenceValidation?: boolean;
@@ -434,7 +434,7 @@ const processCreateLikeRecordFields = Effect.fn("processCreateLikeRecordFields")
             field: error.field,
           }))
         );
-        const localizedDast: Record<string, unknown> = {};
+        const localizedDast: DynamicRow = {};
         for (const [localeCode, localeValue] of Object.entries(localeMap)) {
           if (localeValue === null) {
             localizedDast[localeCode] = null;
@@ -517,7 +517,7 @@ const processCreateLikeRecordFields = Effect.fn("processCreateLikeRecordFields")
             field: error.field,
           }))
         );
-        const localizedBlockIds: Record<string, unknown> = {};
+        const localizedBlockIds: DynamicRow = {};
         for (const [localeCode, localeValue] of Object.entries(localeMap)) {
           if (localeValue === null) {
             localizedBlockIds[localeCode] = null;
@@ -815,7 +815,7 @@ export function createRecord(body: CreateRecordInput, actor?: RequestActor | nul
 
     // For has_draft=false models, build _published_snapshot from inserted values
     if (!model.has_draft) {
-      const snap: Record<string, unknown> = {};
+      const snap: DynamicRow = {};
       for (const [key, value] of Object.entries(record)) {
         if (!key.startsWith("_") && key !== "id") snap[key] = value;
       }
@@ -860,7 +860,7 @@ export function createRecord(body: CreateRecordInput, actor?: RequestActor | nul
  * per-field lookup. See `enrichMediaSites`.
  */
 function enrichRecordSetMedia(
-  records: ReadonlyArray<Record<string, unknown>>,
+  records: ReadonlyArray<DynamicRow>,
   fields: ReadonlyArray<ParsedFieldRow>,
   nestedSites: MediaSite[],
 ) {
@@ -915,7 +915,7 @@ export const getRecord = Effect.fn("getRecord")(function* (modelApiKey: string, 
   return materialized;
 });
 
-export function updateSingletonRecord(modelApiKey: string, data: Record<string, unknown>, actor?: RequestActor | null) {
+export function updateSingletonRecord(modelApiKey: string, data: DynamicRow, actor?: RequestActor | null) {
   return Effect.gen(function* () {
     const model = yield* getModelByApiKey(modelApiKey);
     if (!model) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
@@ -1297,7 +1297,7 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
     if (!model.has_draft && hasExplicitDataUpdates) {
       const updated = yield* selectById(tableName, id);
       if (updated) {
-        const snap: Record<string, unknown> = {};
+        const snap: DynamicRow = {};
         for (const [key, value] of Object.entries(updated)) {
           if (!key.startsWith("_") && key !== "id") snap[key] = value;
         }
@@ -1453,7 +1453,7 @@ export const bulkCreateRecords = Effect.fn("bulkCreateRecords")(function* ({ mod
   return { created: created.length, records: created };
 });
 
-function isStructuredTextEnvelopeLike(value: unknown): value is { value: unknown; blocks: Record<string, unknown> } {
+function isStructuredTextEnvelopeLike(value: unknown): value is { value: unknown; blocks: DynamicRow } {
   return isJsonRecord(value) && "value" in value && isJsonRecord(value.blocks);
 }
 
@@ -1473,13 +1473,13 @@ function getPrunableDast(value: unknown): { schema: string; document: { type: st
 }
 
 function applyPatchToNestedStructuredText(
-  target: Record<string, unknown>,
+  target: DynamicRow,
   blockId: string,
   patchValue: unknown,
 ): { applied: boolean; ambiguous: boolean } {
   let matches = 0;
 
-  const visitObject = (value: Record<string, unknown>) => {
+  const visitObject = (value: DynamicRow) => {
     for (const nestedValue of Object.values(value)) {
       if (isStructuredTextEnvelopeLike(nestedValue)) {
         const blocks = nestedValue.blocks;
@@ -1566,7 +1566,7 @@ export const patchBlocksForField = Effect.fn("patchBlocksForField")(function* (b
 
   const existingBlocks = existingEnvelope.blocks;
   const blockIdsToDelete = new Set<string>();
-  const mergedBlocks: Record<string, Record<string, unknown>> = {};
+  const mergedBlocks: Record<string, DynamicRow> = {};
 
   // Start with all existing blocks as-is
   for (const [blockId, blockData] of Object.entries(existingBlocks)) {
@@ -1759,7 +1759,7 @@ export const patchBlocksForField = Effect.fn("patchBlocksForField")(function* (b
     }
     const updated = yield* selectById(tableName, body.recordId);
     if (updated) {
-      const snap: Record<string, unknown> = {};
+      const snap: DynamicRow = {};
       for (const [key, value] of Object.entries(updated)) {
         if (!key.startsWith("_") && key !== "id") snap[key] = value;
       }
@@ -1886,7 +1886,7 @@ const assertOrderByColumns = Effect.fn("assertOrderByColumns")(function* (orderB
 });
 
 export interface QueryRecordsOptions {
-  filter?: Record<string, unknown>;
+  filter?: DynamicRow;
   orderBy?: readonly string[];
   page?: { limit?: number; offset?: number };
   status?: "draft" | "published" | "updated";
@@ -1944,7 +1944,7 @@ export function queryRecords(modelApiKey: string, opts: QueryRecordsOptions) {
     }
     query += ` LIMIT ? OFFSET ?`;
 
-    const rawRows = yield* sql.unsafe<Record<string, unknown>>(query, [...whereParams, limit, offset]);
+    const rawRows = yield* sql.unsafe<DynamicRow>(query, [...whereParams, limit, offset]);
     const mediaSites: MediaSite[] = [];
     const records = yield* Effect.all(
       rawRows.map((row) => materializeRecordStructuredTextFields({
@@ -2047,7 +2047,7 @@ export function searchRecords(modelApiKey: string, q: string, page?: PickerSearc
     const limit = Math.min(Math.max(page?.limit ?? 20, 1), 100);
     const offset = Math.max(page?.offset ?? 0, 0);
 
-    const rawRows = yield* sql.unsafe<Record<string, unknown>>(
+    const rawRows = yield* sql.unsafe<DynamicRow>(
       `SELECT * FROM "${tableName}"${whereClause} ORDER BY "_updated_at" DESC LIMIT ? OFFSET ?`,
       [...params, limit, offset],
     );
@@ -2092,7 +2092,7 @@ export function searchRecords(modelApiKey: string, q: string, page?: PickerSearc
 // Duplicate — deep-copy a record, minting fresh block ids for block subtrees
 // ===========================================================================
 
-function isRichTextBlockArray(value: unknown): value is Array<Record<string, unknown>> {
+function isRichTextBlockArray(value: unknown): value is Array<DynamicRow> {
   return Array.isArray(value)
     && value.length > 0
     && value.every((entry) => isJsonRecord(entry) && isString(entry.block_type));
@@ -2105,14 +2105,14 @@ function isRichTextBlockArray(value: unknown): value is Array<Record<string, unk
  * rich_text arrays inside block data are remapped too.
  */
 function remapStructuredTextEnvelopeIds(
-  envelope: { value: unknown; blocks: Record<string, unknown> },
-): { value: unknown; blocks: Record<string, unknown> } {
+  envelope: { value: unknown; blocks: DynamicRow },
+): { value: unknown; blocks: DynamicRow } {
   const idMap = new Map(Object.keys(envelope.blocks).map((oldId) => [oldId, generateId()]));
 
   const rewriteNode = (node: unknown): unknown => {
     if (Array.isArray(node)) return node.map(rewriteNode);
     if (!isJsonRecord(node)) return node;
-    const next: Record<string, unknown> = {};
+    const next: DynamicRow = {};
     for (const [key, child] of Object.entries(node)) next[key] = rewriteNode(child);
     if ((next.type === "block" || next.type === "inlineBlock") && isString(next.item)) {
       next.item = idMap.get(next.item) ?? next.item;
@@ -2120,7 +2120,7 @@ function remapStructuredTextEnvelopeIds(
     return next;
   };
 
-  const newBlocks: Record<string, unknown> = {};
+  const newBlocks: DynamicRow = {};
   for (const [oldId, blockData] of Object.entries(envelope.blocks)) {
     newBlocks[idMap.get(oldId) ?? oldId] = remapBlockDataIds(blockData);
   }
@@ -2131,7 +2131,7 @@ function remapStructuredTextEnvelopeIds(
 /** Remap block ids inside a single block's field data (nested containers). */
 function remapBlockDataIds(blockData: unknown): unknown {
   if (!isJsonRecord(blockData)) return blockData;
-  const next: Record<string, unknown> = {};
+  const next: DynamicRow = {};
   for (const [key, value] of Object.entries(blockData)) {
     if (isStructuredTextEnvelopeLike(value)) {
       next[key] = remapStructuredTextEnvelopeIds(value);
@@ -2145,7 +2145,7 @@ function remapBlockDataIds(blockData: unknown): unknown {
 }
 
 /** Remap block ids for a materialized rich_text array (each block gets a fresh id). */
-function remapRichTextBlockIds(blocks: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+function remapRichTextBlockIds(blocks: Array<DynamicRow>): Array<DynamicRow> {
   return blocks.map((block) => {
     const remapped = remapBlockDataIds(block);
     return isJsonRecord(remapped) ? { ...remapped, id: generateId() } : block;
@@ -2158,7 +2158,7 @@ function remapLocalizedFieldValue(
 ): unknown {
   if (!isJsonRecord(value)) return remap(value);
   // A localized value is a { [locale]: value } map.
-  const next: Record<string, unknown> = {};
+  const next: DynamicRow = {};
   for (const [locale, localeValue] of Object.entries(value)) {
     next[locale] = localeValue === null || localeValue === undefined ? localeValue : remap(localeValue);
   }
@@ -2195,7 +2195,7 @@ export function duplicateRecord(modelApiKey: string, id: string, actor?: Request
       fields,
     });
 
-    const data: Record<string, unknown> = {};
+    const data: DynamicRow = {};
     for (const field of fields) {
       const value = materialized[field.api_key];
       if (value === undefined || value === null) continue;
@@ -2396,7 +2396,7 @@ const runDryRunValidation = Effect.fn("runDryRunValidation")(function* (params: 
   model: ModelRow;
   modelFields: readonly ParsedFieldRow[];
   tableName: string;
-  data: Record<string, unknown>;
+  data: DynamicRow;
   recordId: string;
   excludeId: string | null;
   requireAllRequired: boolean;
@@ -2426,7 +2426,7 @@ const runDryRunValidation = Effect.fn("runDryRunValidation")(function* (params: 
   // 2. Field processing (no persistence). Uses a private copy of `data` because
   // the create path mutates it (slug generation etc.); the scalar checks above
   // ran against the untouched original.
-  const record: Record<string, unknown> = {};
+  const record: DynamicRow = {};
   const processIssues = yield* processCreateLikeRecordFields({
     modelApiKey: params.model.api_key,
     tableName: params.tableName,
@@ -2473,7 +2473,7 @@ const runDryRunValidation = Effect.fn("runDryRunValidation")(function* (params: 
  * the same `AggregateValidationError` a real create would raise (every offending
  * field, each carrying its machine-readable `code`).
  */
-export function validateRecord(modelApiKey: string, data: Record<string, unknown>) {
+export function validateRecord(modelApiKey: string, data: DynamicRow) {
   return Effect.gen(function* () {
     if (!modelApiKey) return yield* new ValidationError({ message: "modelApiKey is required" });
     const model = yield* getModelByApiKey(modelApiKey);
@@ -2511,7 +2511,7 @@ export function validateRecord(modelApiKey: string, data: Record<string, unknown
  * `processCreateLikeRecordFields({ dryRun: true })`) and never touches stored
  * blocks — validation is equivalent, with no destructive side effect.
  */
-export function validateRecordUpdate(modelApiKey: string, id: string, data: Record<string, unknown>) {
+export function validateRecordUpdate(modelApiKey: string, id: string, data: DynamicRow) {
   return Effect.gen(function* () {
     if (!modelApiKey) return yield* new ValidationError({ message: "modelApiKey is required" });
     const model = yield* getModelByApiKey(modelApiKey);
@@ -2548,7 +2548,7 @@ function canonicalJson(value: unknown): string {
   const normalize = (input: unknown): unknown => {
     if (Array.isArray(input)) return input.map(normalize);
     if (isJsonRecord(input)) {
-      const sorted: Record<string, unknown> = {};
+      const sorted: DynamicRow = {};
       for (const key of Object.keys(input).sort()) sorted[key] = normalize(input[key]);
       return sorted;
     }

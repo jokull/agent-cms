@@ -78,7 +78,7 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
     deferredBlockModelSDL.push({ bmApiKey: bm.api_key, bmTypeName, bmFields });
 
     // Resolvers for block model types
-    const bmResolvers: Record<string, unknown> = {};
+    const bmResolvers: DynamicRow = {};
     bmResolvers._modelApiKey = () => bm.api_key;
 
     // camelCase -> snake_case field resolvers + media/link resolvers

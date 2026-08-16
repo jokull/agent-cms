@@ -1,4 +1,4 @@
-import { isObjectRecord, isString } from "../dynamic/row-types.js";
+import { isObjectRecord, isString, type DynamicRow } from "../dynamic/row-types.js";
 import { DateTime, Context, Effect } from "effect";
 
 import { contentTableName } from "../dynamic/tables.js";
@@ -603,7 +603,7 @@ export function getAssetUsages(id: string) {
       const isBlock = model.is_block === 1;
       const tableName = isBlock ? `block_${model.api_key}` : contentTableName(model.api_key);
       const rootColumns = isBlock ? `, "_root_record_id", "_root_field_api_key"` : "";
-      const rows = yield* sql.unsafe<Record<string, unknown>>(
+      const rows = yield* sql.unsafe<DynamicRow>(
         `SELECT "id"${rootColumns}, ${fields.map((f) => `"${f.api_key}"`).join(", ")} FROM "${tableName}"`
       );
 

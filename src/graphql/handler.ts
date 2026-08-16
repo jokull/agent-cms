@@ -46,10 +46,10 @@ interface SchemaTiming {
 interface GraphqlRequestBody {
   operationName?: string | null;
   query?: string | null;
-  variables?: Record<string, unknown> | null;
+  variables?: DynamicRow | null;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+function isRecord(value: unknown): value is DynamicRow {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -294,7 +294,7 @@ export function createGraphQLHandler(
     return Promise.resolve();
   }
 
-  function logGraphqlInfo(message: string, fields: Record<string, unknown>) {
+  function logGraphqlInfo(message: string, fields: DynamicRow) {
     Effect.runFork(
       Effect.logInfo(message).pipe(
         Effect.annotateLogs(fields),
@@ -306,9 +306,9 @@ export function createGraphQLHandler(
 
   async function executeDocument(
     document: DocumentNode,
-    variables?: Record<string, unknown>,
+    variables?: DynamicRow,
     context?: { includeDrafts?: boolean; excludeInvalid?: boolean },
-  ): Promise<{ data: unknown; errors?: ReadonlyArray<{ message: string }>; _trace?: Record<string, unknown> }> {
+  ): Promise<{ data: unknown; errors?: ReadonlyArray<{ message: string }>; _trace?: DynamicRow }> {
     const schema = await getSchema();
     const validationErrors = validate(schema, document);
     if (validationErrors.length > 0) {
@@ -345,9 +345,9 @@ export function createGraphQLHandler(
 
   async function executeWithRootFallback(
     query: string,
-    variables?: Record<string, unknown>,
+    variables?: DynamicRow,
     context?: { includeDrafts?: boolean; excludeInvalid?: boolean },
-  ): Promise<{ data: unknown; errors?: ReadonlyArray<{ message: string }>; _trace?: Record<string, unknown> }> {
+  ): Promise<{ data: unknown; errors?: ReadonlyArray<{ message: string }>; _trace?: DynamicRow }> {
     const directFastPath = await publishedFastPath.tryExecute({
       query,
       variables,
@@ -421,7 +421,7 @@ export function createGraphQLHandler(
       return { ...yogaResult, _trace: { path: "yoga", rootPaths, rootReasons } };
     }
 
-    const mergedData: Record<string, unknown> = {};
+    const mergedData: DynamicRow = {};
     const mergedErrors: Array<{ message: string }> = [];
     let fastPathMetrics: FastPathSqlMetrics | undefined;
 
@@ -609,9 +609,9 @@ export function createGraphQLHandler(
 
   async function execute(
     query: string,
-    variables?: Record<string, unknown>,
+    variables?: DynamicRow,
     context?: { includeDrafts?: boolean; excludeInvalid?: boolean }
-  ): Promise<{ data: unknown; errors?: ReadonlyArray<{ message: string }>; _trace?: Record<string, unknown> }> {
+  ): Promise<{ data: unknown; errors?: ReadonlyArray<{ message: string }>; _trace?: DynamicRow }> {
     return executeWithRootFallback(query, variables, context);
   }
 

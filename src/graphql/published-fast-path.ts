@@ -1,5 +1,5 @@
 import { Effect, Layer } from "effect";
-import { isNumber, isString } from "../dynamic/row-types.js";
+import { isNumber, isString, type DynamicRow } from "../dynamic/row-types.js";
 import { SqlClient } from "effect/unstable/sql";
 import {
   Kind,
@@ -29,7 +29,7 @@ import { createVersionedCache } from "../services/schema-version.js";
 
 interface GraphqlFastPathRequest {
   readonly query: string;
-  readonly variables?: Record<string, unknown>;
+  readonly variables?: DynamicRow;
   readonly operationName?: string | null;
 }
 
@@ -41,7 +41,7 @@ interface AssetSelectionPlan {
   readonly responsiveImage:
     | {
         readonly responseKey: string;
-        readonly args: Record<string, unknown>;
+        readonly args: DynamicRow;
         readonly fields: readonly {
           readonly responseKey: string;
           readonly fieldName: string;
@@ -207,7 +207,7 @@ export interface FastPathSqlMetrics {
 }
 
 interface FastPathExecutionResult {
-  readonly response: { data: Record<string, unknown> };
+  readonly response: { data: DynamicRow };
   readonly metrics: FastPathSqlMetrics;
 }
 
@@ -218,7 +218,7 @@ interface FastPathExecutionContext {
   readonly isProduction: boolean;
   readonly defaultLocale: string | null;
   readonly assetCache: Map<string, AssetRow | null>;
-  readonly linkedRecordCache: Map<string, Promise<Record<string, unknown> | null>>;
+  readonly linkedRecordCache: Map<string, Promise<DynamicRow | null>>;
   readonly metrics: FastPathSqlMetrics;
 }
 
@@ -233,7 +233,7 @@ interface DependencyAccumulator {
   readonly assetIds: Set<string>;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+function isRecord(value: unknown): value is DynamicRow {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -242,7 +242,7 @@ function parseJsonValue(value: unknown): unknown {
   return decodeJsonIfString(value);
 }
 
-function isStructuredTextEnvelope(value: unknown): value is { value: Record<string, unknown>; blocks: Record<string, unknown> } {
+function isStructuredTextEnvelope(value: unknown): value is { value: DynamicRow; blocks: DynamicRow } {
   if (!isRecord(value)) return false;
   const rawValue = Reflect.get(value, "value");
   const rawBlocks = Reflect.get(value, "blocks");
@@ -394,39 +394,39 @@ function compileFilterValuePlan(value: ValueNode): FilterValuePlan | null {
   return null;
 }
 
-function resolveIntArg(plan: IntArgPlan, variables: Record<string, unknown>): number | null {
+function resolveIntArg(plan: IntArgPlan, variables: DynamicRow): number | null {
   if (!plan) return null;
   if (plan.kind === "const") return plan.value;
   const value = variables[plan.name];
   return isNumber(value) ? value : null;
 }
 
-function resolveStringListArg(plan: StringListArgPlan, variables: Record<string, unknown>): string[] | undefined {
+function resolveStringListArg(plan: StringListArgPlan, variables: DynamicRow): string[] | undefined {
   if (plan === undefined || plan === null) return undefined;
   if (plan.kind === "const") return plan.value;
   const value = variables[plan.name];
   return Array.isArray(value) && value.every((entry) => isString(entry)) ? value : undefined;
 }
 
-function resolveStringArg(plan: StringArgPlan, variables: Record<string, unknown>): string | undefined {
+function resolveStringArg(plan: StringArgPlan, variables: DynamicRow): string | undefined {
   if (plan === undefined || plan === null) return undefined;
   if (plan.kind === "const") return plan.value;
   const value = variables[plan.name];
   return isString(value) ? value : undefined;
 }
 
-function resolveValueArg(plan: ValueArgPlan, variables: Record<string, unknown>): unknown {
+function resolveValueArg(plan: ValueArgPlan, variables: DynamicRow): unknown {
   return plan.kind === "const" ? plan.value : variables[plan.name];
 }
 
-function resolveFilterValuePlan(plan: FilterValuePlan, variables: Record<string, unknown>): unknown {
+function resolveFilterValuePlan(plan: FilterValuePlan, variables: DynamicRow): unknown {
   if (plan.kind === "const" || plan.kind === "var") {
     return resolveValueArg(plan, variables);
   }
   if (plan.kind === "list") {
     return plan.items.map((item) => resolveFilterValuePlan(item, variables));
   }
-  const resolved: Record<string, unknown> = {};
+  const resolved: DynamicRow = {};
   for (const [key, value] of Object.entries(plan.fields)) {
     resolved[key] = resolveFilterValuePlan(value, variables);
   }
@@ -626,7 +626,7 @@ function buildAssetSelectionPlan(
           fieldName: nested.name.value,
         });
       }
-      const args: Record<string, unknown> = {};
+      const args: DynamicRow = {};
       for (const arg of selection.arguments ?? []) {
         if (!["transforms", "cfImagesParams", "imgixParams"].includes(arg.name.value)) return null;
         const compiled = resolveFilterValuePlan(compileFilterValuePlan(arg.value) ?? { kind: "const", value: null }, {});
@@ -1237,7 +1237,7 @@ async function runSql<A extends object>(
 
 function buildFilterSql(
   filter: FilterPlan | null,
-  variables: Record<string, unknown>,
+  variables: DynamicRow,
   meta: FastPathModelMeta,
   locale?: string,
 ) {
@@ -1377,7 +1377,7 @@ function collectStructuredTextDependencies(
 
 function collectModelDependencies(
   metadata: PublishedFastPathMetadata,
-  source: Record<string, unknown>,
+  source: DynamicRow,
   plan: readonly SelectionPlan[],
   pending: DependencyAccumulator,
   localeOptions?: { readonly locale?: string; readonly fallbackLocales?: readonly string[]; readonly defaultLocale?: string | null },
@@ -1459,10 +1459,10 @@ function pickAssetField(asset: AssetObject, fieldName: string): unknown {
 function projectLatLonField(
   rawValue: unknown,
   plan: LatLonSelectionPlan,
-): Record<string, unknown> | null {
+): DynamicRow | null {
   const parsed = parseJsonValue(rawValue);
   if (!isRecord(parsed)) return null;
-  const result: Record<string, unknown> = {};
+  const result: DynamicRow = {};
   for (const field of plan.fields) {
     result[field.responseKey] = Reflect.get(parsed, field.fieldName) ?? null;
   }
@@ -1473,14 +1473,14 @@ async function projectAsset(
   ctx: FastPathExecutionContext,
   rawValue: unknown,
   plan: AssetSelectionPlan,
-): Promise<Record<string, unknown> | null> {
+): Promise<DynamicRow | null> {
   const reference = parseMediaFieldReference(rawValue);
   if (!reference) return null;
   const assetMap = await fetchAssetMap(ctx, [reference.uploadId]);
   const asset = assetMap.get(reference.uploadId);
   if (!asset) return null;
   const mergedAsset = mergeAssetWithMediaReference(asset, reference, (r2Key) => buildAssetUrl(ctx.assetBaseUrl, r2Key));
-  const result: Record<string, unknown> = {};
+  const result: DynamicRow = {};
   for (const field of plan.fields) {
     result[field.responseKey] = pickAssetField(mergedAsset, field.fieldName);
   }
@@ -1501,17 +1501,17 @@ async function projectAssetGallery(
   ctx: FastPathExecutionContext,
   rawValue: unknown,
   plan: AssetSelectionPlan,
-): Promise<readonly Record<string, unknown>[]> {
+): Promise<readonly DynamicRow[]> {
   const references = parseMediaGalleryReferences(rawValue);
   if (references.length === 0) return [];
   const assetMap = await fetchAssetMap(ctx, references.map((reference) => reference.uploadId));
-  const result: Record<string, unknown>[] = [];
+  const result: DynamicRow[] = [];
 
   for (const reference of references) {
     const asset = assetMap.get(reference.uploadId);
     if (!asset) continue;
     const mergedAsset = mergeAssetWithMediaReference(asset, reference, (r2Key) => buildAssetUrl(ctx.assetBaseUrl, r2Key));
-    const projected: Record<string, unknown> = {};
+    const projected: DynamicRow = {};
     for (const field of plan.fields) {
       projected[field.responseKey] = pickAssetField(mergedAsset, field.fieldName);
     }
@@ -1535,7 +1535,7 @@ async function loadLinkedRecordMap(
   ctx: FastPathExecutionContext,
   targetApiKeys: readonly string[],
   ids: readonly string[],
-): Promise<Map<string, Record<string, unknown>>> {
+): Promise<Map<string, DynamicRow>> {
   return batchResolveLinkedRecordsCached({
     runSql: <A>(effect: Effect.Effect<A, unknown, SqlClient.SqlClient>) => {
       const startedAt = performance.now();
@@ -1555,7 +1555,7 @@ async function loadLinkedRecordMap(
 async function preloadDependencies(
   ctx: FastPathExecutionContext,
   sources: readonly {
-    readonly source: Record<string, unknown>;
+    readonly source: DynamicRow;
     readonly plan: readonly SelectionPlan[];
     readonly localeOptions?: { readonly locale?: string; readonly fallbackLocales?: readonly string[] };
   }[],
@@ -1601,12 +1601,12 @@ async function preloadDependencies(
 async function projectModelSelections(
   ctx: FastPathExecutionContext,
   meta: FastPathModelMeta,
-  source: Record<string, unknown>,
+  source: DynamicRow,
   plan: readonly SelectionPlan[],
   explicitId?: string,
   localeOptions?: { readonly locale?: string; readonly fallbackLocales?: readonly string[] },
-): Promise<Record<string, unknown>> {
-  const result: Record<string, unknown> = {};
+): Promise<DynamicRow> {
+  const result: DynamicRow = {};
 
   for (const selection of plan) {
     switch (selection.kind) {
@@ -1654,7 +1654,7 @@ async function projectModelSelections(
         }
         const ids = rawValue.filter((entry): entry is string => isString(entry));
         const linkedMap = await loadLinkedRecordMap(ctx, selection.targetApiKeys, ids);
-        const projected: Record<string, unknown>[] = [];
+        const projected: DynamicRow[] = [];
         const targetMeta = ctx.metadata.contentModelsByApiKey.get(selection.targetApiKeys[0]);
         if (!targetMeta) {
           result[selection.responseKey] = [];
@@ -1711,7 +1711,7 @@ async function projectModelSelections(
 
 async function projectStructuredTextBlockArray(
   ctx: FastPathExecutionContext,
-  envelopeBlocks: Record<string, unknown>,
+  envelopeBlocks: DynamicRow,
   ids: readonly string[],
   plan: StructuredTextBlocksPlan,
 ): Promise<readonly unknown[]> {
@@ -1732,7 +1732,7 @@ async function projectStructuredTextBlockArray(
       continue;
     }
 
-    const projected: Record<string, unknown> = {};
+    const projected: DynamicRow = {};
     if (plan.includeTypename && typename) {
       projected.__typename = typename;
     }
@@ -1758,14 +1758,14 @@ async function projectStructuredText(
   ctx: FastPathExecutionContext,
   rawValue: unknown,
   plan: Extract<SelectionPlan, { kind: "structured_text" }>,
-): Promise<Record<string, unknown> | null> {
+): Promise<DynamicRow | null> {
   const parsed = parseJsonValue(rawValue);
   if (!isStructuredTextEnvelope(parsed)) return null;
 
   const dast = parsed.value;
   const envelopeBlocks = parsed.blocks;
   if (!isDastLikeDocument(dast)) return null;
-  const result: Record<string, unknown> = {};
+  const result: DynamicRow = {};
 
   if (plan.valueSelected) {
     result.value = dast;
@@ -1792,7 +1792,7 @@ async function projectStructuredText(
   if (plan.linksSelected) {
     const linkIds = extractLinkIds(dast);
     const linkedMap = await loadLinkedRecordMap(ctx, ctx.metadata.contentApiKeys, linkIds);
-    result.links = linkIds.map((id) => linkedMap.get(id) ?? null).filter((value): value is Record<string, unknown> => value !== null);
+    result.links = linkIds.map((id) => linkedMap.get(id) ?? null).filter((value): value is DynamicRow => value !== null);
   }
 
   return result;
@@ -1801,17 +1801,17 @@ async function projectStructuredText(
 async function projectFetchedContentRoot(
   ctx: FastPathExecutionContext,
   root: Extract<RootPlan, { kind: "list" | "singleton" }>,
-  variables: Record<string, unknown>,
+  variables: DynamicRow,
   fetched:
-    | { readonly kind: "list"; readonly sources: readonly Record<string, unknown>[] }
-    | { readonly kind: "singleton"; readonly sources: readonly Record<string, unknown>[]; readonly source: Record<string, unknown> | null },
+    | { readonly kind: "list"; readonly sources: readonly DynamicRow[] }
+    | { readonly kind: "singleton"; readonly sources: readonly DynamicRow[]; readonly source: DynamicRow | null },
 ): Promise<unknown> {
   const localeOptions = {
     locale: resolveStringArg(root.locale, variables),
     fallbackLocales: resolveStringListArg(root.fallbackLocales, variables) ?? [],
   };
   if (root.kind === "list") {
-    const result: Record<string, unknown>[] = [];
+    const result: DynamicRow[] = [];
     for (const merged of fetched.sources) {
       result.push(await projectModelSelections(ctx, root.meta, merged, root.selectionPlan, undefined, localeOptions));
     }
@@ -1824,7 +1824,7 @@ async function projectFetchedContentRoot(
 
 function buildRootResultSql(
   root: RootPlan,
-  variables: Record<string, unknown>,
+  variables: DynamicRow,
 ): { readonly sql: string; readonly params: readonly unknown[] } | null {
   if (root.kind === "meta") {
     const filter = buildFilterSql(root.filter, variables, root.meta);
@@ -1870,7 +1870,7 @@ function buildRootResultSql(
 
 function buildRecursiveRootFetchSql(
   root: Extract<RootPlan, { kind: "list" | "singleton" }>,
-  variables: Record<string, unknown>,
+  variables: DynamicRow,
 ): { readonly sql: string; readonly params: readonly unknown[] } {
   const locale = resolveStringArg(root.locale, variables);
   const filter = buildFilterSql(root.filter, variables, root.meta, locale);
@@ -1912,7 +1912,7 @@ async function executePlan(
   sqlLayer: Layer.Layer<SqlClient.SqlClient>,
   metadata: PublishedFastPathMetadata,
   plan: CompiledFastPathPlan,
-  variables: Record<string, unknown>,
+  variables: DynamicRow,
   metrics: FastPathSqlMetrics,
   options?: PublishedFastPathOptions,
 ): Promise<FastPathExecutionResult> {
@@ -1926,7 +1926,7 @@ async function executePlan(
     linkedRecordCache: new Map(),
     metrics,
   };
-  const data: Record<string, unknown> = {};
+  const data: DynamicRow = {};
   const sqlRoots: RootPlan[] = [];
   const recursiveRoots: Extract<RootPlan, { kind: "list" | "singleton" }>[] = [];
 
@@ -1957,8 +1957,8 @@ async function executePlan(
   const fetchedRecursiveRoots: Array<{
     readonly root: Extract<RootPlan, { kind: "list" | "singleton" }>;
     readonly fetched:
-      | { readonly kind: "list"; readonly sources: readonly Record<string, unknown>[] }
-      | { readonly kind: "singleton"; readonly sources: readonly Record<string, unknown>[]; readonly source: Record<string, unknown> | null };
+      | { readonly kind: "list"; readonly sources: readonly DynamicRow[] }
+      | { readonly kind: "singleton"; readonly sources: readonly DynamicRow[]; readonly source: DynamicRow | null };
   }> = [];
 
   if (jsonParts.length > 0) {
@@ -1982,7 +1982,7 @@ async function executePlan(
         const rawPayload = Reflect.get(sqlData, `__rows__${root.responseKey}`);
         if (root.kind === "list") {
           const rowsPayload = Array.isArray(rawPayload)
-            ? rawPayload.filter((entry): entry is Record<string, unknown> => isRecord(entry))
+            ? rawPayload.filter((entry): entry is DynamicRow => isRecord(entry))
             : [];
           const sources = rowsPayload.map((row) => decodeSnapshot(row, false));
           fetchedRecursiveRoots.push({

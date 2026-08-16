@@ -1,4 +1,4 @@
-import { isObject, isObjectRecord, isString } from "../dynamic/row-types.js";
+import { isObject, isObjectRecord, isString, type DynamicRow } from "../dynamic/row-types.js";
 /**
  * Schema lifecycle operations for complex cascading changes.
  * These go beyond simple CRUD and handle content-level cascades.
@@ -48,7 +48,7 @@ export const removeBlockType = Effect.fn("removeBlockType")(function* (blockApiK
     if (model.length === 0) continue;
 
     const tableName = model[0].is_block ? `block_${model[0].api_key}` : contentTableName(model[0].api_key);
-    const records = yield* sql.unsafe<Record<string, unknown>>(
+    const records = yield* sql.unsafe<DynamicRow>(
       `SELECT id, "${field.api_key}", _published_snapshot FROM "${tableName}" WHERE "${field.api_key}" IS NOT NULL OR _published_snapshot IS NOT NULL`
     );
 
@@ -153,7 +153,7 @@ export const removeBlockFromWhitelist = Effect.fn("removeBlockFromWhitelist")(fu
   // Clean DAST trees (draft + published snapshot) if there are blocks to remove
   let cleanedRecords = 0;
   if (blockIdSet.size > 0) {
-    const records = yield* sql.unsafe<Record<string, unknown>>(
+    const records = yield* sql.unsafe<DynamicRow>(
       `SELECT id, "${field.api_key}", _published_snapshot FROM "${tableName}" WHERE "${field.api_key}" IS NOT NULL OR _published_snapshot IS NOT NULL`
     );
     for (const record of records) {
@@ -217,7 +217,7 @@ export const removeLocale = Effect.fn("removeLocale")(function* (localeId: strin
     if (model.length === 0) continue;
 
     const tableName = model[0].is_block ? `block_${model[0].api_key}` : contentTableName(model[0].api_key);
-    const records = yield* sql.unsafe<Record<string, unknown>>(
+    const records = yield* sql.unsafe<DynamicRow>(
       `SELECT id, "${field.api_key}" FROM "${tableName}" WHERE "${field.api_key}" IS NOT NULL`
     );
 
@@ -269,18 +269,16 @@ const cleanPublishedSnapshot = Effect.fn("cleanPublishedSnapshot")(function* (
   );
 });
 
-interface DastLike {
+interface DastLike extends DynamicRow {
   value?: DastLike;
-  blocks?: Record<string, unknown>;
+  blocks?: DynamicRow;
   document?: { children?: DastNode[] };
-  [key: string]: unknown;
 }
 
-interface DastNode {
+interface DastNode extends DynamicRow {
   type?: string;
   item?: string;
   children?: DastNode[];
-  [key: string]: unknown;
 }
 
 /** Remove block/inlineBlock nodes whose item IDs are in the given set */

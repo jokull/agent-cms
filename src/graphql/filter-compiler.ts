@@ -1,4 +1,4 @@
-import { isBoolean, isNumber, isObjectRecord, isString } from "../dynamic/row-types.js";
+import { isBoolean, isNumber, isObjectRecord, isString, type DynamicRow } from "../dynamic/row-types.js";
 /**
  * Compile GraphQL filter inputs to SQL WHERE clauses.
  * Pushes filtering to the database instead of doing it in-memory.
@@ -39,11 +39,10 @@ function safeLocale(locale: string): string {
   return locale;
 }
 
-interface FilterInput {
+type FilterInput = {
   AND?: FilterInput[];
   OR?: FilterInput[];
-  [field: string]: unknown;
-}
+} & DynamicRow;
 
 interface SqlCondition {
   sql: string;
@@ -405,7 +404,7 @@ function lacksLocaleContent(col: string, locale: string): string {
  * _locales: { notIn: ["de"] }  → no localized field has a value for "de"
  */
 function compileLocalesFilter(
-  value: Record<string, unknown>,
+  value: DynamicRow,
   localizedDbColumns: string[]
 ): SqlCondition | null {
   const allIn = Array.isArray(value.allIn) ? value.allIn.filter((v): v is string => isString(v)) : undefined;

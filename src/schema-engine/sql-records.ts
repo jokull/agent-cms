@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { isBoolean, isString , isObject } from "../dynamic/row-types.js";
+import { isBoolean, isString, isObject, type DynamicRow } from "../dynamic/row-types.js";
 import { SqlClient } from "effect/unstable/sql";
 
 /**
@@ -7,7 +7,7 @@ import { SqlClient } from "effect/unstable/sql";
  */
 export function insertRecord(
   tableName: string,
-  record: Record<string, unknown>
+  record: DynamicRow
 ) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
@@ -29,7 +29,7 @@ export function insertRecord(
 export function selectAll(tableName: string) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const rows = yield* sql.unsafe<Record<string, unknown>>(
+    const rows = yield* sql.unsafe<DynamicRow>(
       `SELECT * FROM "${tableName}"`
     );
     return rows.map(deserializeRow);
@@ -42,7 +42,7 @@ export function selectAll(tableName: string) {
 export function selectById(tableName: string, id: string) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const rows = yield* sql.unsafe<Record<string, unknown>>(
+    const rows = yield* sql.unsafe<DynamicRow>(
       `SELECT * FROM "${tableName}" WHERE "id" = ?`,
       [id]
     );
@@ -56,7 +56,7 @@ export function selectById(tableName: string, id: string) {
 export function selectWhere(tableName: string, column: string, value: unknown) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const rows = yield* sql.unsafe<Record<string, unknown>>(
+    const rows = yield* sql.unsafe<DynamicRow>(
       `SELECT * FROM "${tableName}" WHERE "${column}" = ?`,
       [serializeValue(value)]
     );
@@ -70,7 +70,7 @@ export function selectWhere(tableName: string, column: string, value: unknown) {
 export function updateRecord(
   tableName: string,
   id: string,
-  updates: Record<string, unknown>
+  updates: DynamicRow
 ) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
@@ -121,8 +121,8 @@ function serializeValue(value: unknown): unknown {
 }
 
 /** Deserialize a row from SQLite — parse JSON columns */
-export function deserializeRow(row: Record<string, unknown>): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
+export function deserializeRow(row: DynamicRow): DynamicRow {
+  const result: DynamicRow = {};
   for (const [key, value] of Object.entries(row)) {
     if (isString(value) && (value.startsWith("{") || value.startsWith("["))) {
       try {

@@ -39,7 +39,7 @@ export function toCamelCase(snakeCase: string): string {
 /** Map a field type to its SDL type string */
 export function fieldToSDL(
   fieldType: string,
-  validators: Record<string, unknown>,
+  validators: DynamicRow,
   typeNames: Map<string, string>
 ): string {
   // Link/links depend on validators for their GraphQL type
@@ -150,7 +150,15 @@ export function applyOrdering(records: DynamicRow[], orderBy: string[] | undefin
  * When includeDrafts is true, or the snapshot is absent/unparseable, returns the record unchanged.
  */
 /** Resolve a video field value into a VideoField object */
-export function resolveVideoField(raw: unknown): Record<string, unknown> | null {
+export function resolveVideoField(raw: unknown): {
+  readonly url: unknown;
+  readonly title: unknown;
+  readonly provider: unknown;
+  readonly providerUid: unknown;
+  readonly thumbnailUrl: unknown;
+  readonly width: unknown;
+  readonly height: unknown;
+} | null {
   if (!raw) return null;
   const val = decodeJsonIfString(raw);
   if (isString(val)) {

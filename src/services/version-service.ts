@@ -1,4 +1,4 @@
-import { isObject, isObjectRecord, isString } from "../dynamic/row-types.js";
+import { isObject, isObjectRecord, isString, type DynamicRow } from "../dynamic/row-types.js";
 import { DateTime, Effect } from "effect";
 
 import { contentTableName } from "../dynamic/tables.js";
@@ -123,7 +123,7 @@ export const restoreVersion = Effect.fn("restoreVersion")(function* (modelApiKey
   if (!current) return yield* new NotFoundError({ entity: "Record", id: recordId });
 
   // Version the current state before overwriting (so restore is reversible)
-  const currentSnap: Record<string, unknown> = {};
+  const currentSnap: DynamicRow = {};
   for (const [key, value] of Object.entries(current)) {
     if (!key.startsWith("_") && key !== "id") currentSnap[key] = value;
   }
@@ -141,7 +141,7 @@ export const restoreVersion = Effect.fn("restoreVersion")(function* (modelApiKey
 
   // Parse version snapshot and filter to fields that still exist
   const versionSnapshot = decodeJsonRecordStringOr(version.snapshot, {});
-  const updates: Record<string, unknown> = {};
+  const updates: DynamicRow = {};
   for (const [key, value] of Object.entries(versionSnapshot)) {
     if (existingFieldKeys.has(key)) {
       updates[key] = value;
@@ -171,7 +171,7 @@ export const restoreVersion = Effect.fn("restoreVersion")(function* (modelApiKey
       fields: parsedFields,
     });
 
-    const snap: Record<string, unknown> = {};
+    const snap: DynamicRow = {};
     for (const [key, value] of Object.entries(materialized)) {
       if (!key.startsWith("_") && key !== "id") snap[key] = value;
     }

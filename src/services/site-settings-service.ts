@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { isBoolean } from "../dynamic/row-types.js";
+import { isBoolean, type DynamicRow } from "../dynamic/row-types.js";
 import { SqlClient } from "effect/unstable/sql";
 import { SchemaEngineError, ValidationError, CmsErrorSchema } from "../errors.js";
 
@@ -46,7 +46,7 @@ function mapMissingTable(error: unknown) {
 export function getSiteSettings() {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const rows = yield* sql.unsafe<Record<string, unknown>>("SELECT * FROM site_settings LIMIT 1");
+    const rows = yield* sql.unsafe<DynamicRow>("SELECT * FROM site_settings LIMIT 1");
     return rows.length > 0
       ? rows[0]
       : { message: "No site settings configured yet. Use update_site_settings to create them." };
@@ -74,7 +74,7 @@ export function updateSiteSettings(args: SiteSettingsInput) {
     sets.push(`"updated_at" = datetime('now')`);
     yield* sql.unsafe(`INSERT OR IGNORE INTO site_settings (id) VALUES ('default')`);
     yield* sql.unsafe(`UPDATE site_settings SET ${sets.join(", ")} WHERE id = 'default'`, params);
-    const rows = yield* sql.unsafe<Record<string, unknown>>("SELECT * FROM site_settings WHERE id = 'default'");
+    const rows = yield* sql.unsafe<DynamicRow>("SELECT * FROM site_settings WHERE id = 'default'");
     return rows[0];
   }).pipe(Effect.mapError((error) => {
     if (CmsErrorSchema.guards.ValidationError(error)) return error;

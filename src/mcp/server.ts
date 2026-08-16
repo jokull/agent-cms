@@ -1,4 +1,4 @@
-import { isObjectRecord, isString } from "../dynamic/row-types.js";
+import { isObjectRecord, isString, type DynamicRow } from "../dynamic/row-types.js";
 /**
  * Effect-native MCP (Model Context Protocol) server for agent-cms.
  * 3-layer architecture: Discovery -> Schema -> Content
@@ -235,7 +235,7 @@ function formatToolError(error: unknown): unknown {
   return error;
 }
 
-function isToolPayload(value: unknown): value is Record<PropertyKey, unknown> {
+function isToolPayload(value: unknown): value is DynamicRow {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
@@ -271,13 +271,13 @@ function collectExcessProperties(schema: unknown, value: unknown, path = ""): st
 }
 
 function compactPatchBlocksResponse(
-  fullRecord: Record<string, unknown>,
+  fullRecord: DynamicRow,
   fieldApiKey: string,
   deletedBlockIds: string[],
-): Record<string, unknown> {
+): DynamicRow {
   const fieldValue = fullRecord[fieldApiKey];
 
-  const envelope: Record<string, unknown> | null = (() => {
+  const envelope: DynamicRow | null = (() => {
     if (fieldValue === null || fieldValue === undefined) return null;
     if (isString(fieldValue)) {
       const parsed = decodeJsonRecordStringOr(fieldValue, {});
@@ -325,7 +325,7 @@ function compactPatchBlocksResponse(
   };
 }
 
-function parseValidators(value: unknown): Record<string, unknown> {
+function parseValidators(value: unknown): DynamicRow {
   if (value == null || value === "") return {};
   if (isString(value)) return decodeJsonRecordStringOr(value, {});
   return isObjectRecord(value) ? value : {};
@@ -338,7 +338,7 @@ function withDecoded<S extends Schema.Constraint, E, R2>(
   return (params: unknown) => Schema.decodeUnknownEffect(schema)(params).pipe(Effect.flatMap(handler));
 }
 
-function toMcpInputSchema(tool: AiTool.Any): Record<string, unknown> {
+function toMcpInputSchema(tool: AiTool.Any): DynamicRow {
   // Effect AI's helper is typed against the concrete Tool model, while AiTool.Any is wider.
   // Runtime behavior is correct here because every entry in CmsToolkit is created via AiTool.make.
   const inputSchema = AiTool.getJsonSchema(tool);

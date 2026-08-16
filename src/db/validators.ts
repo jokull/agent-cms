@@ -1,4 +1,4 @@
-import { isBoolean, isNumber, isObjectRecord, isString } from "../dynamic/row-types.js";
+import { isBoolean, isNumber, isObjectRecord, isString, type DynamicRow } from "../dynamic/row-types.js";
 import { DateTime, Effect, Option } from "effect";
 
 import { SqlClient } from "effect/unstable/sql";
@@ -14,19 +14,19 @@ import type { ValidationIssueCode } from "../errors.js";
  */
 
 /** Safely get the slug source field from validators */
-export function getSlugSource(validators: Record<string, unknown>): string | undefined {
+export function getSlugSource(validators: DynamicRow): string | undefined {
   const v = validators.slug_source;
   return isString(v) ? v : undefined;
 }
 
 /** Safely get the structured_text_blocks whitelist */
-export function getBlockWhitelist(validators: Record<string, unknown>): string[] | undefined {
+export function getBlockWhitelist(validators: DynamicRow): string[] | undefined {
   const v = validators.structured_text_blocks;
   return Array.isArray(v) && v.every((x) => isString(x)) ? v : undefined;
 }
 
 /** Safely get the rich_text_blocks whitelist */
-export function getRichTextBlockWhitelist(validators: Record<string, unknown>): string[] | undefined {
+export function getRichTextBlockWhitelist(validators: DynamicRow): string[] | undefined {
   const v = validators.rich_text_blocks;
   return Array.isArray(v) && v.every((x) => isString(x)) ? v : undefined;
 }
@@ -38,46 +38,46 @@ export function getRichTextBlockWhitelist(validators: Record<string, unknown>): 
  * not "no inline blocks" (DatoCMS requires it for inline blocks at all; we diverge
  * deliberately). Enforcement lives in structured-text-service.
  */
-export function getInlineBlockWhitelist(validators: Record<string, unknown>): string[] | undefined {
+export function getInlineBlockWhitelist(validators: DynamicRow): string[] | undefined {
   const v = validators.structured_text_inline_blocks;
   return Array.isArray(v) && v.every((x) => isString(x)) ? v : undefined;
 }
 
 /** Safely get the structured_text_links allowed-model whitelist (api_keys) */
-export function getStructuredTextLinkModels(validators: Record<string, unknown>): string[] | undefined {
+export function getStructuredTextLinkModels(validators: DynamicRow): string[] | undefined {
   const v = validators.structured_text_links;
   return Array.isArray(v) && v.every((x) => isString(x)) ? v : undefined;
 }
 
 /** Safely get the blocks_only flag */
-export function getBlocksOnly(validators: Record<string, unknown>): boolean {
+export function getBlocksOnly(validators: DynamicRow): boolean {
   return validators.blocks_only === true;
 }
 
 /** Safely check if field is required */
-export function isRequired(validators: Record<string, unknown>): boolean {
+export function isRequired(validators: DynamicRow): boolean {
   return validators.required === true;
 }
 
 /** Safely check if field must be unique */
-export function isUnique(validators: Record<string, unknown>): boolean {
+export function isUnique(validators: DynamicRow): boolean {
   return validators.unique === true;
 }
 
 /** Safely get link target model types (for `link` fields) */
-export function getLinkTargets(validators: Record<string, unknown>): string[] | undefined {
+export function getLinkTargets(validators: DynamicRow): string[] | undefined {
   const v = validators.item_item_type;
   return Array.isArray(v) && v.every((x) => isString(x)) ? v : undefined;
 }
 
 /** Safely get links target model types (for `links` fields) */
-export function getLinksTargets(validators: Record<string, unknown>): string[] | undefined {
+export function getLinksTargets(validators: DynamicRow): string[] | undefined {
   const v = validators.items_item_type;
   return Array.isArray(v) && v.every((x) => isString(x)) ? v : undefined;
 }
 
 /** Check if field is searchable (default: true — opt out with {"searchable": false}) */
-export function isSearchable(validators: Record<string, unknown>): boolean {
+export function isSearchable(validators: DynamicRow): boolean {
   return validators.searchable !== false;
 }
 
@@ -104,8 +104,8 @@ export function supportsUniqueValidation(fieldType: string): boolean {
  * Returns { valid, missingFields } where missingFields lists api_keys that are missing.
  */
 export function computeIsValid(
-  record: Record<string, unknown>,
-  fields: ReadonlyArray<{ api_key: string; field_type: string; localized: number; validators: Record<string, unknown> }>,
+  record: DynamicRow,
+  fields: ReadonlyArray<{ api_key: string; field_type: string; localized: number; validators: DynamicRow }>,
   defaultLocale: string | null,
   allLocales?: readonly string[]
 ): { valid: boolean; missingFields: string[] } {
@@ -145,7 +145,7 @@ export function computeIsValid(
 function isValueValidForField(
   value: unknown,
   fieldType: string,
-  validators: Record<string, unknown>,
+  validators: DynamicRow,
 ): boolean {
   return valueValidationCode(value, fieldType, validators) === null;
 }
@@ -159,7 +159,7 @@ function isValueValidForField(
 function valueValidationCode(
   value: unknown,
   fieldType: string,
-  validators: Record<string, unknown>,
+  validators: DynamicRow,
 ): ValidationIssueCode | null {
   if (isRequired(validators) && !hasMeaningfulValue(value)) {
     return "required";
@@ -198,8 +198,8 @@ export interface ValueValidationIssue {
  * checked per the same locale rules as `computeIsValid`.
  */
 export function collectValueValidationIssues(
-  record: Record<string, unknown>,
-  fields: ReadonlyArray<{ api_key: string; field_type: string; localized: number; validators: Record<string, unknown> }>,
+  record: DynamicRow,
+  fields: ReadonlyArray<{ api_key: string; field_type: string; localized: number; validators: DynamicRow }>,
   defaultLocale: string | null,
   allLocales?: readonly string[],
 ): ValueValidationIssue[] {
@@ -230,7 +230,7 @@ export function collectValueValidationIssues(
   return issues;
 }
 
-function passesEnumValidation(value: unknown, validators: Record<string, unknown>): boolean {
+function passesEnumValidation(value: unknown, validators: DynamicRow): boolean {
   const enumValues = validators.enum;
   if (!Array.isArray(enumValues) || !enumValues.every((entry) => isString(entry))) {
     return true;
@@ -238,7 +238,7 @@ function passesEnumValidation(value: unknown, validators: Record<string, unknown
   return isString(value) && enumValues.includes(value);
 }
 
-function passesLengthValidation(value: unknown, fieldType: string, validators: Record<string, unknown>): boolean {
+function passesLengthValidation(value: unknown, fieldType: string, validators: DynamicRow): boolean {
   if (!["string", "text", "slug"].includes(fieldType)) return true;
   const lengthConfig = validators.length;
   if (!isObjectRecord(lengthConfig)) return true;
@@ -250,7 +250,7 @@ function passesLengthValidation(value: unknown, fieldType: string, validators: R
   return true;
 }
 
-function passesNumberRangeValidation(value: unknown, fieldType: string, validators: Record<string, unknown>): boolean {
+function passesNumberRangeValidation(value: unknown, fieldType: string, validators: DynamicRow): boolean {
   if (!["integer", "float"].includes(fieldType)) return true;
   const rangeConfig = validators.number_range;
   if (!isObjectRecord(rangeConfig)) return true;
@@ -262,7 +262,7 @@ function passesNumberRangeValidation(value: unknown, fieldType: string, validato
   return true;
 }
 
-function passesFormatValidation(value: unknown, fieldType: string, validators: Record<string, unknown>): boolean {
+function passesFormatValidation(value: unknown, fieldType: string, validators: DynamicRow): boolean {
   if (!["string", "text", "slug"].includes(fieldType) || !isString(value)) return true;
   const format = validators.format;
   if (!format) return true;
@@ -287,7 +287,7 @@ function passesFormatValidation(value: unknown, fieldType: string, validators: R
   return true;
 }
 
-function passesDateRangeValidation(value: unknown, fieldType: string, validators: Record<string, unknown>): boolean {
+function passesDateRangeValidation(value: unknown, fieldType: string, validators: DynamicRow): boolean {
   if (!["date", "date_time"].includes(fieldType) || !isString(value)) return true;
   const rangeConfig = validators.date_range;
   if (!isObjectRecord(rangeConfig)) return true;
@@ -314,8 +314,8 @@ function parseDateBoundary(value: unknown): number | null {
 
 export function findUniqueConstraintViolations(options: {
   tableName: string;
-  record: Record<string, unknown>;
-  fields: ReadonlyArray<{ api_key: string; localized: number; field_type: string; validators: Record<string, unknown> }>;
+  record: DynamicRow;
+  fields: ReadonlyArray<{ api_key: string; localized: number; field_type: string; validators: DynamicRow }>;
   excludeId?: string | null;
   onlyFieldApiKeys?: ReadonlySet<string>;
 }) {
@@ -366,7 +366,7 @@ export function findUniqueConstraintViolations(options: {
   });
 }
 
-function parseLocaleMap(value: unknown): Record<string, unknown> {
+function parseLocaleMap(value: unknown): DynamicRow {
   if (value === null || value === undefined) return {};
   const parsed = isString(value) ? decodeJsonRecordStringOr(value, {}) : value;
   return isObjectRecord(parsed) ? parsed : {};

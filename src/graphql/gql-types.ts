@@ -31,7 +31,7 @@ export interface AssetObject {
   title: string | null;
   blurhash: string | null;
   focalPoint: { x: number; y: number } | null;
-  customData: Record<string, unknown> | null;
+  customData: DynamicRow | null;
   tags: string[];
   url: string;
   _createdAt: string;
@@ -74,7 +74,7 @@ export interface SchemaBuilderContext {
   blockTypeNames: Map<string, string>;
   defaultLocale: string | null;
   locales: ReadonlyArray<{ code: string; position: number; fallback_locale_id: string | null }>;
-  resolvers: Record<string, Record<string, unknown>>;
+  resolvers: Record<string, DynamicRow>;
   typeDefs: string[];
   queryFieldDefs: string[];
   isProduction?: boolean;

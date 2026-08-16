@@ -135,7 +135,7 @@ export async function batchResolveLinkedRecordsCached(params: {
 
 function materializeBlocksFromEnvelope(
   dast: DastDocInput,
-  envelopeBlocks: Record<string, unknown>,
+  envelopeBlocks: DynamicRow,
 ) {
   const blockLevelIds = extractBlockIds(dast);
   const inlineBlockIds = extractInlineBlockIds(dast);

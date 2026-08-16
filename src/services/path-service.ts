@@ -1,4 +1,4 @@
-import { isString, stringifyTemplateValue } from "../dynamic/row-types.js";
+import { isString, stringifyTemplateValue, type DynamicRow } from "../dynamic/row-types.js";
 /**
  * Canonical path resolver — batch-resolves canonical_path_template for all
  * published records of a model, traversing link fields via dot notation.
@@ -22,7 +22,7 @@ import { decodeJsonRecordStringOr } from "../json.js";
 
 const MAX_DEPTH = 10;
 
-function rowId(row: Record<string, unknown>): string | null {
+function rowId(row: DynamicRow): string | null {
   return isString(row.id) ? row.id : null;
 }
 
@@ -46,7 +46,7 @@ function parseTemplateTokens(template: string): TemplateToken[] {
   return tokens;
 }
 
-function parseValidators(raw: string | null | undefined): Record<string, unknown> {
+function parseValidators(raw: string | null | undefined): DynamicRow {
   if (!raw || raw === "") return {};
   return decodeJsonRecordStringOr(raw, {});
 }
@@ -95,7 +95,7 @@ export const resolveCanonicalPaths = Effect.fn("resolveCanonicalPaths")(function
     neededColumns.add(token.segments[0]); // first segment is always a field on this model
   }
   const columnList = [...neededColumns].map((c) => `"${c}"`).join(", ");
-  const records = yield* sql.unsafe<Record<string, unknown>>(
+  const records = yield* sql.unsafe<DynamicRow>(
     `SELECT ${columnList} FROM "${contentTableName(modelApiKey)}" WHERE "_status" IN ('published', 'updated')`,
   );
 
@@ -171,7 +171,7 @@ function laterTimestamp(a: string | null, b: string | null): string | null {
 const resolveLinkedTokens = Effect.fn("resolveLinkedTokens")(function* (
   sql: SqlClient.SqlClient,
   tokens: TemplateToken[],
-  records: readonly Record<string, unknown>[],
+  records: readonly DynamicRow[],
   fieldsByApiKey: Map<string, FieldRow>,
   resolvedValues: Map<string, Map<string, string>>,
 ) {
@@ -181,7 +181,7 @@ const resolveLinkedTokens = Effect.fn("resolveLinkedTokens")(function* (
 
   // Track the "frontier" of records at each hop level
   // frontier: Map<tokenRaw, Map<originalRecordId, currentLinkedRecord>>
-  type Frontier = Map<string, Record<string, unknown>>;
+  type Frontier = Map<string, DynamicRow>;
 
   // Initialize frontier with the source records
   // tokenFrontier: Map<tokenRaw, Map<originalRecordId, frontier>>
@@ -192,7 +192,7 @@ const resolveLinkedTokens = Effect.fn("resolveLinkedTokens")(function* (
     for (const rec of records) {
       const recId = rowId(rec);
       if (!recId) continue;
-      const frontier = new Map<string, Record<string, unknown>>();
+      const frontier = new Map<string, DynamicRow>();
       frontier.set(recId, rec);
       frontierMap.set(recId, frontier);
     }
@@ -204,7 +204,7 @@ const resolveLinkedTokens = Effect.fn("resolveLinkedTokens")(function* (
   for (const token of tokens) {
     const segments = token.segments;
     // Walk each hop
-    let currentRecords = new Map<string, Record<string, unknown>>();
+    let currentRecords = new Map<string, DynamicRow>();
     // Map original record ID → current linked record
     for (const rec of records) {
       const id = rowId(rec);
@@ -242,13 +242,13 @@ const resolveLinkedTokens = Effect.fn("resolveLinkedTokens")(function* (
       // (they won't appear in nextRecords, so the leaf won't resolve for them)
 
       // Batch-fetch linked records from all target models
-      const linkedRecords = new Map<string, Record<string, unknown>>();
+      const linkedRecords = new Map<string, DynamicRow>();
       if (linkIdToOriginalRecords.size > 0) {
         const idsToFetch = [...linkIdToOriginalRecords.keys()];
         for (const targetApiKey of targetApiKeys) {
           if (idsToFetch.length === 0) break;
           const placeholders = idsToFetch.map(() => "?").join(", ");
-          const rows = yield* sql.unsafe<Record<string, unknown>>(
+          const rows = yield* sql.unsafe<DynamicRow>(
             `SELECT * FROM "${contentTableName(targetApiKey)}" WHERE "id" IN (${placeholders})`,
             idsToFetch,
           );
@@ -260,7 +260,7 @@ const resolveLinkedTokens = Effect.fn("resolveLinkedTokens")(function* (
       }
 
       // Update currentRecords: map original IDs to their linked records
-      const nextRecords = new Map<string, Record<string, unknown>>();
+      const nextRecords = new Map<string, DynamicRow>();
       for (const [origId, rec] of currentRecords) {
         const linkId = rec[fieldName];
         if (isString(linkId) && linkId) {

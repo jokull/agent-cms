@@ -6,7 +6,7 @@ import { DateTime, Effect } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { generateId } from "../id.js";
 import { ValidationError } from "../errors.js";
-import { stringifyTemplateValue } from "../dynamic/row-types.js";
+import { stringifyTemplateValue, type DynamicRow } from "../dynamic/row-types.js";
 
 function hashToken(token: string) {
   return Effect.tryPromise({
@@ -89,7 +89,7 @@ export const validatePreviewToken = Effect.fn("validatePreviewToken")(function* 
 
 export function resolvePreviewPath(
   canonicalPathTemplate: string,
-  recordData: Record<string, unknown>,
+  recordData: DynamicRow,
 ): string {
   return canonicalPathTemplate.replace(/\{([^}]+)\}/g, (_match, fieldName: string) => {
     const value = stringifyTemplateValue(recordData[fieldName]);

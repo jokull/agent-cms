@@ -139,7 +139,7 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
           ["site_settings"]
         );
         if (tableRows.length === 0) return null;
-        const rows = yield* s.unsafe<Record<string, unknown>>('SELECT * FROM "site_settings" LIMIT 1');
+        const rows = yield* s.unsafe<DynamicRow>('SELECT * FROM "site_settings" LIMIT 1');
         return rows.length > 0 ? rows[0] : null;
       })
     );

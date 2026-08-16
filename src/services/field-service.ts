@@ -1,4 +1,4 @@
-import { isBoolean, isNumber, isObject, isObjectRecord, isString } from "../dynamic/row-types.js";
+import { isBoolean, isNumber, isObject, isObjectRecord, isString, type DynamicRow } from "../dynamic/row-types.js";
 import { Effect } from "effect";
 
 import { contentTableName } from "../dynamic/tables.js";
@@ -58,7 +58,7 @@ const BOOLEAN_VALIDATOR_KEYS = new Set(["required", "unique", "searchable"]);
  * agents fluent in DatoCMS reach for `{}` and used to hit "required validator
  * must be a boolean".
  */
-function normalizeBooleanValidators(validators: Record<string, unknown>): Record<string, unknown> {
+function normalizeBooleanValidators(validators: DynamicRow): DynamicRow {
   const out = { ...validators };
   for (const key of BOOLEAN_VALIDATOR_KEYS) {
     const v = out[key];
@@ -76,7 +76,7 @@ function normalizeBooleanValidators(validators: Record<string, unknown>): Record
  * are accepted — agents translating a Dato export reach for the wrapped shape and
  * used to hit "validator must be an array of strings".
  */
-function unwrapWrappedListValidators(validators: Record<string, unknown>): Record<string, unknown> {
+function unwrapWrappedListValidators(validators: DynamicRow): DynamicRow {
   const out = { ...validators };
   const enumValue = out.enum;
   if (isObjectRecord(enumValue) && Array.isArray(enumValue.values)) out.enum = enumValue.values;
@@ -96,7 +96,7 @@ function unwrapWrappedListValidators(validators: Record<string, unknown>): Recor
  * already-api_key (or unknown) entries untouched. Run after
  * unwrapWrappedListValidators so wrapped lists have already collapsed to arrays.
  */
-const normalizeItemTypeValidators = Effect.fn("normalizeItemTypeValidators")(function* (validators: Record<string, unknown>) {
+const normalizeItemTypeValidators = Effect.fn("normalizeItemTypeValidators")(function* (validators: DynamicRow) {
   const sql = yield* SqlClient.SqlClient;
   const out = { ...validators };
   for (const key of ITEM_TYPE_VALIDATOR_KEYS) {
@@ -122,7 +122,7 @@ const normalizeItemTypeValidators = Effect.fn("normalizeItemTypeValidators")(fun
 const validateFieldValidators = Effect.fn("validateFieldValidators")(function* (
   fieldType: string,
   apiKey: string,
-  validators: Record<string, unknown>,
+  validators: DynamicRow,
 ) {
   const unknownKeys = Object.keys(validators).filter((key) => !ALLOWED_FIELD_VALIDATOR_KEYS.has(key));
   if (unknownKeys.length > 0) {
@@ -698,7 +698,7 @@ export const deleteField = Effect.fn("deleteField")(function* (fieldId: string) 
       `SELECT id, _published_snapshot FROM "${tableName}" WHERE _published_snapshot IS NOT NULL`
     );
     for (const record of publishedRecords) {
-      let snapshot: Record<string, unknown>;
+      let snapshot: DynamicRow;
       snapshot = decodeJsonRecordStringOr(record._published_snapshot, {});
       if (Object.keys(snapshot).length === 0) continue;
       if (field.api_key in snapshot) {

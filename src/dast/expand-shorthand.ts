@@ -1,4 +1,4 @@
-import { isObjectRecord, isString } from "../dynamic/row-types.js";
+import {isObjectRecord, isString, type DynamicRow} from "../dynamic/row-types.js";
 /**
  * Expand structured_text shorthand formats into the canonical
  * { value: DastDocument, blocks: Record<string, unknown> } shape.
@@ -37,8 +37,8 @@ export function parseInlineSpans(text: string): readonly (InlineNode | ListItemN
  * - { id, type, data: { ...fields } }  — shorthand (type becomes _type)
  * - { id, _type, ...fields }           — canonical (matches get_record output)
  */
-function buildBlockMapFromArray(blocks: readonly unknown[]): Record<string, unknown> {
-  const map: Record<string, unknown> = {};
+function buildBlockMapFromArray(blocks: readonly unknown[]): DynamicRow {
+  const map: DynamicRow = {};
   for (const b of blocks) {
     if (!isObjectRecord(b)) continue;
     const entry = b;
@@ -70,7 +70,7 @@ function buildBlockMapFromArray(blocks: readonly unknown[]): Record<string, unkn
  * - Array of block entries (shorthand or canonical format)
  * - Object/map keyed by block ID (canonical DAST format, passed through)
  */
-function normalizeBlocks(blocks: unknown): Record<string, unknown> {
+function normalizeBlocks(blocks: unknown): DynamicRow {
   if (Array.isArray(blocks)) return buildBlockMapFromArray(blocks);
   if (isObjectRecord(blocks)) return blocks;
   return {};

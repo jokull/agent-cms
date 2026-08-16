@@ -1,4 +1,4 @@
-import { isNumber, isObjectRecord, isString } from "../dynamic/row-types.js";
+import { isNumber, isObjectRecord, isString, type DynamicRow } from "../dynamic/row-types.js";
 import {
   HttpEffect,
   HttpRouter,
@@ -890,11 +890,11 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
     Effect.runFork(effect.pipe(Effect.provide(fullLayer), Effect.orDie));
   };
 
-  const logInfo = (message: string, fields: Record<string, unknown>) => {
+  const logInfo = (message: string, fields: DynamicRow) => {
     runLoggedEffect(Effect.logInfo(message).pipe(Effect.annotateLogs(fields)));
   };
 
-  const logError = (message: string, fields: Record<string, unknown>) => {
+  const logError = (message: string, fields: DynamicRow) => {
     runLoggedEffect(Effect.logError(message).pipe(Effect.annotateLogs(fields)));
   };
 
@@ -924,7 +924,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
     invalidateSchema: () => void;
     execute: (
       query: string,
-      variables?: Record<string, unknown>,
+      variables?: DynamicRow,
       context?: { includeDrafts?: boolean; excludeInvalid?: boolean }
     ) => Promise<{ data: unknown; errors?: ReadonlyArray<{ message: string }> }>;
   } | null = null;
@@ -1437,7 +1437,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
      */
     async execute(
       query: string,
-      variables?: Record<string, unknown>,
+      variables?: DynamicRow,
       context?: { includeDrafts?: boolean; excludeInvalid?: boolean }
     ): Promise<{ data: unknown; errors?: ReadonlyArray<{ message: string }> }> {
       const instance = await getGraphqlInstance();

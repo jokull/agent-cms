@@ -1,5 +1,5 @@
 import { DateTime, Effect } from "effect";
-import { isString } from "../dynamic/row-types.js";
+import { isString, type DynamicRow } from "../dynamic/row-types.js";
 import { contentTableName } from "../dynamic/tables.js";
 import { SqlClient } from "effect/unstable/sql";
 import { NotFoundError, AggregateValidationError, type ValidationIssue } from "../errors.js";
@@ -89,7 +89,7 @@ export function publishRecord(modelApiKey: string, recordId: string, actor?: Req
     }
 
     // Build snapshot from current field values (exclude system columns)
-    const snapshot: Record<string, unknown> = {};
+    const snapshot: DynamicRow = {};
     for (const [key, value] of Object.entries(materialized)) {
       if (!key.startsWith("_") && key !== "id") {
         snapshot[key] = value;

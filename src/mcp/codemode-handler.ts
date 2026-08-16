@@ -1,4 +1,4 @@
-import { isBoolean, isObjectRecord, isString } from "../dynamic/row-types.js";
+import { isBoolean, isObjectRecord, isString, type DynamicRow } from "../dynamic/row-types.js";
 /**
  * Code Mode MCP endpoint.
  *
@@ -99,7 +99,7 @@ async function callToolViaMcp(
   mcpHandler: (request: Request) => Promise<Response>,
   mcpPath: string,
   toolName: string,
-  args: Record<string, unknown>,
+  args: DynamicRow,
 ): Promise<{ content: Array<{ type: "text"; text: string }>; isError?: boolean }> {
   const url = `http://localhost${mcpPath}`;
   const callRequest = new Request(url, {

@@ -1,4 +1,4 @@
-import { isNumber, isObjectRecord, isString, stringArrayFrom } from "./dynamic/row-types.js";
+import { isNumber, isObjectRecord, isString, stringArrayFrom, type DynamicRow } from "./dynamic/row-types.js";
 import { Context, Effect, Option } from "effect";
 
 import { SqlClient } from "effect/unstable/sql";
@@ -12,7 +12,7 @@ export interface MediaFieldReference {
   readonly alt?: string | null;
   readonly title?: string | null;
   readonly focalPoint?: { x: number; y: number } | null;
-  readonly customData?: Record<string, unknown> | null;
+  readonly customData?: DynamicRow | null;
 }
 
 export function parseMediaFieldReference(value: unknown): MediaFieldReference | null {
@@ -186,7 +186,7 @@ export interface EnrichedMediaValue {
   readonly alt: string | null;
   readonly title: string | null;
   readonly focal_point: { x: number; y: number } | null;
-  readonly custom_data: Record<string, unknown> | null;
+  readonly custom_data: DynamicRow | null;
   readonly blurhash: string | null;
 }
 
@@ -242,14 +242,14 @@ function enrichReference(
  * `enrichMediaSites`.
  */
 export interface MediaSite {
-  readonly container: Record<string, unknown>;
+  readonly container: DynamicRow;
   readonly key: string;
   readonly fieldType: "media" | "media_gallery" | "seo";
 }
 
 export function collectMediaSite(
   sites: MediaSite[] | undefined,
-  container: Record<string, unknown>,
+  container: DynamicRow,
   key: string,
   fieldType: string,
 ): void {
@@ -351,7 +351,7 @@ export function stripMediaEnrichment(fieldType: string, value: unknown): unknown
 function stripOneMedia(value: unknown): unknown {
   if (!isObjectRecord(value)) return value;
   if (!isString(value.upload_id)) return value;
-  const out: Record<string, unknown> = {};
+  const out: DynamicRow = {};
   for (const [key, entry] of Object.entries(value)) {
     if (MEDIA_ENRICHMENT_KEYS.includes(key)) continue;
     out[key] = entry;
@@ -359,7 +359,7 @@ function stripOneMedia(value: unknown): unknown {
   return out;
 }
 
-function isJsonRecord(value: unknown): value is Record<string, unknown> {
+function isJsonRecord(value: unknown): value is DynamicRow {
   return isObjectRecord(value);
 }
 

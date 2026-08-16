@@ -3,7 +3,7 @@
  * Loads CMS metadata, builds context, and delegates to sub-modules.
  */
 import { createSchema } from "graphql-yoga";
-import { isBoolean, isNumber, isString } from "../dynamic/row-types.js";
+import { isBoolean, isNumber, isString, type DynamicRow } from "../dynamic/row-types.js";
 import { GraphQLScalarType, Kind } from "graphql";
 import { Effect, Layer } from "effect";
 import { SqlClient } from "effect/unstable/sql";
@@ -124,7 +124,7 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
     // Initialize shared state
     const typeDefs: string[] = [];
     const queryFieldDefs: string[] = [];
-    const resolvers: Record<string, Record<string, unknown>> = { Query: {} };
+    const resolvers: Record<string, DynamicRow> = { Query: {} };
 
     typeDefs.push(BASE_TYPE_DEFS);
     if (locales.length > 0) {
