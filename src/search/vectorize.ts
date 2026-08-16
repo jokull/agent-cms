@@ -26,12 +26,18 @@ export interface VectorizeMutationResult {
   readonly count: number;
 }
 
+/** Vectorize metadata value (Cloudflare Vectorize contract: string | number | boolean | string[]). */
+export type VectorizeVectorMetadataValue = string | number | boolean | string[];
+
+/** Vectorize metadata record (Cloudflare Vectorize contract). */
+export type VectorizeVectorMetadata = VectorizeVectorMetadataValue | Record<string, VectorizeVectorMetadataValue>;
+
 /** Vectorize query response: scored matches (Cloudflare Vectorize contract). */
 export interface VectorizeQueryResult {
   readonly matches: ReadonlyArray<{
     readonly id: string;
     readonly score: number;
-    readonly metadata?: Record<string, string>;
+    readonly metadata?: Record<string, VectorizeVectorMetadata>;
   }>;
 }
 
@@ -40,7 +46,7 @@ export interface VectorizeQueryResult {
  * Compatible with Cloudflare's `VectorizeIndex` type from `wrangler types` — no cast needed.
  */
 export interface VectorizeBinding {
-  upsert(vectors: Array<{ id: string; values: number[]; metadata?: Record<string, string> }>): Promise<VectorizeMutationResult>;
+  upsert(vectors: Array<{ id: string; values: number[]; metadata?: Record<string, VectorizeVectorMetadata> }>): Promise<VectorizeMutationResult>;
   deleteByIds(ids: string[]): Promise<VectorizeMutationResult>;
   query(vector: number[], options: { topK: number; returnMetadata?: "all" | "none" }): Promise<VectorizeQueryResult>;
 }
@@ -132,8 +138,8 @@ export function vectorizeSearch(
       catch: (error) => new VectorizeError({ message: `Search failed: ${describeUnknown(error)}` }),
     });
     return raw.matches.map((m) => ({
-      recordId: m.metadata?.recordId ?? m.id.split(":")[1],
-      modelApiKey: m.metadata?.modelApiKey ?? m.id.split(":")[0],
+      recordId: isString(m.metadata?.recordId) ? m.metadata.recordId : m.id.split(":")[1],
+      modelApiKey: isString(m.metadata?.modelApiKey) ? m.metadata.modelApiKey : m.id.split(":")[0],
       score: m.score,
     }));
   });

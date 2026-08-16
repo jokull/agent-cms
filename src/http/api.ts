@@ -41,16 +41,12 @@ import { CmsApiErrorList } from "./api-errors.js";
  * everything else (SQL layer errors, defects) becomes a SchemaEngineError —
  * the same contract the old boundary mapper gave (500 vs the mapped status).
  */
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- boundary mapper: accepts the opaque error channel and narrows it to the declared union (tagged errors pass through; SQL/unknown become SchemaEngineError).
 function toDeclaredError(error: unknown): CmsError {
   if (isCmsError(error)) return error;
   return new SchemaEngineError({
     message: error instanceof Error ? error.message : String(error),
   });
-}
-
-// TEMP-DEBUG
-export function debugToDeclaredError(error: unknown): void {
-  console.log("TO-DECLARED", error instanceof Error ? error.message : JSON.stringify(error));
 }
 
 export const ModelsGroup = HttpApiGroup.make("models").add(

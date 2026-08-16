@@ -62,8 +62,9 @@ const UnauthorizedBody = Schema.Struct({ error: Schema.String });
 const NotFoundApiError = Schema.encodeTo(NotFoundBody, {
   decode: SchemaGetter.transform((body: Schema.Schema.Type<typeof NotFoundBody>) =>
     new NotFoundError({ entity: body.entity, id: body.id })),
-  // SAFETY: the encode getter receives the runtime error value (declared unknown).
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- encode getter receives the runtime error value; declared `unknown` per the d.ts getter-direction drift (d.ts types getter input as the body while the runtime feeds the error value).
   encode: SchemaGetter.transform((input: unknown) => {
+    // SAFETY: the runtime feeds this getter the error value; cast is the documented d.ts-drift workaround.
     const error = input as NotFoundError;
     return {
       error: `${error.entity} not found: ${error.id}`,
@@ -76,8 +77,9 @@ const NotFoundApiError = Schema.encodeTo(NotFoundBody, {
 const ValidationApiError = Schema.encodeTo(ValidationBody, {
   decode: SchemaGetter.transform((body: Schema.Schema.Type<typeof ValidationBody>) =>
     new ValidationError({ message: body.error, field: body.field })),
-  // SAFETY: the encode getter receives the runtime error value (declared unknown).
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- encode getter receives the runtime error value; declared `unknown` per the d.ts getter-direction drift (d.ts types getter input as the body while the runtime feeds the error value).
   encode: SchemaGetter.transform((input: unknown) => {
+    // SAFETY: the runtime feeds this getter the error value; cast is the documented d.ts-drift workaround.
     const error = input as ValidationError;
     // oxlint-disable-next-line anti-slop/no-conditional-empty-object-spread -- absent field must stay absent in JSON; the response transform coerces undefined to null.
     return { error: error.message, ...(error.field !== undefined ? { field: error.field } : {}) };
@@ -95,8 +97,9 @@ const AggregateValidationApiError = Schema.encodeTo(AggregateValidationBody, {
         code: issue.code as never,
       })),
     })),
-  // SAFETY: the encode getter receives the runtime error value (declared unknown).
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- encode getter receives the runtime error value; declared `unknown` per the d.ts getter-direction drift (d.ts types getter input as the body while the runtime feeds the error value).
   encode: SchemaGetter.transform((input: unknown) => {
+    // SAFETY: the runtime feeds this getter the error value; cast is the documented d.ts-drift workaround.
     const error = input as AggregateValidationError;
     return {
       error: error.issues.length === 1
@@ -114,8 +117,9 @@ const AggregateValidationApiError = Schema.encodeTo(AggregateValidationBody, {
 const ReferenceConflictApiError = Schema.encodeTo(ReferenceConflictBody, {
   decode: SchemaGetter.transform((body: Schema.Schema.Type<typeof ReferenceConflictBody>) =>
     new ReferenceConflictError({ message: body.error, references: [...body.references] })),
-  // SAFETY: the encode getter receives the runtime error value (declared unknown).
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- encode getter receives the runtime error value; declared `unknown` per the d.ts getter-direction drift (d.ts types getter input as the body while the runtime feeds the error value).
   encode: SchemaGetter.transform((input: unknown) => {
+    // SAFETY: the runtime feeds this getter the error value; cast is the documented d.ts-drift workaround.
     const error = input as ReferenceConflictError;
     return { error: error.message, references: [...error.references] };
   }),
@@ -124,8 +128,9 @@ const ReferenceConflictApiError = Schema.encodeTo(ReferenceConflictBody, {
 const DuplicateApiError = Schema.encodeTo(DuplicateBody, {
   decode: SchemaGetter.transform((body: Schema.Schema.Type<typeof DuplicateBody>) =>
     new DuplicateError({ message: body.error })),
-  // SAFETY: the encode getter receives the runtime error value (declared unknown).
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- encode getter receives the runtime error value; declared `unknown` per the d.ts getter-direction drift (d.ts types getter input as the body while the runtime feeds the error value).
   encode: SchemaGetter.transform((input: unknown) => {
+    // SAFETY: the runtime feeds this getter the error value; cast is the documented d.ts-drift workaround.
     const error = input as DuplicateError;
     return { error: error.message };
   }),
@@ -134,8 +139,9 @@ const DuplicateApiError = Schema.encodeTo(DuplicateBody, {
 const SchemaEngineApiError = Schema.encodeTo(SchemaEngineBody, {
   decode: SchemaGetter.transform((body: Schema.Schema.Type<typeof SchemaEngineBody>) =>
     new SchemaEngineError({ message: body.error })),
-  // SAFETY: the encode getter receives the runtime error value (declared unknown).
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- encode getter receives the runtime error value; declared `unknown` per the d.ts getter-direction drift (d.ts types getter input as the body while the runtime feeds the error value).
   encode: SchemaGetter.transform((input: unknown) => {
+    // SAFETY: the runtime feeds this getter the error value; cast is the documented d.ts-drift workaround.
     const error = input as SchemaEngineError;
     return { error: error.message };
   }),
@@ -144,8 +150,9 @@ const SchemaEngineApiError = Schema.encodeTo(SchemaEngineBody, {
 const UnauthorizedApiError = Schema.encodeTo(UnauthorizedBody, {
   decode: SchemaGetter.transform((body: Schema.Schema.Type<typeof UnauthorizedBody>) =>
     new UnauthorizedError({ message: body.error })),
-  // SAFETY: the encode getter receives the runtime error value (declared unknown).
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- encode getter receives the runtime error value; declared `unknown` per the d.ts getter-direction drift (d.ts types getter input as the body while the runtime feeds the error value).
   encode: SchemaGetter.transform((input: unknown) => {
+    // SAFETY: the runtime feeds this getter the error value; cast is the documented d.ts-drift workaround.
     const error = input as UnauthorizedError;
     return { error: error.message };
   }),

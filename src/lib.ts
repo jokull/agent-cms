@@ -66,22 +66,26 @@ export { ensureSchema } from "./migrations.js";
  * free of any Effect/Schema import. A decode failure is a genuine defect (the
  * wire codec already gate-kept the shape), so it propagates as an incident.
  */
-export function createAssetOp(raw: CreateAssetInput, actor?: RequestActor | null) {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- boundary parser: the op re-validates the wire shape through CreateAssetInput (applying defaults) so the codegen bridge can hand over plain decoded wire objects without importing Schema.
+export function createAssetOp(raw: unknown, actor?: RequestActor | null) {
   return Schema.decodeUnknownEffect(CreateAssetInput)(raw).pipe(
     Effect.flatMap((input) => createAsset(input, actor)),
   );
 }
-export function replaceAssetOp(id: string, raw: CreateAssetInput, actor?: RequestActor | null) {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- boundary parser: re-validates the wire shape through CreateAssetInput for the codegen bridge (plain decoded wire objects, no Schema import in the generated artifact).
+export function replaceAssetOp(id: string, raw: unknown, actor?: RequestActor | null) {
   return Schema.decodeUnknownEffect(CreateAssetInput)(raw).pipe(
     Effect.flatMap((input) => replaceAsset(id, input, actor)),
   );
 }
-export function importAssetOp(raw: ImportAssetFromUrlInput, actor?: RequestActor | null) {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- boundary parser: re-validates the wire shape through ImportAssetFromUrlInput for the codegen bridge (plain decoded wire objects, no Schema import in the generated artifact).
+export function importAssetOp(raw: unknown, actor?: RequestActor | null) {
   return Schema.decodeUnknownEffect(ImportAssetFromUrlInput)(raw).pipe(
     Effect.flatMap((input) => importAssetFromUrl(input, actor)),
   );
 }
-export function createUploadUrlOp(raw: CreateUploadUrlInput) {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- boundary parser: re-validates the wire shape through CreateUploadUrlInput for the codegen bridge (plain decoded wire objects, no Schema import in the generated artifact).
+export function createUploadUrlOp(raw: unknown) {
   return Schema.decodeUnknownEffect(CreateUploadUrlInput)(raw).pipe(
     Effect.flatMap((input) => createAssetUploadUrl(input)),
   );
