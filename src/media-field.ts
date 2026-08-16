@@ -1,4 +1,4 @@
-import { isNumber, isObjectRecord, isString, stringArrayFrom, type DynamicRow } from "./dynamic/row-types.js";
+import { isNumber, isObjectRecord, isString, stringArrayFrom, type DynamicRow, type StoredFieldValue } from "./dynamic/row-types.js";
 import { Context, Effect, Option } from "effect";
 
 import { SqlClient } from "effect/unstable/sql";
@@ -15,7 +15,7 @@ export interface MediaFieldReference {
   readonly customData?: DynamicRow | null;
 }
 
-export function parseMediaFieldReference(value: unknown): MediaFieldReference | null {
+export function parseMediaFieldReference(value: StoredFieldValue): MediaFieldReference | null {
   const parsed = decodeJsonIfString(value);
   if (isString(parsed)) {
     return parsed.length > 0 ? { uploadId: parsed } : null;
@@ -33,11 +33,11 @@ export function parseMediaFieldReference(value: unknown): MediaFieldReference | 
   };
 }
 
-export function parseMediaGalleryReferences(value: unknown): MediaFieldReference[] {
+export function parseMediaGalleryReferences(value: StoredFieldValue): MediaFieldReference[] {
   const parsed = decodeJsonIfString(value);
   if (!Array.isArray(parsed)) return [];
   return parsed
-    .map((entry) => parseMediaFieldReference(entry))
+    .map((entry: StoredFieldValue) => parseMediaFieldReference(entry))
     .filter((entry): entry is MediaFieldReference => entry !== null);
 }
 
@@ -65,7 +65,8 @@ export function mergeAssetWithMediaReference(
     customData: isJsonRecord(reference?.customData)
       ? reference.customData
       : (isJsonRecord(defaultCustomData) ? defaultCustomData : null),
-    tags: stringArrayFrom(decodeJsonStringOr(asset.tags, [])),
+    // SAFETY: a missing/invalid tags JSON decodes to the empty array, a StoredFieldValue per the json contract.
+    tags: stringArrayFrom(decodeJsonStringOr(asset.tags, [] as unknown as StoredFieldValue)),
     url: assetUrl(asset.r2_key),
     _createdAt: asset.created_at,
     _updatedAt: asset.updated_at,
@@ -261,7 +262,8 @@ export function collectMediaSite(
 }
 
 function siteAssetIds(site: MediaSite): string[] {
-  const value = site.container[site.key];
+  // SAFETY: media site cells hold StoredFieldValue (id string, reference object, or JSON string).
+  const value = site.container[site.key] as StoredFieldValue;
   if (site.fieldType === "media") {
     const reference = parseMediaFieldReference(value);
     return reference ? [reference.uploadId] : [];
@@ -301,7 +303,7 @@ export function enrichMediaSites(sites: ReadonlyArray<MediaSite>): Effect.Effect
     const byId = new Map(rows.map((row) => [row.id, row] as const));
     const resolve = yield* assetUrlResolver;
 
-    const enrichOne = (value: unknown): unknown => {
+    const enrichOne = (value: StoredFieldValue): StoredFieldValue | EnrichedMediaValue => {
       const reference = parseMediaFieldReference(value);
       if (!reference) return value;
       const asset = byId.get(reference.uploadId);
@@ -312,16 +314,19 @@ export function enrichMediaSites(sites: ReadonlyArray<MediaSite>): Effect.Effect
     for (const site of sites) {
       const value = site.container[site.key];
       if (site.fieldType === "media") {
-        site.container[site.key] = enrichOne(value);
+        // SAFETY: media field cell values are StoredFieldValue (id string or reference object).
+        site.container[site.key] = enrichOne(value as StoredFieldValue);
         continue;
       }
       if (site.fieldType === "media_gallery") {
-        const parsed = decodeJsonIfString(value);
+        // SAFETY: media_gallery field cell values are StoredFieldValue (JSON string or entry array).
+        const parsed = decodeJsonIfString(value as StoredFieldValue);
         if (!Array.isArray(parsed)) continue;
-        site.container[site.key] = parsed.map((entry) => enrichOne(entry));
+        site.container[site.key] = parsed.map((entry: StoredFieldValue) => enrichOne(entry));
         continue;
       }
-      const parsed = decodeJsonIfString(value);
+      // SAFETY: seo field cell values are StoredFieldValue (JSON string or object).
+      const parsed = decodeJsonIfString(value as StoredFieldValue);
       if (!isObjectRecord(parsed)) continue;
       const imageId = isString(parsed.image) ? parsed.image : null;
       const asset = imageId ? byId.get(imageId) : undefined;
@@ -335,11 +340,11 @@ export function enrichMediaSites(sites: ReadonlyArray<MediaSite>): Effect.Effect
  * can be written straight back without persisting a stale URL or a stale copy
  * of the asset's metadata. A bare id string passes through untouched.
  */
-export function stripMediaEnrichment(fieldType: string, value: unknown): unknown {
+export function stripMediaEnrichment(fieldType: string, value: StoredFieldValue | undefined): StoredFieldValue | StoredFieldValue[] | undefined {
   if (value === null || value === undefined) return value;
   if (fieldType === "media") return stripOneMedia(value);
   if (fieldType === "media_gallery") {
-    return Array.isArray(value) ? value.map((entry) => stripOneMedia(entry)) : value;
+    return Array.isArray(value) ? value.map((entry: StoredFieldValue) => stripOneMedia(entry)) : value;
   }
   if (fieldType === "seo" && isObjectRecord(value) && SEO_ENRICHMENT_KEY in value) {
     const { [SEO_ENRICHMENT_KEY]: _dropped, ...rest } = value;
@@ -348,7 +353,7 @@ export function stripMediaEnrichment(fieldType: string, value: unknown): unknown
   return value;
 }
 
-function stripOneMedia(value: unknown): unknown {
+function stripOneMedia(value: StoredFieldValue): StoredFieldValue {
   if (!isObjectRecord(value)) return value;
   if (!isString(value.upload_id)) return value;
   const out: DynamicRow = {};
@@ -359,10 +364,12 @@ function stripOneMedia(value: unknown): unknown {
   return out;
 }
 
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- type guard: must accept opaque values to narrow them.
 function isJsonRecord(value: unknown): value is DynamicRow {
   return isObjectRecord(value);
 }
 
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- type guard: must accept opaque values to narrow them.
 function isFocalPoint(value: unknown): value is { x: number; y: number } {
   return isJsonRecord(value)
     && isNumber(value.x)

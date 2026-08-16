@@ -1,4 +1,4 @@
-import { isNumber, isObjectRecord, isString } from "../dynamic/row-types.js";
+import { isNumber, isObjectRecord, isString, type StoredFieldValue } from "../dynamic/row-types.js";
 /**
  * Build reverse reference fields and resolvers.
  * For each target model with incoming link/links references, add _allReferencing<Source>s fields.
@@ -58,7 +58,7 @@ export function buildReverseRefs(
 /**
  * Build reverse reference resolvers and extend target type SDL.
  */
-function getThroughFieldApiKeys(through: unknown): readonly string[] | undefined {
+function getThroughFieldApiKeys(through: StoredFieldValue): readonly string[] | undefined {
   if (!isObjectRecord(through)) return undefined;
   const fields = through.fields;
   if (!Array.isArray(fields)) return undefined;
@@ -128,7 +128,9 @@ export function buildReverseRefResolvers(
         if (Array.isArray(args.fallbackLocales)) {
           context.fallbackLocales = args.fallbackLocales.filter((value): value is string => isString(value));
         }
-        const throughFieldNames = getThroughFieldApiKeys(args.through);
+        // SAFETY: the `through` GraphQL input is a plain object of field names
+        // (StoredFieldValue); the guard validates its shape at runtime.
+        const throughFieldNames = getThroughFieldApiKeys(args.through as StoredFieldValue);
         const filteredSourceRefs = throughFieldNames && throughFieldNames.length > 0
           ? sourceRefs.filter((ref) => throughFieldNames.includes(toCamelCase(ref.fieldApiKey)))
           : sourceRefs;
@@ -190,7 +192,9 @@ export function buildReverseRefResolvers(
         if (Array.isArray(args.fallbackLocales)) {
           context.fallbackLocales = args.fallbackLocales.filter((value): value is string => isString(value));
         }
-        const throughFieldNames = getThroughFieldApiKeys(args.through);
+        // SAFETY: the `through` GraphQL input is a plain object of field names
+        // (StoredFieldValue); the guard validates its shape at runtime.
+        const throughFieldNames = getThroughFieldApiKeys(args.through as StoredFieldValue);
         const filteredSourceRefs = throughFieldNames && throughFieldNames.length > 0
           ? sourceRefs.filter((ref) => throughFieldNames.includes(toCamelCase(ref.fieldApiKey)))
           : sourceRefs;

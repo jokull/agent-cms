@@ -1,4 +1,4 @@
-import { isBoolean, isNumber, isObject, isObjectRecord, isString, type DynamicRow } from "../dynamic/row-types.js";
+import { isBoolean, isNumber, isObject, isObjectRecord, isString, type DynamicRow, type StoredFieldValue } from "../dynamic/row-types.js";
 import { Effect } from "effect";
 
 import { contentTableName } from "../dynamic/tables.js";
@@ -407,13 +407,13 @@ const validateFieldValidators = Effect.fn("validateFieldValidators")(function* (
   }
 });
 
-function serializeDefaultValueForFieldMetadata(value: unknown): string | null {
+function serializeDefaultValueForFieldMetadata(value: StoredFieldValue | undefined): string | null {
   if (value === undefined) return null;
   if (isString(value)) return value;
   return encodeJson(value);
 }
 
-function serializeDefaultValueForRecordColumn(value: unknown): unknown {
+function serializeDefaultValueForRecordColumn(value: StoredFieldValue | undefined): StoredFieldValue {
   if (value === undefined) return null;
   if (isObject(value)) return encodeJson(value);
   if (isBoolean(value)) return value ? 1 : 0;
@@ -508,7 +508,8 @@ export const createField = Effect.fn("createField")(function* (modelId: string, 
     [
       id, modelId, body.label, body.apiKey, body.fieldType,
       position, body.localized ? 1 : 0, validators,
-      serializeDefaultValueForFieldMetadata(body.defaultValue),
+      // SAFETY: field default values are cell values (scalars, JSON strings, or composite objects encoded on write).
+      serializeDefaultValueForFieldMetadata(body.defaultValue as StoredFieldValue | undefined),
       body.appearance ? encodeJson(body.appearance) : null,
       body.hint ?? null, body.fieldsetId ?? null,
       now, now,
@@ -524,7 +525,8 @@ export const createField = Effect.fn("createField")(function* (modelId: string, 
     );
     if (modelInfo.length > 0) {
       const tableName = modelInfo[0].is_block ? `block_${modelInfo[0].api_key}` : contentTableName(modelInfo[0].api_key);
-      const serialized = serializeDefaultValueForRecordColumn(body.defaultValue);
+      // SAFETY: field default values are cell values (scalars, JSON strings, or composite objects encoded on write).
+      const serialized = serializeDefaultValueForRecordColumn(body.defaultValue as StoredFieldValue | undefined);
       yield* sql.unsafe(
         `UPDATE "${tableName}" SET "${body.apiKey}" = ? WHERE "${body.apiKey}" IS NULL`,
         [serialized]

@@ -1,4 +1,4 @@
-import { isNumber, isObjectRecord, isString, type DynamicRow } from "../dynamic/row-types.js";
+import { isNumber, isObjectRecord, isString, type DynamicRow, type StoredFieldValue } from "../dynamic/row-types.js";
 import {
   HttpEffect,
   HttpRouter,
@@ -55,6 +55,7 @@ import {
   type RequestActor,
 } from "../attribution.js";
 
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- errors reach this serializer from Effect's opaque error/defect channels; any thrown value must be describable.
 function describeUnknown(error: unknown): string {
   if (error instanceof Error) return `${error.name}: ${error.message}`;
   if (isString(error)) return error;
@@ -87,6 +88,7 @@ function handle<A, R>(
         Effect.andThen(HttpServerResponse.json({ error: "Internal server error" }, { status: 500 })),
       )
     ),
+    // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Effect's defect channel is opaque; catchDefect receives any thrown non-error value.
     Effect.catchDefect((defect: unknown) => {
       return Effect.logError("REST defect").pipe(
         Effect.annotateLogs({ defect: describeUnknown(defect) }),
@@ -117,6 +119,7 @@ function handleNoContent<A, R>(effect: Effect.Effect<A, unknown, R>) {
         Effect.andThen(HttpServerResponse.json({ error: "Internal server error" }, { status: 500 })),
       )
     ),
+    // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Effect's defect channel is opaque; catchDefect receives any thrown non-error value.
     Effect.catchDefect((defect: unknown) =>
       Effect.logError("REST defect").pipe(
         Effect.annotateLogs({ defect: describeUnknown(defect) }),
@@ -140,7 +143,7 @@ const queryParam = Effect.fn("queryParam")(function* (name: string) {
 
 function decodeUnknownInput<S extends Schema.Constraint>(
   schema: S,
-  input: unknown,
+  input: StoredFieldValue,
   message: string = "Invalid input",
 ) {
   return Schema.decodeUnknownEffect(schema)(input).pipe(
@@ -150,11 +153,15 @@ function decodeUnknownInput<S extends Schema.Constraint>(
 
 const readJsonBody = Effect.fn("readJsonBody")(function* (message: string = "Invalid JSON body") {
   const req = yield* HttpServerRequest.HttpServerRequest;
-  return yield* req.json.pipe(
+  const body = yield* req.json.pipe(
     Effect.mapError((e) => new ValidationError({
       message: `${message}: ${describeUnknown(e)}`,
     }))
   );
+  // SAFETY: the decoded JSON body is a string/number/boolean/null/object value; JSON arrays are the
+  // only Schema.Json member outside StoredFieldValue, and every downstream schema is a Struct that
+  // rejects arrays with a clear ValidationError — so the type only narrows, never mis-handles.
+  return body as StoredFieldValue;
 });
 
 const currentActor = Effect.fn("currentActor")(function* () {

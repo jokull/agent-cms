@@ -1,4 +1,4 @@
-import { isBoolean, isNumber, isObjectRecord, isString, type DynamicRow } from "../dynamic/row-types.js";
+import { isBoolean, isNumber, isObjectRecord, isString, type DynamicRow, type StoredFieldValue } from "../dynamic/row-types.js";
 import { DateTime, Effect, Option } from "effect";
 
 import { SqlClient } from "effect/unstable/sql";
@@ -111,7 +111,9 @@ export function computeIsValid(
 ): { valid: boolean; missingFields: string[] } {
   const missingFields: string[] = [];
   for (const field of fields) {
-    const value = record[field.api_key];
+    // SAFETY: DynamicRow cells are StoredFieldValue by the dynamic-zone contract
+    // (the Record<string, unknown> window hides the union).
+    const value = record[field.api_key] as StoredFieldValue;
     let fieldInvalid = false;
     if (field.localized && defaultLocale) {
       // Localized field: check locale keys in JSON map
@@ -126,7 +128,8 @@ export function computeIsValid(
       // When allLocales is set, check every locale; otherwise just the default
       const localesToCheck = allLocales ?? [defaultLocale];
       for (const locale of localesToCheck) {
-        const locValue = localeMap[locale];
+        // SAFETY: locale-map values are content-table cells (StoredFieldValue).
+        const locValue = localeMap[locale] as StoredFieldValue;
         if (!isValueValidForField(locValue, field.field_type, field.validators)) {
           fieldInvalid = true;
           break; // One missing locale is enough to mark the field invalid
@@ -143,7 +146,7 @@ export function computeIsValid(
 }
 
 function isValueValidForField(
-  value: unknown,
+  value: StoredFieldValue,
   fieldType: string,
   validators: DynamicRow,
 ): boolean {
@@ -157,7 +160,7 @@ function isValueValidForField(
  * (dry-run) so the two never diverge on what counts as valid.
  */
 function valueValidationCode(
-  value: unknown,
+  value: StoredFieldValue,
   fieldType: string,
   validators: DynamicRow,
 ): ValidationIssueCode | null {
@@ -205,7 +208,9 @@ export function collectValueValidationIssues(
 ): ValueValidationIssue[] {
   const issues: ValueValidationIssue[] = [];
   for (const field of fields) {
-    const value = record[field.api_key];
+    // SAFETY: DynamicRow cells are StoredFieldValue by the dynamic-zone contract
+    // (the Record<string, unknown> window hides the union).
+    const value = record[field.api_key] as StoredFieldValue;
     if (field.localized && defaultLocale) {
       let localeMap = value;
       if (isString(localeMap)) {
@@ -218,7 +223,8 @@ export function collectValueValidationIssues(
       const localesToCheck = allLocales ?? [defaultLocale];
       let fieldCode: ValidationIssueCode | null = null;
       for (const locale of localesToCheck) {
-        fieldCode = valueValidationCode(localeMap[locale], field.field_type, field.validators);
+        // SAFETY: locale-map values are content-table cells (StoredFieldValue).
+        fieldCode = valueValidationCode(localeMap[locale] as StoredFieldValue, field.field_type, field.validators);
         if (fieldCode !== null) break;
       }
       if (fieldCode !== null) issues.push({ field: field.api_key, code: fieldCode });
@@ -230,7 +236,7 @@ export function collectValueValidationIssues(
   return issues;
 }
 
-function passesEnumValidation(value: unknown, validators: DynamicRow): boolean {
+function passesEnumValidation(value: StoredFieldValue, validators: DynamicRow): boolean {
   const enumValues = validators.enum;
   if (!Array.isArray(enumValues) || !enumValues.every((entry) => isString(entry))) {
     return true;
@@ -238,7 +244,7 @@ function passesEnumValidation(value: unknown, validators: DynamicRow): boolean {
   return isString(value) && enumValues.includes(value);
 }
 
-function passesLengthValidation(value: unknown, fieldType: string, validators: DynamicRow): boolean {
+function passesLengthValidation(value: StoredFieldValue, fieldType: string, validators: DynamicRow): boolean {
   if (!["string", "text", "slug"].includes(fieldType)) return true;
   const lengthConfig = validators.length;
   if (!isObjectRecord(lengthConfig)) return true;
@@ -250,7 +256,7 @@ function passesLengthValidation(value: unknown, fieldType: string, validators: D
   return true;
 }
 
-function passesNumberRangeValidation(value: unknown, fieldType: string, validators: DynamicRow): boolean {
+function passesNumberRangeValidation(value: StoredFieldValue, fieldType: string, validators: DynamicRow): boolean {
   if (!["integer", "float"].includes(fieldType)) return true;
   const rangeConfig = validators.number_range;
   if (!isObjectRecord(rangeConfig)) return true;
@@ -262,7 +268,7 @@ function passesNumberRangeValidation(value: unknown, fieldType: string, validato
   return true;
 }
 
-function passesFormatValidation(value: unknown, fieldType: string, validators: DynamicRow): boolean {
+function passesFormatValidation(value: StoredFieldValue, fieldType: string, validators: DynamicRow): boolean {
   if (!["string", "text", "slug"].includes(fieldType) || !isString(value)) return true;
   const format = validators.format;
   if (!format) return true;
@@ -287,14 +293,16 @@ function passesFormatValidation(value: unknown, fieldType: string, validators: D
   return true;
 }
 
-function passesDateRangeValidation(value: unknown, fieldType: string, validators: DynamicRow): boolean {
+function passesDateRangeValidation(value: StoredFieldValue, fieldType: string, validators: DynamicRow): boolean {
   if (!["date", "date_time"].includes(fieldType) || !isString(value)) return true;
   const rangeConfig = validators.date_range;
   if (!isObjectRecord(rangeConfig)) return true;
   const valueTime = parseDateValue(value);
   if (valueTime === null) return false;
-  const minTime = parseDateBoundary(rangeConfig.min);
-  const maxTime = parseDateBoundary(rangeConfig.max);
+  // SAFETY: validator-config cells are content-table cells (StoredFieldValue).
+  const minTime = parseDateBoundary(rangeConfig.min as StoredFieldValue);
+  // SAFETY: validator-config cells are content-table cells (StoredFieldValue).
+  const maxTime = parseDateBoundary(rangeConfig.max as StoredFieldValue);
   if (minTime !== null && valueTime < minTime) return false;
   if (maxTime !== null && valueTime > maxTime) return false;
   return true;
@@ -305,8 +313,8 @@ function parseDateValue(value: string): number | null {
   return Option.isSome(parsed) ? DateTime.toEpochMillis(parsed.value) : null;
 }
 
-function parseDateBoundary(value: unknown): number | null {
-  if (value === undefined) return null;
+function parseDateBoundary(value: StoredFieldValue): number | null {
+  if (value == null) return null;
   if (value === "now") return DateTime.toEpochMillis(DateTime.nowUnsafe());
   if (!isString(value)) return null;
   return parseDateValue(value);
@@ -327,10 +335,14 @@ export function findUniqueConstraintViolations(options: {
       if (!isUnique(field.validators) || !supportsUniqueValidation(field.field_type)) continue;
       if (options.onlyFieldApiKeys && !options.onlyFieldApiKeys.has(field.api_key)) continue;
 
-      const value = options.record[field.api_key];
+      // SAFETY: DynamicRow cells are StoredFieldValue by the dynamic-zone contract
+      // (the Record<string, unknown> window hides the union).
+      const value = options.record[field.api_key] as StoredFieldValue;
       if (field.localized) {
         const localeMap = parseLocaleMap(value);
-        for (const [localeCode, localeValue] of Object.entries(localeMap)) {
+        for (const [localeCode, rawLocaleValue] of Object.entries(localeMap)) {
+          // SAFETY: locale-map values are content-table cells (StoredFieldValue).
+          const localeValue = rawLocaleValue as StoredFieldValue;
           if (!hasMeaningfulValue(localeValue)) continue;
           const path = `$."${localeCode.replace(/"/g, '\\"')}"`;
           const rows = yield* sql.unsafe<{ id: string }>(
@@ -366,17 +378,17 @@ export function findUniqueConstraintViolations(options: {
   });
 }
 
-function parseLocaleMap(value: unknown): DynamicRow {
-  if (value === null || value === undefined) return {};
+function parseLocaleMap(value: StoredFieldValue): DynamicRow {
+  if (value == null) return {};
   const parsed = isString(value) ? decodeJsonRecordStringOr(value, {}) : value;
   return isObjectRecord(parsed) ? parsed : {};
 }
 
-function hasMeaningfulValue(value: unknown): boolean {
-  return value !== null && value !== undefined && value !== "";
+function hasMeaningfulValue(value: StoredFieldValue): boolean {
+  return value != null && value !== "";
 }
 
-function serializeUniqueValue(value: unknown): unknown {
+function serializeUniqueValue(value: StoredFieldValue): StoredFieldValue {
   if (isBoolean(value)) return value ? 1 : 0;
   return value;
 }

@@ -127,6 +127,7 @@ function parseToolCallResponse(
   text: string,
   contentType: string | null,
 ): { content: Array<{ type: "text"; text: string }>; isError?: boolean } {
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- untrusted JSON-RPC wire payload: this duck-typing helper IS the boundary parser for the tool-call result.
   function parseToolCallResult(value: unknown): { content: Array<{ type: "text"; text: string }>; isError?: boolean } | null {
     if (!isObjectRecord(value) || !Array.isArray(value.content)) return null;
     const content = value.content.filter((entry): entry is { type: "text"; text: string } =>
@@ -140,6 +141,7 @@ function parseToolCallResponse(
   }
 
   // Helper to extract result from a parsed JSON-RPC response or array of responses
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- untrusted JSON-RPC wire payload: the response may be an object or array of arbitrary JSON, duck-typed here.
   function extractResult(parsed: unknown): { content: Array<{ type: "text"; text: string }>; isError?: boolean } | null {
     if (Array.isArray(parsed)) {
       for (const item of parsed) {

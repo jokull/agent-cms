@@ -1,4 +1,4 @@
-import { isObject, isObjectRecord, isString, type DynamicRow } from "../dynamic/row-types.js";
+import { isObject, isObjectRecord, isString, type DynamicRow, type StoredFieldValue } from "../dynamic/row-types.js";
 /**
  * Schema lifecycle operations for complex cascading changes.
  * These go beyond simple CRUD and handle content-level cascades.
@@ -62,7 +62,8 @@ export const removeBlockType = Effect.fn("removeBlockType")(function* (blockApiK
 
       if (blockIdSet.size > 0) {
         // Clean draft DAST
-        const dastRaw = decodeJsonIfString(record[field.api_key]);
+        // SAFETY: content/block table cells are StoredFieldValue by the dynamic-zone contract.
+      const dastRaw = decodeJsonIfString(record[field.api_key] as StoredFieldValue);
         const dast: DastLike | null = isObjectRecord(dastRaw) ? dastRaw : null;
         if (dast?.document?.children) {
           const cleaned = removeBlockNodesFromDast(dast, blockIdSet);
@@ -157,7 +158,8 @@ export const removeBlockFromWhitelist = Effect.fn("removeBlockFromWhitelist")(fu
       `SELECT id, "${field.api_key}", _published_snapshot FROM "${tableName}" WHERE "${field.api_key}" IS NOT NULL OR _published_snapshot IS NOT NULL`
     );
     for (const record of records) {
-      const dastRaw = decodeJsonIfString(record[field.api_key]);
+      // SAFETY: content/block table cells are StoredFieldValue by the dynamic-zone contract.
+      const dastRaw = decodeJsonIfString(record[field.api_key] as StoredFieldValue);
       const dast: DastLike | null = isObjectRecord(dastRaw) ? dastRaw : null;
       if (dast?.document?.children) {
         const cleaned = removeBlockNodesFromDast(dast, blockIdSet);
@@ -222,7 +224,8 @@ export const removeLocale = Effect.fn("removeLocale")(function* (localeId: strin
     );
 
     for (const record of records) {
-      const parsed = decodeJsonIfString(record[field.api_key]);
+      // SAFETY: content/block table cells are StoredFieldValue by the dynamic-zone contract.
+      const parsed = decodeJsonIfString(record[field.api_key] as StoredFieldValue);
       if (!isObjectRecord(parsed)) continue;
 
       const localeMap = parsed;
@@ -261,7 +264,8 @@ const cleanPublishedSnapshot = Effect.fn("cleanPublishedSnapshot")(function* (
   const snapshot = decodeJsonRecordStringOr(rows[0]._published_snapshot, {});
   if (Object.keys(snapshot).length === 0) return;
 
-  const dast = decodeJsonIfString(snapshot[fieldApiKey]);
+  // SAFETY: snapshot cells are StoredFieldValue by the dynamic-zone contract.
+  const dast = decodeJsonIfString(snapshot[fieldApiKey] as StoredFieldValue);
   snapshot[fieldApiKey] = removeBlockNodesFromStructuredTextValue(dast, blockIds);
   yield* sql.unsafe(
     `UPDATE "${tableName}" SET _published_snapshot = ? WHERE id = ?`,
@@ -294,7 +298,7 @@ function removeBlockNodesFromDast(dast: DastLike, blockIds: Set<string>): DastLi
   };
 }
 
-function removeBlockNodesFromStructuredTextValue(value: unknown, blockIds: Set<string>): unknown {
+function removeBlockNodesFromStructuredTextValue(value: StoredFieldValue, blockIds: Set<string>): StoredFieldValue {
   if (!isObjectRecord(value)) return value;
   const obj: DastLike = value;
 

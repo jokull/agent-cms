@@ -66,22 +66,22 @@ export { ensureSchema } from "./migrations.js";
  * free of any Effect/Schema import. A decode failure is a genuine defect (the
  * wire codec already gate-kept the shape), so it propagates as an incident.
  */
-export function createAssetOp(raw: unknown, actor?: RequestActor | null) {
+export function createAssetOp(raw: CreateAssetInput, actor?: RequestActor | null) {
   return Schema.decodeUnknownEffect(CreateAssetInput)(raw).pipe(
     Effect.flatMap((input) => createAsset(input, actor)),
   );
 }
-export function replaceAssetOp(id: string, raw: unknown, actor?: RequestActor | null) {
+export function replaceAssetOp(id: string, raw: CreateAssetInput, actor?: RequestActor | null) {
   return Schema.decodeUnknownEffect(CreateAssetInput)(raw).pipe(
     Effect.flatMap((input) => replaceAsset(id, input, actor)),
   );
 }
-export function importAssetOp(raw: unknown, actor?: RequestActor | null) {
+export function importAssetOp(raw: ImportAssetFromUrlInput, actor?: RequestActor | null) {
   return Schema.decodeUnknownEffect(ImportAssetFromUrlInput)(raw).pipe(
     Effect.flatMap((input) => importAssetFromUrl(input, actor)),
   );
 }
-export function createUploadUrlOp(raw: unknown) {
+export function createUploadUrlOp(raw: CreateUploadUrlInput) {
   return Schema.decodeUnknownEffect(CreateUploadUrlInput)(raw).pipe(
     Effect.flatMap((input) => createAssetUploadUrl(input)),
   );

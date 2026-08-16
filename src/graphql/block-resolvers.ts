@@ -1,4 +1,4 @@
-import { isObjectRecord, isString } from "../dynamic/row-types.js";
+import { isObjectRecord, isString, type StoredFieldValue } from "../dynamic/row-types.js";
 /**
  * Build GraphQL types and resolvers for block models.
  * Also computes per-field StructuredText union types.
@@ -16,8 +16,8 @@ import { loadAsset, loadAssets } from "./asset-loader.js";
 import { decodeJsonIfString, decodeJsonStringOr } from "../json.js";
 import { mergeAssetWithMediaReference, parseMediaFieldReference, parseMediaGalleryReferences } from "../media-field.js";
 
-function pickLocalizedEntry(rawValue: unknown, context: GqlContext) {
-  if (rawValue === null || rawValue === undefined) return { locale: null, value: null };
+function pickLocalizedEntry(rawValue: StoredFieldValue, context: GqlContext) {
+  if (rawValue == null) return { locale: null, value: null };
   const localeMap = decodeJsonIfString(rawValue);
   if (!isObjectRecord(localeMap)) {
     return { locale: null, value: rawValue };
@@ -38,7 +38,7 @@ function pickLocalizedEntry(rawValue: unknown, context: GqlContext) {
   return { locale: firstLocale, value: firstValue };
 }
 
-function withFieldLocaleArgs(context: GqlContext, args: unknown): GqlContext {
+function withFieldLocaleArgs(context: GqlContext, args: DynamicRow): GqlContext {
   if (!isObjectRecord(args)) return context;
   // SAFETY: args guarded as a plain object above; locale keys are GraphQL field args.
   const rawLocale: unknown = Reflect.get(args, "locale");
@@ -86,8 +86,10 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
       const gqlName = toCamelCase(f.api_key);
 
       if (f.field_type === "media") {
-        bmResolvers[gqlName] = async (parent: DynamicRow, _args: unknown, context: GqlContext) => {
-          const reference = parseMediaFieldReference(parent[f.api_key]);
+        bmResolvers[gqlName] = async (parent: DynamicRow, _args: DynamicRow, context: GqlContext) => {
+          // SAFETY: media cells hold a JSON reference string or parsed object
+          // (StoredFieldValue); the reference parser validates the shape.
+          const reference = parseMediaFieldReference(parent[f.api_key] as StoredFieldValue);
           if (!reference) return null;
           // Batched across every sibling block in the request — N venues with
           // images used to cost N round trips (#27).
@@ -98,8 +100,10 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
           };
         };
       } else if (f.field_type === "media_gallery") {
-        bmResolvers[gqlName] = async (parent: DynamicRow, _args: unknown, context: GqlContext) => {
-          const references = parseMediaGalleryReferences(parent[f.api_key]);
+        bmResolvers[gqlName] = async (parent: DynamicRow, _args: DynamicRow, context: GqlContext) => {
+          // SAFETY: gallery cells hold a JSON reference array or parsed array
+          // (StoredFieldValue at the cell boundary); the parser validates shape.
+          const references = parseMediaGalleryReferences(parent[f.api_key] as StoredFieldValue);
           if (references.length === 0) return [];
           const assetMap = await loadAssets({
             runSql,
@@ -114,7 +118,7 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
       } else if (f.field_type === "link") {
         const targets = getLinkTargets(f.validators);
         if (targets && targets.length > 0) {
-          bmResolvers[gqlName] = async (parent: DynamicRow, _args: unknown, context: GqlContext) => {
+          bmResolvers[gqlName] = async (parent: DynamicRow, _args: DynamicRow, context: GqlContext) => {
             const linkedId = parent[f.api_key];
             if (!isString(linkedId) || !linkedId) return null;
             const resolved = await loadLinkedRecords({
@@ -129,9 +133,11 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
           };
         }
       } else if (f.field_type === "structured_text") {
-        bmResolvers[gqlName] = async (parent: DynamicRow, _args: unknown, context: GqlContext) => {
+        bmResolvers[gqlName] = async (parent: DynamicRow, _args: DynamicRow, context: GqlContext) => {
+          // SAFETY: content cells hold StoredFieldValue scalars or JSON strings;
+          // the envelope checks below validate the actual shape at runtime.
           const localized = f.localized
-            ? pickLocalizedEntry(parent[f.api_key], context)
+            ? pickLocalizedEntry(parent[f.api_key] as StoredFieldValue, context)
             : { locale: null, value: parent[f.api_key] };
           const raw = localized.value;
           if (!raw) return null;
@@ -155,9 +161,11 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
           });
         };
       } else if (f.field_type === "rich_text") {
-        bmResolvers[gqlName] = async (parent: DynamicRow, _args: unknown, context: GqlContext) => {
+        bmResolvers[gqlName] = async (parent: DynamicRow, _args: DynamicRow, context: GqlContext) => {
+          // SAFETY: content cells hold StoredFieldValue scalars or JSON strings;
+          // the envelope checks below validate the actual shape at runtime.
           const localized = f.localized
-            ? pickLocalizedEntry(parent[f.api_key], context)
+            ? pickLocalizedEntry(parent[f.api_key] as StoredFieldValue, context)
             : { locale: null, value: parent[f.api_key] };
           const raw = localized.value;
           if (!raw) return [];
@@ -184,8 +192,10 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
       } else if (f.field_type === "links") {
         const targets = getLinksTargets(f.validators);
         if (targets && targets.length > 0) {
-          bmResolvers[gqlName] = async (parent: DynamicRow, _args: unknown, context: GqlContext) => {
-            let linkedIds = parent[f.api_key];
+          bmResolvers[gqlName] = async (parent: DynamicRow, _args: DynamicRow, context: GqlContext) => {
+            // SAFETY: links cells hold a JSON id array or parsed array
+            // (StoredFieldValue at the cell boundary); decode validates shape.
+            let linkedIds = parent[f.api_key] as StoredFieldValue;
             linkedIds = decodeJsonIfString(linkedIds);
             if (!Array.isArray(linkedIds)) return [];
             const linkedIdStrings = linkedIds.filter((id): id is string => isString(id));
@@ -201,11 +211,14 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
           };
         }
       } else if (f.field_type === "video") {
-        bmResolvers[gqlName] = (parent: DynamicRow) => resolveVideoField(parent[f.api_key]);
+        // SAFETY: video cells hold a URL string or a JSON object (StoredFieldValue).
+        bmResolvers[gqlName] = (parent: DynamicRow) => resolveVideoField(parent[f.api_key] as StoredFieldValue);
       } else {
         // Default camelCase -> snake_case resolver
-        bmResolvers[gqlName] = (parent: DynamicRow, args: unknown, context: GqlContext) => {
-          const rawVal = parent[f.api_key];
+        bmResolvers[gqlName] = (parent: DynamicRow, args: DynamicRow, context: GqlContext) => {
+          // SAFETY: content cells hold StoredFieldValue scalars or JSON strings;
+          // the localized-value and JSON-string checks below validate at runtime.
+          const rawVal = parent[f.api_key] as StoredFieldValue;
           if (f.localized && getRegistryDef(f.field_type)?.localizable) {
             return pickLocalizedEntry(rawVal, withFieldLocaleArgs(context, args)).value;
           }

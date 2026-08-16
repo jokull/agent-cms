@@ -8,7 +8,13 @@ import type { ModelRow, ParsedFieldRow } from "../db/row-types.js";
 /** The minimal DAST document shape expected by extract*Ids helpers */
 export type DastDocInput = { document: { children: readonly unknown[] } };
 
-import type { DynamicRow } from "../dynamic/row-types.js";
+import type { DynamicRow, StoredFieldValue } from "../dynamic/row-types.js";
+
+/**
+ * A value as it appears in GraphQL query variables or argument ASTs: a stored
+ * field value, or a (possibly nested, possibly sparse) array of the same.
+ */
+export type QueryVariableValue = StoredFieldValue | readonly (QueryVariableValue | undefined)[];
 
 /** GraphQL resolver context passed through from Yoga */
 export interface GqlContext {

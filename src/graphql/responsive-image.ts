@@ -1,10 +1,10 @@
-import { isBoolean, isNumber, isObject, isObjectRecord, isString } from "../dynamic/row-types.js";
+import { isBoolean, isNumber, isObject, isObjectRecord, isString, type StoredFieldValue } from "../dynamic/row-types.js";
 import type { AssetObject } from "./gql-types.js";
 
 import type { DynamicRow } from "../dynamic/row-types.js";
 
 
-function coerceStringListValue(value: unknown): string[] {
+function coerceStringListValue(value: StoredFieldValue): string[] {
   if (Array.isArray(value)) {
     return value.filter((entry): entry is string => isString(entry));
   }
@@ -21,9 +21,11 @@ export function normalizeImgixParams(raw: DynamicRow): DynamicRow {
   if (raw.width != null) out.width = raw.width;
   if (raw.height != null) out.height = raw.height;
 
+  // SAFETY: imgix `auto` is a scalar or a scalar list (StoredFieldValue);
+  // the array branch above handles lists, so a non-array reaches the coercer.
   const autoValues = Array.isArray(raw.auto)
     ? raw.auto.filter((entry): entry is string => isString(entry))
-    : coerceStringListValue(raw.auto);
+    : coerceStringListValue(raw.auto as StoredFieldValue);
   if (
     autoValues.includes("format") ||
     autoValues.join(",") === "compress,format" ||

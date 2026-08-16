@@ -1,4 +1,4 @@
-import { isBoolean, isObject, isObjectRecord, isString, type DynamicRow } from "../dynamic/row-types.js";
+import { isBoolean, isObject, isObjectRecord, isString, type DynamicRow, type StoredFieldValue } from "../dynamic/row-types.js";
 import { Effect, Schema, SchemaIssue } from "effect";
 
 import { contentTableName } from "../dynamic/tables.js";
@@ -65,6 +65,16 @@ export function getStructuredTextStorageKey(fieldApiKey: string, localeCode?: st
   return localeCode ? `${fieldApiKey}:${localeCode}` : fieldApiKey;
 }
 
+/**
+ * Read a content-cell value from a row. By the dynamic-zone contract, cell
+ * values are exactly `StoredFieldValue` (scalars as SQLite materializes them,
+ * or the JSON-string form of composite values), so the narrowing cast is safe.
+ */
+function cellValue(row: DynamicRow, key: string): StoredFieldValue {
+  // SAFETY: DynamicRow cell values are StoredFieldValue by the dynamic-zone contract.
+  return row[key] as StoredFieldValue;
+}
+
 function mergeRowMaps(target: Map<string, DynamicRow[]>, source: Map<string, DynamicRow[]>) {
   for (const [tableName, rows] of source) {
     const existing = target.get(tableName);
@@ -73,20 +83,21 @@ function mergeRowMaps(target: Map<string, DynamicRow[]>, source: Map<string, Dyn
   }
 }
 
-function serializeValue(value: unknown): unknown {
+function serializeValue(value: StoredFieldValue | undefined): StoredFieldValue {
   if (value === undefined || value === null) return null;
   if (isBoolean(value)) return value ? 1 : 0;
   if (isObject(value)) return encodeJson(value);
   return value;
 }
 
-function deserializeValue(value: unknown): unknown {
+function deserializeValue(value: StoredFieldValue | undefined): StoredFieldValue | unknown[] | undefined {
   if (isString(value) && (value.startsWith("{") || value.startsWith("["))) {
     return decodeJsonStringOr(value, value);
   }
   return value;
 }
 
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- decode boundary: accepts unvalidated structured_text write payloads and runs Schema decoding.
 function decodeStructuredTextInput(fieldApiKey: string, value: unknown) {
   return Schema.decodeUnknownEffect(StructuredTextWriteInput)(value).pipe(
     Effect.mapError((e) => new ValidationError({
@@ -176,7 +187,7 @@ function formatDastParseErrors(error: Schema.SchemaError): string {
   return formatted.map((issue) => `${(issue.path ?? []).map(String).join(".")}: ${issue.message}`).join("; ");
 }
 
-const validateDastForField = Effect.fn("validateDastForField")(function* (fieldApiKey: string, value: unknown, blocksOnly: boolean) {
+const validateDastForField = Effect.fn("validateDastForField")(function* (fieldApiKey: string, value: DastDocumentInput, blocksOnly: boolean) {
   const dast = yield* Schema.decodeUnknownEffect(DastDocumentSchema)(value).pipe(
     Effect.mapError((e) => new ValidationError({
       message: `Invalid DAST document: ${formatDastParseErrors(e)}`,
@@ -441,7 +452,7 @@ const insertCompiledRows = Effect.fn("insertCompiledRows")(function* (sql: SqlCl
       const columns = Object.keys(row);
       const colList = columns.map((c) => `"${c}"`).join(", ");
       const placeholders = columns.map(() => "?").join(", ");
-      const values = columns.map((c) => serializeValue(row[c]));
+      const values = columns.map((c) => serializeValue(cellValue(row, c)));
       yield* sql.unsafe(
         `INSERT INTO "${tableName}" (${colList}) VALUES (${placeholders})`,
         values
@@ -620,7 +631,8 @@ interface ParsedMaterializeStructuredTextRequest {
 }
 
 function parseMaterializeStructuredTextRequest(request: MaterializeStructuredTextRequest) {
-  const dast = decodeJsonIfString(request.rawValue);
+  // SAFETY: materialize request rawValues are stored cell values (JSON string or scalar).
+  const dast = decodeJsonIfString(request.rawValue as StoredFieldValue);
   if (!dast || !isObject(dast)) return null;
   if (!("document" in dast) || !isObjectRecord(dast.document) || !("children" in dast.document)) {
     return null;
@@ -848,13 +860,14 @@ export const materializeStructuredTextValues = Effect.fn("materializeStructuredT
       if (!blockApiKey) continue;
       const blockModel = blockModelByApiKey.get(blockApiKey);
       if (!blockModel) continue;
-      const rawPayload = decodeJsonIfString(row.__payload);
+      const rawPayload = decodeJsonIfString(cellValue(row, "__payload"));
       if (!isObjectRecord(rawPayload)) continue;
 
       const payload: DynamicRow = { _type: blockApiKey };
       const selectedFieldPlans = request.params.selectedNestedFieldsPlan?.fieldsByBlockApiKey.get(blockApiKey);
       for (const field of blockModel.fields) {
-        const rawValue = deserializeValue(Reflect.get(rawPayload, field.api_key));
+        // SAFETY: block payload cells are stored cell values; a missing key surfaces as undefined, checked below.
+        const rawValue = deserializeValue(Reflect.get(rawPayload, field.api_key) as StoredFieldValue | undefined);
         if (rawValue === undefined) continue;
         if (field.field_type === "structured_text" && rawValue !== null) {
           const nestedPlan = selectedFieldPlans?.get(field.api_key);
@@ -957,7 +970,7 @@ export const materializeRecordStructuredTextFields = Effect.fn("materializeRecor
 
     if (field.field_type === "rich_text") {
       if (field.localized) {
-        const localeMap = decodeJsonIfString(rawValue);
+        const localeMap = decodeJsonIfString(cellValue(params.record, field.api_key));
         if (!isObjectRecord(localeMap)) continue;
         const localized: DynamicRow = {};
         for (const [localeCode, localeValue] of Object.entries(localeMap)) {
@@ -996,7 +1009,7 @@ export const materializeRecordStructuredTextFields = Effect.fn("materializeRecor
 
     // structured_text
     if (field.localized) {
-      const localeMap = decodeJsonIfString(rawValue);
+      const localeMap = decodeJsonIfString(cellValue(params.record, field.api_key));
       if (!isObjectRecord(localeMap)) {
         continue;
       }
@@ -1260,7 +1273,8 @@ export const materializeRichTextValue = Effect.fn("materializeRichTextValue")(fu
   materializeContext?: MaterializeContext;
 }): Effect.fn.Return<DynamicRow[] | null, unknown, SqlClient.SqlClient> {
   const sql = yield* SqlClient.SqlClient;
-  const parsed = decodeJsonIfString(params.rawValue);
+  // SAFETY: materialize request rawValues are stored cell values (JSON string or scalar).
+  const parsed = decodeJsonIfString(params.rawValue as StoredFieldValue);
   if (!Array.isArray(parsed) || parsed.length === 0) return parsed === null ? null : [];
 
   const blockIds = parsed.filter((id): id is string => isString(id));
@@ -1312,12 +1326,13 @@ export const materializeRichTextValue = Effect.fn("materializeRichTextValue")(fu
       const blockModel = blockModelByApiKey.get(blockApiKey);
       if (!blockModel) continue;
 
-      const rawPayload = decodeJsonIfString(row.__payload);
+      const rawPayload = decodeJsonIfString(cellValue(row, "__payload"));
       if (!isObjectRecord(rawPayload)) continue;
 
       const payload: DynamicRow = { _type: blockApiKey, id: rowId };
       for (const field of blockModel.fields) {
-        const rawValue = deserializeValue(Reflect.get(rawPayload, field.api_key));
+        // SAFETY: block payload cells are stored cell values; a missing key surfaces as undefined, checked below.
+        const rawValue = deserializeValue(Reflect.get(rawPayload, field.api_key) as StoredFieldValue | undefined);
         if (rawValue === undefined) continue;
 
         if (field.field_type === "structured_text" && rawValue !== null) {
@@ -1405,7 +1420,7 @@ export const materializeRecordRichTextFields = Effect.fn("materializeRecordRichT
     if (rawValue === null || rawValue === undefined) continue;
 
     if (field.localized) {
-      const localeMap = decodeJsonIfString(rawValue);
+      const localeMap = decodeJsonIfString(cellValue(params.record, field.api_key));
       if (!isObjectRecord(localeMap)) continue;
       const localized: DynamicRow = {};
       for (const [localeCode, localeValue] of Object.entries(localeMap)) {

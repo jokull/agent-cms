@@ -19,6 +19,12 @@
 /** A dynamic row from a content/block table. */
 export type DynamicRow = Record<string, unknown>;
 
+/**
+ * The universe of values stored in a content-table cell: scalars as SQLite
+ * materializes them, or the JSON-string form of composite values.
+ */
+export type StoredFieldValue = string | number | boolean | null | DynamicRow;
+
 /** Narrow `unknown` to a plain object record. Arrays and null are excluded. */
 export function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

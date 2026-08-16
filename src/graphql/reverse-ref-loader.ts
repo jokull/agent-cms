@@ -14,7 +14,7 @@
  * facts).
  */
 import { Effect, Exit, Request, RequestResolver } from "effect";
-import { isString } from "../dynamic/row-types.js";
+import { isString, type StoredFieldValue } from "../dynamic/row-types.js";
 import { SqlClient } from "effect/unstable/sql";
 import type { GqlContext, ReverseRef } from "./gql-types.js";
 import type { DynamicRow } from "../dynamic/row-types.js";
@@ -101,7 +101,9 @@ function extractMatchingParentIds(row: DynamicRow, sourceRefs: readonly ReverseR
       continue;
     }
 
-    const decoded = decodeJsonIfString(rawValue);
+    // SAFETY: link/links cells hold a JSON string or parsed value
+    // (StoredFieldValue); the decode/array checks below validate shape.
+    const decoded = decodeJsonIfString(rawValue as StoredFieldValue);
     if (!Array.isArray(decoded)) continue;
     for (const item of decoded) {
       if (isString(item) && parentIdSet.has(item)) {

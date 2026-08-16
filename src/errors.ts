@@ -116,6 +116,7 @@ export const CmsErrorSchema = Schema.Union([
 export type CmsError = Schema.Schema.Type<typeof CmsErrorSchema>;
 
 /** Runtime type guard for CmsError — `Schema.is` on the tagged union. */
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- this type guard IS the boundary parser: it accepts the opaque error channel and narrows it via Schema.is.
 export function isCmsError(error: unknown): error is CmsError {
   return Schema.is(CmsErrorSchema)(error);
 }

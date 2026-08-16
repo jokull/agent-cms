@@ -1,5 +1,5 @@
 import { SqlClient } from "effect/unstable/sql";
-import { isBoolean, isNumber, isString } from "../dynamic/row-types.js";
+import { isBoolean, isNumber, isObjectRecord, isString, type DynamicRow, type StoredFieldValue } from "../dynamic/row-types.js";
 import { contentTableName } from "../dynamic/tables.js";
 import { Effect, Layer } from "effect";
 import {
@@ -25,8 +25,7 @@ import {
   type StructuredTextMaterializePlan,
 } from "../services/structured-text-service.js";
 import { compileFilterToSql, compileOrderBy, type FilterCompilerOpts } from "./filter-compiler.js";
-import type { DastDocInput } from "./gql-types.js";
-import type { DynamicRow } from "../dynamic/row-types.js";
+import type { DastDocInput, QueryVariableValue } from "./gql-types.js";
 import { pluralize, toCamelCase, toContentTypeName, toTypeName } from "./gql-utils.js";
 import { decodeSnapshot, deserializeRecord } from "../dynamic/decode.js";
 import { recordSqlMetrics } from "./sql-metrics.js";
@@ -171,24 +170,22 @@ function getLinkBucketKey(fieldApiKey: string, targetApiKey: string) {
   return `${fieldApiKey}:${targetApiKey}`;
 }
 
-function isRecord(value: unknown): value is DynamicRow {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isStringArray(value: unknown): value is string[] {
+function isStringArray(value: QueryVariableValue | undefined): value is string[] {
   return Array.isArray(value) && value.every((item) => isString(item));
 }
 
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- type guard: validates arbitrary cell/row values against the DAST document shape; the input contract is "anything" by construction.
 function isDastDocument(value: unknown): value is DastDocInput {
-  if (!isRecord(value)) return false;
+  if (!isObjectRecord(value)) return false;
   const document = Reflect.get(value, "document");
-  if (!isRecord(document)) return false;
+  if (!isObjectRecord(document)) return false;
   return Array.isArray(Reflect.get(document, "children"));
 }
 
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- type guard: validates arbitrary cell/row values against the structured-text envelope shape; the input contract is "anything" by construction.
 function isStructuredTextEnvelope(value: unknown): value is StructuredTextEnvelope {
-  if (!isRecord(value)) return false;
-  return isDastDocument(Reflect.get(value, "value")) && isRecord(Reflect.get(value, "blocks"));
+  if (!isObjectRecord(value)) return false;
+  return isDastDocument(Reflect.get(value, "value")) && isObjectRecord(Reflect.get(value, "blocks"));
 }
 
 function getStructuredTextBlockIds(value: StructuredTextEnvelope) {
@@ -204,7 +201,7 @@ function getStructuredTextBlockIds(value: StructuredTextEnvelope) {
   return computed;
 }
 
-function parseBooleanValue(value: unknown): boolean | null {
+function parseBooleanValue(value: StoredFieldValue): boolean | null {
   if (isBoolean(value)) return value;
   if (value === 1) return true;
   if (value === 0) return false;
@@ -212,24 +209,34 @@ function parseBooleanValue(value: unknown): boolean | null {
 }
 
 function pickLocalizedValue(
-  rawValue: unknown,
+  rawValue: StoredFieldValue,
   localeOptions: LocaleProjectionOptions,
-): unknown {
-  if (!isRecord(rawValue)) return rawValue ?? null;
+): StoredFieldValue {
+  if (!isObjectRecord(rawValue)) return rawValue ?? null;
 
   const locale = localeOptions.locale;
   if (locale) {
     const localized = Reflect.get(rawValue, locale);
-    if (localized !== undefined && localized !== null) return localized;
+    if (localized !== undefined && localized !== null) {
+      // SAFETY: locale maps hold per-locale cell values, which are the
+      // StoredFieldValue universe; a record cell stays a DynamicRow.
+      return localized as StoredFieldValue;
+    }
   }
 
   for (const fallback of localeOptions.fallbackLocales ?? []) {
     const localized = Reflect.get(rawValue, fallback);
-    if (localized !== undefined && localized !== null) return localized;
+    if (localized !== undefined && localized !== null) {
+      // SAFETY: locale maps hold per-locale cell values, which are the
+      // StoredFieldValue universe; a record cell stays a DynamicRow.
+      return localized as StoredFieldValue;
+    }
   }
 
   const firstDefined = Object.values(rawValue).find((value) => value !== undefined && value !== null);
-  return firstDefined ?? null;
+  // SAFETY: locale maps hold per-locale cell values, which are the
+  // StoredFieldValue universe; a record cell stays a DynamicRow.
+  return (firstDefined ?? null) as StoredFieldValue;
 }
 
 function buildFieldNameMap(fields: readonly ParsedFieldRow[]) {
@@ -253,10 +260,13 @@ function buildFragmentMap(document: DocumentNode) {
   );
 }
 
-function resolveValueNode(node: ValueNode, variables: DynamicRow | undefined): unknown {
+function resolveValueNode(node: ValueNode, variables: DynamicRow | undefined): QueryVariableValue | undefined {
   switch (node.kind) {
     case Kind.VARIABLE:
-      return variables?.[node.name.value];
+      // SAFETY: variable cells are JSON values (scalars, records, arrays); the
+      // declared DynamicRow cell is unknown at the zone boundary, so the value
+      // is narrowed to the GraphQL argument-value union here.
+      return variables?.[node.name.value] as QueryVariableValue | undefined;
     case Kind.NULL:
       return null;
     case Kind.INT:
@@ -279,7 +289,7 @@ function getArgumentValue(
   args: readonly ArgumentNode[] | undefined,
   name: string,
   variables: DynamicRow | undefined,
-): unknown {
+): QueryVariableValue | undefined {
   const node = args?.find((arg) => arg.name.value === name);
   return node ? resolveValueNode(node.value, variables) : undefined;
 }
@@ -481,7 +491,7 @@ function buildRootPlan(
       kind: "list",
       model,
       args: {
-        filter: isRecord(filter) ? filter : undefined,
+        filter: isObjectRecord(filter) ? filter : undefined,
         orderBy: isStringArray(orderBy) ? orderBy : undefined,
         first: isNumber(first) ? first : undefined,
         skip: isNumber(skip) ? skip : undefined,
@@ -501,7 +511,7 @@ function buildRootPlan(
     kind: "single",
     model,
     args: {
-      filter: isRecord(filter) ? filter : undefined,
+      filter: isObjectRecord(filter) ? filter : undefined,
       id: isString(id) || isNumber(id) ? id : undefined,
       locale: isString(locale) ? locale : undefined,
       fallbackLocales: isStringArray(fallbackLocales) ? fallbackLocales : undefined,
@@ -510,8 +520,11 @@ function buildRootPlan(
   };
 }
 
-function scalarValue(field: ParsedFieldRow, row: DynamicRow, localeOptions: LocaleProjectionOptions): unknown {
-  const value = row[field.api_key];
+function scalarValue(field: ParsedFieldRow, row: DynamicRow, localeOptions: LocaleProjectionOptions): StoredFieldValue {
+  // SAFETY: content cells hold StoredFieldValue scalars or JSON strings; parsed
+  // composite values surface as DynamicRow. JSON arrays remain JSON strings
+  // until a caller decodes them.
+  const value = row[field.api_key] as StoredFieldValue;
   if (field.field_type === "boolean") return parseBooleanValue(value);
   if (field.localized) return pickLocalizedValue(value, localeOptions);
   return value ?? null;
@@ -558,12 +571,12 @@ function projectStructuredText(
 
 function projectBlock(
   blockId: string,
-  rawBlock: unknown,
+  rawBlock: DynamicRow,
   plan: StructuredTextBlocksPlan,
   linkBuckets: ReadonlyMap<string, ReadonlyMap<string, DynamicRow>>,
   localeOptions: LocaleProjectionOptions,
 ): DynamicRow | null {
-  if (!isRecord(rawBlock)) return null;
+  if (!isObjectRecord(rawBlock)) return null;
   const blockType = Reflect.get(rawBlock, "_type");
   if (!isString(blockType)) return null;
   const blockSelections = plan.selectionsByBlockApiKey.get(blockType) ?? [];
@@ -630,7 +643,7 @@ function projectRow(
     }
     if (selection.kind === "link") {
       const prefetched = row[`__prefetch_${selection.field.api_key}`];
-      if (isRecord(prefetched)) {
+      if (isObjectRecord(prefetched)) {
         result[selection.responseKey] = projectRow(
           decodeSnapshot(prefetched, false),
           selection.target,
@@ -652,7 +665,10 @@ function projectRow(
         : null;
       continue;
     }
-    const rawValue = row[selection.field.api_key];
+    // SAFETY: content cells hold StoredFieldValue scalars or JSON strings; parsed
+    // composite values surface as DynamicRow. The envelope guard below validates
+    // the actual shape at runtime.
+    const rawValue = row[selection.field.api_key] as StoredFieldValue;
     const value = selection.field.localized
       ? pickLocalizedValue(rawValue, localeOptions)
       : rawValue;
@@ -1030,7 +1046,7 @@ async function materializeRootStructuredText(
       const rawValue = row[selection.field.api_key];
       if (!rawValue || isStructuredTextEnvelope(rawValue)) continue;
 
-      if (selection.field.localized && isRecord(rawValue) && !isDastDocument(rawValue)) {
+      if (selection.field.localized && isObjectRecord(rawValue) && !isDastDocument(rawValue)) {
         // Localized field: rawValue is a locale map like { en: { schema, document }, is: { ... } }
         for (const [locale, localeValue] of Object.entries(rawValue)) {
           if (!localeValue || isStructuredTextEnvelope(localeValue)) continue;
@@ -1098,7 +1114,7 @@ async function materializeRootStructuredText(
         if (localeMap) {
           // Merge materialized envelopes back into the locale map, preserving any already-materialized locales
           const existing = row[selection.field.api_key];
-          const merged: DynamicRow = isRecord(existing) ? { ...existing } : {};
+          const merged: DynamicRow = isObjectRecord(existing) ? { ...existing } : {};
           for (const [locale, envelope] of Object.entries(localeMap)) {
             if (envelope) merged[locale] = envelope;
           }
@@ -1125,7 +1141,7 @@ function collectStructuredTextLinkIds(
     if (!blocksPlan) return;
     for (const blockId of blockIds) {
       const rawBlock = value.blocks[blockId];
-      if (!isRecord(rawBlock)) continue;
+      if (!isObjectRecord(rawBlock)) continue;
       const blockType = Reflect.get(rawBlock, "_type");
       if (!isString(blockType)) continue;
       const blockSelections = blocksPlan.selectionsByBlockApiKey.get(blockType) ?? [];
@@ -1198,7 +1214,7 @@ function buildStructuredTextLinkQueries(
       const rawValue = row[selection.field.api_key];
       if (isStructuredTextEnvelope(rawValue)) {
         collectStructuredTextLinkIds(rawValue, selection, idsByBucket, descriptorsByBucket);
-      } else if (selection.field.localized && isRecord(rawValue)) {
+      } else if (selection.field.localized && isObjectRecord(rawValue)) {
         // Localized field: rawValue is a locale map of envelopes
         for (const localeValue of Object.values(rawValue)) {
           if (isStructuredTextEnvelope(localeValue)) {

@@ -1,4 +1,4 @@
-import { isString, stringifyTemplateValue, type DynamicRow } from "../dynamic/row-types.js";
+import { isString, stringifyTemplateValue, type DynamicRow, type StoredFieldValue } from "../dynamic/row-types.js";
 /**
  * Canonical path resolver — batch-resolves canonical_path_template for all
  * published records of a model, traversing link fields via dot notation.
@@ -26,7 +26,7 @@ function rowId(row: DynamicRow): string | null {
   return isString(row.id) ? row.id : null;
 }
 
-function timestampValue(value: unknown): string | null {
+function timestampValue(value: StoredFieldValue): string | null {
   return isString(value) ? value : null;
 }
 
@@ -143,8 +143,10 @@ export const resolveCanonicalPaths = Effect.fn("resolveCanonicalPaths")(function
       if (resolved !== undefined) return encodeURIComponent(resolved);
       return `{${tokenRaw}}`; // leave unreplaced
     });
-    const publishedAt = timestampValue(rec._published_at);
-    const updatedAt = timestampValue(rec._updated_at);
+    // SAFETY: row cells are StoredFieldValue by the dynamic-zone contract; timestamps are stored as ISO strings or null.
+    const publishedAt = timestampValue(rec._published_at as StoredFieldValue);
+    // SAFETY: same dynamic-zone cell guarantee for the updated-at timestamp.
+    const updatedAt = timestampValue(rec._updated_at as StoredFieldValue);
     const lastmod = laterTimestamp(publishedAt, updatedAt) ?? new Date().toISOString();
     results.push({ id: recId, path, lastmod });
   }

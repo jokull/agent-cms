@@ -1,4 +1,4 @@
-import { isBoolean, isNumber, isObjectRecord, isString, type DynamicRow } from "../dynamic/row-types.js";
+import { isBoolean, isNumber, isObjectRecord, isString, type DynamicRow, type StoredFieldValue } from "../dynamic/row-types.js";
 /**
  * Compile GraphQL filter inputs to SQL WHERE clauses.
  * Pushes filtering to the database instead of doing it in-memory.
@@ -14,6 +14,7 @@ import { isBoolean, isNumber, isObjectRecord, isString, type DynamicRow } from "
  */
 
 import { buildPatternMatch } from "../sql-util.js";
+import type { QueryVariableValue } from "./gql-types.js";
 
 
 
@@ -49,11 +50,11 @@ interface SqlCondition {
   params: unknown[];
 }
 
-function isFilterInput(value: unknown): value is FilterInput {
+function isFilterInput(value: StoredFieldValue): value is FilterInput {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isPrimitiveArray(value: unknown): value is Array<string | number | boolean | null> {
+function isPrimitiveArray(value: QueryVariableValue): value is Array<string | number | boolean | null> {
   return Array.isArray(value)
     && value.every((item) =>
       isString(item)
@@ -195,7 +196,10 @@ function buildSqlConditions(
 
     for (const [op, expected] of Object.entries(value)) {
       if (expected === undefined) continue;
-      const cond = compileOperator(op, expected, col, resolveDbExpr(key, dbKey, opts), isJsonArray, isJsonObjectId);
+      // SAFETY: filter operator values are GraphQL argument values — scalars,
+      // records, or arrays of scalars (QueryVariableValue); the operator
+      // compiler validates each shape at runtime.
+      const cond = compileOperator(op, expected as QueryVariableValue, col, resolveDbExpr(key, dbKey, opts), isJsonArray, isJsonObjectId);
       if (cond) conditions.push(cond);
     }
   }
@@ -210,7 +214,7 @@ function buildSqlConditions(
  */
 function compileOperator(
   op: string,
-  expected: unknown,
+  expected: QueryVariableValue,
   col: string,
   dbExpr: string,
   isJsonArray: boolean = false,

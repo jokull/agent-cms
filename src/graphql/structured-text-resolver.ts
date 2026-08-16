@@ -1,4 +1,4 @@
-import { isObjectRecord, isString } from "../dynamic/row-types.js";
+import { isObjectRecord, isString, type StoredFieldValue } from "../dynamic/row-types.js";
 import { Effect } from "effect";
 
 import { contentTableName } from "../dynamic/tables.js";
@@ -12,10 +12,12 @@ import { decodeSnapshot, deserializeRecord } from "../dynamic/decode.js";
 import { loadLinkedRecords } from "./linked-record-loader.js";
 import { materializeStructuredTextValue as materializeStructuredTextEnvelope } from "../services/structured-text-service.js";
 
-function parseUnknownJson(value: unknown): unknown {
+function parseUnknownJson(value: StoredFieldValue): StoredFieldValue {
   if (isString(value)) {
     try {
-      return JSON.parse(value);
+      // SAFETY: JSON.parse yields scalars, records, or arrays — the
+      // stored-value universe; callers validate concrete shapes downstream.
+      return JSON.parse(value) as StoredFieldValue;
     } catch {
       return value;
     }
@@ -183,7 +185,9 @@ export async function resolveStructuredTextValue(params: {
   linkedRecordCache?: Map<string, Promise<DynamicRow | null>>;
   context?: GqlContext;
 }): Promise<{ value: unknown; blocks: DynamicRow[]; inlineBlocks: DynamicRow[]; links: DynamicRow[] } | null> {
-  let raw = parseUnknownJson(params.rawValue);
+  // SAFETY: structured-text cells are JSON strings or parsed objects
+  // (StoredFieldValue); the isObjectRecord check below validates the shape.
+  let raw = parseUnknownJson(params.rawValue as StoredFieldValue);
   if (!isObjectRecord(raw)) return null;
 
   let envelopeValue = raw.value;

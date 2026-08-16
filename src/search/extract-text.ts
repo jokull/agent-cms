@@ -1,14 +1,14 @@
 import type { ParsedFieldRow } from "../db/row-types.js";
-import { isBoolean, isNumber, isString, type DynamicRow } from "../dynamic/row-types.js";
+import { isBoolean, isNumber, isObjectRecord, isString, type DynamicRow, type StoredFieldValue } from "../dynamic/row-types.js";
 import { isSearchable } from "../db/validators.js";
 
 /**
  * Extract plain text from a DAST document.
  * Walks the tree collecting span.value strings.
  */
-export function extractDastText(dast: unknown): string {
-  if (!isRecord(dast)) return "";
-  const doc = isRecord(dast.document) ? dast.document : dast;
+export function extractDastText(dast: DynamicRow | null | undefined): string {
+  if (!isObjectRecord(dast)) return "";
+  const doc = isObjectRecord(dast.document) ? dast.document : dast;
   const children = getArray(doc, "children");
   if (!children) return "";
   const parts: string[] = [];
@@ -20,9 +20,9 @@ export function extractDastText(dast: unknown): string {
  * Extract text sections from DAST, splitting at heading boundaries.
  * Useful for Phase 2 chunking.
  */
-export function extractDastSections(dast: unknown): TextSection[] {
-  if (!isRecord(dast)) return [];
-  const doc = isRecord(dast.document) ? dast.document : dast;
+export function extractDastSections(dast: DynamicRow | null | undefined): TextSection[] {
+  if (!isObjectRecord(dast)) return [];
+  const doc = isObjectRecord(dast.document) ? dast.document : dast;
   const children = getArray(doc, "children");
   if (!children) return [];
 
@@ -31,7 +31,7 @@ export function extractDastSections(dast: unknown): TextSection[] {
   let currentParts: string[] = [];
 
   for (const node of children) {
-    if (!isRecord(node)) continue;
+    if (!isObjectRecord(node)) continue;
     if (node.type === "heading") {
       // Flush previous section
       if (currentParts.length > 0) {
@@ -80,8 +80,10 @@ export function extractRecordText(
 
   for (const field of fields) {
     if (!isSearchable(field.validators)) continue;
-    const value = record[field.api_key];
-    if (value === undefined || value === null) continue;
+    // SAFETY: DynamicRow cells are StoredFieldValue by the dynamic-zone contract
+    // (the Record<string, unknown> window hides the union).
+    const value = record[field.api_key] as StoredFieldValue;
+    if (value == null) continue;
 
     const texts = extractFieldText(field, value);
     if (texts.length === 0) continue;
@@ -100,12 +102,13 @@ export function extractRecordText(
   };
 }
 
-function extractFieldText(field: ParsedFieldRow, value: unknown): string[] {
+function extractFieldText(field: ParsedFieldRow, value: StoredFieldValue): string[] {
   // Localized fields: extract all locale values
-  if (field.localized && isRecord(value)) {
+  if (field.localized && isObjectRecord(value)) {
     const texts: string[] = [];
     for (const localeValue of Object.values(value)) {
-      texts.push(...extractFieldText({ ...field, localized: 0 }, localeValue));
+      // SAFETY: locale-map values are content-table cells (StoredFieldValue).
+      texts.push(...extractFieldText({ ...field, localized: 0 }, localeValue as StoredFieldValue));
     }
     return texts;
   }
@@ -113,12 +116,12 @@ function extractFieldText(field: ParsedFieldRow, value: unknown): string[] {
   switch (field.field_type) {
     case "structured_text": {
       const parsed = isString(value) ? safeParse(value) : value;
-      if (!isRecord(parsed)) return [];
-      const dast = isRecord(parsed.value) ? parsed.value : parsed;
+      if (!isObjectRecord(parsed)) return [];
+      const dast = isObjectRecord(parsed.value) ? parsed.value : parsed;
       const parts: string[] = [];
       const text = extractDastText(dast);
       if (text) parts.push(text);
-      if (isRecord(parsed.blocks)) {
+      if (isObjectRecord(parsed.blocks)) {
         parts.push(...extractGenericText(parsed.blocks));
       }
       return parts;
@@ -132,7 +135,7 @@ function extractFieldText(field: ParsedFieldRow, value: unknown): string[] {
       const parts: string[] = [];
       for (const item of parsed) {
         if (isString(item)) continue; // raw block ID — no text to extract
-        if (isRecord(item)) {
+        if (isObjectRecord(item)) {
           parts.push(...extractGenericText(item));
         }
       }
@@ -141,7 +144,7 @@ function extractFieldText(field: ParsedFieldRow, value: unknown): string[] {
 
     case "seo": {
       const parsed = isString(value) ? safeParse(value) : value;
-      if (!isRecord(parsed)) return [];
+      if (!isObjectRecord(parsed)) return [];
       const parts: string[] = [];
       if (isString(parsed.title)) parts.push(parsed.title);
       if (isString(parsed.description)) parts.push(parsed.description);
@@ -155,7 +158,7 @@ function extractFieldText(field: ParsedFieldRow, value: unknown): string[] {
 }
 
 /** Extract text from any value — strings directly, JSON objects recursively. */
-function extractGenericText(value: unknown): string[] {
+function extractGenericText(value: StoredFieldValue): string[] {
   if (isString(value)) {
     // Skip values that look like IDs (ULIDs, UUIDs)
     if (/^[0-9a-z]{10}$/.test(value)) return []; // nanoid (lowercase alphanumeric, 10 chars)
@@ -169,16 +172,19 @@ function extractGenericText(value: unknown): string[] {
     // Arrays of IDs (links) — skip
     const texts: string[] = [];
     for (const item of value) {
-      texts.push(...extractGenericText(item));
+      // SAFETY: array cells are content-table cells (StoredFieldValue); the
+      // Array.isArray narrow goes through any, so the union is recovered here.
+      texts.push(...extractGenericText(item as StoredFieldValue));
     }
     return texts;
   }
-  if (isRecord(value)) {
+  if (isObjectRecord(value)) {
     // JSON objects — extract string values recursively
     const texts: string[] = [];
     for (const [key, v] of Object.entries(value)) {
       if (key.startsWith("_")) continue;
-      texts.push(...extractGenericText(v));
+      // SAFETY: record cells are content-table cells (StoredFieldValue).
+      texts.push(...extractGenericText(v as StoredFieldValue));
     }
     return texts;
   }
@@ -187,10 +193,6 @@ function extractGenericText(value: unknown): string[] {
 
 // --- Helpers ---
 
-function isRecord(v: unknown): v is DynamicRow {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-
 function getArray(obj: DynamicRow, key: string): unknown[] | undefined {
   const v = obj[key];
   return Array.isArray(v) ? v : undefined;
@@ -198,7 +200,7 @@ function getArray(obj: DynamicRow, key: string): unknown[] | undefined {
 
 function collectText(nodes: unknown[], parts: string[]) {
   for (const node of nodes) {
-    if (!isRecord(node)) continue;
+    if (!isObjectRecord(node)) continue;
     // Span nodes contain the actual text
     if (node.type === "span" && isString(node.value)) {
       parts.push(node.value);
@@ -213,9 +215,12 @@ function collectText(nodes: unknown[], parts: string[]) {
   }
 }
 
-function safeParse(json: string): unknown {
+function safeParse(json: string): StoredFieldValue {
   try {
-    return JSON.parse(json);
+    // SAFETY: JSON.parse yields well-formed JSON, which is the stored-field-value
+    // universe (scalars, records, arrays); the union's DynamicRow member carries
+    // the object/array forms at the type level.
+    return JSON.parse(json) as StoredFieldValue;
   } catch {
     return null;
   }

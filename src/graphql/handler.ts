@@ -1,5 +1,5 @@
 import { createYoga } from "graphql-yoga";
-import { isString } from "../dynamic/row-types.js";
+import { isObjectRecord, isString } from "../dynamic/row-types.js";
 import { Effect, Layer, Logger } from "effect";
 import type { DynamicRow } from "../dynamic/row-types.js";
 import {
@@ -49,20 +49,17 @@ interface GraphqlRequestBody {
   variables?: DynamicRow | null;
 }
 
-function isRecord(value: unknown): value is DynamicRow {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function readCredentialType(request: Request): CredentialType {
   const raw = request.headers.get("X-Credential-Type");
   return raw === "admin" || raw === "editor" ? raw : null;
 }
 
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- HTTP boundary validator: narrows an arbitrary parsed JSON request body to the GraphQL request shape; the input contract is "anything parseable" by construction.
 function isGraphqlRequestBody(value: unknown): value is GraphqlRequestBody {
-  if (!isRecord(value)) return false;
+  if (!isObjectRecord(value)) return false;
   const operationNameValid = value.operationName === undefined || value.operationName === null || isString(value.operationName);
   const queryValid = value.query === undefined || value.query === null || isString(value.query);
-  const variablesValid = value.variables === undefined || value.variables === null || isRecord(value.variables);
+  const variablesValid = value.variables === undefined || value.variables === null || isObjectRecord(value.variables);
   return operationNameValid && queryValid && variablesValid;
 }
 
@@ -458,7 +455,7 @@ export function createGraphQLHandler(
     if (unsupportedSelections.length > 0) {
       const unsupportedDocument = buildSubsetDocument(document, operation, unsupportedSelections);
       const unsupportedResult = await executeDocument(unsupportedDocument, variables, context);
-      if (isRecord(unsupportedResult.data)) {
+      if (isObjectRecord(unsupportedResult.data)) {
         Object.assign(mergedData, unsupportedResult.data);
       }
       if (unsupportedResult.errors) {

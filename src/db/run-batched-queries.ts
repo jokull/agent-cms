@@ -15,12 +15,14 @@ interface D1ClientLike {
   };
 }
 
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- duck-typed runtime boundary: the D1 database arrives inside Effect SQL's config and only .prepare/.batch exist on the type, so this guard is the parser.
 function isD1Database(value: unknown): value is D1Database {
   if (!isObjectRecord(value)) return false;
   return typeof value.prepare === "function"
     && typeof value.batch === "function";
 }
 
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- duck-typed runtime boundary: SqlClient's declared surface has no `config` member; this guard is the parser for the D1 client shape.
 function isD1ClientLike(value: unknown): value is SqlClient.SqlClient & D1ClientLike {
   if (!isObjectRecord(value)) return false;
   const { config } = value;

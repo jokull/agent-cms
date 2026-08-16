@@ -1,4 +1,4 @@
-import { isObject } from "./dynamic/row-types.js";
+import { isObject, type StoredFieldValue } from "./dynamic/row-types.js";
 export interface CmsAdminClientConfig {
   readonly endpoint: string;
   readonly writeKey: string;
@@ -32,7 +32,7 @@ function trimTrailingSlash(input: string): string {
   return input.replace(/\/$/, "");
 }
 
-async function readJsonOrError(response: Response): Promise<unknown> {
+async function readJsonOrError(response: Response): Promise<StoredFieldValue> {
   const contentType = response.headers.get("content-type") ?? "";
   if (contentType.includes("application/json")) {
     return response.json();

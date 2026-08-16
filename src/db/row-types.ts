@@ -2,9 +2,9 @@
  * Row types for system tables as returned by @effect/sql.
  * These are the snake_case column names from SQLite, not camelCase.
  */
-import type { DynamicRow } from "../dynamic/row-types.js";
+import { isObjectRecord, type DynamicRow } from "../dynamic/row-types.js";
 
-export interface ModelRow {
+export interface ModelRow extends DynamicRow {
   readonly id: string;
   readonly name: string;
   readonly api_key: string;
@@ -129,27 +129,22 @@ export interface BlockRow extends DynamicRow {
 
 // --- Type guards ---
 
-export function isModelRow(row: unknown): row is ModelRow {
+export function isModelRow(row: DynamicRow | null | undefined): row is ModelRow {
   return typeof row === "object" && row !== null && "api_key" in row && "is_block" in row;
 }
 
-export function isContentRow(row: unknown): row is ContentRow {
+export function isContentRow(row: DynamicRow | null | undefined): row is ContentRow {
   return typeof row === "object" && row !== null && "id" in row && "_status" in row;
 }
 
 // --- Helpers ---
-
-/** Runtime check that a value is a plain object record */
-function isRecord(value: unknown): value is DynamicRow {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 /** Safely parse JSON to a Record, returning empty object on failure */
 function parseJsonRecord(json: string | null | undefined): DynamicRow {
   if (!json) return {};
   try {
     const parsed: unknown = JSON.parse(json);
-    if (isRecord(parsed)) return parsed;
+    if (isObjectRecord(parsed)) return parsed;
   } catch { /* invalid JSON */ }
   return {};
 }

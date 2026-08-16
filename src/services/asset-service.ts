@@ -1,4 +1,4 @@
-import { isObjectRecord, isString, type DynamicRow } from "../dynamic/row-types.js";
+import { isObjectRecord, isString, type DynamicRow, type StoredFieldValue } from "../dynamic/row-types.js";
 import { DateTime, Context, Effect } from "effect";
 
 import { contentTableName } from "../dynamic/tables.js";
@@ -522,7 +522,7 @@ interface AssetReferencingField {
  * `field-types.ts`'s `localizable: false`), so the raw column is always the plain
  * (non-locale-keyed) value — no locale-map unwrapping needed.
  */
-function extractAssetIds(fieldType: string, rawValue: unknown): string[] {
+function extractAssetIds(fieldType: string, rawValue: StoredFieldValue): string[] {
   const value = decodeJsonIfString(rawValue);
   if (fieldType === "media") {
     const ref = parseMediaFieldReference(value);
@@ -609,7 +609,8 @@ export function getAssetUsages(id: string) {
 
       for (const row of rows) {
         for (const field of fields) {
-          const assetIds = extractAssetIds(field.field_type, row[field.api_key]);
+          // SAFETY: content/block table cells are StoredFieldValue by the dynamic-zone contract.
+          const assetIds = extractAssetIds(field.field_type, row[field.api_key] as StoredFieldValue);
           if (!assetIds.includes(id)) continue;
 
           if (isBlock) {

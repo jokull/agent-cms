@@ -1,4 +1,4 @@
-import { isNumber, isObjectRecord, isString, stringArrayFrom } from "../dynamic/row-types.js";
+import { isNumber, isObjectRecord, isString, stringArrayFrom, type StoredFieldValue } from "../dynamic/row-types.js";
 /**
  * Build asset-related resolvers: allUploads, _allUploadsMeta,
  * Asset.responsiveImage, SeoField.image, ColorField.hex.
@@ -20,7 +20,7 @@ import { normalizeImgixParams } from "./responsive-image.js";
 
 type RunSqlFn = SchemaBuilderContext["runSql"];
 
-function pickLocalizedSiteValue(rawValue: unknown, locale?: string | null, fallbackLocales: string[] = []) {
+function pickLocalizedSiteValue(rawValue: StoredFieldValue, locale?: string | null, fallbackLocales: string[] = []) {
   if (rawValue == null) return null;
   const localeMap = decodeJsonIfString(rawValue);
   if (!isObjectRecord(localeMap)) {
@@ -39,7 +39,7 @@ function pickLocalizedSiteValue(rawValue: unknown, locale?: string | null, fallb
   return firstValue ?? null;
 }
 
-function pickLocalizedSiteString(rawValue: unknown, locale?: string | null, fallbackLocales: string[] = []) {
+function pickLocalizedSiteString(rawValue: StoredFieldValue, locale?: string | null, fallbackLocales: string[] = []) {
   const value = pickLocalizedSiteValue(rawValue, locale, fallbackLocales);
   return isString(value) ? value : null;
 }
@@ -129,7 +129,7 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
 
   // _site query - DatoCMS-compatible site info with globalSeo and faviconMetaTags
   queryFieldDefs.push("_site: SiteInfo!");
-  (resolvers.Query)._site = async (_parent: unknown, args: DynamicRow, context: DynamicRow) => {
+  (resolvers.Query)._site = async (_parent: DynamicRow, args: DynamicRow, context: DynamicRow) => {
     // Load site settings from DB (returns defaults if table/row doesn't exist)
     const settings = await runSql(
       Effect.gen(function* () {
@@ -149,10 +149,14 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
     const fallbackLocales = argFallbackLocales.length > 0 ? argFallbackLocales : stringArrayFrom(context.fallbackLocales);
     const fallbackSeo = settings
       ? {
-          title: pickLocalizedSiteString(settings.fallback_seo_title, locale, fallbackLocales),
-          description: pickLocalizedSiteString(settings.fallback_seo_description, locale, fallbackLocales),
-          twitterCard: pickLocalizedSiteString(settings.fallback_seo_twitter_card, locale, fallbackLocales),
-          image: pickLocalizedSiteString(settings.fallback_seo_image_id, locale, fallbackLocales),
+          // SAFETY: site_settings columns hold scalar or JSON-string values (StoredFieldValue).
+          title: pickLocalizedSiteString(settings.fallback_seo_title as StoredFieldValue, locale, fallbackLocales),
+          // SAFETY: site_settings columns hold scalar or JSON-string values (StoredFieldValue).
+          description: pickLocalizedSiteString(settings.fallback_seo_description as StoredFieldValue, locale, fallbackLocales),
+          // SAFETY: site_settings columns hold scalar or JSON-string values (StoredFieldValue).
+          twitterCard: pickLocalizedSiteString(settings.fallback_seo_twitter_card as StoredFieldValue, locale, fallbackLocales),
+          // SAFETY: site_settings columns hold scalar or JSON-string values (StoredFieldValue).
+          image: pickLocalizedSiteString(settings.fallback_seo_image_id as StoredFieldValue, locale, fallbackLocales),
         }
       : null;
     const hasFallbackSeo = fallbackSeo !== null
@@ -166,10 +170,14 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
       noIndex: settings?.no_index === 1 || settings?.no_index === true || false,
       faviconMetaTags: isString(settings?.favicon_id) ? await buildFaviconMetaTags(runSql, settings.favicon_id) : [],
       globalSeo: settings ? {
-        siteName: pickLocalizedSiteString(settings.site_name, locale, fallbackLocales),
-        titleSuffix: pickLocalizedSiteString(settings.title_suffix, locale, fallbackLocales),
-        facebookPageUrl: pickLocalizedSiteString(settings.facebook_page_url, locale, fallbackLocales),
-        twitterAccount: pickLocalizedSiteString(settings.twitter_account, locale, fallbackLocales),
+        // SAFETY: site_settings columns hold scalar or JSON-string values (StoredFieldValue).
+        siteName: pickLocalizedSiteString(settings.site_name as StoredFieldValue, locale, fallbackLocales),
+        // SAFETY: site_settings columns hold scalar or JSON-string values (StoredFieldValue).
+        titleSuffix: pickLocalizedSiteString(settings.title_suffix as StoredFieldValue, locale, fallbackLocales),
+        // SAFETY: site_settings columns hold scalar or JSON-string values (StoredFieldValue).
+        facebookPageUrl: pickLocalizedSiteString(settings.facebook_page_url as StoredFieldValue, locale, fallbackLocales),
+        // SAFETY: site_settings columns hold scalar or JSON-string values (StoredFieldValue).
+        twitterAccount: pickLocalizedSiteString(settings.twitter_account as StoredFieldValue, locale, fallbackLocales),
         fallbackSeo: hasFallbackSeo ? fallbackSeo : null,
       } : null,
     };
@@ -181,7 +189,7 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
   queryFieldDefs.push("allUploads(filter: UploadFilter, orderBy: [UploadOrderBy!], first: Int, skip: Int): [Asset!]!");
   queryFieldDefs.push("_allUploadsMeta(filter: UploadFilter): UploadMeta!");
 
-  (resolvers.Query).allUploads = async (_: unknown, args: DynamicRow) => {
+  (resolvers.Query).allUploads = async (_: DynamicRow, args: DynamicRow) => {
     return await runSql(
       Effect.gen(function* () {
         const s = yield* SqlClient.SqlClient;
@@ -203,7 +211,7 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
     );
   };
 
-  (resolvers.Query)._allUploadsMeta = async (_: unknown, args: DynamicRow) => {
+  (resolvers.Query)._allUploadsMeta = async (_: DynamicRow, args: DynamicRow) => {
     return {
       count: await runSql(
         Effect.gen(function* () {
@@ -231,7 +239,7 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
 
   // SeoField.image resolver: look up asset by ID
   resolvers.SeoField = {
-    image: async (seo: DynamicRow, _args: unknown, context: GqlContext) => {
+    image: async (seo: DynamicRow, _args: DynamicRow, context: GqlContext) => {
       const assetId = seo.image;
       if (!isString(assetId)) return null;
       const a = await loadAsset({ runSql, id: assetId, context });

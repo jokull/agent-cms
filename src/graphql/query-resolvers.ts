@@ -1,4 +1,4 @@
-import { isBoolean, isNumber, isObject, isObjectRecord, isString, stringArrayFrom } from "../dynamic/row-types.js";
+import { isBoolean, isNumber, isObject, isObjectRecord, isString, stringArrayFrom, type StoredFieldValue } from "../dynamic/row-types.js";
 /**
  * Build Query root field resolvers for content models:
  * list queries, single queries, meta queries, and filter/orderBy type defs.
@@ -22,8 +22,8 @@ import { decodeJsonIfString } from "../json.js";
 /**
  * Build filter/orderBy type defs and Query resolvers for each content model.
  */
-function pickLocalizedStructuredTextValue(rawValue: unknown, context: GqlContext, defaultLocale?: string | null) {
-  if (rawValue === null || rawValue === undefined) return { locale: null, value: null };
+function pickLocalizedStructuredTextValue(rawValue: StoredFieldValue, context: GqlContext, defaultLocale?: string | null) {
+  if (rawValue == null) return { locale: null, value: null };
 
   const localeMap = decodeJsonIfString(rawValue);
   if (!isObjectRecord(localeMap)) {
@@ -240,8 +240,10 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
         const allowedBlockApiKeys = getBlockWhitelist(field.validators) ?? [];
 
         for (const record of records) {
+          // SAFETY: content cells hold StoredFieldValue scalars or JSON strings;
+          // the locale map / envelope checks below validate shapes at runtime.
           const selected = field.localized
-            ? pickLocalizedStructuredTextValue(record[field.api_key], context, defaultLocale)
+            ? pickLocalizedStructuredTextValue(record[field.api_key] as StoredFieldValue, context, defaultLocale)
             : { locale: null, value: record[field.api_key] };
           const rawValue = selected.value;
           if (!rawValue) continue;
@@ -355,7 +357,7 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
       );
     }
 
-    (resolvers.Query)[listName] = async (_: unknown, args: DynamicRow, context: GqlContext, info: GraphQLResolveInfo) => {
+    (resolvers.Query)[listName] = async (_: DynamicRow, args: DynamicRow, context: GqlContext, info: GraphQLResolveInfo) => {
       const includeDrafts = context.includeDrafts ?? false;
       const excludeInvalid = isBoolean(args.excludeInvalid)
         ? args.excludeInvalid
@@ -389,7 +391,7 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
       return results;
     };
 
-    (resolvers.Query)[singleName] = async (_: unknown, args: DynamicRow, context: GqlContext, info: GraphQLResolveInfo) => {
+    (resolvers.Query)[singleName] = async (_: DynamicRow, args: DynamicRow, context: GqlContext, info: GraphQLResolveInfo) => {
       const includeDrafts = context.includeDrafts ?? false;
       const locale = isString(args.locale)
         ? args.locale
@@ -436,7 +438,7 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
       return null;
     };
 
-    (resolvers.Query)[metaName] = async (_: unknown, args: DynamicRow, context: GqlContext) => {
+    (resolvers.Query)[metaName] = async (_: DynamicRow, args: DynamicRow, context: GqlContext) => {
       const includeDrafts = context.includeDrafts ?? false;
       const excludeInvalid = isBoolean(args.excludeInvalid)
         ? args.excludeInvalid

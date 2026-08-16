@@ -1,5 +1,5 @@
 import { createCmsAdminClient, type CmsAdminClientConfig } from "./admin-client.js";
-import { isString } from "./dynamic/row-types.js";
+import { isString, type StoredFieldValue } from "./dynamic/row-types.js";
 import { tryDecodeJsonString } from "./json.js";
 
 export interface EditorMcpPrincipal {
@@ -136,7 +136,7 @@ async function sha256Base64Url(input: string): Promise<string> {
   return base64UrlEncodeBytes(new Uint8Array(digest));
 }
 
-function jsonResponse(body: unknown, status: number = 200): Response {
+function jsonResponse(body: StoredFieldValue, status: number = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json" },

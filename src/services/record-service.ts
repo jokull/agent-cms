@@ -1,4 +1,4 @@
-import { isBoolean, isNumber, isObject, isObjectRecord, isString, type DynamicRow } from "../dynamic/row-types.js";
+import { isBoolean, isNumber, isObject, isObjectRecord, isString, type DynamicRow, type StoredFieldValue } from "../dynamic/row-types.js";
 import { Effect, Schema } from "effect";
 
 import { contentTableName } from "../dynamic/tables.js";
@@ -94,7 +94,17 @@ const getModelFields = Effect.fn("getModelFields")(function* (modelId: string) {
   return fields.map(parseFieldValidators);
 });
 
-function isEmptyFieldValue(value: unknown): boolean {
+/**
+ * Read a content-cell value from a row. By the dynamic-zone contract, cell
+ * values are exactly `StoredFieldValue` (scalars as SQLite materializes them,
+ * or the JSON-string form of composite values), so the narrowing cast is safe.
+ */
+function cellValue(row: DynamicRow, key: string): StoredFieldValue {
+  // SAFETY: DynamicRow cell values are StoredFieldValue by the dynamic-zone contract.
+  return row[key] as StoredFieldValue;
+}
+
+function isEmptyFieldValue(value: StoredFieldValue | undefined): boolean {
   return value === undefined || value === null || value === "";
 }
 
@@ -139,7 +149,7 @@ function requiredFieldIssues(
   labelPrefix?: string,
 ): ValidationIssue[] {
   return modelFields
-    .filter((field) => isRequired(field.validators) && isEmptyFieldValue(data[field.api_key]))
+    .filter((field) => isRequired(field.validators) && isEmptyFieldValue(cellValue(data, field.api_key)))
     .map((field) => ({
       field: field.api_key,
       code: "required" as const,
@@ -149,7 +159,7 @@ function requiredFieldIssues(
     }));
 }
 
-function decodeLocalizedStructuredTextMap(field: ParsedFieldRow, rawValue: unknown) {
+function decodeLocalizedStructuredTextMap(field: ParsedFieldRow, rawValue: StoredFieldValue) {
   return Schema.decodeUnknownEffect(
     Schema.Record(Schema.String, Schema.NullOr(Schema.Unknown))
   )(rawValue).pipe(
@@ -160,7 +170,7 @@ function decodeLocalizedStructuredTextMap(field: ParsedFieldRow, rawValue: unkno
   );
 }
 
-function decodeLocalizedFieldMap(field: ParsedFieldRow, rawValue: unknown) {
+function decodeLocalizedFieldMap(field: ParsedFieldRow, rawValue: StoredFieldValue) {
   return Schema.decodeUnknownEffect(
     Schema.Record(Schema.String, Schema.Unknown)
   )(rawValue).pipe(
@@ -172,7 +182,7 @@ function decodeLocalizedFieldMap(field: ParsedFieldRow, rawValue: unknown) {
   );
 }
 
-function parseExistingLocaleMap(rawValue: unknown): DynamicRow {
+function parseExistingLocaleMap(rawValue: StoredFieldValue | undefined): DynamicRow {
   if (rawValue === null || rawValue === undefined) return {};
   const parsed = decodeJsonIfString(rawValue);
   if (!isObjectRecord(parsed)) return {};
@@ -189,33 +199,38 @@ function isLocaleKey(key: string): boolean {
   return /^[a-z]{2,3}(?:[_-][A-Za-z0-9]{2,8})*$/.test(key);
 }
 
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- type guard: must accept opaque values to narrow them.
 function isLocalizedValueMap(value: unknown): value is DynamicRow {
   return isJsonRecord(value) && Object.keys(value).length > 0 && Object.keys(value).every(isLocaleKey);
 }
 
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- type guard: must accept opaque values to narrow them.
 function isJsonRecord(value: unknown): value is DynamicRow {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- type guard: must accept opaque values to narrow them.
 function isMistakenMediaObject(value: unknown): value is DynamicRow {
   return isJsonRecord(value) && isString(value.id) && value.id.length > 0 && value.upload_id === undefined;
 }
 
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- type guard: must accept opaque values to narrow them.
 function isMistakenLinkObject(value: unknown): value is DynamicRow {
   return isJsonRecord(value) && isString(value.id) && value.id.length > 0;
 }
 
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- defensive shape check over unvalidated links payloads (strings, objects, or arrays).
 function hasMistakenLinkObject(value: unknown): boolean {
   return Array.isArray(value) && value.some((entry) => isMistakenLinkObject(entry));
 }
 
-function toSlugSourceString(value: unknown): string | null {
+function toSlugSourceString(value: StoredFieldValue): string | null {
   if (isString(value)) return value;
   if (isNumber(value) || isBoolean(value)) return String(value);
   return null;
 }
 
-function normalizeBooleanValue(field: ParsedFieldRow, value: unknown): unknown {
+function normalizeBooleanValue(field: ParsedFieldRow, value: StoredFieldValue): StoredFieldValue {
   if (field.field_type !== "boolean") return value;
   if (value === 1) return true;
   if (value === 0) return false;
@@ -234,7 +249,7 @@ function normalizeBooleanFields(record: DynamicRow, fields: ReadonlyArray<Parsed
   const normalized = { ...record };
   for (const field of fields) {
     if (field.api_key in normalized) {
-      normalized[field.api_key] = normalizeBooleanValue(field, normalized[field.api_key]);
+      normalized[field.api_key] = normalizeBooleanValue(field, cellValue(normalized, field.api_key));
     }
   }
   return normalized;
@@ -252,13 +267,17 @@ function scopeStructuredTextIds<T>(value: T, scope: string): T {
 
   const idMap = new Map(originalIds.map((id) => [id, `${scope}:${id}`]));
 
-  const rewriteNode = (node: unknown): unknown => {
-    if (Array.isArray(node)) return node.map(rewriteNode);
+  const rewriteNode = (node: StoredFieldValue | unknown[]): StoredFieldValue | unknown[] => {
+    if (Array.isArray(node)) {
+      // SAFETY: DAST children arrays hold nodes (objects/scalars), i.e. cell values or arrays.
+      return node.map((child) => rewriteNode(child as StoredFieldValue | unknown[]));
+    }
     if (!isObjectRecord(node)) return node;
 
     const next: DynamicRow = {};
     for (const [key, child] of Object.entries(node)) {
-      next[key] = rewriteNode(child);
+      // SAFETY: DAST node fields hold nested nodes, node arrays, or scalars.
+      next[key] = rewriteNode(child as StoredFieldValue | unknown[]);
     }
     if ((next.type === "block" || next.type === "inlineBlock") && isString(next.item)) {
       next.item = idMap.get(next.item) ?? next.item;
@@ -267,7 +286,8 @@ function scopeStructuredTextIds<T>(value: T, scope: string): T {
   };
 
   if ("value" in mutableClone) {
-    mutableClone.value = rewriteNode(mutableClone.value);
+    // SAFETY: the write-input `value` is a DAST document (object) or shorthand — a cell value.
+    mutableClone.value = rewriteNode(mutableClone.value as StoredFieldValue | unknown[]);
   }
   mutableClone.blocks = Object.fromEntries(
     Object.entries(blocks ?? {}).map(([blockId, blockValue]) => [
@@ -304,7 +324,7 @@ function createFieldErrorMessage(prefix: string | undefined, message: string) {
   return prefix ? `${prefix}: ${message}` : message;
 }
 
-function getReferenceIds(fieldType: string, value: unknown): string[] {
+function getReferenceIds(fieldType: string, value: StoredFieldValue): string[] {
   if (fieldType === "link") {
     return isString(value) && value.length > 0 ? [value] : [];
   }
@@ -316,7 +336,7 @@ function getReferenceIds(fieldType: string, value: unknown): string[] {
   return [];
 }
 
-function getAssetIds(fieldType: string, value: unknown): string[] {
+function getAssetIds(fieldType: string, value: StoredFieldValue): string[] {
   if (fieldType === "media") {
     const ref = parseMediaFieldReference(value);
     return ref ? [ref.uploadId] : [];
@@ -333,7 +353,7 @@ function getAssetIds(fieldType: string, value: unknown): string[] {
 const validateAssetFieldValue = Effect.fn("validateAssetFieldValue")(function* (
   sql: SqlClient.SqlClient,
   field: ParsedFieldRow,
-  value: unknown,
+  value: StoredFieldValue,
   errorPrefix?: string,
 ) {
   const assetIds = getAssetIds(field.field_type, value);
@@ -360,7 +380,7 @@ const validateAssetFieldValue = Effect.fn("validateAssetFieldValue")(function* (
 const validateReferenceFieldValue = Effect.fn("validateReferenceFieldValue")(function* (
   sql: SqlClient.SqlClient,
   field: ParsedFieldRow,
-  value: unknown,
+  value: StoredFieldValue,
   errorPrefix?: string,
 ) {
   const targetModelApiKeys = field.field_type === "link"
@@ -428,7 +448,7 @@ const processCreateLikeRecordFields = Effect.fn("processCreateLikeRecordFields")
     Effect.gen(function* () {
     if (field.field_type === "structured_text" && data[field.api_key] !== undefined && data[field.api_key] !== null) {
       if (field.localized) {
-        const localeMap = yield* decodeLocalizedStructuredTextMap(field, data[field.api_key]).pipe(
+        const localeMap = yield* decodeLocalizedStructuredTextMap(field, cellValue(data, field.api_key)).pipe(
           Effect.mapError((error) => new ValidationError({
             message: createFieldErrorMessage(errorPrefix, error.message),
             field: error.field,
@@ -441,7 +461,8 @@ const processCreateLikeRecordFields = Effect.fn("processCreateLikeRecordFields")
             continue;
           }
 
-          const expandedLocale = expandStructuredTextShorthand(localeValue);
+          // SAFETY: per-locale DAST values in a decoded locale map are cell values.
+          const expandedLocale = expandStructuredTextShorthand(localeValue as StoredFieldValue);
 
           const stInput = yield* Schema.decodeUnknownEffect(StructuredTextWriteInput)(scopeStructuredTextIds(expandedLocale, `${field.api_key}:${localeCode}`)).pipe(
             Effect.mapError((e) => new ValidationError({
@@ -477,7 +498,7 @@ const processCreateLikeRecordFields = Effect.fn("processCreateLikeRecordFields")
         return;
       }
 
-      const expanded = expandStructuredTextShorthand(data[field.api_key]);
+      const expanded = expandStructuredTextShorthand(cellValue(data, field.api_key));
 
       const stInput = yield* Schema.decodeUnknownEffect(StructuredTextWriteInput)(expanded).pipe(
         Effect.mapError((e) => new ValidationError({
@@ -511,7 +532,7 @@ const processCreateLikeRecordFields = Effect.fn("processCreateLikeRecordFields")
       const allowedBlockTypes = getRichTextBlockWhitelist(field.validators) ?? [];
 
       if (field.localized) {
-        const localeMap = yield* decodeLocalizedFieldMap(field, data[field.api_key]).pipe(
+        const localeMap = yield* decodeLocalizedFieldMap(field, cellValue(data, field.api_key)).pipe(
           Effect.mapError((error) => new ValidationError({
             message: createFieldErrorMessage(errorPrefix, error.message),
             field: error.field,
@@ -571,8 +592,8 @@ const processCreateLikeRecordFields = Effect.fn("processCreateLikeRecordFields")
 
     if (field.field_type === "slug") {
       const sourceFieldKey = getSlugSource(field.validators);
-      const sourceValue = sourceFieldKey ? toSlugSourceString(data[sourceFieldKey]) : null;
-      const currentValue = toSlugSourceString(data[field.api_key]);
+      const sourceValue = sourceFieldKey ? toSlugSourceString(cellValue(data, sourceFieldKey)) : null;
+      const currentValue = toSlugSourceString(cellValue(data, field.api_key));
       if (!data[field.api_key] && sourceValue) {
         data[field.api_key] = generateSlug(sourceValue);
       } else if (currentValue) {
@@ -624,7 +645,7 @@ const processCreateLikeRecordFields = Effect.fn("processCreateLikeRecordFields")
       }
       if (fieldDef.inputSchema) {
         if (field.localized) {
-          const localeMap = yield* decodeLocalizedFieldMap(field, data[field.api_key]).pipe(
+          const localeMap = yield* decodeLocalizedFieldMap(field, cellValue(data, field.api_key)).pipe(
             Effect.mapError((error) => new ValidationError({
               message: createFieldErrorMessage(errorPrefix, error.message),
               field: error.field,
@@ -661,7 +682,7 @@ const processCreateLikeRecordFields = Effect.fn("processCreateLikeRecordFields")
       && data[field.api_key] !== null
     ) {
       if (field.localized) {
-        const localeMap = yield* decodeLocalizedFieldMap(field, data[field.api_key]).pipe(
+        const localeMap = yield* decodeLocalizedFieldMap(field, cellValue(data, field.api_key)).pipe(
           Effect.mapError((error) => new ValidationError({
             message: createFieldErrorMessage(errorPrefix, error.message),
             field: error.field,
@@ -669,10 +690,11 @@ const processCreateLikeRecordFields = Effect.fn("processCreateLikeRecordFields")
         );
         for (const localeValue of Object.values(localeMap)) {
           if (localeValue === null) continue;
-          yield* validateReferenceFieldValue(sql, field, localeValue, errorPrefix);
+          // SAFETY: per-locale values in a decoded locale map are cell values.
+          yield* validateReferenceFieldValue(sql, field, localeValue as StoredFieldValue, errorPrefix);
         }
       } else {
-        yield* validateReferenceFieldValue(sql, field, data[field.api_key], errorPrefix);
+        yield* validateReferenceFieldValue(sql, field, cellValue(data, field.api_key), errorPrefix);
       }
     }
 
@@ -683,7 +705,7 @@ const processCreateLikeRecordFields = Effect.fn("processCreateLikeRecordFields")
       && data[field.api_key] !== null
     ) {
       if (field.localized) {
-        const localeMap = yield* decodeLocalizedFieldMap(field, data[field.api_key]).pipe(
+        const localeMap = yield* decodeLocalizedFieldMap(field, cellValue(data, field.api_key)).pipe(
           Effect.mapError((error) => new ValidationError({
             message: createFieldErrorMessage(errorPrefix, error.message),
             field: error.field,
@@ -691,10 +713,11 @@ const processCreateLikeRecordFields = Effect.fn("processCreateLikeRecordFields")
         );
         for (const localeValue of Object.values(localeMap)) {
           if (localeValue === null) continue;
-          yield* validateAssetFieldValue(sql, field, localeValue, errorPrefix);
+          // SAFETY: per-locale values in a decoded locale map are cell values.
+          yield* validateAssetFieldValue(sql, field, localeValue as StoredFieldValue, errorPrefix);
         }
       } else {
-        yield* validateAssetFieldValue(sql, field, data[field.api_key], errorPrefix);
+        yield* validateAssetFieldValue(sql, field, cellValue(data, field.api_key), errorPrefix);
       }
     }
 
@@ -702,7 +725,7 @@ const processCreateLikeRecordFields = Effect.fn("processCreateLikeRecordFields")
       // Reads enrich media values with resolved asset metadata; writing one
       // straight back must not persist that (stale URL) — strip it here so
       // read-modify-write round-trips to exactly what was stored.
-      record[field.api_key] = stripMediaEnrichment(field.field_type, data[field.api_key]);
+      record[field.api_key] = stripMediaEnrichment(field.field_type, cellValue(data, field.api_key));
     }
     });
 
@@ -1005,8 +1028,8 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
           });
         } else {
           if (field.localized) {
-            const localeMap = yield* decodeLocalizedStructuredTextMap(field, data[field.api_key]);
-            const existingLocaleMap = parseExistingLocaleMap(existing[field.api_key]);
+            const localeMap = yield* decodeLocalizedStructuredTextMap(field, cellValue(data, field.api_key));
+            const existingLocaleMap = parseExistingLocaleMap(cellValue(existing, field.api_key));
             const nextLocaleMap = { ...existingLocaleMap };
 
             for (const [localeCode, localeValue] of Object.entries(localeMap)) {
@@ -1020,7 +1043,8 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
                 continue;
               }
 
-              const expandedLocale = expandStructuredTextShorthand(localeValue);
+              // SAFETY: per-locale DAST values in a decoded locale map are cell values.
+              const expandedLocale = expandStructuredTextShorthand(localeValue as StoredFieldValue);
 
               const stInput = yield* Schema.decodeUnknownEffect(StructuredTextWriteInput)(scopeStructuredTextIds(expandedLocale, `${field.api_key}:${localeCode}`)).pipe(
                 Effect.mapError((e) => new ValidationError({
@@ -1053,7 +1077,7 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
             return;
           }
 
-          const expanded = expandStructuredTextShorthand(data[field.api_key]);
+          const expanded = expandStructuredTextShorthand(cellValue(data, field.api_key));
 
           const stInput = yield* Schema.decodeUnknownEffect(StructuredTextWriteInput)(expanded).pipe(
             Effect.mapError((e) => new ValidationError({
@@ -1092,8 +1116,8 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
             includeLocalizedVariants: field.localized === 1,
           });
         } else if (field.localized) {
-          const localeMap = yield* decodeLocalizedFieldMap(field, data[field.api_key]);
-          const existingLocaleMap = parseExistingLocaleMap(existing[field.api_key]);
+          const localeMap = yield* decodeLocalizedFieldMap(field, cellValue(data, field.api_key));
+          const existingLocaleMap = parseExistingLocaleMap(cellValue(existing, field.api_key));
           const nextLocaleMap = { ...existingLocaleMap };
           const allowedBlockTypes = getRichTextBlockWhitelist(field.validators) ?? [];
 
@@ -1153,8 +1177,8 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
       // Slug field: normalize and enforce uniqueness (excluding current record)
       if (field.field_type === "slug" && data[field.api_key] !== undefined && data[field.api_key] !== null) {
         const sourceFieldKey = getSlugSource(field.validators);
-        const sourceValue = sourceFieldKey ? toSlugSourceString(data[sourceFieldKey]) : null;
-        const currentValue = toSlugSourceString(data[field.api_key]);
+        const sourceValue = sourceFieldKey ? toSlugSourceString(cellValue(data, sourceFieldKey)) : null;
+        const currentValue = toSlugSourceString(cellValue(data, field.api_key));
         if (sourceValue && !currentValue) {
           data[field.api_key] = generateSlug(sourceValue);
         } else if (currentValue) {
@@ -1205,8 +1229,8 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
         }
         if (fieldDef.inputSchema) {
           if (field.localized) {
-            const localeMap = yield* decodeLocalizedFieldMap(field, data[field.api_key]);
-            const existingLocaleMap = parseExistingLocaleMap(existing[field.api_key]);
+            const localeMap = yield* decodeLocalizedFieldMap(field, cellValue(data, field.api_key));
+            const existingLocaleMap = parseExistingLocaleMap(cellValue(existing, field.api_key));
             const nextLocaleMap = { ...existingLocaleMap, ...localeMap };
             for (const [localeCode, localeValue] of Object.entries(localeMap)) {
               if (localeValue === null) continue;
@@ -1235,13 +1259,14 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
         && data[field.api_key] !== null
       ) {
         if (field.localized) {
-          const localeMap = yield* decodeLocalizedFieldMap(field, data[field.api_key]);
+          const localeMap = yield* decodeLocalizedFieldMap(field, cellValue(data, field.api_key));
           for (const localeValue of Object.values(localeMap)) {
             if (localeValue === null) continue;
-            yield* validateAssetFieldValue(sql, field, localeValue);
+            // SAFETY: per-locale values in a decoded locale map are cell values.
+            yield* validateAssetFieldValue(sql, field, localeValue as StoredFieldValue);
           }
         } else {
-          yield* validateAssetFieldValue(sql, field, data[field.api_key]);
+          yield* validateAssetFieldValue(sql, field, cellValue(data, field.api_key));
         }
       }
 
@@ -1251,14 +1276,14 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
         field.field_type !== "rich_text" &&
         data[field.api_key] !== undefined
       ) {
-        const localeMap = yield* decodeLocalizedFieldMap(field, data[field.api_key]);
-        const existingLocaleMap = parseExistingLocaleMap(existing[field.api_key]);
+        const localeMap = yield* decodeLocalizedFieldMap(field, cellValue(data, field.api_key));
+        const existingLocaleMap = parseExistingLocaleMap(cellValue(existing, field.api_key));
         data[field.api_key] = { ...existingLocaleMap, ...localeMap };
       }
 
       if (data[field.api_key] !== undefined) {
         // See the same strip in the create path: enrichment keys are read-only.
-        updates[field.api_key] = stripMediaEnrichment(field.field_type, data[field.api_key]);
+        updates[field.api_key] = stripMediaEnrichment(field.field_type, cellValue(data, field.api_key));
       }
       });
 
@@ -1453,11 +1478,12 @@ export const bulkCreateRecords = Effect.fn("bulkCreateRecords")(function* ({ mod
   return { created: created.length, records: created };
 });
 
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- type guard: must accept opaque values to narrow them.
 function isStructuredTextEnvelopeLike(value: unknown): value is { value: unknown; blocks: DynamicRow } {
   return isJsonRecord(value) && "value" in value && isJsonRecord(value.blocks);
 }
 
-function getPrunableDast(value: unknown): { schema: string; document: { type: string; children: readonly unknown[] } } | null {
+function getPrunableDast(value: StoredFieldValue): { schema: string; document: { type: string; children: readonly unknown[] } } | null {
   if (!isJsonRecord(value)) return null;
   if (!isString(value.schema)) return null;
   if (!isJsonRecord(value.document)) return null;
@@ -1475,7 +1501,7 @@ function getPrunableDast(value: unknown): { schema: string; document: { type: st
 function applyPatchToNestedStructuredText(
   target: DynamicRow,
   blockId: string,
-  patchValue: unknown,
+  patchValue: StoredFieldValue,
 ): { applied: boolean; ambiguous: boolean } {
   let matches = 0;
 
@@ -1487,7 +1513,8 @@ function applyPatchToNestedStructuredText(
           matches++;
           if (patchValue === null) {
             delete blocks[blockId];
-            const dast = getPrunableDast(nestedValue.value);
+            // SAFETY: the DAST document inside a structured_text envelope is a cell value.
+            const dast = getPrunableDast(nestedValue.value as StoredFieldValue);
             if (dast) {
               nestedValue.value = pruneBlockNodes(dast, new Set([blockId]));
             }
@@ -1609,7 +1636,8 @@ export const patchBlocksForField = Effect.fn("patchBlocksForField")(function* (b
       if (!Object.hasOwn(existingBlocks, blockId)) {
         let nestedMatched = false;
         for (const topLevelBlock of Object.values(mergedBlocks)) {
-          const result = applyPatchToNestedStructuredText(topLevelBlock, blockId, patchValue);
+          // SAFETY: patch values are null (delete), strings (keep), or merge objects — cell values.
+          const result = applyPatchToNestedStructuredText(topLevelBlock, blockId, patchValue as StoredFieldValue);
           if (result.ambiguous) {
             return yield* new ValidationError({
               message: `Block '${blockId}' matched multiple nested structured_text locations in field '${body.fieldApiKey}'. Patch the parent block explicitly instead.`,
@@ -1855,12 +1883,15 @@ function allowedQueryColumns(fields: readonly ParsedFieldRow[]): ReadonlySet<str
 }
 
 /** Reject filter keys that are not real field api_keys or system meta columns. */
-const assertFilterColumns = Effect.fn("assertFilterColumns")(function* (filter: unknown, allowed: ReadonlySet<string>): Effect.fn.Return<void, ValidationError> {
+const assertFilterColumns = Effect.fn("assertFilterColumns")(function* (filter: DynamicRow | undefined, allowed: ReadonlySet<string>): Effect.fn.Return<void, ValidationError> {
   if (!isJsonRecord(filter)) return;
   for (const [key, value] of Object.entries(filter)) {
     if (key === "AND" || key === "OR") {
       if (Array.isArray(value)) {
-        for (const sub of value) yield* assertFilterColumns(sub, allowed);
+        for (const sub of value) {
+          // SAFETY: AND/OR filter elements are sub-filter records (filter-compiler emits them).
+          yield* assertFilterColumns(sub as DynamicRow, allowed);
+        }
       }
       continue;
     }
@@ -2054,7 +2085,8 @@ export function searchRecords(modelApiKey: string, q: string, page?: PickerSearc
 
     const partial = rawRows.map((raw) => {
       const row = deserializeRow(raw);
-      const image = imageKey ? (parseMediaFieldReference(row[imageKey])?.uploadId ?? null) : null;
+      // SAFETY: row cells are StoredFieldValue by the dynamic-zone contract; media cells are id strings or reference objects.
+      const image = imageKey ? (parseMediaFieldReference(row[imageKey] as StoredFieldValue)?.uploadId ?? null) : null;
       return {
         id: String(row.id),
         title: titleKey === "id" ? String(row.id) : row[titleKey],
@@ -2092,6 +2124,7 @@ export function searchRecords(modelApiKey: string, q: string, page?: PickerSearc
 // Duplicate — deep-copy a record, minting fresh block ids for block subtrees
 // ===========================================================================
 
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- type guard: must accept opaque values to narrow them.
 function isRichTextBlockArray(value: unknown): value is Array<DynamicRow> {
   return Array.isArray(value)
     && value.length > 0
@@ -2109,11 +2142,17 @@ function remapStructuredTextEnvelopeIds(
 ): { value: unknown; blocks: DynamicRow } {
   const idMap = new Map(Object.keys(envelope.blocks).map((oldId) => [oldId, generateId()]));
 
-  const rewriteNode = (node: unknown): unknown => {
-    if (Array.isArray(node)) return node.map(rewriteNode);
+  const rewriteNode = (node: StoredFieldValue | unknown[]): StoredFieldValue | unknown[] => {
+    if (Array.isArray(node)) {
+      // SAFETY: DAST children arrays hold nodes (objects/scalars), i.e. cell values or arrays.
+      return node.map((child) => rewriteNode(child as StoredFieldValue | unknown[]));
+    }
     if (!isJsonRecord(node)) return node;
     const next: DynamicRow = {};
-    for (const [key, child] of Object.entries(node)) next[key] = rewriteNode(child);
+    for (const [key, child] of Object.entries(node)) {
+      // SAFETY: DAST node fields hold nested nodes, node arrays, or scalars.
+      next[key] = rewriteNode(child as StoredFieldValue | unknown[]);
+    }
     if ((next.type === "block" || next.type === "inlineBlock") && isString(next.item)) {
       next.item = idMap.get(next.item) ?? next.item;
     }
@@ -2122,14 +2161,16 @@ function remapStructuredTextEnvelopeIds(
 
   const newBlocks: DynamicRow = {};
   for (const [oldId, blockData] of Object.entries(envelope.blocks)) {
-    newBlocks[idMap.get(oldId) ?? oldId] = remapBlockDataIds(blockData);
+    // SAFETY: block payloads stored in a structured_text envelope are cell values.
+    newBlocks[idMap.get(oldId) ?? oldId] = remapBlockDataIds(blockData as StoredFieldValue);
   }
 
-  return { value: rewriteNode(envelope.value), blocks: newBlocks };
+  // SAFETY: the envelope's DAST value is a document (object) or node array — a cell value.
+  return { value: rewriteNode(envelope.value as StoredFieldValue | unknown[]), blocks: newBlocks };
 }
 
 /** Remap block ids inside a single block's field data (nested containers). */
-function remapBlockDataIds(blockData: unknown): unknown {
+function remapBlockDataIds(blockData: StoredFieldValue): StoredFieldValue {
   if (!isJsonRecord(blockData)) return blockData;
   const next: DynamicRow = {};
   for (const [key, value] of Object.entries(blockData)) {
@@ -2153,14 +2194,17 @@ function remapRichTextBlockIds(blocks: Array<DynamicRow>): Array<DynamicRow> {
 }
 
 function remapLocalizedFieldValue(
-  value: unknown,
-  remap: (inner: unknown) => unknown,
-): unknown {
+  value: StoredFieldValue,
+  remap: (inner: StoredFieldValue) => StoredFieldValue | DynamicRow[],
+): StoredFieldValue | DynamicRow[] {
   if (!isJsonRecord(value)) return remap(value);
   // A localized value is a { [locale]: value } map.
   const next: DynamicRow = {};
   for (const [locale, localeValue] of Object.entries(value)) {
-    next[locale] = localeValue === null || localeValue === undefined ? localeValue : remap(localeValue);
+    // SAFETY: per-locale values in a localized field map are cell values.
+    next[locale] = localeValue === null || localeValue === undefined
+      ? localeValue
+      : remap(localeValue as StoredFieldValue);
   }
   return next;
 }
@@ -2201,13 +2245,17 @@ export function duplicateRecord(modelApiKey: string, id: string, actor?: Request
       if (value === undefined || value === null) continue;
 
       if (field.field_type === "structured_text") {
+        // SAFETY: materialized field values are cell values (envelopes or locale maps).
+        const cell = value as StoredFieldValue;
         data[field.api_key] = field.localized
-          ? remapLocalizedFieldValue(value, (inner) =>
+          ? remapLocalizedFieldValue(cell, (inner) =>
               isStructuredTextEnvelopeLike(inner) ? remapStructuredTextEnvelopeIds(inner) : inner)
           : (isStructuredTextEnvelopeLike(value) ? remapStructuredTextEnvelopeIds(value) : value);
       } else if (field.field_type === "rich_text") {
+        // SAFETY: materialized field values are cell values (block arrays or locale maps).
+        const cell = value as StoredFieldValue;
         data[field.api_key] = field.localized
-          ? remapLocalizedFieldValue(value, (inner) =>
+          ? remapLocalizedFieldValue(cell, (inner) =>
               isRichTextBlockArray(inner) ? remapRichTextBlockIds(inner) : inner)
           : (isRichTextBlockArray(value) ? remapRichTextBlockIds(value) : value);
       } else {
@@ -2241,6 +2289,7 @@ export interface BulkOpResult {
   error?: string;
 }
 
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- opaque Effect failure from bulk ops; formatted defensively.
 function describeCmsError(error: unknown): string {
   if (isCmsError(error)) {
     const body = errorToResponse(error).body;
@@ -2544,12 +2593,18 @@ export function validateRecordUpdate(modelApiKey: string, id: string, data: Dyna
 // ===========================================================================
 
 /** Recursively key-sorted JSON, so two structurally-equal values compare equal. */
-function canonicalJson(value: unknown): string {
-  const normalize = (input: unknown): unknown => {
-    if (Array.isArray(input)) return input.map(normalize);
+function canonicalJson(value: StoredFieldValue | unknown[]): string {
+  const normalize = (input: StoredFieldValue | unknown[]): StoredFieldValue | unknown[] => {
+    if (Array.isArray(input)) {
+      // SAFETY: JSON array elements are JSON values (cell values or nested arrays).
+      return input.map((element) => normalize(element as StoredFieldValue | unknown[]));
+    }
     if (isJsonRecord(input)) {
       const sorted: DynamicRow = {};
-      for (const key of Object.keys(input).sort()) sorted[key] = normalize(input[key]);
+      for (const key of Object.keys(input).sort()) {
+        // SAFETY: JSON object members are JSON values (cell values or nested arrays).
+        sorted[key] = normalize(input[key] as StoredFieldValue | unknown[]);
+      }
       return sorted;
     }
     return input;
@@ -2558,10 +2613,9 @@ function canonicalJson(value: unknown): string {
 }
 
 /** Decode a stored column value to its comparable JSON form (null if absent). */
-function snapshotComparable(value: unknown): unknown {
+function snapshotComparable(value: StoredFieldValue | undefined): StoredFieldValue | unknown[] {
   if (value === undefined || value === null) return null;
-  const decoded = decodeJsonIfString(value);
-  return decoded === undefined ? null : decoded;
+  return decodeJsonIfString(value);
 }
 
 export interface RecordSyncState {
@@ -2602,7 +2656,7 @@ export function getSyncState(modelApiKey: string, id: string) {
 
     const modelFields = yield* getModelFields(model.id);
 
-    const decodedSnapshot = snapshotComparable(existing._published_snapshot);
+    const decodedSnapshot = snapshotComparable(cellValue(existing, "_published_snapshot"));
     const snapshotRecord = isJsonRecord(decodedSnapshot) ? decodedSnapshot : null;
 
     // Compare like-for-like: the snapshot holds materialized structured_text /
@@ -2620,11 +2674,11 @@ export function getSyncState(modelApiKey: string, id: string) {
 
     const changedFields: string[] = [];
     for (const field of modelFields) {
-      const current = snapshotComparable(comparableRow[field.api_key]);
+      const current = snapshotComparable(cellValue(comparableRow, field.api_key));
       if (snapshotRecord === null) {
         if (current !== null && current !== "") changedFields.push(field.api_key);
       } else {
-        const snapshotValue = snapshotComparable(snapshotRecord[field.api_key]);
+        const snapshotValue = snapshotComparable(cellValue(snapshotRecord, field.api_key));
         if (canonicalJson(current) !== canonicalJson(snapshotValue)) changedFields.push(field.api_key);
       }
     }

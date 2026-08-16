@@ -29,6 +29,7 @@ const fieldMap: Record<keyof SiteSettingsInput, string> = {
   fallbackSeoTwitterCard: "fallback_seo_twitter_card",
 };
 
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- opaque SQL/Effect error from the settings access path; formatted defensively.
 function mapMissingTable(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   if (message.includes("no such table: site_settings")) {

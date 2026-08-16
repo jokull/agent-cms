@@ -1,5 +1,6 @@
 import { Cause, Option, Schema, SchemaIssue } from "effect";
 import type { AiBinding, VectorizeBinding } from "./search/vectorize.js";
+import type { CmsBindings } from "./index.js";
 
 const RuntimeObject = Schema.Unknown.pipe(
   Schema.refine(
@@ -79,7 +80,7 @@ function formatConfigParseError(error: Schema.SchemaError): string {
   return SchemaIssue.makeFormatterDefault()(error.issue);
 }
 
-export function decodeCmsBindings(input: unknown): DecodedCmsBindings {
+export function decodeCmsBindings(input: CmsBindings): DecodedCmsBindings {
   const decoded = Schema.decodeUnknownExit(RawCmsBindingsSchema)(input);
   if (decoded._tag === "Failure") {
     const error = Cause.findErrorOption(decoded.cause).pipe(Option.getOrThrow);

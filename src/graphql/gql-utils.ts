@@ -1,4 +1,4 @@
-import { isBoolean, isNumber, isObjectRecord, isString, type DynamicRow } from "../dynamic/row-types.js";
+import { isBoolean, isNumber, isObjectRecord, isString, type DynamicRow, type StoredFieldValue } from "../dynamic/row-types.js";
 /**
  * Shared utility functions for the GraphQL schema builder.
  */
@@ -150,7 +150,7 @@ export function applyOrdering(records: DynamicRow[], orderBy: string[] | undefin
  * When includeDrafts is true, or the snapshot is absent/unparseable, returns the record unchanged.
  */
 /** Resolve a video field value into a VideoField object */
-export function resolveVideoField(raw: unknown): {
+export function resolveVideoField(raw: StoredFieldValue): {
   readonly url: unknown;
   readonly title: unknown;
   readonly provider: unknown;

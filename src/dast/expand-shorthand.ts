@@ -1,4 +1,4 @@
-import {isObjectRecord, isString, type DynamicRow} from "../dynamic/row-types.js";
+import {isObjectRecord, isString, type DynamicRow, type StoredFieldValue} from "../dynamic/row-types.js";
 /**
  * Expand structured_text shorthand formats into the canonical
  * { value: DastDocument, blocks: Record<string, unknown> } shape.
@@ -70,7 +70,7 @@ function buildBlockMapFromArray(blocks: readonly unknown[]): DynamicRow {
  * - Array of block entries (shorthand or canonical format)
  * - Object/map keyed by block ID (canonical DAST format, passed through)
  */
-function normalizeBlocks(blocks: unknown): DynamicRow {
+function normalizeBlocks(blocks: StoredFieldValue): DynamicRow {
   if (Array.isArray(blocks)) return buildBlockMapFromArray(blocks);
   if (isObjectRecord(blocks)) return blocks;
   return {};
@@ -83,7 +83,7 @@ function normalizeBlocks(blocks: unknown): DynamicRow {
  * For shorthand formats (string, array, or wrapper objects), returns the expanded
  * { value: DastDocument, blocks: Record<string, unknown> } shape.
  */
-export function expandStructuredTextShorthand(rawValue: unknown): unknown {
+export function expandStructuredTextShorthand(rawValue: StoredFieldValue): StoredFieldValue {
   // 1. String → Agent Text mode
   if (isString(rawValue)) {
     const doc = agentTextToDast(rawValue);
@@ -98,7 +98,8 @@ export function expandStructuredTextShorthand(rawValue: unknown): unknown {
     : (isString(rawValue.agentText) ? rawValue.agentText : null);
   if (agentText !== null) {
     const doc = agentTextToDast(agentText);
-    const blocks = normalizeBlocks(rawValue.blocks);
+    // SAFETY: wrapper-object cells are content-table cells (StoredFieldValue).
+    const blocks = normalizeBlocks(rawValue.blocks as StoredFieldValue);
     return { value: doc, blocks };
   }
 

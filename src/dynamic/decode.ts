@@ -8,7 +8,7 @@
  */
 import { Exit, Schema } from "effect";
 import { decodeJsonIfString, decodeJsonStringOr } from "../json.js";
-import { isObjectRecord, type DynamicRow } from "./row-types.js";
+import { isObjectRecord, type DynamicRow, type StoredFieldValue } from "./row-types.js";
 
 /**
  * In the drafts path, overlay the published snapshot of a record when it
@@ -16,7 +16,9 @@ import { isObjectRecord, type DynamicRow } from "./row-types.js";
  */
 export function decodeSnapshot(record: DynamicRow, includeDrafts: boolean): DynamicRow {
   if (includeDrafts || !record._published_snapshot) return record;
-  const snapshot = decodeJsonIfString(record._published_snapshot);
+  // SAFETY: _published_snapshot is a stored JSON string or parsed value — the
+  // decode helper's StoredFieldValue input covers both.
+  const snapshot = decodeJsonIfString(record._published_snapshot as StoredFieldValue);
   if (!isObjectRecord(snapshot)) return record;
   return { ...record, ...snapshot };
 }

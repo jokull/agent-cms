@@ -3,7 +3,7 @@
  * Loads CMS metadata, builds context, and delegates to sub-modules.
  */
 import { createSchema } from "graphql-yoga";
-import { isBoolean, isNumber, isString, type DynamicRow } from "../dynamic/row-types.js";
+import { isBoolean, isNumber, isString, type DynamicRow, type StoredFieldValue } from "../dynamic/row-types.js";
 import { GraphQLScalarType, Kind } from "graphql";
 import { Effect, Layer } from "effect";
 import { SqlClient } from "effect/unstable/sql";
@@ -20,7 +20,7 @@ import { buildAssetResolvers } from "./asset-resolvers.js";
 import { recordSqlMetrics } from "./sql-metrics.js";
 import { encodeJson } from "../json.js";
 
-function serializeGraphqlScalar(value: unknown): string | null {
+function serializeGraphqlScalar(value: StoredFieldValue): string | null {
   if (value == null) return null;
   if (isString(value)) return value;
   if (isNumber(value) || isBoolean(value)) return String(value);
@@ -30,10 +30,12 @@ function serializeGraphqlScalar(value: unknown): string | null {
 const GraphQLItemId = new GraphQLScalarType({
   name: "ItemId",
   serialize(value) {
-    return serializeGraphqlScalar(value);
+    // SAFETY: GraphQL scalar inputs are JSON values (scalars, records, null).
+    return serializeGraphqlScalar(value as StoredFieldValue);
   },
   parseValue(value) {
-    return serializeGraphqlScalar(value);
+    // SAFETY: GraphQL scalar inputs are JSON values (scalars, records, null).
+    return serializeGraphqlScalar(value as StoredFieldValue);
   },
   parseLiteral(ast) {
     if (ast.kind === Kind.STRING || ast.kind === Kind.INT) {
@@ -46,10 +48,12 @@ const GraphQLItemId = new GraphQLScalarType({
 const GraphQLSiteLocale = new GraphQLScalarType({
   name: "SiteLocale",
   serialize(value) {
-    return serializeGraphqlScalar(value);
+    // SAFETY: GraphQL scalar inputs are JSON values (scalars, records, null).
+    return serializeGraphqlScalar(value as StoredFieldValue);
   },
   parseValue(value) {
-    return serializeGraphqlScalar(value);
+    // SAFETY: GraphQL scalar inputs are JSON values (scalars, records, null).
+    return serializeGraphqlScalar(value as StoredFieldValue);
   },
   parseLiteral(ast) {
     if (ast.kind === Kind.STRING || ast.kind === Kind.ENUM) {

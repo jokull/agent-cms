@@ -1,4 +1,4 @@
-import { isObjectRecord, isString, type DynamicRow } from "../dynamic/row-types.js";
+import { isObjectRecord, isString, type DynamicRow, type StoredFieldValue } from "../dynamic/row-types.js";
 /**
  * Effect-native MCP (Model Context Protocol) server for agent-cms.
  * 3-layer architecture: Discovery -> Schema -> Content
@@ -211,7 +211,7 @@ function cmsTool<Name extends string>(
   return tool;
 }
 
-function toStructuredContent(value: unknown) {
+function toStructuredContent(value: StoredFieldValue) {
   // The MCP CallToolResult `structuredContent` field is a Json codec; class
   // instances (e.g. Data.TaggedError) fail its validation, so normalize to a
   // plain JSON value before constructing the result.
@@ -228,6 +228,7 @@ function toStructuredContent(value: unknown) {
  * human-oriented message instead of dumping the internal ParseError tree to the
  * MCP client. Non-ParseError failures pass through unchanged.
  */
+// oxlint-disable-next-line anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns -- Effect's error channel is opaque; SchemaErrors map to ValidationError, all other failures pass through unchanged.
 function formatToolError(error: unknown): unknown {
   if (Schema.isSchemaError(error)) {
     return new ValidationError({ message: SchemaIssue.makeFormatterDefault()(error.issue) });
@@ -235,6 +236,7 @@ function formatToolError(error: unknown): unknown {
   return error;
 }
 
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- MCP registry payloads are opaque wire JSON; this type guard is the boundary parser.
 function isToolPayload(value: unknown): value is DynamicRow {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -248,8 +250,8 @@ function isToolPayload(value: unknown): value is DynamicRow {
  * wrong key becomes one clear ValidationError. Only closed objects are checked;
  * open records (record `data`, `validators`) accept any keys.
  */
-function collectExcessProperties(schema: unknown, value: unknown, path = ""): string[] {
-  if (!isObjectRecord(schema) || !isObjectRecord(value)) return [];
+function collectExcessProperties(schema: DynamicRow, value: StoredFieldValue, path = ""): string[] {
+  if (!isObjectRecord(value)) return [];
   const props = isObjectRecord(schema.properties) ? schema.properties : {};
   const errors: string[] = [];
   if (schema.additionalProperties === false) {
@@ -263,9 +265,14 @@ function collectExcessProperties(schema: unknown, value: unknown, path = ""): st
     }
   }
   for (const [key, sub] of Object.entries(props)) {
-    if (key in value) {
-      errors.push(...collectExcessProperties(sub, value[key], path ? `${path}.${key}` : key));
-    }
+    if (!(key in value)) continue;
+    if (!isObjectRecord(sub)) continue;
+    const subValue = value[key];
+    errors.push(...collectExcessProperties(
+      sub,
+      isObjectRecord(subValue) ? subValue : {},
+      path ? `${path}.${key}` : key,
+    ));
   }
   return errors;
 }
@@ -302,14 +309,12 @@ function compactPatchBlocksResponse(
 
   // Extract block order from DAST traversal
   const blockOrder: string[] = [];
-  function walkDast(node: unknown) {
-    if (!isObjectRecord(node)) return;
-    const n = node;
-    if (n.type === "block" && isString(n.item)) blockOrder.push(n.item);
-    if (Array.isArray(n.children)) n.children.forEach(walkDast);
+  function walkDast(node: DynamicRow) {
+    if (node.type === "block" && isString(node.item)) blockOrder.push(node.item);
+    if (Array.isArray(node.children)) node.children.forEach(walkDast);
   }
   const value = envelope.value;
-  if (isObjectRecord(value)) {
+  if (isObjectRecord(value) && isObjectRecord(value.document)) {
     walkDast(value.document);
   }
   const recordId = isString(fullRecord.id) ? fullRecord.id : "";
@@ -325,7 +330,7 @@ function compactPatchBlocksResponse(
   };
 }
 
-function parseValidators(value: unknown): DynamicRow {
+function parseValidators(value: StoredFieldValue): DynamicRow {
   if (value == null || value === "") return {};
   if (isString(value)) return decodeJsonRecordStringOr(value, {});
   return isObjectRecord(value) ? value : {};
@@ -335,7 +340,7 @@ function withDecoded<S extends Schema.Constraint, E, R2>(
   schema: S,
   handler: (params: S["Type"]) => Effect.Effect<unknown, E, R2>,
 ) {
-  return (params: unknown) => Schema.decodeUnknownEffect(schema)(params).pipe(Effect.flatMap(handler));
+  return (params: DynamicRow) => Schema.decodeUnknownEffect(schema)(params).pipe(Effect.flatMap(handler));
 }
 
 function toMcpInputSchema(tool: AiTool.Any): DynamicRow {
@@ -349,7 +354,7 @@ function toMcpInputSchema(tool: AiTool.Any): DynamicRow {
     : { type: "object", properties: {}, additionalProperties: false };
 }
 
-type LooseToolHandler = (params: unknown) => Effect.Effect<unknown, unknown, unknown>;
+type LooseToolHandler = (params: DynamicRow) => Effect.Effect<unknown, unknown, unknown>;
 
 function pickToolkitHandlers<K extends Record<string, AiTool.Any>>(
   toolkit: { readonly tools: K },
@@ -861,8 +866,8 @@ export function createMcpLayer(
   }
 
   /** Look up canonical_path_template for a model and resolve _previewPath if set */
-  const addPreviewPath = Effect.fn("addPreviewPath")(function* (modelApiKey: string, record: unknown) {
-    if (!isObjectRecord(record)) return record;
+  const addPreviewPath = Effect.fn("addPreviewPath")(function* (modelApiKey: string, record: DynamicRow | null) {
+    if (record === null) return null;
     const sql = yield* SqlClient.SqlClient;
     const models = yield* sql.unsafe<{ canonical_path_template: string | null }>(
       "SELECT canonical_path_template FROM models WHERE api_key = ?",
@@ -874,24 +879,21 @@ export function createMcpLayer(
     return { ...record, _previewPath: previewPath };
   });
 
-  const addPreviewPathToList = Effect.fn("addPreviewPathToList")(function* (modelApiKey: string, records: unknown) {
-    if (!Array.isArray(records)) return records;
-    const recordList: readonly unknown[] = records;
+  const addPreviewPathToList = Effect.fn("addPreviewPathToList")(function* (modelApiKey: string, records: readonly DynamicRow[]) {
     const sql = yield* SqlClient.SqlClient;
     const models = yield* sql.unsafe<{ canonical_path_template: string | null }>(
       "SELECT canonical_path_template FROM models WHERE api_key = ?",
       [modelApiKey]
     );
     const template = models[0]?.canonical_path_template;
-    if (!template) return recordList;
-    return recordList.map((r) => {
-      if (!isObjectRecord(r)) return r;
+    if (!template) return records;
+    return records.map((r) => {
       const previewPath = PreviewService.resolvePreviewPath(template, r);
       return { ...r, _previewPath: previewPath };
     });
   });
 
-  const toolHandlers: Record<string, (params: unknown) => Effect.Effect<unknown, unknown, unknown>> = {
+  const toolHandlers: Record<string, LooseToolHandler> = {
     schema_info: withDecoded(SchemaInfoInput, ({ filterByName, filterByType, includeFieldDetails }) =>
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
@@ -1167,21 +1169,31 @@ export function createMcpLayer(
             Effect.flatMap((stream) => Stream.runLast(stream)),
             Effect.map((maybeResult) =>
               Option.isSome(maybeResult)
-                ? new McpSchema.CallToolResult({
-                    isError: maybeResult.value.isFailure,
-                    structuredContent: toStructuredContent(maybeResult.value.encodedResult),
-                    content: [{ type: "text", text: encodeJson(maybeResult.value.encodedResult) }],
-                  })
+                ? (() => {
+                    // SAFETY: encodedResult is the tool's JSON-encoded success value; toStructuredContent
+                    // and encodeJson only branch on object records (DynamicRow is in StoredFieldValue) and
+                    // handle any other runtime value without crashing, so the type is a safe approximation.
+                    const encoded = maybeResult.value.encodedResult as StoredFieldValue;
+                    return new McpSchema.CallToolResult({
+                      isError: maybeResult.value.isFailure,
+                      structuredContent: toStructuredContent(encoded),
+                      content: [{ type: "text", text: encodeJson(encoded) }],
+                    });
+                  })()
                 : new McpSchema.CallToolResult({
                     content: [{ type: "text", text: "Tool returned no result" }],
                   }),
             ),
             Effect.catch((rawError) => {
               const error = formatToolError(rawError);
+              // SAFETY: formatToolError returns either a ValidationError (a record) or the raw
+              // error untouched; toStructuredContent and encodeJson handle non-record values without
+              // crashing, so the cast only affects type-checking, not runtime behavior.
+              const errorPayload = error as StoredFieldValue;
               return Effect.succeed(new McpSchema.CallToolResult({
                 isError: true,
-                structuredContent: toStructuredContent(error),
-                content: [{ type: "text", text: encodeJson(error) }],
+                structuredContent: toStructuredContent(errorPayload),
+                content: [{ type: "text", text: encodeJson(errorPayload) }],
               }));
             }),
           );

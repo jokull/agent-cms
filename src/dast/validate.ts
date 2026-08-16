@@ -31,6 +31,7 @@ function formatIssuePath(path: ReadonlyArray<unknown>): string {
  * Validate a DAST document structure.
  * Returns an array of errors (empty = valid).
  */
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- schema validator: accepts arbitrary JSON input; the DastDocumentSchema decode IS the boundary parse.
 export function validateDast(doc: unknown): ValidationError[] {
   const result = Schema.decodeUnknownExit(DastDocumentSchema)(doc);
 
@@ -47,6 +48,7 @@ export function validateDast(doc: unknown): ValidationError[] {
 /**
  * Validate that a DAST document only contains block nodes at root level.
  */
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- schema validator: accepts arbitrary JSON input; the DastDocumentSchema decode IS the boundary parse.
 export function validateBlocksOnly(doc: unknown): ValidationError[] {
   const decoded = Schema.decodeUnknownExit(DastDocumentSchema)(doc);
   if (decoded._tag === "Failure") return [];
@@ -81,6 +83,7 @@ const BLOCK_LEVEL_NODE_TYPES = new Set<string>([
 ]);
 
 /** Narrow unknown to a block-level DAST node via its type discriminant. */
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- runtime type guard: the discriminant check IS the boundary parse for raw DAST JSON nodes.
 function isBlockLevelNode(value: unknown): value is BlockLevelNode {
   return isObjectRecord(value)
     && isString(value.type)
