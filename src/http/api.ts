@@ -46,6 +46,11 @@ function toDeclaredError(error: unknown): CmsError {
   });
 }
 
+// TEMP-DEBUG
+export function debugToDeclaredError(error: unknown): void {
+  console.log("TO-DECLARED", error instanceof Error ? error.message : JSON.stringify(error));
+}
+
 const ModelsGroup = HttpApiGroup.make("models").add(
   HttpApiEndpoint.get("list", "/", {
     success: Schema.Array(Schema.Unknown),
@@ -350,7 +355,10 @@ const SetupGroup = HttpApiGroup.make("setup").add(
   }),
 ).prefix("/api/setup");
 
+
 export const CmsApi = HttpApi.make("cms").add(ModelsGroup, FieldsGroup, RecordsGroup, LocalesGroup, SchemaGroup, SearchGroup, TokensGroup, PreviewTokensGroup, PathsGroup, SetupGroup);
+
+
 const LocalesHandlers = HttpApiBuilder.group(CmsApi, "locales", (handlers) =>
   handlers
     .handle("list", () => LocaleService.listLocales().pipe(Effect.mapError(toDeclaredError)))

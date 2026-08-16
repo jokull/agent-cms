@@ -10,10 +10,10 @@ import {
 import { Cause, DateTime, Effect, Layer, Logger, Schema, SchemaIssue, Option } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import * as AssetService from "../services/asset-service.js";
+import { AssetImportContext, AssetUrlContext, type AssetUrlConfig } from "../services/asset-service.js";
 import * as TokenService from "../services/token-service.js";
 import * as PreviewService from "../services/preview-service.js";
 import * as PathService from "../services/path-service.js";
-import { AssetImportContext, AssetUrlContext, type AssetUrlConfig } from "../services/asset-service.js";
 import { isCmsError, errorToResponse } from "../errors.js";
 import { ApiLayer, ApiHandlersLayer } from "./api.js";
 import { openApiSpec } from "./api/index.js";
@@ -51,66 +51,8 @@ function getRequestIdFromHeaders(headers: Headers): string {
 }
 
 /** Helper: run a CMS Effect and return an HTTP response */
-function handle<A, R>(
-  effect: Effect.Effect<A, unknown, R>,
-  status: number = 200
-) {
-  return effect.pipe(
-    Effect.flatMap((result) => HttpServerResponse.json(result, { status })),
-    Effect.tapCause((cause) => Effect.logError("REST effect failed", cause)),
-    Effect.catchIf(isCmsError, (error) => {
-      const mapped = errorToResponse(error);
-      return HttpServerResponse.json(mapped.body, { status: mapped.status });
-    }),
-    Effect.catch((error) =>
-      Effect.logError("Unhandled REST error").pipe(
-        Effect.annotateLogs({ error: describeUnknown(error) }),
-        Effect.andThen(HttpServerResponse.json({ error: "Internal server error" }, { status: 500 })),
-      )
-    ),
-    // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Effect's defect channel is opaque; catchDefect receives any thrown non-error value.
-    Effect.catchDefect((defect: unknown) => {
-      return Effect.logError("REST defect").pipe(
-        Effect.annotateLogs({ defect: describeUnknown(defect) }),
-        Effect.andThen(HttpServerResponse.json({ error: "Internal server error" }, { status: 500 })),
-      );
-    })
-  );
-}
 
 /** Extract a required path parameter, defaulting to empty string if missing */
-function param(params: Record<string, string | undefined>, name: string): string {
-  return params[name] ?? "";
-}
-
-/** Get query param */
-function decodeUnknownInput<S extends Schema.Constraint>(
-  schema: S,
-  input: StoredFieldValue,
-  message: string = "Invalid input",
-) {
-  return Schema.decodeUnknownEffect(schema)(input).pipe(
-    Effect.mapError((e) => new ValidationError({ message: `${message}: ${e.message}` }))
-  );
-}
-
-const readJsonBody = Effect.fn("readJsonBody")(function* (message: string = "Invalid JSON body") {
-  const req = yield* HttpServerRequest.HttpServerRequest;
-  const body = yield* req.json.pipe(
-    Effect.mapError((e) => new ValidationError({
-      message: `${message}: ${describeUnknown(e)}`,
-    }))
-  );
-  // SAFETY: the decoded JSON body is a string/number/boolean/null/object value; JSON arrays are the
-  // only Schema.Json member outside StoredFieldValue, and every downstream schema is a Struct that
-  // rejects arrays with a clear ValidationError — so the type only narrows, never mis-handles.
-  return body as StoredFieldValue;
-});
-
-const currentActor = Effect.fn("currentActor")(function* () {
-  const req = yield* HttpServerRequest.HttpServerRequest;
-  return actorFromHeaders(new Headers(req.headers));
-});
 
 // --- Assets ---
 // Upload URL endpoint is handled in fetchHandler (needs r2Credentials from options)
@@ -215,7 +157,67 @@ const assetsRouter = HttpRouter.use((router) => {
 });
 
 // --- Locales ---
-// --- Combine all routes ---
+
+
+function handle<A, R>(
+  effect: Effect.Effect<A, unknown, R>,
+  status: number = 200
+) {
+  return effect.pipe(
+    Effect.flatMap((result) => HttpServerResponse.json(result, { status })),
+    Effect.tapCause((cause) => Effect.logError("REST effect failed", cause)),
+    Effect.catchIf(isCmsError, (error) => {
+      const mapped = errorToResponse(error);
+      return HttpServerResponse.json(mapped.body, { status: mapped.status });
+    }),
+    Effect.catch((error) =>
+      Effect.logError("Unhandled REST error").pipe(
+        Effect.annotateLogs({ error: describeUnknown(error) }),
+        Effect.andThen(HttpServerResponse.json({ error: "Internal server error" }, { status: 500 })),
+      )
+    ),
+    // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Effect's defect channel is opaque; catchDefect receives any thrown non-error value.
+    Effect.catchDefect((defect: unknown) =>
+      Effect.logError("REST defect").pipe(
+        Effect.annotateLogs({ defect: describeUnknown(defect) }),
+        Effect.andThen(HttpServerResponse.json({ error: "Internal server error" }, { status: 500 })),
+      ),
+    ),
+  );
+}
+
+const readJsonBody = Effect.fn("readJsonBody")(function* (message: string = "Invalid JSON body") {
+  const req = yield* HttpServerRequest.HttpServerRequest;
+  const body = yield* req.json.pipe(
+    Effect.mapError((e) => new ValidationError({
+      message: `${message}: ${describeUnknown(e)}`,
+    }))
+  );
+  // SAFETY: the decoded JSON body is a string/number/boolean/null/object value; JSON arrays are the
+  // only Schema.Json member outside StoredFieldValue, and every downstream schema is a Struct that
+  // rejects them anyway — the cast is the honest boundary read.
+  return body as StoredFieldValue;
+});
+
+const decodeUnknownInput = <S extends Schema.Constraint>(
+  schema: S,
+  input: StoredFieldValue,
+  message: string = "Invalid input",
+) => Schema.decodeUnknownEffect(schema)(input).pipe(
+  Effect.mapError((e) => new ValidationError({ message: `${message}: ${e.message}` })),
+);
+
+const currentActor = Effect.fn("currentActor")(function* () {
+  const req = yield* HttpServerRequest.HttpServerRequest;
+  return actorFromHeaders(new Headers(req.headers));
+});
+
+function param(params: Record<string, string | undefined>, name: string): string {
+  return params[name] ?? "";
+}
+
+
+
 const healthRouter = HttpRouter.use((router) =>
   router.add("GET", "/health", HttpServerResponse.json({ status: "ok" }))
 );
