@@ -1,8 +1,7 @@
-import { isString, type DynamicRow, type StoredFieldValue } from "../dynamic/row-types.js";
+import { isString, type DynamicRow } from "../dynamic/row-types.js";
 import {
   HttpEffect,
   HttpRouter,
-  HttpServerRequest,
   HttpServerResponse,
 } from "effect/unstable/http";
 
@@ -17,20 +16,13 @@ import * as PathService from "../services/path-service.js";
 import { isCmsError, errorToResponse } from "../errors.js";
 import { ApiLayer, ApiHandlersLayer } from "./api.js";
 import { openApiSpec } from "./api/index.js";
-import {
-  CreateAssetInput,
-  ImportAssetFromUrlInput,
-  ListAssetsInput,
-  UpdateAssetMetadataInput,
-  CreateUploadUrlInput,
-} from "../services/input-schemas.js";
-import { UnauthorizedError, ValidationError } from "../errors.js";
+import { CreateUploadUrlInput } from "../services/input-schemas.js";
+import { UnauthorizedError } from "../errors.js";
 import * as ScheduleService from "../services/schedule-service.js";
 import type { AiBinding, VectorizeBinding } from "../search/vectorize.js";
 import { VectorizeContext } from "../search/vectorize-context.js";
 import { HooksContext, type CmsHooks } from "../hooks.js";
 import {
-  actorFromHeaders,
   actorHeaders,
   type RequestActor,
 } from "../attribution.js";
@@ -54,170 +46,6 @@ function getRequestIdFromHeaders(headers: Headers): string {
 
 /** Extract a required path parameter, defaulting to empty string if missing */
 
-// --- Assets ---
-// Upload URL endpoint is handled in fetchHandler (needs r2Credentials from options)
-const assetsRouter = HttpRouter.use((router) => {
-  const api = router.prefixed("/api/assets");
-  return Effect.all([
-  api.add("GET", 
-    "/",
-    Effect.gen(function* () {
-      const req = yield* HttpServerRequest.HttpServerRequest;
-      const url = new URL(req.url, "http://localhost");
-      const q = url.searchParams.get("q");
-      const limit = url.searchParams.get("limit");
-      const offset = url.searchParams.get("offset");
-      const orderByParam = url.searchParams.get("orderBy");
-      const parsed = yield* decodeUnknownInput(ListAssetsInput, {
-        q: q ?? undefined,
-        orderBy: orderByParam !== null ? orderByParam.split(",").map((s) => s.trim()).filter(Boolean) : undefined,
-        page: (limit !== null || offset !== null) ? {
-          limit: limit !== null ? Number(limit) : undefined,
-          offset: offset !== null ? Number(offset) : undefined,
-        } : undefined,
-      }, "Invalid asset list input");
-      return yield* handle(AssetService.listAssets({
-        query: parsed.q,
-        page: parsed.page ? { limit: Math.min(parsed.page.limit, 100), offset: parsed.page.offset } : undefined,
-        orderBy: parsed.orderBy,
-      }));
-    })
-  ),
-
-  api.add("POST", 
-    "/",
-    Effect.gen(function* () {
-      const body = yield* readJsonBody();
-      const input = yield* decodeUnknownInput(CreateAssetInput, body);
-      const actor = yield* currentActor();
-      return yield* handle(AssetService.createAsset(input, actor), 201);
-    })
-  ),
-
-  api.add("POST", 
-    "/import-from-url",
-    Effect.gen(function* () {
-      const body = yield* readJsonBody();
-      const input = yield* decodeUnknownInput(ImportAssetFromUrlInput, body);
-      const actor = yield* currentActor();
-      return yield* handle(AssetService.importAssetFromUrl(input, actor), 201);
-    })
-  ),
-
-  api.add("GET", 
-    "/:id",
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      return yield* handle(AssetService.getAsset(param(params, "id")));
-    })
-  ),
-
-  api.add("GET", 
-    "/:id/usages",
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      return yield* handle(
-        AssetService.getAssetUsages(param(params, "id")).pipe(Effect.map((usages) => ({ usages })))
-      );
-    })
-  ),
-
-  api.add("PUT", 
-    "/:id",
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      const body = yield* readJsonBody();
-      const input = yield* decodeUnknownInput(CreateAssetInput, body);
-      const actor = yield* currentActor();
-      return yield* handle(AssetService.replaceAsset(param(params, "id"), input, actor));
-    })
-  ),
-
-  api.add("PATCH", 
-    "/:id",
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      const body = yield* readJsonBody();
-      const input = yield* decodeUnknownInput(UpdateAssetMetadataInput, body);
-      const actor = yield* currentActor();
-      return yield* handle(AssetService.updateAssetMetadata(param(params, "id"), input, actor));
-    })
-  ),
-
-  api.add("DELETE", 
-    "/:id",
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      const req = yield* HttpServerRequest.HttpServerRequest;
-      const force = new URL(req.url, "http://localhost").searchParams.get("force") === "true";
-      return yield* handle(AssetService.deleteAsset(param(params, "id"), force));
-    })
-  )
-  ]);
-});
-
-// --- Locales ---
-
-
-function handle<A, R>(
-  effect: Effect.Effect<A, unknown, R>,
-  status: number = 200
-) {
-  return effect.pipe(
-    Effect.flatMap((result) => HttpServerResponse.json(result, { status })),
-    Effect.tapCause((cause) => Effect.logError("REST effect failed", cause)),
-    Effect.catchIf(isCmsError, (error) => {
-      const mapped = errorToResponse(error);
-      return HttpServerResponse.json(mapped.body, { status: mapped.status });
-    }),
-    Effect.catch((error) =>
-      Effect.logError("Unhandled REST error").pipe(
-        Effect.annotateLogs({ error: describeUnknown(error) }),
-        Effect.andThen(HttpServerResponse.json({ error: "Internal server error" }, { status: 500 })),
-      )
-    ),
-    // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Effect's defect channel is opaque; catchDefect receives any thrown non-error value.
-    Effect.catchDefect((defect: unknown) =>
-      Effect.logError("REST defect").pipe(
-        Effect.annotateLogs({ defect: describeUnknown(defect) }),
-        Effect.andThen(HttpServerResponse.json({ error: "Internal server error" }, { status: 500 })),
-      ),
-    ),
-  );
-}
-
-const readJsonBody = Effect.fn("readJsonBody")(function* (message: string = "Invalid JSON body") {
-  const req = yield* HttpServerRequest.HttpServerRequest;
-  const body = yield* req.json.pipe(
-    Effect.mapError((e) => new ValidationError({
-      message: `${message}: ${describeUnknown(e)}`,
-    }))
-  );
-  // SAFETY: the decoded JSON body is a string/number/boolean/null/object value; JSON arrays are the
-  // only Schema.Json member outside StoredFieldValue, and every downstream schema is a Struct that
-  // rejects them anyway — the cast is the honest boundary read.
-  return body as StoredFieldValue;
-});
-
-const decodeUnknownInput = <S extends Schema.Constraint>(
-  schema: S,
-  input: StoredFieldValue,
-  message: string = "Invalid input",
-) => Schema.decodeUnknownEffect(schema)(input).pipe(
-  Effect.mapError((e) => new ValidationError({ message: `${message}: ${e.message}` })),
-);
-
-const currentActor = Effect.fn("currentActor")(function* () {
-  const req = yield* HttpServerRequest.HttpServerRequest;
-  return actorFromHeaders(new Headers(req.headers));
-});
-
-function param(params: Record<string, string | undefined>, name: string): string {
-  return params[name] ?? "";
-}
-
-
-
 const healthRouter = HttpRouter.use((router) =>
   router.add("GET", "/health", HttpServerResponse.json({ status: "ok" }))
 );
@@ -232,7 +60,6 @@ export const appRouter = Layer.mergeAll(
   openApiRouter,
   healthRouter,
   ApiLayer.pipe(Layer.provide(ApiHandlersLayer)),
-  assetsRouter,
 );
 
 /**

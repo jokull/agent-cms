@@ -17,6 +17,7 @@ import * as VersionService from "../services/version-service.js";
 import * as PublishService from "../services/publish-service.js";
 import * as ScheduleService from "../services/schedule-service.js";
 import * as LocaleService from "../services/locale-service.js";
+import * as AssetService from "../services/asset-service.js";
 import * as SchemaIO from "../services/schema-io.js";
 import * as SearchService from "../search/search-service.js";
 import * as TokenService from "../services/token-service.js";
@@ -25,6 +26,7 @@ import * as PathService from "../services/path-service.js";
 import { actorFromHeaders } from "../attribution.js";
 import {
   CreateModelInput, UpdateModelInput, CreateFieldInput, UpdateFieldInput,
+  CreateAssetInput, ImportAssetFromUrlInput, UpdateAssetMetadataInput,
   CreateRecordInput, PatchRecordInput, PatchBlocksInput, BulkCreateRecordsInput,
   QueryRecordsInput, ValidateRecordInput, BulkRecordOperationInput,
   ScheduleRecordInput, ReorderInput,
@@ -51,7 +53,7 @@ export function debugToDeclaredError(error: unknown): void {
   console.log("TO-DECLARED", error instanceof Error ? error.message : JSON.stringify(error));
 }
 
-const ModelsGroup = HttpApiGroup.make("models").add(
+export const ModelsGroup = HttpApiGroup.make("models").add(
   HttpApiEndpoint.get("list", "/", {
     success: Schema.Array(Schema.Unknown),
     error: CmsApiErrorList,
@@ -81,7 +83,7 @@ const ModelsGroup = HttpApiGroup.make("models").add(
 
 
 
-const FieldsGroup = HttpApiGroup.make("fields").add(
+export const FieldsGroup = HttpApiGroup.make("fields").add(
   HttpApiEndpoint.get("list", "/models/:modelId/fields", {
     params: Schema.Struct({ modelId: Schema.String }),
     success: Schema.Array(Schema.Unknown),
@@ -117,7 +119,7 @@ const RecordIdParams = Schema.Struct({ id: Schema.String });
 const VersionParams = Schema.Struct({ id: Schema.String, versionId: Schema.String });
 const NoContent = HttpApiSchema.status(204)(Schema.Void);
 
-const RecordsGroup = HttpApiGroup.make("records").add(
+export const RecordsGroup = HttpApiGroup.make("records").add(
   HttpApiEndpoint.post("bulkCreate", "/records/bulk", {
     payload: BulkCreateRecordsInput,
     success: HttpApiSchema.status(201)(Schema.Unknown),
@@ -272,7 +274,7 @@ const RecordsGroup = HttpApiGroup.make("records").add(
 
 const IdParams = Schema.Struct({ id: Schema.String });
 
-const LocalesGroup = HttpApiGroup.make("locales").add(
+export const LocalesGroup = HttpApiGroup.make("locales").add(
   HttpApiEndpoint.get("list", "/", { success: Schema.Array(Schema.Unknown), error: CmsApiErrorList }),
   HttpApiEndpoint.post("create", "/", {
     payload: CreateLocaleInput,
@@ -286,7 +288,7 @@ const LocalesGroup = HttpApiGroup.make("locales").add(
   }),
 ).prefix("/api/locales");
 
-const SchemaGroup = HttpApiGroup.make("schema").add(
+export const SchemaGroup = HttpApiGroup.make("schema").add(
   HttpApiEndpoint.get("export", "/", { success: Schema.Unknown, error: CmsApiErrorList }),
   HttpApiEndpoint.post("import", "/", {
     payload: ImportSchemaInput,
@@ -295,7 +297,7 @@ const SchemaGroup = HttpApiGroup.make("schema").add(
   }),
 ).prefix("/api/schema");
 
-const SearchGroup = HttpApiGroup.make("search").add(
+export const SearchGroup = HttpApiGroup.make("search").add(
   HttpApiEndpoint.post("search", "/", {
     payload: SearchInput,
     success: Schema.Unknown,
@@ -308,7 +310,7 @@ const SearchGroup = HttpApiGroup.make("search").add(
   }),
 ).prefix("/api/search");
 
-const TokensGroup = HttpApiGroup.make("tokens").add(
+export const TokensGroup = HttpApiGroup.make("tokens").add(
   HttpApiEndpoint.get("list", "/", { success: Schema.Array(Schema.Unknown), error: CmsApiErrorList }),
   HttpApiEndpoint.post("create", "/", {
     // The expiresIn range checks live in the handler (payload-decode errors
@@ -327,7 +329,7 @@ const TokensGroup = HttpApiGroup.make("tokens").add(
   }),
 ).prefix("/api/tokens");
 
-const PreviewTokensGroup = HttpApiGroup.make("previewTokens").add(
+export const PreviewTokensGroup = HttpApiGroup.make("previewTokens").add(
   HttpApiEndpoint.post("create", "/", {
     payload: Schema.Struct({ expiresIn: Schema.optional(Schema.Number) }),
     success: HttpApiSchema.status(201)(Schema.Unknown),
@@ -340,7 +342,7 @@ const PreviewTokensGroup = HttpApiGroup.make("previewTokens").add(
   }),
 ).prefix("/api/preview-tokens");
 
-const PathsGroup = HttpApiGroup.make("paths").add(
+export const PathsGroup = HttpApiGroup.make("paths").add(
   HttpApiEndpoint.get("resolve", "/:modelApiKey", {
     params: Schema.Struct({ modelApiKey: Schema.String }),
     success: Schema.Unknown,
@@ -348,7 +350,7 @@ const PathsGroup = HttpApiGroup.make("paths").add(
   }),
 ).prefix("/paths");
 
-const SetupGroup = HttpApiGroup.make("setup").add(
+export const SetupGroup = HttpApiGroup.make("setup").add(
   HttpApiEndpoint.post("run", "/", {
     success: Schema.Unknown,
     error: CmsApiErrorList,
@@ -356,7 +358,60 @@ const SetupGroup = HttpApiGroup.make("setup").add(
 ).prefix("/api/setup");
 
 
-export const CmsApi = HttpApi.make("cms").add(ModelsGroup, FieldsGroup, RecordsGroup, LocalesGroup, SchemaGroup, SearchGroup, TokensGroup, PreviewTokensGroup, PathsGroup, SetupGroup);
+const AssetQuery = Schema.Struct({
+  q: Schema.optional(Schema.String),
+  orderBy: Schema.optional(Schema.String),
+  limit: Schema.optional(Schema.String),
+  offset: Schema.optional(Schema.String),
+});
+
+export const AssetsGroup = HttpApiGroup.make("assets").add(
+  HttpApiEndpoint.get("list", "/", {
+    query: AssetQuery,
+    success: Schema.Unknown,
+    error: CmsApiErrorList,
+  }),
+  HttpApiEndpoint.post("create", "/", {
+    payload: CreateAssetInput,
+    success: HttpApiSchema.status(201)(Schema.Unknown),
+    error: CmsApiErrorList,
+  }),
+  HttpApiEndpoint.post("importFromUrl", "/import-from-url", {
+    payload: ImportAssetFromUrlInput,
+    success: HttpApiSchema.status(201)(Schema.Unknown),
+    error: CmsApiErrorList,
+  }),
+  HttpApiEndpoint.get("get", "/:id", {
+    params: IdParams,
+    success: Schema.Unknown,
+    error: CmsApiErrorList,
+  }),
+  HttpApiEndpoint.get("usages", "/:id/usages", {
+    params: IdParams,
+    success: Schema.Unknown,
+    error: CmsApiErrorList,
+  }),
+  HttpApiEndpoint.put("replace", "/:id", {
+    params: IdParams,
+    payload: CreateAssetInput,
+    success: Schema.Unknown,
+    error: CmsApiErrorList,
+  }),
+  HttpApiEndpoint.patch("updateMetadata", "/:id", {
+    params: IdParams,
+    payload: UpdateAssetMetadataInput,
+    success: Schema.Unknown,
+    error: CmsApiErrorList,
+  }),
+  HttpApiEndpoint.delete("delete", "/:id", {
+    params: IdParams,
+    query: Schema.Struct({ force: Schema.optional(Schema.String) }),
+    success: Schema.Unknown,
+    error: CmsApiErrorList,
+  }),
+).prefix("/api/assets");
+
+export const CmsApi = HttpApi.make("cms").add(ModelsGroup, FieldsGroup, RecordsGroup, LocalesGroup, SchemaGroup, SearchGroup, TokensGroup, PreviewTokensGroup, PathsGroup, SetupGroup, AssetsGroup);
 
 
 const LocalesHandlers = HttpApiBuilder.group(CmsApi, "locales", (handlers) =>
@@ -518,4 +573,57 @@ const FieldsHandlers = HttpApiBuilder.group(CmsApi, "fields", (handlers) =>
 );
 
 export const ApiLayer = HttpApiBuilder.layer(CmsApi);
-export const ApiHandlersLayer = Layer.mergeAll(ModelsHandlers, FieldsHandlers, RecordsHandlers, LocalesHandlers, SchemaHandlers, SearchHandlers, TokensHandlers, PreviewTokensHandlers, PathsHandlers, SetupHandlers);
+const AssetsHandlers = HttpApiBuilder.group(CmsApi, "assets", (handlers) => {
+  const actor = (args: { request: unknown }) =>
+    // SAFETY: HttpApi handler args always carry the HttpServerRequest.
+    actorFromHeaders(new Headers((args.request as { headers: Headers }).headers));
+  return handlers
+    .handle("list", ({ query }) =>
+      Effect.gen(function* () {
+        // The old route validated the offset through ListAssetsInput's schema
+        // check; query values arrive as strings, so the check lives here.
+        if (query.offset !== undefined && Number(query.offset) < 0) {
+          return yield* new ValidationError({ message: "offset must be >= 0" });
+        }
+        if (query.limit !== undefined && (Number.isNaN(Number(query.limit)) || Number(query.limit) < 0)) {
+          return yield* new ValidationError({ message: "limit must be a non-negative number" });
+        }
+        return yield* AssetService.listAssets({
+          query: query.q,
+          page: (query.limit !== undefined || query.offset !== undefined)
+            ? {
+                limit: query.limit !== undefined ? Math.min(Number(query.limit), 100) : 24,
+                offset: query.offset !== undefined ? Number(query.offset) : 0,
+              }
+            : undefined,
+          orderBy: query.orderBy !== undefined
+            ? query.orderBy.split(",").map((part) => part.trim()).filter(Boolean)
+            : undefined,
+        }).pipe(Effect.mapError(toDeclaredError));
+      }))
+    .handle("create", (args) => Effect.gen(function* () {
+      const a = actor(args);
+      return yield* AssetService.createAsset(args.payload, a).pipe(Effect.mapError(toDeclaredError));
+    }))
+    .handle("importFromUrl", (args) => Effect.gen(function* () {
+      const a = actor(args);
+      return yield* AssetService.importAssetFromUrl(args.payload, a).pipe(Effect.mapError(toDeclaredError));
+    }))
+    .handle("get", ({ params }) => AssetService.getAsset(params.id).pipe(Effect.mapError(toDeclaredError)))
+    .handle("usages", ({ params }) => AssetService.getAssetUsages(params.id).pipe(
+      Effect.map((usages) => ({ usages })),
+      Effect.mapError(toDeclaredError),
+    ))
+    .handle("replace", (args) => Effect.gen(function* () {
+      const a = actor(args);
+      return yield* AssetService.replaceAsset(args.params.id, args.payload, a).pipe(Effect.mapError(toDeclaredError));
+    }))
+    .handle("updateMetadata", (args) => Effect.gen(function* () {
+      const a = actor(args);
+      return yield* AssetService.updateAssetMetadata(args.params.id, args.payload, a).pipe(Effect.mapError(toDeclaredError));
+    }))
+    .handle("delete", ({ params, query }) =>
+      AssetService.deleteAsset(params.id, query.force === "true").pipe(Effect.mapError(toDeclaredError)));
+});
+
+export const ApiHandlersLayer = Layer.mergeAll(ModelsHandlers, FieldsHandlers, RecordsHandlers, LocalesHandlers, SchemaHandlers, SearchHandlers, TokensHandlers, PreviewTokensHandlers, PathsHandlers, SetupHandlers, AssetsHandlers);
