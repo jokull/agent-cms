@@ -1,4 +1,4 @@
-import { isNumber, isObjectRecord, isString, type DynamicRow, type StoredFieldValue } from "../dynamic/row-types.js";
+import { isString, type DynamicRow, type StoredFieldValue } from "../dynamic/row-types.js";
 import {
   HttpEffect,
   HttpRouter,
@@ -10,33 +10,25 @@ import {
 import { Cause, DateTime, Effect, Layer, Logger, Schema, SchemaIssue, Option } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import * as AssetService from "../services/asset-service.js";
+import * as TokenService from "../services/token-service.js";
+import * as PreviewService from "../services/preview-service.js";
+import * as PathService from "../services/path-service.js";
 import { AssetImportContext, AssetUrlContext, type AssetUrlConfig } from "../services/asset-service.js";
-import * as LocaleService from "../services/locale-service.js";
 import { isCmsError, errorToResponse } from "../errors.js";
 import { ApiLayer, ApiHandlersLayer } from "./api.js";
+import { openApiSpec } from "./api/index.js";
 import {
-  SearchInput,
-  ReindexSearchInput,
   CreateAssetInput,
   ImportAssetFromUrlInput,
   ListAssetsInput,
   UpdateAssetMetadataInput,
-  CreateLocaleInput,
-  ImportSchemaInput,
   CreateUploadUrlInput,
-  CreateEditorTokenInput,
 } from "../services/input-schemas.js";
 import { UnauthorizedError, ValidationError } from "../errors.js";
-import * as SchemaIO from "../services/schema-io.js";
 import * as ScheduleService from "../services/schedule-service.js";
-import * as TokenService from "../services/token-service.js";
-import * as PreviewService from "../services/preview-service.js";
-import * as PathService from "../services/path-service.js";
-import * as SearchService from "../search/search-service.js";
 import type { AiBinding, VectorizeBinding } from "../search/vectorize.js";
 import { VectorizeContext } from "../search/vectorize-context.js";
 import { HooksContext, type CmsHooks } from "../hooks.js";
-import { ensureSchema } from "../migrations.js";
 import {
   actorFromHeaders,
   actorHeaders,
@@ -92,12 +84,6 @@ function param(params: Record<string, string | undefined>, name: string): string
 }
 
 /** Get query param */
-const queryParam = Effect.fn("queryParam")(function* (name: string) {
-  const req = yield* HttpServerRequest.HttpServerRequest;
-  const url = new URL(req.url, "http://localhost");
-  return url.searchParams.get(name) ?? "";
-});
-
 function decodeUnknownInput<S extends Schema.Constraint>(
   schema: S,
   input: StoredFieldValue,
@@ -229,173 +215,22 @@ const assetsRouter = HttpRouter.use((router) => {
 });
 
 // --- Locales ---
-const localesRouter = HttpRouter.use((router) => {
-  const api = router.prefixed("/api/locales");
-  return Effect.all([
-  api.add("GET", "/", handle(LocaleService.listLocales())),
-  api.add("POST", 
-    "/",
-    Effect.gen(function* () {
-      const body = yield* readJsonBody();
-      const input = yield* decodeUnknownInput(CreateLocaleInput, body);
-      return yield* handle(LocaleService.createLocale(input), 201);
-    })
-  ),
-  api.add("DELETE", 
-    "/:id",
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      return yield* handle(LocaleService.deleteLocale(param(params, "id")));
-    })
-  )
-  ]);
-});
-
-// --- Schema Import/Export ---
-const schemaRouter = HttpRouter.use((router) => {
-  const api = router.prefixed("/api/schema");
-  return Effect.all([
-  api.add("GET", "/", handle(SchemaIO.exportSchema())),
-
-  api.add("POST", 
-    "/",
-    Effect.gen(function* () {
-      const body = yield* readJsonBody();
-      const input = yield* decodeUnknownInput(ImportSchemaInput, body);
-      return yield* handle(SchemaIO.importSchema(input), 201);
-    })
-  )
-  ]);
-});
-
-// --- Search ---
-const searchRouter = HttpRouter.use((router) => {
-  const api = router.prefixed("/api/search");
-  return Effect.all([
-  api.add("POST", 
-    "/",
-    Effect.gen(function* () {
-      const body = yield* readJsonBody();
-      const parsed = yield* decodeUnknownInput(SearchInput, body, "Invalid search input");
-      return yield* handle(SearchService.search(parsed));
-    })
-  ),
-
-  api.add("POST", 
-    "/reindex",
-    Effect.gen(function* () {
-      const body = yield* readJsonBody();
-      const parsed = yield* decodeUnknownInput(ReindexSearchInput, body);
-      const modelApiKey = parsed.modelApiKey;
-      return yield* handle(SearchService.reindexAll(modelApiKey));
-    })
-  )
-  ]);
-});
-
-// --- Tokens ---
-const tokensRouter = HttpRouter.use((router) => {
-  const api = router.prefixed("/api/tokens");
-  return Effect.all([
-  api.add("GET", "/", handle(TokenService.listEditorTokens())),
-
-  api.add("POST", 
-    "/",
-    Effect.gen(function* () {
-      const body = yield* readJsonBody();
-      const input = yield* decodeUnknownInput(CreateEditorTokenInput, body);
-      return yield* handle(TokenService.createEditorToken(input), 201);
-    })
-  ),
-
-  api.add("DELETE", 
-    "/:id",
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      return yield* handle(TokenService.revokeEditorToken(param(params, "id")));
-    })
-  )
-  ]);
-});
-
-// --- Preview Tokens ---
-const previewTokensRouter = HttpRouter.use((router) => {
-  const api = router.prefixed("/api/preview-tokens");
-  return Effect.all([
-  api.add("POST", 
-    "/",
-    Effect.gen(function* () {
-      const body = yield* readJsonBody();
-      const expiresIn = isObjectRecord(body) && isNumber(body.expiresIn)
-        ? body.expiresIn
-        : undefined;
-      return yield* handle(PreviewService.createPreviewToken(expiresIn), 201);
-    })
-  ),
-
-  api.add("GET", 
-    "/validate",
-    Effect.gen(function* () {
-      const token = yield* queryParam("token");
-      return yield* handle(PreviewService.validatePreviewToken(token));
-    })
-  ),
-  ]);
-});
-
-// --- Canonical paths ---
-const pathsRouter = HttpRouter.use((router) => {
-  const api = router.prefixed("/paths");
-  return Effect.all([
-  api.add("GET", 
-    "/:modelApiKey",
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      return yield* handle(PathService.resolveCanonicalPaths(param(params, "modelApiKey")));
-    })
-  ),
-  ]);
-});
-
-// --- Setup / bootstrap ---
-const setupRouter = HttpRouter.use((router) => {
-  const api = router.prefixed("/api");
-  return Effect.all([
-  api.add("POST", 
-    "/setup",
-    handle(ensureSchema().pipe(Effect.as({ ok: true })))
-  )
-  ]);
-});
-
-// --- Health ---
+// --- Combine all routes ---
 const healthRouter = HttpRouter.use((router) =>
-  Effect.all([
   router.add("GET", "/health", HttpServerResponse.json({ status: "ok" }))
-  ])
 );
 
-// --- OpenAPI spec ---
-import { openApiSpec } from "./api/index.js";
 const openApiRouter = HttpRouter.use((router) =>
   Effect.all([
-  router.add("GET", "/openapi.json", HttpServerResponse.json(openApiSpec))
+    router.add("GET", "/openapi.json", HttpServerResponse.json(openApiSpec)),
   ])
 );
 
-// --- Combine all routes ---
 export const appRouter = Layer.mergeAll(
   openApiRouter,
   healthRouter,
   ApiLayer.pipe(Layer.provide(ApiHandlersLayer)),
   assetsRouter,
-  localesRouter,
-  schemaRouter,
-  searchRouter,
-  tokensRouter,
-  previewTokensRouter,
-  setupRouter,
-  pathsRouter,
 );
 
 /**

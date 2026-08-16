@@ -79,6 +79,7 @@ const ValidationApiError = Schema.encodeTo(ValidationBody, {
   // SAFETY: the encode getter receives the runtime error value (declared unknown).
   encode: SchemaGetter.transform((input: unknown) => {
     const error = input as ValidationError;
+    console.log("VALIDATION-ENCODE", error._tag, JSON.stringify({ m: error.message, f: error.field }));
     // oxlint-disable-next-line anti-slop/no-conditional-empty-object-spread -- absent field must stay absent in JSON; the response transform coerces undefined to null.
     return { error: error.message, ...(error.field !== undefined ? { field: error.field } : {}) };
   }),

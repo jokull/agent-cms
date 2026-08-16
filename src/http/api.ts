@@ -16,14 +16,22 @@ import * as RecordService from "../services/record-service.js";
 import * as VersionService from "../services/version-service.js";
 import * as PublishService from "../services/publish-service.js";
 import * as ScheduleService from "../services/schedule-service.js";
+import * as LocaleService from "../services/locale-service.js";
+import * as SchemaIO from "../services/schema-io.js";
+import * as SearchService from "../search/search-service.js";
+import * as TokenService from "../services/token-service.js";
+import * as PreviewService from "../services/preview-service.js";
+import * as PathService from "../services/path-service.js";
 import { actorFromHeaders } from "../attribution.js";
 import {
   CreateModelInput, UpdateModelInput, CreateFieldInput, UpdateFieldInput,
   CreateRecordInput, PatchRecordInput, PatchBlocksInput, BulkCreateRecordsInput,
   QueryRecordsInput, ValidateRecordInput, BulkRecordOperationInput,
   ScheduleRecordInput, ReorderInput,
+  CreateLocaleInput, ImportSchemaInput, SearchInput, ReindexSearchInput,
 } from "../services/input-schemas.js";
-import { SchemaEngineError, isCmsError, type CmsError } from "../errors.js";
+import { ensureSchema } from "../migrations.js";
+import { SchemaEngineError, ValidationError, isCmsError, type CmsError } from "../errors.js";
 import { CmsApiErrorList } from "./api-errors.js";
 
 /**
@@ -257,7 +265,142 @@ const RecordsGroup = HttpApiGroup.make("records").add(
 ).prefix("/api");
 
 
-export const CmsApi = HttpApi.make("cms").add(ModelsGroup, FieldsGroup, RecordsGroup);
+const IdParams = Schema.Struct({ id: Schema.String });
+
+const LocalesGroup = HttpApiGroup.make("locales").add(
+  HttpApiEndpoint.get("list", "/", { success: Schema.Array(Schema.Unknown), error: CmsApiErrorList }),
+  HttpApiEndpoint.post("create", "/", {
+    payload: CreateLocaleInput,
+    success: HttpApiSchema.status(201)(Schema.Unknown),
+    error: CmsApiErrorList,
+  }),
+  HttpApiEndpoint.delete("delete", "/:id", {
+    params: IdParams,
+    success: Schema.Unknown,
+    error: CmsApiErrorList,
+  }),
+).prefix("/api/locales");
+
+const SchemaGroup = HttpApiGroup.make("schema").add(
+  HttpApiEndpoint.get("export", "/", { success: Schema.Unknown, error: CmsApiErrorList }),
+  HttpApiEndpoint.post("import", "/", {
+    payload: ImportSchemaInput,
+    success: HttpApiSchema.status(201)(Schema.Unknown),
+    error: CmsApiErrorList,
+  }),
+).prefix("/api/schema");
+
+const SearchGroup = HttpApiGroup.make("search").add(
+  HttpApiEndpoint.post("search", "/", {
+    payload: SearchInput,
+    success: Schema.Unknown,
+    error: CmsApiErrorList,
+  }),
+  HttpApiEndpoint.post("reindex", "/reindex", {
+    payload: ReindexSearchInput,
+    success: Schema.Unknown,
+    error: CmsApiErrorList,
+  }),
+).prefix("/api/search");
+
+const TokensGroup = HttpApiGroup.make("tokens").add(
+  HttpApiEndpoint.get("list", "/", { success: Schema.Array(Schema.Unknown), error: CmsApiErrorList }),
+  HttpApiEndpoint.post("create", "/", {
+    // The expiresIn range checks live in the handler (payload-decode errors
+    // would produce an empty 400 — the old flow surfaced the message).
+    payload: Schema.Struct({
+      name: Schema.NonEmptyString,
+      expiresIn: Schema.optional(Schema.Number),
+    }),
+    success: HttpApiSchema.status(201)(Schema.Unknown),
+    error: CmsApiErrorList,
+  }),
+  HttpApiEndpoint.delete("delete", "/:id", {
+    params: IdParams,
+    success: Schema.Unknown,
+    error: CmsApiErrorList,
+  }),
+).prefix("/api/tokens");
+
+const PreviewTokensGroup = HttpApiGroup.make("previewTokens").add(
+  HttpApiEndpoint.post("create", "/", {
+    payload: Schema.Struct({ expiresIn: Schema.optional(Schema.Number) }),
+    success: HttpApiSchema.status(201)(Schema.Unknown),
+    error: CmsApiErrorList,
+  }),
+  HttpApiEndpoint.get("validate", "/", {
+    query: Schema.Struct({ token: Schema.String }),
+    success: Schema.Unknown,
+    error: CmsApiErrorList,
+  }),
+).prefix("/api/preview-tokens");
+
+const PathsGroup = HttpApiGroup.make("paths").add(
+  HttpApiEndpoint.get("resolve", "/:modelApiKey", {
+    params: Schema.Struct({ modelApiKey: Schema.String }),
+    success: Schema.Unknown,
+    error: CmsApiErrorList,
+  }),
+).prefix("/paths");
+
+const SetupGroup = HttpApiGroup.make("setup").add(
+  HttpApiEndpoint.post("run", "/", {
+    success: Schema.Unknown,
+    error: CmsApiErrorList,
+  }),
+).prefix("/api/setup");
+
+export const CmsApi = HttpApi.make("cms").add(ModelsGroup, FieldsGroup, RecordsGroup, LocalesGroup, SchemaGroup, SearchGroup, TokensGroup, PreviewTokensGroup, PathsGroup, SetupGroup);
+const LocalesHandlers = HttpApiBuilder.group(CmsApi, "locales", (handlers) =>
+  handlers
+    .handle("list", () => LocaleService.listLocales().pipe(Effect.mapError(toDeclaredError)))
+    .handle("create", ({ payload }) => LocaleService.createLocale(payload).pipe(Effect.mapError(toDeclaredError)))
+    .handle("delete", ({ params }) => LocaleService.deleteLocale(params.id).pipe(Effect.mapError(toDeclaredError))),
+);
+
+const SchemaHandlers = HttpApiBuilder.group(CmsApi, "schema", (handlers) =>
+  handlers
+    .handle("export", () => SchemaIO.exportSchema().pipe(Effect.mapError(toDeclaredError)))
+    .handle("import", ({ payload }) => SchemaIO.importSchema(payload).pipe(Effect.mapError(toDeclaredError))),
+);
+
+const SearchHandlers = HttpApiBuilder.group(CmsApi, "search", (handlers) =>
+  handlers
+    .handle("search", ({ payload }) => SearchService.search(payload).pipe(Effect.mapError(toDeclaredError)))
+    .handle("reindex", ({ payload }) => SearchService.reindexAll(payload.modelApiKey).pipe(Effect.mapError(toDeclaredError))),
+);
+
+const TokensHandlers = HttpApiBuilder.group(CmsApi, "tokens", (handlers) =>
+  handlers
+    .handle("list", () => TokenService.listEditorTokens().pipe(Effect.mapError(toDeclaredError)))
+    .handle("create", ({ payload }) =>
+      Effect.gen(function* () {
+        if (payload.expiresIn !== undefined) {
+          if (payload.expiresIn <= 0) {
+            return yield* new ValidationError({ message: "Expected a positive number" });
+          }
+          if (payload.expiresIn > 60 * 60 * 24 * 365) {
+            return yield* new ValidationError({ message: "expiresIn must be <= 31536000 seconds" });
+          }
+        }
+        return yield* TokenService.createEditorToken(payload).pipe(Effect.mapError(toDeclaredError));
+      }))
+    .handle("delete", ({ params }) => TokenService.revokeEditorToken(params.id).pipe(Effect.mapError(toDeclaredError))),
+);
+
+const PreviewTokensHandlers = HttpApiBuilder.group(CmsApi, "previewTokens", (handlers) =>
+  handlers
+    .handle("create", ({ payload }) => PreviewService.createPreviewToken(payload.expiresIn).pipe(Effect.mapError(toDeclaredError)))
+    .handle("validate", ({ query }) => PreviewService.validatePreviewToken(query.token).pipe(Effect.mapError(toDeclaredError))),
+);
+
+const PathsHandlers = HttpApiBuilder.group(CmsApi, "paths", (handlers) =>
+  handlers.handle("resolve", ({ params }) => PathService.resolveCanonicalPaths(params.modelApiKey).pipe(Effect.mapError(toDeclaredError))),
+);
+
+const SetupHandlers = HttpApiBuilder.group(CmsApi, "setup", (handlers) =>
+  handlers.handle("run", () => ensureSchema().pipe(Effect.as({ ok: true }), Effect.mapError(toDeclaredError))),
+);
 
 const RecordsHandlers = HttpApiBuilder.group(CmsApi, "records", (handlers) => {
   const actor = (args: { request: unknown }) =>
@@ -367,4 +510,4 @@ const FieldsHandlers = HttpApiBuilder.group(CmsApi, "fields", (handlers) =>
 );
 
 export const ApiLayer = HttpApiBuilder.layer(CmsApi);
-export const ApiHandlersLayer = Layer.mergeAll(ModelsHandlers, FieldsHandlers, RecordsHandlers);
+export const ApiHandlersLayer = Layer.mergeAll(ModelsHandlers, FieldsHandlers, RecordsHandlers, LocalesHandlers, SchemaHandlers, SearchHandlers, TokensHandlers, PreviewTokensHandlers, PathsHandlers, SetupHandlers);
