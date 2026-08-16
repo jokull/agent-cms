@@ -1,5 +1,5 @@
 import { D1Client } from "@effect/sql-d1";
-import { Layer } from "effect";
+import { DateTime, Layer } from "effect";
 import { createWebHandler } from "./http/router.js";
 import type { AiBinding, VectorizeBinding } from "./search/vectorize.js";
 import type { CmsHooks } from "./hooks.js";
@@ -61,6 +61,7 @@ const objectIds = new WeakMap<object, number>();
 let nextObjectId = 1;
 const handlerCache = new Map<string, CachedCmsHandler>();
 
+// oxlint-disable-next-line anti-slop/no-object-parameters -- cache-key identity over heterogeneous binding objects (D1/R2/Ai/Vectorize); no property access.
 function getObjectId(value: object | undefined): number {
   if (!value) return 0;
   const existing = objectIds.get(value);
@@ -72,11 +73,11 @@ function getObjectId(value: object | undefined): number {
 
 function cacheKey(bindings: DecodedCmsBindings, hooks: CmsHooks | undefined): string {
   return [
-    getObjectId(bindings.db as unknown as object),
-    getObjectId(bindings.assets as unknown as object | undefined),
-    getObjectId(bindings.ai as unknown as object | undefined),
-    getObjectId(bindings.vectorize as unknown as object | undefined),
-    getObjectId(hooks as unknown as object | undefined),
+    getObjectId(bindings.db),
+    getObjectId(bindings.assets),
+    getObjectId(bindings.ai),
+    getObjectId(bindings.vectorize),
+    getObjectId(hooks),
     bindings.environment ?? "",
     bindings.assetBaseUrl ?? "",
     bindings.writeKey ?? "",
@@ -156,7 +157,7 @@ function createCMSHandlerUncached(bindings: DecodedCmsBindings, hooks?: CmsHooks
     execute: webHandler.execute,
 
     /** Run due scheduled publish/unpublish transitions. Safe to call from a cron trigger. */
-    runScheduledTransitions: (now?: Date) => webHandler.runScheduledTransitions(now),
+    runScheduledTransitions: (now?: Date) => webHandler.runScheduledTransitions(now ? DateTime.fromDateUnsafe(now) : undefined),
 
     /**
      * Resolve canonical paths for all published records of a model.

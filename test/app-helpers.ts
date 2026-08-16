@@ -1,5 +1,5 @@
 import { Effect, Layer, ManagedRuntime } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { ensureSchema } from "../src/migrations.js";
 import { createWebHandler } from "../src/http/router.js";

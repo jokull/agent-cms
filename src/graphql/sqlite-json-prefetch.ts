@@ -1,4 +1,5 @@
 import type { GraphQLResolveInfo, SelectionNode, SelectionSetNode } from "graphql";
+import { contentTableName } from "../dynamic/tables.js";
 import { getLinkTargets } from "../db/validators.js";
 import type { ParsedFieldRow } from "../db/row-types.js";
 import { toCamelCase } from "./gql-utils.js";
@@ -173,7 +174,7 @@ export function buildLinkPrefetchSpecs(params: {
 
     specs.push({
       rootFieldApiKey: rootField.api_key,
-      sqlExpression: `(SELECT json_object(${jsonParts.join(", ")}) FROM "content_${targetApiKey}" linked WHERE linked.id = "${params.tableName}"."${rootField.api_key}" LIMIT 1) AS "__prefetch_${rootField.api_key}"`,
+      sqlExpression: `(SELECT json_object(${jsonParts.join(", ")}) FROM "${contentTableName(targetApiKey)}" linked WHERE linked.id = "${params.tableName}"."${rootField.api_key}" LIMIT 1) AS "__prefetch_${rootField.api_key}"`,
     });
   }
 

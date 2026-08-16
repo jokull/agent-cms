@@ -5,7 +5,7 @@
  * via `OpenApi.fromApi()`. The spec is served at /openapi.json by
  * the router.
  */
-import { HttpApi, OpenApi } from "@effect/platform";
+import { HttpApi, OpenApi } from "effect/unstable/httpapi";
 import { modelsGroup } from "./models.js";
 import { fieldsGroup } from "./fields.js";
 import { recordsGroup } from "./records.js";

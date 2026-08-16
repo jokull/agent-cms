@@ -7,8 +7,8 @@
  * Deliberately small — it does NOT re-export the whole service surface, only
  * what the generated in-process RPC procedures call.
  */
-import { Effect, Either, Layer, ManagedRuntime, Option, Schema } from "effect";
-import { SqlClient } from "@effect/sql";
+import { Effect, Layer, ManagedRuntime, Option, Result, Schema } from "effect";
+import { SqlClient } from "effect/unstable/sql";
 import { D1Client } from "@effect/sql-d1";
 import { VectorizeContext } from "./search/vectorize-context.js";
 import { HooksContext } from "./hooks.js";
@@ -66,23 +66,27 @@ export { ensureSchema } from "./migrations.js";
  * free of any Effect/Schema import. A decode failure is a genuine defect (the
  * wire codec already gate-kept the shape), so it propagates as an incident.
  */
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- boundary parser: the op re-validates the wire shape through CreateAssetInput (applying defaults) so the codegen bridge can hand over plain decoded wire objects without importing Schema.
 export function createAssetOp(raw: unknown, actor?: RequestActor | null) {
-  return Schema.decodeUnknown(CreateAssetInput)(raw).pipe(
+  return Schema.decodeUnknownEffect(CreateAssetInput)(raw).pipe(
     Effect.flatMap((input) => createAsset(input, actor)),
   );
 }
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- boundary parser: re-validates the wire shape through CreateAssetInput for the codegen bridge (plain decoded wire objects, no Schema import in the generated artifact).
 export function replaceAssetOp(id: string, raw: unknown, actor?: RequestActor | null) {
-  return Schema.decodeUnknown(CreateAssetInput)(raw).pipe(
+  return Schema.decodeUnknownEffect(CreateAssetInput)(raw).pipe(
     Effect.flatMap((input) => replaceAsset(id, input, actor)),
   );
 }
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- boundary parser: re-validates the wire shape through ImportAssetFromUrlInput for the codegen bridge (plain decoded wire objects, no Schema import in the generated artifact).
 export function importAssetOp(raw: unknown, actor?: RequestActor | null) {
-  return Schema.decodeUnknown(ImportAssetFromUrlInput)(raw).pipe(
+  return Schema.decodeUnknownEffect(ImportAssetFromUrlInput)(raw).pipe(
     Effect.flatMap((input) => importAssetFromUrl(input, actor)),
   );
 }
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- boundary parser: re-validates the wire shape through CreateUploadUrlInput for the codegen bridge (plain decoded wire objects, no Schema import in the generated artifact).
 export function createUploadUrlOp(raw: unknown) {
-  return Schema.decodeUnknown(CreateUploadUrlInput)(raw).pipe(
+  return Schema.decodeUnknownEffect(CreateUploadUrlInput)(raw).pipe(
     Effect.flatMap((input) => createAssetUploadUrl(input)),
   );
 }
@@ -184,10 +188,10 @@ export function makeCmsRuntime(deps: CmsRuntimeDeps): CmsRuntime {
   const runtime = ManagedRuntime.make(cmsRuntimeLayer(sqlLayer, deps.assets));
   return {
     run: (effect) =>
-      runtime.runPromise(Effect.either(effect)).then((either) =>
-        Either.isRight(either)
-          ? { ok: true, value: either.right }
-          : { ok: false, error: either.left },
+      runtime.runPromise(Effect.result(effect)).then((result) =>
+        Result.isSuccess(result)
+          ? { ok: true, value: result.success }
+          : { ok: false, error: result.failure },
       ),
   };
 }

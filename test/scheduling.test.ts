@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { Effect } from "effect";
+import { DateTime, Effect } from "effect";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -59,7 +59,7 @@ describe("scheduled publishing and unpublishing", () => {
     expect(before.data.allPosts[0]._publicationScheduledAt).toBe(publishAt);
     expect(before.data.allPosts[0]._status).toBe("draft");
 
-    const executed = await runScheduledTransitions(new Date("2026-04-01T09:00:01.000Z"));
+    const executed = await runScheduledTransitions(DateTime.makeUnsafe("2026-04-01T09:00:01.000Z"));
     expect(executed.published).toEqual([{ modelApiKey: "post", recordId: record.id }]);
 
     const getRes = await handler(new Request(`http://localhost/api/records/${record.id}?modelApiKey=post`));
@@ -83,7 +83,7 @@ describe("scheduled publishing and unpublishing", () => {
     });
     expect(scheduleRes.status).toBe(200);
 
-    const executed = await runScheduledTransitions(new Date("2026-04-15T00:00:01.000Z"));
+    const executed = await runScheduledTransitions(DateTime.makeUnsafe("2026-04-15T00:00:01.000Z"));
     expect(executed.unpublished).toEqual([{ modelApiKey: "post", recordId: record.id }]);
 
     const getRes = await handler(new Request(`http://localhost/api/records/${record.id}?modelApiKey=post`));

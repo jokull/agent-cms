@@ -1,41 +1,43 @@
+import { isNumber, isObjectRecord, isString, stringArrayFrom, type DynamicRow, type StoredFieldValue } from "./dynamic/row-types.js";
 import { Context, Effect, Option } from "effect";
-import { SqlClient } from "@effect/sql";
+
+import { SqlClient } from "effect/unstable/sql";
 import { decodeJsonIfString, decodeJsonStringOr } from "./json.js";
 import type { AssetRow } from "./db/row-types.js";
 import type { AssetObject } from "./graphql/gql-types.js";
-import { isObjectRecord, stringArrayFrom } from "./value-utils.js";
+
 
 export interface MediaFieldReference {
   readonly uploadId: string;
   readonly alt?: string | null;
   readonly title?: string | null;
   readonly focalPoint?: { x: number; y: number } | null;
-  readonly customData?: Record<string, unknown> | null;
+  readonly customData?: DynamicRow | null;
 }
 
-export function parseMediaFieldReference(value: unknown): MediaFieldReference | null {
+export function parseMediaFieldReference(value: StoredFieldValue): MediaFieldReference | null {
   const parsed = decodeJsonIfString(value);
-  if (typeof parsed === "string") {
+  if (isString(parsed)) {
     return parsed.length > 0 ? { uploadId: parsed } : null;
   }
   if (!isObjectRecord(parsed)) return null;
   const objectValue = parsed;
-  const uploadId = typeof objectValue.upload_id === "string" ? objectValue.upload_id : null;
+  const uploadId = isString(objectValue.upload_id) ? objectValue.upload_id : null;
   if (!uploadId) return null;
   return {
     uploadId,
-    alt: typeof objectValue.alt === "string" || objectValue.alt === null ? objectValue.alt : undefined,
-    title: typeof objectValue.title === "string" || objectValue.title === null ? objectValue.title : undefined,
+    alt: isString(objectValue.alt) || objectValue.alt === null ? objectValue.alt : undefined,
+    title: isString(objectValue.title) || objectValue.title === null ? objectValue.title : undefined,
     focalPoint: isFocalPoint(objectValue.focal_point) || objectValue.focal_point === null ? objectValue.focal_point ?? null : undefined,
     customData: isJsonRecord(objectValue.custom_data) || objectValue.custom_data === null ? objectValue.custom_data ?? null : undefined,
   };
 }
 
-export function parseMediaGalleryReferences(value: unknown): MediaFieldReference[] {
+export function parseMediaGalleryReferences(value: StoredFieldValue): MediaFieldReference[] {
   const parsed = decodeJsonIfString(value);
   if (!Array.isArray(parsed)) return [];
   return parsed
-    .map((entry) => parseMediaFieldReference(entry))
+    .map((entry: StoredFieldValue) => parseMediaFieldReference(entry))
     .filter((entry): entry is MediaFieldReference => entry !== null);
 }
 
@@ -63,7 +65,9 @@ export function mergeAssetWithMediaReference(
     customData: isJsonRecord(reference?.customData)
       ? reference.customData
       : (isJsonRecord(defaultCustomData) ? defaultCustomData : null),
-    tags: stringArrayFrom(decodeJsonStringOr(asset.tags, [])),
+    // SAFETY: a missing/invalid tags JSON decodes to the empty array, a StoredFieldValue per the json contract.
+    // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- fallback literal for an absent tags cell; the union bridge is the honest typed default.
+    tags: stringArrayFrom(decodeJsonStringOr(asset.tags, [] as unknown as StoredFieldValue)),
     url: assetUrl(asset.r2_key),
     _createdAt: asset.created_at,
     _updatedAt: asset.updated_at,
@@ -109,10 +113,10 @@ export interface AssetUrlConfig {
  * builds its layer once per Worker but only learns the request origin per
  * request.
  */
-export class AssetUrlContext extends Context.Tag("AssetUrlContext")<
+export class AssetUrlContext extends Context.Service<
   AssetUrlContext,
   { readonly current: () => AssetUrlConfig }
->() {}
+>()("AssetUrlContext") {}
 
 /** The minimum an asset row needs for URL resolution. */
 export interface AssetUrlSource {
@@ -184,7 +188,7 @@ export interface EnrichedMediaValue {
   readonly alt: string | null;
   readonly title: string | null;
   readonly focal_point: { x: number; y: number } | null;
-  readonly custom_data: Record<string, unknown> | null;
+  readonly custom_data: DynamicRow | null;
   readonly blurhash: string | null;
 }
 
@@ -240,14 +244,14 @@ function enrichReference(
  * `enrichMediaSites`.
  */
 export interface MediaSite {
-  readonly container: Record<string, unknown>;
+  readonly container: DynamicRow;
   readonly key: string;
   readonly fieldType: "media" | "media_gallery" | "seo";
 }
 
 export function collectMediaSite(
   sites: MediaSite[] | undefined,
-  container: Record<string, unknown>,
+  container: DynamicRow,
   key: string,
   fieldType: string,
 ): void {
@@ -259,7 +263,8 @@ export function collectMediaSite(
 }
 
 function siteAssetIds(site: MediaSite): string[] {
-  const value = site.container[site.key];
+  // SAFETY: media site cells hold StoredFieldValue (id string, reference object, or JSON string).
+  const value = site.container[site.key] as StoredFieldValue;
   if (site.fieldType === "media") {
     const reference = parseMediaFieldReference(value);
     return reference ? [reference.uploadId] : [];
@@ -268,7 +273,7 @@ function siteAssetIds(site: MediaSite): string[] {
     return parseMediaGalleryReferences(value).map((reference) => reference.uploadId);
   }
   const parsed = decodeJsonIfString(value);
-  if (isObjectRecord(parsed) && typeof parsed.image === "string" && parsed.image.length > 0) {
+  if (isObjectRecord(parsed) && isString(parsed.image) && parsed.image.length > 0) {
     return [parsed.image];
   }
   return [];
@@ -299,7 +304,7 @@ export function enrichMediaSites(sites: ReadonlyArray<MediaSite>): Effect.Effect
     const byId = new Map(rows.map((row) => [row.id, row] as const));
     const resolve = yield* assetUrlResolver;
 
-    const enrichOne = (value: unknown): unknown => {
+    const enrichOne = (value: StoredFieldValue): StoredFieldValue | EnrichedMediaValue => {
       const reference = parseMediaFieldReference(value);
       if (!reference) return value;
       const asset = byId.get(reference.uploadId);
@@ -310,18 +315,21 @@ export function enrichMediaSites(sites: ReadonlyArray<MediaSite>): Effect.Effect
     for (const site of sites) {
       const value = site.container[site.key];
       if (site.fieldType === "media") {
-        site.container[site.key] = enrichOne(value);
+        // SAFETY: media field cell values are StoredFieldValue (id string or reference object).
+        site.container[site.key] = enrichOne(value as StoredFieldValue);
         continue;
       }
       if (site.fieldType === "media_gallery") {
-        const parsed = decodeJsonIfString(value);
+        // SAFETY: media_gallery field cell values are StoredFieldValue (JSON string or entry array).
+        const parsed = decodeJsonIfString(value as StoredFieldValue);
         if (!Array.isArray(parsed)) continue;
-        site.container[site.key] = parsed.map((entry) => enrichOne(entry));
+        site.container[site.key] = parsed.map((entry: StoredFieldValue) => enrichOne(entry));
         continue;
       }
-      const parsed = decodeJsonIfString(value);
+      // SAFETY: seo field cell values are StoredFieldValue (JSON string or object).
+      const parsed = decodeJsonIfString(value as StoredFieldValue);
       if (!isObjectRecord(parsed)) continue;
-      const imageId = typeof parsed.image === "string" ? parsed.image : null;
+      const imageId = isString(parsed.image) ? parsed.image : null;
       const asset = imageId ? byId.get(imageId) : undefined;
       site.container[site.key] = { ...parsed, [SEO_ENRICHMENT_KEY]: asset ? resolve(asset) : null };
     }
@@ -333,11 +341,11 @@ export function enrichMediaSites(sites: ReadonlyArray<MediaSite>): Effect.Effect
  * can be written straight back without persisting a stale URL or a stale copy
  * of the asset's metadata. A bare id string passes through untouched.
  */
-export function stripMediaEnrichment(fieldType: string, value: unknown): unknown {
+export function stripMediaEnrichment(fieldType: string, value: StoredFieldValue | undefined): StoredFieldValue | StoredFieldValue[] | undefined {
   if (value === null || value === undefined) return value;
   if (fieldType === "media") return stripOneMedia(value);
   if (fieldType === "media_gallery") {
-    return Array.isArray(value) ? value.map((entry) => stripOneMedia(entry)) : value;
+    return Array.isArray(value) ? value.map((entry: StoredFieldValue) => stripOneMedia(entry)) : value;
   }
   if (fieldType === "seo" && isObjectRecord(value) && SEO_ENRICHMENT_KEY in value) {
     const { [SEO_ENRICHMENT_KEY]: _dropped, ...rest } = value;
@@ -346,10 +354,10 @@ export function stripMediaEnrichment(fieldType: string, value: unknown): unknown
   return value;
 }
 
-function stripOneMedia(value: unknown): unknown {
+function stripOneMedia(value: StoredFieldValue): StoredFieldValue {
   if (!isObjectRecord(value)) return value;
-  if (typeof value.upload_id !== "string") return value;
-  const out: Record<string, unknown> = {};
+  if (!isString(value.upload_id)) return value;
+  const out: DynamicRow = {};
   for (const [key, entry] of Object.entries(value)) {
     if (MEDIA_ENRICHMENT_KEYS.includes(key)) continue;
     out[key] = entry;
@@ -357,12 +365,14 @@ function stripOneMedia(value: unknown): unknown {
   return out;
 }
 
-function isJsonRecord(value: unknown): value is Record<string, unknown> {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- type guard: must accept opaque values to narrow them.
+function isJsonRecord(value: unknown): value is DynamicRow {
   return isObjectRecord(value);
 }
 
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- type guard: must accept opaque values to narrow them.
 function isFocalPoint(value: unknown): value is { x: number; y: number } {
   return isJsonRecord(value)
-    && typeof value.x === "number"
-    && typeof value.y === "number";
+    && isNumber(value.x)
+    && isNumber(value.y);
 }

@@ -12,10 +12,10 @@ export interface CmsHooks {
   readonly onUnpublish?: (event: { modelApiKey: string; recordId: string }) => void | Promise<void>;
 }
 
-export class HooksContext extends Context.Tag("HooksContext")<
+export class HooksContext extends Context.Service<
   HooksContext,
   Option.Option<CmsHooks>
->() {}
+>()("HooksContext") {}
 
 class HookExecutionError extends Data.TaggedError("HookExecutionError")<{
   cause: unknown;

@@ -2,8 +2,9 @@
  * Row types for system tables as returned by @effect/sql.
  * These are the snake_case column names from SQLite, not camelCase.
  */
+import { isObjectRecord, type DynamicRow } from "../dynamic/row-types.js";
 
-export interface ModelRow {
+export interface ModelRow extends DynamicRow {
   readonly id: string;
   readonly name: string;
   readonly api_key: string;
@@ -40,7 +41,7 @@ export interface FieldRow {
 
 /** FieldRow with validators parsed from JSON */
 export interface ParsedFieldRow extends Omit<FieldRow, "validators"> {
-  readonly validators: Record<string, unknown>;
+  readonly validators: DynamicRow;
 }
 
 export interface LocaleRow {
@@ -74,7 +75,7 @@ export interface AssetRow {
 }
 
 /** A dynamic content table row — system columns are known, field columns are unknown */
-export interface ContentRow {
+export interface ContentRow extends DynamicRow {
   readonly id: string;
   readonly _status: string;
   readonly _published_at: string | null;
@@ -87,7 +88,6 @@ export interface ContentRow {
   readonly _published_by: string | null;
   readonly _scheduled_publish_at: string | null;
   readonly _scheduled_unpublish_at: string | null;
-  readonly [fieldKey: string]: unknown;
 }
 
 export interface VersionRow {
@@ -117,7 +117,7 @@ export interface StoredEditorTokenRow extends EditorTokenRow {
 }
 
 /** A dynamic block table row */
-export interface BlockRow {
+export interface BlockRow extends DynamicRow {
   readonly id: string;
   readonly _root_record_id: string;
   readonly _root_field_api_key: string;
@@ -125,32 +125,26 @@ export interface BlockRow {
   readonly _parent_block_id: string | null;
   readonly _parent_field_api_key: string;
   readonly _depth: number;
-  readonly [fieldKey: string]: unknown;
 }
 
 // --- Type guards ---
 
-export function isModelRow(row: unknown): row is ModelRow {
+export function isModelRow(row: DynamicRow | null | undefined): row is ModelRow {
   return typeof row === "object" && row !== null && "api_key" in row && "is_block" in row;
 }
 
-export function isContentRow(row: unknown): row is ContentRow {
+export function isContentRow(row: DynamicRow | null | undefined): row is ContentRow {
   return typeof row === "object" && row !== null && "id" in row && "_status" in row;
 }
 
 // --- Helpers ---
 
-/** Runtime check that a value is a plain object record */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 /** Safely parse JSON to a Record, returning empty object on failure */
-function parseJsonRecord(json: string | null | undefined): Record<string, unknown> {
+function parseJsonRecord(json: string | null | undefined): DynamicRow {
   if (!json) return {};
   try {
     const parsed: unknown = JSON.parse(json);
-    if (isRecord(parsed)) return parsed;
+    if (isObjectRecord(parsed)) return parsed;
   } catch { /* invalid JSON */ }
   return {};
 }
@@ -166,7 +160,7 @@ export function isPublished(row: ContentRow): boolean {
 }
 
 /** Parse a published snapshot from JSON string */
-export function parseSnapshot(row: ContentRow): Record<string, unknown> | null {
+export function parseSnapshot(row: ContentRow): DynamicRow | null {
   if (!row._published_snapshot) return null;
   const result = parseJsonRecord(row._published_snapshot);
   return Object.keys(result).length > 0 ? result : null;

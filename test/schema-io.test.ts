@@ -7,7 +7,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { Effect } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import { createTestApp, jsonRequest, gqlQuery } from "./app-helpers.js";
 import type { SchemaExport } from "../src/services/schema-io.js";
 

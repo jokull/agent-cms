@@ -1,4 +1,6 @@
 import { createCmsAdminClient, type CmsAdminClientConfig } from "./admin-client.js";
+import { isString, type DynamicRow, type StoredFieldValue } from "./dynamic/row-types.js";
+import { tryDecodeJsonString } from "./json.js";
 
 export interface EditorMcpPrincipal {
   readonly id: string;
@@ -98,7 +100,7 @@ async function importHmacKey(secret: string) {
   );
 }
 
-async function signJwt(secret: string, claims: object): Promise<string> {
+async function signJwt(secret: string, claims: DynamicRow): Promise<string> {
   const key = await importHmacKey(secret);
   const header = base64UrlEncodeText(JSON.stringify({ alg: "HS256", typ: "JWT" }));
   const payload = base64UrlEncodeText(JSON.stringify(claims));
@@ -118,7 +120,13 @@ async function verifyJwt<T extends { exp: number }>(secret: string, token: strin
   );
   const valid = await crypto.subtle.verify("HMAC", key, signatureBytes, new TextEncoder().encode(message));
   if (!valid) return null;
-  const claims = JSON.parse(base64UrlDecodeText(payload)) as T;
+  // SAFETY: the token passed HMAC verification and its payload was base64url-encoded by
+  // signJwt from JSON.stringify(claims), so it is well-formed JSON of the claims shape.
+  const parsed = tryDecodeJsonString(base64UrlDecodeText(payload));
+  if (!parsed.ok) return null;
+  // SAFETY: the payload was HMAC-verified against the shared secret before
+  // parse (verifyJwt rejects bad signatures), so claims match the JWT issuer's shape.
+  const claims = parsed.value as T;
   if (claims.exp <= Math.floor(Date.now() / 1000)) return null;
   return claims;
 }
@@ -128,7 +136,7 @@ async function sha256Base64Url(input: string): Promise<string> {
   return base64UrlEncodeBytes(new Uint8Array(digest));
 }
 
-function jsonResponse(body: unknown, status: number = 200): Response {
+function jsonResponse(body: StoredFieldValue, status: number = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json" },
@@ -260,10 +268,10 @@ export function createEditorMcpProxy(config: EditorMcpProxyConfig): EditorMcpPro
 
     if (
       grantType !== "authorization_code"
-      || typeof code !== "string"
-      || typeof clientId !== "string"
-      || typeof redirectUri !== "string"
-      || typeof codeVerifier !== "string"
+      || !isString(code)
+      || !isString(clientId)
+      || !isString(redirectUri)
+      || !isString(codeVerifier)
     ) {
       return jsonResponse({ error: "invalid_request" }, 400);
     }
@@ -318,6 +326,8 @@ export function createEditorMcpProxy(config: EditorMcpProxyConfig): EditorMcpPro
     }
 
     const upstreamUrl = new URL(cmsBaseUrl + "/mcp/editor");
+    // SAFETY: Workers' fetch requires duplex: "half" when forwarding a streaming request body;
+    // the DOM RequestInit type omits the property, so the literal carries it explicitly.
     const upstreamRequest = new Request(upstreamUrl, {
       method: request.method,
       headers: cloneHeadersWithoutAuthorization(request.headers),

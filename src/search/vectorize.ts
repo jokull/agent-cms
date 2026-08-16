@@ -3,13 +3,42 @@
  * All functions return Effect — async boundaries use Effect.tryPromise.
  */
 import { Data, Effect } from "effect";
+import { isString } from "../dynamic/row-types.js";
+
+/**
+ * Workers AI text-embeddings response shape (bge-small-en-v1.5).
+ */
+export interface AiEmbeddingsResult {
+  readonly data: number[][];
+}
 
 /**
  * Minimal structural type for Workers AI binding.
  * Compatible with Cloudflare's `Ai` type from `wrangler types` — no cast needed.
  */
 export interface AiBinding {
-  run(model: string, input: { text: string[] }): Promise<unknown>;
+  run(model: string, input: { text: string[] }): Promise<AiEmbeddingsResult>;
+}
+
+/** Vectorize mutation result: ids processed plus count (Cloudflare Vectorize contract). */
+export interface VectorizeMutationResult {
+  readonly ids: string[];
+  readonly count: number;
+}
+
+/** Vectorize metadata value (Cloudflare Vectorize contract: string | number | boolean | string[]). */
+export type VectorizeVectorMetadataValue = string | number | boolean | string[];
+
+/** Vectorize metadata record (Cloudflare Vectorize contract). */
+export type VectorizeVectorMetadata = VectorizeVectorMetadataValue | Record<string, VectorizeVectorMetadataValue>;
+
+/** Vectorize query response: scored matches (Cloudflare Vectorize contract). */
+export interface VectorizeQueryResult {
+  readonly matches: ReadonlyArray<{
+    readonly id: string;
+    readonly score: number;
+    readonly metadata?: Record<string, VectorizeVectorMetadata>;
+  }>;
 }
 
 /**
@@ -17,19 +46,19 @@ export interface AiBinding {
  * Compatible with Cloudflare's `VectorizeIndex` type from `wrangler types` — no cast needed.
  */
 export interface VectorizeBinding {
-  upsert(vectors: Array<{ id: string; values: number[]; metadata?: Record<string, string> }>): Promise<unknown>;
-  deleteByIds(ids: string[]): Promise<unknown>;
-  query(vector: number[], options: { topK: number; returnMetadata?: "all" | "none" }): Promise<unknown>;
+  upsert(vectors: Array<{ id: string; values: number[]; metadata?: Record<string, VectorizeVectorMetadata> }>): Promise<VectorizeMutationResult>;
+  deleteByIds(ids: string[]): Promise<VectorizeMutationResult>;
+  query(vector: number[], options: { topK: number; returnMetadata?: "all" | "none" }): Promise<VectorizeQueryResult>;
 }
 
 export class VectorizeError extends Data.TaggedError("VectorizeError")<{
   readonly message: string;
 }> {}
 
-function describeUnknown(error: unknown): string {
-  if (error instanceof Error) return `${error.name}: ${error.message}`;
-  if (typeof error === "string") return error;
-  return JSON.stringify(error);
+function describeUnknown(cause: unknown): string {
+  if (cause instanceof Error) return `${cause.name}: ${cause.message}`;
+  if (isString(cause)) return cause;
+  return JSON.stringify(cause);
 }
 
 const EMBED_MODEL = "@cf/baai/bge-small-en-v1.5";
@@ -38,11 +67,13 @@ const EMBED_MODEL = "@cf/baai/bge-small-en-v1.5";
  * Generate embeddings for text chunks using Workers AI.
  */
 export function embedTexts(ai: AiBinding, texts: string[]) {
-  if (texts.length === 0) return Effect.succeed([] as number[][]);
+  if (texts.length === 0) return Effect.succeed<number[][]>([]);
   return Effect.tryPromise({
     try: () => ai.run(EMBED_MODEL, { text: texts }),
     catch: (error) => new VectorizeError({ message: `Embedding failed: ${describeUnknown(error)}` }),
-  }).pipe(Effect.map((result) => (result as { data: number[][] }).data));
+  }).pipe(
+    Effect.map((result) => result.data),
+  );
 }
 
 /**
@@ -106,10 +137,9 @@ export function vectorizeSearch(
       try: () => vectorize.query(embeddings[0], { topK, returnMetadata: "all" }),
       catch: (error) => new VectorizeError({ message: `Search failed: ${describeUnknown(error)}` }),
     });
-    const results = raw as { matches: Array<{ id: string; score: number; metadata?: Record<string, string> }> };
-    return results.matches.map((m) => ({
-      recordId: m.metadata?.recordId ?? m.id.split(":")[1],
-      modelApiKey: m.metadata?.modelApiKey ?? m.id.split(":")[0],
+    return raw.matches.map((m) => ({
+      recordId: isString(m.metadata?.recordId) ? m.metadata.recordId : m.id.split(":")[1],
+      modelApiKey: isString(m.metadata?.modelApiKey) ? m.metadata.modelApiKey : m.id.split(":")[0],
       score: m.score,
     }));
   });

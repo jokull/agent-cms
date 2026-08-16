@@ -1,6 +1,7 @@
 import { Effect } from "effect";
-import { SqlClient } from "@effect/sql";
-import { SchemaEngineError, ValidationError } from "../errors.js";
+import { isBoolean, type DynamicRow } from "../dynamic/row-types.js";
+import { SqlClient } from "effect/unstable/sql";
+import { SchemaEngineError, ValidationError, CmsErrorSchema } from "../errors.js";
 
 type SiteSettingsInput = {
   siteName?: string;
@@ -15,7 +16,7 @@ type SiteSettingsInput = {
   fallbackSeoTwitterCard?: string;
 };
 
-const fieldMap: Record<keyof SiteSettingsInput, string> = {
+const fieldMap = {
   siteName: "site_name",
   titleSuffix: "title_suffix",
   noIndex: "no_index",
@@ -26,8 +27,8 @@ const fieldMap: Record<keyof SiteSettingsInput, string> = {
   fallbackSeoDescription: "fallback_seo_description",
   fallbackSeoImageId: "fallback_seo_image_id",
   fallbackSeoTwitterCard: "fallback_seo_twitter_card",
-};
-
+} satisfies Record<keyof SiteSettingsInput, string>;
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- opaque SQL/Effect error from the settings access path; formatted defensively.
 function mapMissingTable(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   if (message.includes("no such table: site_settings")) {
@@ -45,7 +46,7 @@ function mapMissingTable(error: unknown) {
 export function getSiteSettings() {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const rows = yield* sql.unsafe<Record<string, unknown>>("SELECT * FROM site_settings LIMIT 1");
+    const rows = yield* sql.unsafe<DynamicRow>("SELECT * FROM site_settings LIMIT 1");
     return rows.length > 0
       ? rows[0]
       : { message: "No site settings configured yet. Use update_site_settings to create them." };
@@ -59,9 +60,11 @@ export function updateSiteSettings(args: SiteSettingsInput) {
     const params: unknown[] = [];
 
     for (const [key, value] of Object.entries(args)) {
+      // SAFETY: `args` is statically typed SiteSettingsInput, so Object.entries
+      // yields exactly its keys and fieldMap has an entry for every one.
       const col = fieldMap[key as keyof SiteSettingsInput];
       sets.push(`"${col}" = ?`);
-      params.push(typeof value === "boolean" ? (value ? 1 : 0) : value);
+      params.push(isBoolean(value) ? (value ? 1 : 0) : value);
     }
 
     if (sets.length === 0) {
@@ -71,10 +74,10 @@ export function updateSiteSettings(args: SiteSettingsInput) {
     sets.push(`"updated_at" = datetime('now')`);
     yield* sql.unsafe(`INSERT OR IGNORE INTO site_settings (id) VALUES ('default')`);
     yield* sql.unsafe(`UPDATE site_settings SET ${sets.join(", ")} WHERE id = 'default'`, params);
-    const rows = yield* sql.unsafe<Record<string, unknown>>("SELECT * FROM site_settings WHERE id = 'default'");
+    const rows = yield* sql.unsafe<DynamicRow>("SELECT * FROM site_settings WHERE id = 'default'");
     return rows[0];
   }).pipe(Effect.mapError((error) => {
-    if (error instanceof ValidationError) return error;
+    if (CmsErrorSchema.guards.ValidationError(error)) return error;
     return mapMissingTable(error);
   }));
 }

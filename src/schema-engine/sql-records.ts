@@ -1,23 +1,26 @@
 import { Effect } from "effect";
-import { SqlClient } from "@effect/sql";
+import { isBoolean, isString, isObject, type DynamicRow, type StoredFieldValue } from "../dynamic/row-types.js";
+import { SqlClient } from "effect/unstable/sql";
 
 /**
  * Insert a record into a dynamic content table.
  */
 export function insertRecord(
   tableName: string,
-  record: Record<string, unknown>
+  record: DynamicRow
 ) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const columns = Object.keys(record);
     const colList = columns.map((c) => `"${c}"`).join(", ");
     const placeholders = columns.map(() => "?").join(", ");
-    const values = columns.map((c) => record[c]);
+    // SAFETY: DynamicRow cells are StoredFieldValue by the dynamic-zone contract
+    // (the Record<string, unknown> window hides the union).
+    const values = columns.map((c) => serializeValue(record[c] as StoredFieldValue));
 
     yield* sql.unsafe(
       `INSERT INTO "${tableName}" (${colList}) VALUES (${placeholders})`,
-      values.map(serializeValue)
+      values
     );
   });
 }
@@ -28,7 +31,7 @@ export function insertRecord(
 export function selectAll(tableName: string) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const rows = yield* sql.unsafe<Record<string, unknown>>(
+    const rows = yield* sql.unsafe<DynamicRow>(
       `SELECT * FROM "${tableName}"`
     );
     return rows.map(deserializeRow);
@@ -41,7 +44,7 @@ export function selectAll(tableName: string) {
 export function selectById(tableName: string, id: string) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const rows = yield* sql.unsafe<Record<string, unknown>>(
+    const rows = yield* sql.unsafe<DynamicRow>(
       `SELECT * FROM "${tableName}" WHERE "id" = ?`,
       [id]
     );
@@ -52,10 +55,10 @@ export function selectById(tableName: string, id: string) {
 /**
  * Select records matching a column value.
  */
-export function selectWhere(tableName: string, column: string, value: unknown) {
+export function selectWhere(tableName: string, column: string, value: StoredFieldValue) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const rows = yield* sql.unsafe<Record<string, unknown>>(
+    const rows = yield* sql.unsafe<DynamicRow>(
       `SELECT * FROM "${tableName}" WHERE "${column}" = ?`,
       [serializeValue(value)]
     );
@@ -69,7 +72,7 @@ export function selectWhere(tableName: string, column: string, value: unknown) {
 export function updateRecord(
   tableName: string,
   id: string,
-  updates: Record<string, unknown>
+  updates: DynamicRow
 ) {
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
@@ -77,7 +80,9 @@ export function updateRecord(
     if (columns.length === 0) return;
 
     const setClauses = columns.map((c) => `"${c}" = ?`).join(", ");
-    const values = [...columns.map((c) => serializeValue(updates[c])), id];
+    // SAFETY: DynamicRow cells are StoredFieldValue by the dynamic-zone contract
+    // (the Record<string, unknown> window hides the union).
+    const values = [...columns.map((c) => serializeValue(updates[c] as StoredFieldValue)), id];
 
     yield* sql.unsafe(
       `UPDATE "${tableName}" SET ${setClauses} WHERE "id" = ?`,
@@ -112,18 +117,18 @@ export function countRecords(tableName: string) {
 // --- Serialization helpers ---
 
 /** Serialize a JS value for SQLite storage */
-function serializeValue(value: unknown): unknown {
-  if (value === undefined || value === null) return null;
-  if (typeof value === "boolean") return value ? 1 : 0;
-  if (typeof value === "object") return JSON.stringify(value);
+function serializeValue(value: StoredFieldValue): StoredFieldValue {
+  if (value == null) return null;
+  if (isBoolean(value)) return value ? 1 : 0;
+  if (isObject(value)) return JSON.stringify(value);
   return value;
 }
 
 /** Deserialize a row from SQLite — parse JSON columns */
-export function deserializeRow(row: Record<string, unknown>): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
+export function deserializeRow(row: DynamicRow): DynamicRow {
+  const result: DynamicRow = {};
   for (const [key, value] of Object.entries(row)) {
-    if (typeof value === "string" && (value.startsWith("{") || value.startsWith("["))) {
+    if (isString(value) && (value.startsWith("{") || value.startsWith("["))) {
       try {
         result[key] = JSON.parse(value);
       } catch {

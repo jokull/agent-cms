@@ -1,4 +1,7 @@
-import { ParseResult, Schema } from "effect";
+import { isNumber, isObjectRecord, isString } from "../dynamic/row-types.js";
+import { Cause, Option, Schema, SchemaIssue } from "effect";
+
+
 import { DastDocumentSchema } from "./schema.js";
 import type {
   BlockLevelNode,
@@ -13,12 +16,14 @@ export interface ValidationError {
   message: string;
 }
 
-function formatIssuePath(path: ReadonlyArray<PropertyKey>): string {
+function formatIssuePath(path: ReadonlyArray<unknown>): string {
   return path.reduce<string>((acc, segment) => {
-    if (typeof segment === "number") return `${acc}[${segment}]`;
-    if (typeof segment === "symbol") return acc;
-    if (acc.length === 0) return segment;
-    return `${acc}.${segment}`;
+    if (isNumber(segment)) return `${acc}[${segment}]`;
+    if (isString(segment)) {
+      if (acc.length === 0) return segment;
+      return `${acc}.${segment}`;
+    }
+    return acc;
   }, "");
 }
 
@@ -26,14 +31,16 @@ function formatIssuePath(path: ReadonlyArray<PropertyKey>): string {
  * Validate a DAST document structure.
  * Returns an array of errors (empty = valid).
  */
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- schema validator: accepts arbitrary JSON input; the DastDocumentSchema decode IS the boundary parse.
 export function validateDast(doc: unknown): ValidationError[] {
-  const result = Schema.decodeUnknownEither(DastDocumentSchema)(doc);
+  const result = Schema.decodeUnknownExit(DastDocumentSchema)(doc);
 
-  if (result._tag === "Right") return [];
+  if (result._tag === "Success") return [];
 
-  const formatted = ParseResult.ArrayFormatter.formatErrorSync(result.left);
+  const error = Cause.findErrorOption(result.cause).pipe(Option.getOrThrow);
+  const formatted = SchemaIssue.makeFormatterStandardSchemaV1()(error.issue).issues;
   return formatted.map((issue) => ({
-    path: formatIssuePath(issue.path),
+    path: formatIssuePath(issue.path ?? []),
     message: issue.message,
   }));
 }
@@ -41,11 +48,12 @@ export function validateDast(doc: unknown): ValidationError[] {
 /**
  * Validate that a DAST document only contains block nodes at root level.
  */
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- schema validator: accepts arbitrary JSON input; the DastDocumentSchema decode IS the boundary parse.
 export function validateBlocksOnly(doc: unknown): ValidationError[] {
-  const decoded = Schema.decodeUnknownEither(DastDocumentSchema)(doc);
-  if (decoded._tag === "Left") return [];
+  const decoded = Schema.decodeUnknownExit(DastDocumentSchema)(doc);
+  if (decoded._tag === "Failure") return [];
 
-  return decoded.right.document.children.flatMap((child, index) =>
+  return decoded.value.document.children.flatMap((child, index) =>
     child.type === "block"
       ? []
       : [{
@@ -63,11 +71,33 @@ type DastLikeDocument = {
 };
 type DastNode = RootNode | BlockLevelNode | InlineNode;
 
+const BLOCK_LEVEL_NODE_TYPES = new Set<string>([
+  "paragraph",
+  "heading",
+  "list",
+  "blockquote",
+  "code",
+  "thematicBreak",
+  "block",
+  "table",
+]);
+
+/** Narrow unknown to a block-level DAST node via its type discriminant. */
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- runtime type guard: the discriminant check IS the boundary parse for raw DAST JSON nodes.
+function isBlockLevelNode(value: unknown): value is BlockLevelNode {
+  return isObjectRecord(value)
+    && isString(value.type)
+    && BLOCK_LEVEL_NODE_TYPES.has(value.type);
+}
+
 function visitDastNode(node: DastNode, visit: (node: DastNode) => void): void {
   visit(node);
 
   if ("children" in node) {
     for (const child of node.children) {
+      if (!isObjectRecord(child)) continue;
+      // SAFETY: every child of a DAST node is itself a DastNode per the
+      // @agent-cms/dast node definitions (all children arrays hold DastNode members).
       visitDastNode(child as DastNode, visit);
     }
   }
@@ -80,7 +110,7 @@ function visitDastNode(node: DastNode, visit: (node: DastNode) => void): void {
  */
 export function extractBlockIds(doc: DastLikeDocument): string[] {
   const ids: string[] = [];
-  visitDastNode({ type: "root", children: doc.document.children as readonly BlockLevelNode[] }, (node) => {
+  visitDastNode({ type: "root", children: doc.document.children.filter(isBlockLevelNode) }, (node) => {
     if (node.type === "block") {
       ids.push(node.item);
     }
@@ -93,7 +123,7 @@ export function extractBlockIds(doc: DastLikeDocument): string[] {
  */
 export function extractInlineBlockIds(doc: DastLikeDocument): string[] {
   const ids: string[] = [];
-  visitDastNode({ type: "root", children: doc.document.children as readonly BlockLevelNode[] }, (node) => {
+  visitDastNode({ type: "root", children: doc.document.children.filter(isBlockLevelNode) }, (node) => {
     if (node.type === "inlineBlock") {
       ids.push(node.item);
     }
@@ -107,7 +137,7 @@ export function extractInlineBlockIds(doc: DastLikeDocument): string[] {
  */
 export function extractAllBlockIds(doc: DastLikeDocument): string[] {
   const ids: string[] = [];
-  visitDastNode({ type: "root", children: doc.document.children as readonly BlockLevelNode[] }, (node) => {
+  visitDastNode({ type: "root", children: doc.document.children.filter(isBlockLevelNode) }, (node) => {
     if (node.type === "block" || node.type === "inlineBlock") {
       ids.push(node.item);
     }
@@ -120,7 +150,7 @@ export function extractAllBlockIds(doc: DastLikeDocument): string[] {
  */
 export function extractLinkIds(doc: DastLikeDocument): string[] {
   const ids: string[] = [];
-  visitDastNode({ type: "root", children: doc.document.children as readonly BlockLevelNode[] }, (node) => {
+  visitDastNode({ type: "root", children: doc.document.children.filter(isBlockLevelNode) }, (node) => {
     if (node.type === "itemLink" || node.type === "inlineItem") {
       ids.push(node.item);
     }
@@ -220,7 +250,8 @@ export function pruneBlockNodes(
     document: {
       type: "root",
       children: doc.document.children
-        .map((child) => pruneBlockLevelNode(child as BlockLevelNode))
+        .filter(isBlockLevelNode)
+        .map((child) => pruneBlockLevelNode(child))
         .filter((child): child is BlockLevelNode => child !== null),
     },
   };

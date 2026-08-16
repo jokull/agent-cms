@@ -1,3 +1,4 @@
+import { isBoolean, isObjectRecord, isString, type DynamicRow } from "../dynamic/row-types.js";
 /**
  * Code Mode MCP endpoint.
  *
@@ -16,10 +17,11 @@ import {
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { McpServer as SdkMcpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+
 import { DynamicWorkerExecutor } from "@cloudflare/codemode";
 import { codeMcpServer } from "@cloudflare/codemode/mcp";
 import { getToolMeta } from "./server.js";
-import { isObjectRecord } from "../value-utils.js";
+
 
 export interface CreateCodeModeHandlerOptions {
   /** WorkerLoader binding from wrangler worker_loaders config */
@@ -80,6 +82,8 @@ export async function createCodeModeMcpServer(
 
   // Wrap with Code Mode
   const executor = new DynamicWorkerExecutor({
+    // SAFETY: the loader binding is provided by Cloudflare at runtime; the cast
+    // to never satisfies the opaque DynamicWorkerExecutor options typing.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- CodeMode loader binding is provided by Cloudflare at runtime but typed as opaque user input here.
     loader: options.loader as never,
   });
@@ -95,7 +99,7 @@ async function callToolViaMcp(
   mcpHandler: (request: Request) => Promise<Response>,
   mcpPath: string,
   toolName: string,
-  args: Record<string, unknown>,
+  args: DynamicRow,
 ): Promise<{ content: Array<{ type: "text"; text: string }>; isError?: boolean }> {
   const url = `http://localhost${mcpPath}`;
   const callRequest = new Request(url, {
@@ -122,20 +126,23 @@ function parseToolCallResponse(
   requestId: number,
   text: string,
   contentType: string | null,
+  // oxlint-disable-next-line anti-slop/no-known-value-widening -- the literal content type is the response contract.
 ): { content: Array<{ type: "text"; text: string }>; isError?: boolean } {
-  function parseToolCallResult(value: unknown): { content: Array<{ type: "text"; text: string }>; isError?: boolean } | null {
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- untrusted JSON-RPC wire payload: this duck-typing helper IS the boundary parser.oundary parser for the tool-call result.
+  function parseToolCallResult(value: unknown) {
     if (!isObjectRecord(value) || !Array.isArray(value.content)) return null;
     const content = value.content.filter((entry): entry is { type: "text"; text: string } =>
-      isObjectRecord(entry) && entry.type === "text" && typeof entry.text === "string"
+      isObjectRecord(entry) && entry.type === "text" && isString(entry.text)
     );
     if (content.length !== value.content.length) return null;
     return {
       content,
-      ...(typeof value.isError === "boolean" ? { isError: value.isError } : {}),
+      isError: isBoolean(value.isError) ? value.isError : undefined,
     };
   }
 
   // Helper to extract result from a parsed JSON-RPC response or array of responses
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- untrusted JSON-RPC wire payload: the response may be an object or array of arbitrary JSON, duck-typed here.
   function extractResult(parsed: unknown): { content: Array<{ type: "text"; text: string }>; isError?: boolean } | null {
     if (Array.isArray(parsed)) {
       for (const item of parsed) {
@@ -184,6 +191,7 @@ function parseToolCallResponse(
     // Fall through
   }
 
+  // oxlint-disable-next-line anti-slop/no-known-value-widening -- literal response contract for the tool-call fallback.
   return {
     content: [{ type: "text", text: `Failed to parse MCP response: ${text.slice(0, 200)}` }],
     isError: true,

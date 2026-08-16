@@ -1,15 +1,23 @@
+import { isObjectRecord, isString, type StoredFieldValue } from "../dynamic/row-types.js";
 import { Effect } from "effect";
-import { SqlClient } from "@effect/sql";
+
+import { contentTableName } from "../dynamic/tables.js";
+import { SqlClient } from "effect/unstable/sql";
 import { extractBlockIds, extractInlineBlockIds, extractLinkIds } from "../dast/index.js";
-import type { DynamicRow, DastDocInput, GqlContext } from "./gql-types.js";
-import { deserializeRecord, toTypeName, decodeSnapshot } from "./gql-utils.js";
+import type { DastDocInput, GqlContext } from "./gql-types.js";
+import type { DynamicRow } from "../dynamic/row-types.js";
+
+import { toTypeName } from "./gql-utils.js";
+import { decodeSnapshot, deserializeRecord } from "../dynamic/decode.js";
 import { loadLinkedRecords } from "./linked-record-loader.js";
 import { materializeStructuredTextValue as materializeStructuredTextEnvelope } from "../services/structured-text-service.js";
 
-function parseUnknownJson(value: unknown): unknown {
-  if (typeof value === "string") {
+function parseUnknownJson(value: StoredFieldValue): StoredFieldValue {
+  if (isString(value)) {
     try {
-      return JSON.parse(value);
+      // SAFETY: JSON.parse yields scalars, records, or arrays — the
+      // stored-value universe; callers validate concrete shapes downstream.
+      return JSON.parse(value) as StoredFieldValue;
     } catch {
       return value;
     }
@@ -31,7 +39,7 @@ export async function batchFetchRecords(params: {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       return yield* sql.unsafe<DynamicRow>(
-        `SELECT * FROM "content_${params.tableApiKey}" WHERE id IN (${placeholders})`,
+        `SELECT * FROM "${contentTableName(params.tableApiKey)}" WHERE id IN (${placeholders})`,
         params.ids
       );
     })
@@ -129,7 +137,7 @@ export async function batchResolveLinkedRecordsCached(params: {
 
 function materializeBlocksFromEnvelope(
   dast: DastDocInput,
-  envelopeBlocks: Record<string, unknown>,
+  envelopeBlocks: DynamicRow,
 ) {
   const blockLevelIds = extractBlockIds(dast);
   const inlineBlockIds = extractInlineBlockIds(dast);
@@ -138,23 +146,23 @@ function materializeBlocksFromEnvelope(
 
   for (const id of blockLevelIds) {
     const raw = envelopeBlocks[id];
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
-    const payload = raw as DynamicRow;
+    if (!isObjectRecord(raw)) continue;
+    const payload = raw;
     blocks.push({
       id,
       ...payload,
-      __typename: typeof payload._type === "string" ? `${toTypeName(payload._type)}Record` : undefined,
+      __typename: isString(payload._type) ? `${toTypeName(payload._type)}Record` : undefined,
     });
   }
 
   for (const id of inlineBlockIds) {
     const raw = envelopeBlocks[id];
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
-    const payload = raw as DynamicRow;
+    if (!isObjectRecord(raw)) continue;
+    const payload = raw;
     inlineBlocks.push({
       id,
       ...payload,
-      __typename: typeof payload._type === "string" ? `${toTypeName(payload._type)}Record` : undefined,
+      __typename: isString(payload._type) ? `${toTypeName(payload._type)}Record` : undefined,
     });
   }
 
@@ -177,11 +185,14 @@ export async function resolveStructuredTextValue(params: {
   linkedRecordCache?: Map<string, Promise<DynamicRow | null>>;
   context?: GqlContext;
 }): Promise<{ value: unknown; blocks: DynamicRow[]; inlineBlocks: DynamicRow[]; links: DynamicRow[] } | null> {
-  let raw = parseUnknownJson(params.rawValue);
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  // SAFETY: structured-text cells are JSON strings or parsed objects
+  // (StoredFieldValue); the isObjectRecord check below validates the shape.
+  let raw = parseUnknownJson(params.rawValue as StoredFieldValue);
+  if (!isObjectRecord(raw)) return null;
 
-  let rawObj = raw as DynamicRow;
-  let isEnvelope = rawObj.value && typeof rawObj.value === "object" && rawObj.blocks && typeof rawObj.blocks === "object";
+  let envelopeValue = raw.value;
+  let envelopeBlocks = raw.blocks;
+  let isEnvelope = isObjectRecord(envelopeValue) && isObjectRecord(envelopeBlocks);
 
   if (!isEnvelope && params.rootRecordId && params.rootFieldApiKey && params.parentContainerModelApiKey && params.parentFieldApiKey) {
     const materialized = await params.runSql(
@@ -196,13 +207,15 @@ export async function resolveStructuredTextValue(params: {
       })
     );
     if (materialized) {
-      raw = materialized;
-      rawObj = materialized as unknown as DynamicRow;
       isEnvelope = true;
+      envelopeValue = materialized.value;
+      envelopeBlocks = materialized.blocks;
     }
   }
 
-  const dast = (isEnvelope ? rawObj.value : rawObj) as DastDocInput;
+  // SAFETY: structured-text payloads are DAST documents ({ document: { children } })
+  // — validated on write by the CMS and produced by the materializer above.
+  const dast = (isEnvelope ? envelopeValue : raw) as DastDocInput;
   const linkIds = extractLinkIds(dast);
   const allModelApiKeys = params.models.map((m) => m.api_key);
   const resolvedLinks = linkIds.length > 0
@@ -224,10 +237,14 @@ export async function resolveStructuredTextValue(params: {
         cache: params.linkedRecordCache,
       })
     : new Map<string, DynamicRow>();
-  const links = linkIds.map((id) => resolvedLinks.get(id) ?? null).filter(Boolean) as DynamicRow[];
+  const links = linkIds
+    .map((id) => resolvedLinks.get(id) ?? null)
+    .filter((link): link is DynamicRow => link !== null);
 
   if (isEnvelope) {
-    const envelopeBlocks = rawObj.blocks as Record<string, unknown>;
+    if (!isObjectRecord(envelopeBlocks)) {
+      return { value: dast, blocks: [], inlineBlocks: [], links };
+    }
     const { blocks, inlineBlocks } = materializeBlocksFromEnvelope(dast, envelopeBlocks);
     return { value: dast, blocks, inlineBlocks, links };
   }

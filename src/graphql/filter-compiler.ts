@@ -1,3 +1,4 @@
+import { isBoolean, isNumber, isObjectRecord, isString, type DynamicRow, type StoredFieldValue } from "../dynamic/row-types.js";
 /**
  * Compile GraphQL filter inputs to SQL WHERE clauses.
  * Pushes filtering to the database instead of doing it in-memory.
@@ -13,6 +14,9 @@
  */
 
 import { buildPatternMatch } from "../sql-util.js";
+import type { QueryVariableValue } from "./gql-types.js";
+
+
 
 /**
  * A locale code is interpolated into a JSON path literal (`'$.<locale>'`) — it
@@ -36,27 +40,26 @@ function safeLocale(locale: string): string {
   return locale;
 }
 
-interface FilterInput {
+type FilterInput = {
   AND?: FilterInput[];
   OR?: FilterInput[];
-  [field: string]: unknown;
-}
+} & DynamicRow;
 
 interface SqlCondition {
   sql: string;
   params: unknown[];
 }
 
-function isFilterInput(value: unknown): value is FilterInput {
+function isFilterInput(value: StoredFieldValue): value is FilterInput {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isPrimitiveArray(value: unknown): value is Array<string | number | boolean | null> {
+function isPrimitiveArray(value: QueryVariableValue): value is Array<string | number | boolean | null> {
   return Array.isArray(value)
     && value.every((item) =>
-      typeof item === "string"
-      || typeof item === "number"
-      || typeof item === "boolean"
+      isString(item)
+      || isNumber(item)
+      || isBoolean(item)
       || item === null);
 }
 
@@ -100,6 +103,7 @@ export function compileFilterToSql(
 }
 
 // Map GraphQL camelCase system fields to snake_case DB columns
+// oxlint-disable-next-line anti-slop/no-known-value-widening -- indexed by dynamic camelCase keys; the open type IS the contract.
 const META_COLUMN_MAP: Partial<Record<string, string>> = {
   _createdAt: "_created_at",
   _updatedAt: "_updated_at",
@@ -174,16 +178,16 @@ function buildSqlConditions(
     }
 
     // --- _locales special filter ---
-    if (key === "_locales" && typeof value === "object" && value !== null) {
+    if (key === "_locales" && isObjectRecord(value)) {
       const locCols = opts?.localizedDbColumns ?? [];
       if (locCols.length > 0) {
-        const locCondition = compileLocalesFilter(value as Record<string, unknown>, locCols);
+        const locCondition = compileLocalesFilter(value, locCols);
         if (locCondition) conditions.push(locCondition);
       }
       continue;
     }
 
-    if (typeof value !== "object" || value === null) continue;
+    if (!isObjectRecord(value)) continue;
 
     const dbKey = resolveDbKey(key, opts);
     const col = resolveCol(key, dbKey, opts);
@@ -191,9 +195,12 @@ function buildSqlConditions(
     const isJsonArray = opts?.jsonArrayFields?.has(key) ?? false;
     const isJsonObjectId = opts?.jsonObjectIdFields?.has(key) ?? false;
 
-    for (const [op, expected] of Object.entries(value as Record<string, unknown>)) {
+    for (const [op, expected] of Object.entries(value)) {
       if (expected === undefined) continue;
-      const cond = compileOperator(op, expected, col, resolveDbExpr(key, dbKey, opts), isJsonArray, isJsonObjectId);
+      // SAFETY: filter operator values are GraphQL argument values — scalars,
+      // records, or arrays of scalars (QueryVariableValue); the operator
+      // compiler validates each shape at runtime.
+      const cond = compileOperator(op, expected as QueryVariableValue, col, resolveDbExpr(key, dbKey, opts), isJsonArray, isJsonObjectId);
       if (cond) conditions.push(cond);
     }
   }
@@ -208,7 +215,7 @@ function buildSqlConditions(
  */
 function compileOperator(
   op: string,
-  expected: unknown,
+  expected: QueryVariableValue,
   col: string,
   dbExpr: string,
   isJsonArray: boolean = false,
@@ -227,14 +234,14 @@ function compileOperator(
         const json = JSON.stringify(expected);
         return { sql: `${col} = ?`, params: [json] };
       }
-      const val = typeof expected === "boolean" ? (expected ? 1 : 0) : expected;
+      const val = isBoolean(expected) ? (expected ? 1 : 0) : expected;
       return { sql: `${col} = ?`, params: [val] };
     }
     case "neq": {
       if (isJsonObjectId) {
         return { sql: `${objectIdExpr} != ?`, params: [expected] };
       }
-      const val = typeof expected === "boolean" ? (expected ? 1 : 0) : expected;
+      const val = isBoolean(expected) ? (expected ? 1 : 0) : expected;
       return { sql: `${col} != ?`, params: [val] };
     }
     case "gt":
@@ -297,24 +304,24 @@ function compileOperator(
 
     // --- String matching ---
     case "matches":
-      if (typeof expected === "string") {
+      if (isString(expected)) {
         const m = buildPatternMatch(col, expected);
         return { sql: m.sql, params: [m.param] };
       }
       // DatoCMS-style { pattern, caseSensitive } object
-      if (typeof expected === "object" && expected !== null && "pattern" in expected) {
-        const obj = expected as Record<string, unknown>;
+      if (isObjectRecord(expected) && "pattern" in expected) {
+        const obj = expected;
         const m = buildPatternMatch(col, String(obj.pattern), { caseSensitive: Boolean(obj.caseSensitive) });
         return { sql: m.sql, params: [m.param] };
       }
       return null;
     case "notMatches":
-      if (typeof expected === "string") {
+      if (isString(expected)) {
         const m = buildPatternMatch(col, expected, { negated: true });
         return { sql: m.sql, params: [m.param] };
       }
-      if (typeof expected === "object" && expected !== null && "pattern" in expected) {
-        const obj = expected as Record<string, unknown>;
+      if (isObjectRecord(expected) && "pattern" in expected) {
+        const obj = expected;
         const m = buildPatternMatch(col, String(obj.pattern), { caseSensitive: Boolean(obj.caseSensitive), negated: true });
         return { sql: m.sql, params: [m.param] };
       }
@@ -341,11 +348,11 @@ function compileOperator(
 
     // --- Geolocation: near { latitude, longitude, radius } ---
     case "near": {
-      if (typeof expected !== "object" || expected === null) return null;
-      const geo = expected as Record<string, unknown>;
-      const latitude = typeof geo.latitude === "number" ? geo.latitude : undefined;
-      const longitude = typeof geo.longitude === "number" ? geo.longitude : undefined;
-      const radius = typeof geo.radius === "number" ? geo.radius : undefined;
+      if (!isObjectRecord(expected)) return null;
+      const geo = expected;
+      const latitude = isNumber(geo.latitude) ? geo.latitude : undefined;
+      const longitude = isNumber(geo.longitude) ? geo.longitude : undefined;
+      const radius = isNumber(geo.radius) ? geo.radius : undefined;
       if (latitude == null || longitude == null || radius == null) return null;
 
       // Bounding-box approximation: 1° latitude ≈ 111,320 meters
@@ -368,8 +375,8 @@ function compileOperator(
 
     // Legacy: matchesObject (kept for backwards compat, prefer unified "matches")
     case "matchesObject":
-      if (typeof expected === "object" && expected !== null && "pattern" in expected) {
-        const obj = expected as Record<string, unknown>;
+      if (isObjectRecord(expected) && "pattern" in expected) {
+        const obj = expected;
         const m = buildPatternMatch(col, String(obj.pattern), { caseSensitive: Boolean(obj.caseSensitive) });
         return { sql: m.sql, params: [m.param] };
       }
@@ -402,12 +409,12 @@ function lacksLocaleContent(col: string, locale: string): string {
  * _locales: { notIn: ["de"] }  → no localized field has a value for "de"
  */
 function compileLocalesFilter(
-  value: Record<string, unknown>,
+  value: DynamicRow,
   localizedDbColumns: string[]
 ): SqlCondition | null {
-  const allIn = Array.isArray(value.allIn) ? value.allIn as string[] : undefined;
-  const anyIn = Array.isArray(value.anyIn) ? value.anyIn as string[] : undefined;
-  const notIn = Array.isArray(value.notIn) ? value.notIn as string[] : undefined;
+  const allIn = Array.isArray(value.allIn) ? value.allIn.filter((v): v is string => isString(v)) : undefined;
+  const anyIn = Array.isArray(value.anyIn) ? value.anyIn.filter((v): v is string => isString(v)) : undefined;
+  const notIn = Array.isArray(value.notIn) ? value.notIn.filter((v): v is string => isString(v)) : undefined;
 
   const parts: SqlCondition[] = [];
 

@@ -1,26 +1,31 @@
-import type { AssetObject, DynamicRow } from "./gql-types.js";
-import { isObjectRecord } from "../value-utils.js";
+import { isBoolean, isNumber, isObject, isObjectRecord, isString, type StoredFieldValue } from "../dynamic/row-types.js";
+import type { AssetObject } from "./gql-types.js";
 
-function coerceStringListValue(value: unknown): string[] {
+import type { DynamicRow } from "../dynamic/row-types.js";
+
+
+function coerceStringListValue(value: StoredFieldValue): string[] {
   if (Array.isArray(value)) {
-    return value.filter((entry): entry is string => typeof entry === "string");
+    return value.filter((entry): entry is string => isString(entry));
   }
-  if (typeof value === "string") return [value];
-  if (typeof value === "number" || typeof value === "boolean") return [String(value)];
+  if (isString(value)) return [value];
+  if (isNumber(value) || isBoolean(value)) return [String(value)];
   return [];
 }
 
-export function normalizeImgixParams(raw: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
+export function normalizeImgixParams(raw: DynamicRow): DynamicRow {
+  const out: DynamicRow = {};
 
   if (raw.w != null) out.width = raw.w;
   if (raw.h != null) out.height = raw.h;
   if (raw.width != null) out.width = raw.width;
   if (raw.height != null) out.height = raw.height;
 
+  // SAFETY: imgix `auto` is a scalar or a scalar list (StoredFieldValue);
+  // the array branch above handles lists, so a non-array reaches the coercer.
   const autoValues = Array.isArray(raw.auto)
-    ? raw.auto.filter((entry): entry is string => typeof entry === "string")
-    : coerceStringListValue(raw.auto);
+    ? raw.auto.filter((entry): entry is string => isString(entry))
+    : coerceStringListValue(raw.auto as StoredFieldValue);
   if (
     autoValues.includes("format") ||
     autoValues.join(",") === "compress,format" ||
@@ -34,7 +39,7 @@ export function normalizeImgixParams(raw: Record<string, unknown>): Record<strin
   if (raw.q != null) out.quality = raw.q;
   if (raw.quality != null) out.quality = raw.quality;
 
-  const fit = typeof raw.fit === "string" ? raw.fit : undefined;
+  const fit = isString(raw.fit) ? raw.fit : undefined;
   if (fit === "facearea") {
     out.fit = "cover";
     out.gravity = "face";
@@ -82,37 +87,37 @@ export function buildResponsiveImage(
   const rawParams = isObjectRecord(rawParamsValue) ? rawParamsValue : {};
   const params = args.imgixParams ? normalizeImgixParams(rawParams) : rawParams;
 
-  const requestedW = typeof params.width === "number"
+  const requestedW = isNumber(params.width)
     ? params.width
-    : typeof params.w === "number"
+    : isNumber(params.w)
       ? params.w
       : asset.width;
-  const requestedH = typeof params.height === "number"
+  const requestedH = isNumber(params.height)
     ? params.height
-    : typeof params.h === "number"
+    : isNumber(params.h)
       ? params.h
       : null;
-  const fit = typeof params.fit === "string" ? params.fit : "scale-down";
-  const quality = typeof params.quality === "number"
+  const fit = isString(params.fit) ? params.fit : "scale-down";
+  const quality = isNumber(params.quality)
     ? params.quality
-    : typeof params.q === "number"
+    : isNumber(params.q)
       ? params.q
       : null;
-  const format = typeof params.format === "string"
+  const format = isString(params.format)
     ? params.format
-    : typeof params.auto === "string"
+    : isString(params.auto)
       ? params.auto
       : "auto";
-  let gravity = typeof params.gravity === "string" ? params.gravity : null;
+  let gravity = isString(params.gravity) ? params.gravity : null;
   if (!gravity && asset.focalPoint) {
     gravity = `${asset.focalPoint.x}x${asset.focalPoint.y}`;
   }
-  const zoom = typeof params.zoom === "number" ? params.zoom : null;
-  const background = typeof params.background === "string" ? params.background : null;
-  const blur = typeof params.blur === "number" ? params.blur : null;
-  const sharpen = typeof params.sharpen === "number" ? params.sharpen : null;
-  const rotate = typeof params.rotate === "number" ? params.rotate : null;
-  const anim = typeof params.anim === "boolean" ? params.anim : null;
+  const zoom = isNumber(params.zoom) ? params.zoom : null;
+  const background = isString(params.background) ? params.background : null;
+  const blur = isNumber(params.blur) ? params.blur : null;
+  const sharpen = isNumber(params.sharpen) ? params.sharpen : null;
+  const rotate = isNumber(params.rotate) ? params.rotate : null;
+  const anim = isBoolean(params.anim) ? params.anim : null;
   const trim = isObjectRecord(params.trim) ? params.trim : null;
 
   const origW = asset.width;
@@ -130,6 +135,7 @@ export function buildResponsiveImage(
   }
 
   function transformUrl(targetWidth: number, targetFormat?: string): string {
+    // oxlint-disable-next-line anti-slop/no-known-value-widening -- the params object is built incrementally by key.
     const p: Record<string, string | number> = { width: targetWidth, fit };
     if (requestedH) p.height = Math.round(targetWidth / outAspect);
     if (quality) p.quality = quality;
@@ -142,11 +148,11 @@ export function buildResponsiveImage(
     if (sharpen != null) p.sharpen = sharpen;
     if (rotate != null) p.rotate = rotate;
     if (anim != null) p.anim = anim ? "true" : "false";
-    if (trim && typeof trim === "object") {
+    if (trim && isObject(trim)) {
       if (trim.top != null) p.trim = "border";
       for (const key of ["top", "right", "bottom", "left", "width", "height"] as const) {
         const value = trim[key];
-        if (typeof value === "number") p[`trim.${key}`] = value;
+        if (isNumber(value)) p[`trim.${key}`] = value;
       }
     }
     return cfImageUrl(baseAssetPath, p);

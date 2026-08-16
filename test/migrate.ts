@@ -7,7 +7,7 @@
  * files) — the Worker bundle never touches the filesystem.
  */
 import { Effect } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import { readFileSync, readdirSync } from "fs";
 import { join } from "path";
 

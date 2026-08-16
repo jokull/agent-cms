@@ -3,9 +3,10 @@
  * Loads CMS metadata, builds context, and delegates to sub-modules.
  */
 import { createSchema } from "graphql-yoga";
+import { isBoolean, isNumber, isString, type DynamicRow, type StoredFieldValue } from "../dynamic/row-types.js";
 import { GraphQLScalarType, Kind } from "graphql";
 import { Effect, Layer } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import type { ModelRow, FieldRow } from "../db/row-types.js";
 import { parseFieldValidators } from "../db/row-types.js";
 import type { SchemaBuilderContext, SchemaBuilderOptions } from "./gql-types.js";
@@ -19,20 +20,22 @@ import { buildAssetResolvers } from "./asset-resolvers.js";
 import { recordSqlMetrics } from "./sql-metrics.js";
 import { encodeJson } from "../json.js";
 
-function serializeGraphqlScalar(value: unknown): string | null {
+function serializeGraphqlScalar(value: StoredFieldValue): string | null {
   if (value == null) return null;
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (isString(value)) return value;
+  if (isNumber(value) || isBoolean(value)) return String(value);
   return encodeJson(value);
 }
 
 const GraphQLItemId = new GraphQLScalarType({
   name: "ItemId",
   serialize(value) {
-    return serializeGraphqlScalar(value);
+    // SAFETY: GraphQL scalar inputs are JSON values (scalars, records, null).
+    return serializeGraphqlScalar(value as StoredFieldValue);
   },
   parseValue(value) {
-    return serializeGraphqlScalar(value);
+    // SAFETY: GraphQL scalar inputs are JSON values (scalars, records, null).
+    return serializeGraphqlScalar(value as StoredFieldValue);
   },
   parseLiteral(ast) {
     if (ast.kind === Kind.STRING || ast.kind === Kind.INT) {
@@ -45,10 +48,12 @@ const GraphQLItemId = new GraphQLScalarType({
 const GraphQLSiteLocale = new GraphQLScalarType({
   name: "SiteLocale",
   serialize(value) {
-    return serializeGraphqlScalar(value);
+    // SAFETY: GraphQL scalar inputs are JSON values (scalars, records, null).
+    return serializeGraphqlScalar(value as StoredFieldValue);
   },
   parseValue(value) {
-    return serializeGraphqlScalar(value);
+    // SAFETY: GraphQL scalar inputs are JSON values (scalars, records, null).
+    return serializeGraphqlScalar(value as StoredFieldValue);
   },
   parseLiteral(ast) {
     if (ast.kind === Kind.STRING || ast.kind === Kind.ENUM) {
@@ -123,7 +128,9 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
     // Initialize shared state
     const typeDefs: string[] = [];
     const queryFieldDefs: string[] = [];
-    const resolvers: Record<string, Record<string, unknown>> = { Query: {} };
+    // SAFETY: the resolver registry is built dynamically across model/field loops.
+    // oxlint-disable-next-line anti-slop/no-known-value-widening -- the cast is the honest contract.
+    const resolvers = { Query: {} } as Record<string, DynamicRow>;
 
     typeDefs.push(BASE_TYPE_DEFS);
     if (locales.length > 0) {
@@ -169,6 +176,9 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
       resolvers: {
         ...resolvers,
         ItemId: GraphQLItemId,
+        // SiteLocale only exists in the schema when no locales are configured;
+        // the empty branch keeps the literal assignable to IResolvers.
+        // oxlint-disable-next-line anti-slop/no-conditional-empty-object-spread
         ...(locales.length > 0 ? {} : { SiteLocale: GraphQLSiteLocale }),
       },
     });

@@ -1,16 +1,20 @@
+import { isNumber, isObjectRecord, isString, type StoredFieldValue } from "../dynamic/row-types.js";
 /**
  * Build reverse reference fields and resolvers.
  * For each target model with incoming link/links references, add _allReferencing<Source>s fields.
  */
 import { Effect } from "effect";
-import { SqlClient } from "@effect/sql";
+
+import { contentTableName } from "../dynamic/tables.js";
+import { SqlClient } from "effect/unstable/sql";
 import { getLinkTargets, getLinksTargets } from "../db/validators.js";
 import { compileFilterToSql, compileOrderBy, type FilterCompilerOpts } from "./filter-compiler.js";
 import type { ModelRow, ParsedFieldRow } from "../db/row-types.js";
-import type { SchemaBuilderContext, ReverseRef, DynamicRow, GqlContext } from "./gql-types.js";
+import type { SchemaBuilderContext, ReverseRef, GqlContext } from "./gql-types.js";
+import type { DynamicRow } from "../dynamic/row-types.js";
 import { toTypeName, toCamelCase } from "./gql-utils.js";
 import { loadReverseRefs } from "./reverse-ref-loader.js";
-import { isObjectRecord } from "../value-utils.js";
+
 
 /**
  * Build the reverse reference map: target model api_key -> array of incoming link/links refs.
@@ -39,7 +43,7 @@ export function buildReverseRefs(
         arr.push({
           sourceModelApiKey: m.api_key,
           sourceTypeName: toTypeName(m.api_key),
-          sourceTableName: `content_${m.api_key}`,
+          sourceTableName: contentTableName(m.api_key),
           fieldApiKey: f.api_key,
           fieldType: f.field_type,
         });
@@ -54,11 +58,11 @@ export function buildReverseRefs(
 /**
  * Build reverse reference resolvers and extend target type SDL.
  */
-function getThroughFieldApiKeys(through: unknown): readonly string[] | undefined {
+function getThroughFieldApiKeys(through: StoredFieldValue): readonly string[] | undefined {
   if (!isObjectRecord(through)) return undefined;
   const fields = through.fields;
   if (!Array.isArray(fields)) return undefined;
-  return fields.filter((value): value is string => typeof value === "string");
+  return fields.filter((value): value is string => isString(value));
 }
 
 export function buildReverseRefResolvers(
@@ -114,22 +118,26 @@ export function buildReverseRefResolvers(
           .map((sf) => toCamelCase(sf.api_key))
       );
 
-      // Ensure resolver map exists for target type
+      // Ensure resolver map exists for target type. Index-signature typing
+      // claims the key is always present, but runtime key presence is dynamic.
+      // oxlint-disable-next-line typescript-eslint/no-unnecessary-condition
       if (!resolvers[targetTypeName]) resolvers[targetTypeName] = {};
 
       (resolvers[targetTypeName])[fieldName] = async (parent: DynamicRow, args: DynamicRow, context: GqlContext) => {
-        if (typeof args.locale === "string") context.locale = args.locale;
+        if (isString(args.locale)) context.locale = args.locale;
         if (Array.isArray(args.fallbackLocales)) {
-          context.fallbackLocales = args.fallbackLocales.filter((value): value is string => typeof value === "string");
+          context.fallbackLocales = args.fallbackLocales.filter((value): value is string => isString(value));
         }
-        const throughFieldNames = getThroughFieldApiKeys(args.through);
+        // SAFETY: the `through` GraphQL input is a plain object of field names
+        // (StoredFieldValue); the guard validates its shape at runtime.
+        const throughFieldNames = getThroughFieldApiKeys(args.through as StoredFieldValue);
         const filteredSourceRefs = throughFieldNames && throughFieldNames.length > 0
           ? sourceRefs.filter((ref) => throughFieldNames.includes(toCamelCase(ref.fieldApiKey)))
           : sourceRefs;
         if (filteredSourceRefs.length === 0) return [];
 
         const includeDrafts = context.includeDrafts ?? false;
-        const filterLocale = typeof args.locale === "string"
+        const filterLocale = isString(args.locale)
           ? args.locale
           : (context.locale ?? defaultLocale ?? undefined);
         const filterOpts: FilterCompilerOpts = {
@@ -141,14 +149,14 @@ export function buildReverseRefResolvers(
         };
         const filterArg = isObjectRecord(args.filter) ? args.filter : undefined;
         const orderByArg = Array.isArray(args.orderBy)
-          ? args.orderBy.filter((value): value is string => typeof value === "string")
+          ? args.orderBy.filter((value): value is string => isString(value))
           : undefined;
         const compiled = compileFilterToSql(filterArg, filterOpts);
         const orderBy = compileOrderBy(orderByArg, filterOpts);
         const normalizedOrderBy = orderBy ?? undefined;
-        const first = Math.min(typeof args.first === "number" ? args.first : 20, 500);
-        const skip = typeof args.skip === "number" && args.skip > 0 ? args.skip : 0;
-        const parentId = typeof parent.id === "string" ? parent.id : String(parent.id);
+        const first = Math.min(isNumber(args.first) ? args.first : 20, 500);
+        const skip = isNumber(args.skip) && args.skip > 0 ? args.skip : 0;
+        const parentId = isString(parent.id) ? parent.id : String(parent.id);
         const loaderKey = JSON.stringify({
           sourceTableName,
           targetApiKey,
@@ -180,18 +188,20 @@ export function buildReverseRefResolvers(
       };
 
       (resolvers[targetTypeName])[metaFieldName] = async (parent: DynamicRow, args: DynamicRow, context: GqlContext) => {
-        if (typeof args.locale === "string") context.locale = args.locale;
+        if (isString(args.locale)) context.locale = args.locale;
         if (Array.isArray(args.fallbackLocales)) {
-          context.fallbackLocales = args.fallbackLocales.filter((value): value is string => typeof value === "string");
+          context.fallbackLocales = args.fallbackLocales.filter((value): value is string => isString(value));
         }
-        const throughFieldNames = getThroughFieldApiKeys(args.through);
+        // SAFETY: the `through` GraphQL input is a plain object of field names
+        // (StoredFieldValue); the guard validates its shape at runtime.
+        const throughFieldNames = getThroughFieldApiKeys(args.through as StoredFieldValue);
         const filteredSourceRefs = throughFieldNames && throughFieldNames.length > 0
           ? sourceRefs.filter((ref) => throughFieldNames.includes(toCamelCase(ref.fieldApiKey)))
           : sourceRefs;
         if (filteredSourceRefs.length === 0) return { count: 0 };
 
         const includeDrafts = context.includeDrafts ?? false;
-        const filterLocale = typeof args.locale === "string"
+        const filterLocale = isString(args.locale)
           ? args.locale
           : (context.locale ?? defaultLocale ?? undefined);
         const filterOpts: FilterCompilerOpts = {
@@ -203,7 +213,7 @@ export function buildReverseRefResolvers(
         };
         const filterArg = isObjectRecord(args.filter) ? args.filter : undefined;
         const compiled = compileFilterToSql(filterArg, filterOpts);
-        const parentId = typeof parent.id === "string" ? parent.id : String(parent.id);
+        const parentId = isString(parent.id) ? parent.id : String(parent.id);
 
         const refConditions: string[] = [];
         const queryParams: unknown[] = [];
@@ -235,7 +245,7 @@ export function buildReverseRefResolvers(
           })
         );
         const rawCount = rows[0].count;
-        return { count: typeof rawCount === "number" ? rawCount : Number(rawCount) };
+        return { count: isNumber(rawCount) ? rawCount : Number(rawCount) };
       };
     }
 

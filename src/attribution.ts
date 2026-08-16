@@ -17,8 +17,9 @@ export function actorLabel(actor?: RequestActor | null): string | null {
   return actor?.label ?? null;
 }
 
-export function actorHeaders(actor?: RequestActor | null): Record<string, string> {
+export function actorHeaders(actor?: RequestActor | null) {
   if (!actor) return {};
+  // oxlint-disable-next-line anti-slop/no-known-value-widening -- built incrementally by token presence.
   const headers: Record<string, string> = {
     [ACTOR_TYPE_HEADER]: actor.type,
     [ACTOR_LABEL_HEADER]: actor.label,

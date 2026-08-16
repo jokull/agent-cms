@@ -1,25 +1,29 @@
+import { isBoolean, isNumber, isObject, isObjectRecord, isString, stringArrayFrom, type StoredFieldValue } from "../dynamic/row-types.js";
 /**
  * Build Query root field resolvers for content models:
  * list queries, single queries, meta queries, and filter/orderBy type defs.
  */
 import { Effect } from "effect";
-import { SqlClient } from "@effect/sql";
+
+import { SqlClient } from "effect/unstable/sql";
 import { compileFilterToSql, compileOrderBy, type FilterCompilerOpts } from "./filter-compiler.js";
 import { computeIsValid, findUniqueConstraintViolations, getBlockWhitelist } from "../db/validators.js";
 import type { GraphQLResolveInfo } from "graphql";
-import type { SchemaBuilderContext, ModelQueryMeta, DynamicRow, GqlContext } from "./gql-types.js";
-import { toCamelCase, pluralize, getRegistryDef, deserializeRecord, decodeSnapshot } from "./gql-utils.js";
+import type { SchemaBuilderContext, ModelQueryMeta, GqlContext } from "./gql-types.js";
+import type { DynamicRow } from "../dynamic/row-types.js";
+import { toCamelCase, pluralize, getRegistryDef } from "./gql-utils.js";
+import { decodeSnapshot, deserializeRecord } from "../dynamic/decode.js";
 import { buildLinkPrefetchSpecs, collectSelectedFieldNames } from "./sqlite-json-prefetch.js";
 import { materializeStructuredTextValues } from "../services/structured-text-service.js";
 import { resolveStructuredTextValue } from "./structured-text-resolver.js";
 import { decodeJsonIfString } from "../json.js";
-import { isObjectRecord, stringArrayFrom } from "../value-utils.js";
+
 
 /**
  * Build filter/orderBy type defs and Query resolvers for each content model.
  */
-function pickLocalizedStructuredTextValue(rawValue: unknown, context: GqlContext, defaultLocale?: string | null) {
-  if (rawValue === null || rawValue === undefined) return { locale: null, value: null };
+function pickLocalizedStructuredTextValue(rawValue: StoredFieldValue, context: GqlContext, defaultLocale?: string | null) {
+  if (rawValue == null) return { locale: null, value: null };
 
   const localeMap = decodeJsonIfString(rawValue);
   if (!isObjectRecord(localeMap)) {
@@ -61,13 +65,13 @@ function readQueryArgs(args: DynamicRow) {
   return {
     filter: isObjectRecord(args.filter) ? args.filter : undefined,
     orderBy: orderBy.length > 0 ? orderBy : undefined,
-    first: typeof args.first === "number" ? args.first : undefined,
-    skip: typeof args.skip === "number" ? args.skip : undefined,
+    first: isNumber(args.first) ? args.first : undefined,
+    skip: isNumber(args.skip) ? args.skip : undefined,
   };
 }
 
 function applyLocaleArgs(args: DynamicRow, context: GqlContext) {
-  if (typeof args.locale === "string") context.locale = args.locale;
+  if (isString(args.locale)) context.locale = args.locale;
   const fallbackLocales = stringArrayFrom(args.fallbackLocales);
   if (fallbackLocales.length > 0) context.fallbackLocales = fallbackLocales;
 }
@@ -236,16 +240,18 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
         const allowedBlockApiKeys = getBlockWhitelist(field.validators) ?? [];
 
         for (const record of records) {
+          // SAFETY: content cells hold StoredFieldValue scalars or JSON strings;
+          // the locale map / envelope checks below validate shapes at runtime.
           const selected = field.localized
-            ? pickLocalizedStructuredTextValue(record[field.api_key], context, defaultLocale)
+            ? pickLocalizedStructuredTextValue(record[field.api_key] as StoredFieldValue, context, defaultLocale)
             : { locale: null, value: record[field.api_key] };
           const rawValue = selected.value;
           if (!rawValue) continue;
-          if (typeof rawValue === "object" && !Array.isArray(rawValue)
+          if (isObject(rawValue) && !Array.isArray(rawValue)
             && "value" in rawValue && "blocks" in rawValue) {
             continue;
           }
-          const recordId = typeof record.id === "string" || typeof record.id === "number"
+          const recordId = isString(record.id) || isNumber(record.id)
             ? String(record.id)
             : null;
           if (!recordId) continue;
@@ -284,7 +290,7 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
         if (!envelope) return null;
         if (assignment.localized && assignment.locale) {
           const existing = assignment.record[assignment.fieldApiKey];
-          if (typeof existing === "object" && existing !== null && !Array.isArray(existing)) {
+          if (isObjectRecord(existing)) {
             Reflect.set(existing, assignment.locale, envelope);
           }
         } else {
@@ -351,12 +357,12 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
       );
     }
 
-    (resolvers.Query)[listName] = async (_: unknown, args: DynamicRow, context: GqlContext, info: GraphQLResolveInfo) => {
+    (resolvers.Query)[listName] = async (_: DynamicRow, args: DynamicRow, context: GqlContext, info: GraphQLResolveInfo) => {
       const includeDrafts = context.includeDrafts ?? false;
-      const excludeInvalid = typeof args.excludeInvalid === "boolean"
+      const excludeInvalid = isBoolean(args.excludeInvalid)
         ? args.excludeInvalid
         : (context.excludeInvalid ?? false);
-      const locale = typeof args.locale === "string"
+      const locale = isString(args.locale)
         ? args.locale
         : (context.locale ?? defaultLocale ?? undefined);
       // Store locale for nested field resolvers (per-query, not shared across root fields)
@@ -376,7 +382,7 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
             tableName,
             record,
             fields,
-            excludeId: typeof record.id === "string" ? record.id : null,
+            excludeId: isString(record.id) ? record.id : null,
           }));
           return uniqueViolations.length === 0;
         }));
@@ -385,9 +391,9 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
       return results;
     };
 
-    (resolvers.Query)[singleName] = async (_: unknown, args: DynamicRow, context: GqlContext, info: GraphQLResolveInfo) => {
+    (resolvers.Query)[singleName] = async (_: DynamicRow, args: DynamicRow, context: GqlContext, info: GraphQLResolveInfo) => {
       const includeDrafts = context.includeDrafts ?? false;
-      const locale = typeof args.locale === "string"
+      const locale = isString(args.locale)
         ? args.locale
         : (context.locale ?? defaultLocale ?? undefined);
       applyLocaleArgs(args, context);
@@ -432,9 +438,9 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
       return null;
     };
 
-    (resolvers.Query)[metaName] = async (_: unknown, args: DynamicRow, context: GqlContext) => {
+    (resolvers.Query)[metaName] = async (_: DynamicRow, args: DynamicRow, context: GqlContext) => {
       const includeDrafts = context.includeDrafts ?? false;
-      const excludeInvalid = typeof args.excludeInvalid === "boolean"
+      const excludeInvalid = isBoolean(args.excludeInvalid)
         ? args.excludeInvalid
         : (context.excludeInvalid ?? false);
       if (excludeInvalid) {
@@ -450,7 +456,7 @@ export function buildQueryResolvers(ctx: SchemaBuilderContext, modelMetas: Model
             tableName,
             record,
             fields,
-            excludeId: typeof record.id === "string" ? record.id : null,
+            excludeId: isString(record.id) ? record.id : null,
           }));
           return uniqueViolations.length === 0;
         }));

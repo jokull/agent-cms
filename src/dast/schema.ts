@@ -2,18 +2,18 @@
  * Effect Schema definitions for DAST documents.
  * Comprehensive recursive schemas for full validation of DAST nodes.
  */
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { DEFAULT_MARKS } from "./types.js";
 
 // --- Marks ---
 /** The six marks every project gets for free. */
-const DefaultMarkSchema = Schema.Literal(...DEFAULT_MARKS);
+const DefaultMarkSchema = Schema.Literals(DEFAULT_MARKS);
 /**
  * Project-defined marks, e.g. `customMark_kbd`. DatoCMS' CMA lets a project
  * register arbitrary custom marks; only the `customMark_` prefix is fixed.
  */
-const CustomMarkSchema = Schema.TemplateLiteral("customMark_", Schema.String);
-export const MarkSchema = Schema.Union(DefaultMarkSchema, CustomMarkSchema);
+const CustomMarkSchema = Schema.TemplateLiteral(["customMark_", Schema.String]);
+export const MarkSchema = Schema.Union([DefaultMarkSchema, CustomMarkSchema]);
 
 // --- Link meta ---
 const LinkMetaEntry = Schema.Struct({
@@ -25,20 +25,20 @@ const LinkMetaEntry = Schema.Struct({
 export const SpanNodeSchema = Schema.Struct({
   type: Schema.Literal("span"),
   value: Schema.String,
-  marks: Schema.optionalWith(Schema.Array(MarkSchema), { exact: true }),
+  marks: Schema.optionalKey(Schema.Array(MarkSchema)),
 });
 
 export const LinkNodeSchema = Schema.Struct({
   type: Schema.Literal("link"),
   url: Schema.NonEmptyString,
-  meta: Schema.optionalWith(Schema.Array(LinkMetaEntry), { exact: true }),
+  meta: Schema.optionalKey(Schema.Array(LinkMetaEntry)),
   children: Schema.Array(SpanNodeSchema),
 });
 
 export const ItemLinkNodeSchema = Schema.Struct({
   type: Schema.Literal("itemLink"),
   item: Schema.NonEmptyString,
-  meta: Schema.optionalWith(Schema.Array(LinkMetaEntry), { exact: true }),
+  meta: Schema.optionalKey(Schema.Array(LinkMetaEntry)),
   children: Schema.Array(SpanNodeSchema),
 });
 
@@ -52,31 +52,31 @@ export const InlineBlockNodeSchema = Schema.Struct({
   item: Schema.NonEmptyString,
 });
 
-export const InlineNodeSchema = Schema.Union(
+export const InlineNodeSchema = Schema.Union([
   SpanNodeSchema,
   LinkNodeSchema,
   ItemLinkNodeSchema,
   InlineItemNodeSchema,
   InlineBlockNodeSchema,
-);
+]);
 
 // --- Block-level node schemas ---
 export const ParagraphNodeSchema = Schema.Struct({
   type: Schema.Literal("paragraph"),
-  style: Schema.optionalWith(Schema.String, { exact: true }),
+  style: Schema.optionalKey(Schema.String),
   children: Schema.Array(InlineNodeSchema),
 });
 
 const HeadingLevel = Schema.Number.pipe(
-  Schema.int(),
-  Schema.greaterThanOrEqualTo(1),
-  Schema.lessThanOrEqualTo(6),
+  Schema.check(Schema.isInt()),
+  Schema.check(Schema.isGreaterThanOrEqualTo(1)),
+  Schema.check(Schema.isLessThanOrEqualTo(6)),
 );
 
 export const HeadingNodeSchema = Schema.Struct({
   type: Schema.Literal("heading"),
   level: HeadingLevel,
-  style: Schema.optionalWith(Schema.String, { exact: true }),
+  style: Schema.optionalKey(Schema.String),
   children: Schema.Array(InlineNodeSchema),
 });
 
@@ -95,35 +95,35 @@ interface ListNodeType {
   readonly children: ReadonlyArray<ListItemNodeType>;
 }
 
-export const ListNodeSchema: Schema.Schema<ListNodeType> = Schema.suspend(() =>
+export const ListNodeSchema: Schema.Codec<ListNodeType> = Schema.suspend((): Schema.Codec<ListNodeType> =>
   Schema.Struct({
     type: Schema.Literal("list"),
-    style: Schema.Literal("bulleted", "numbered"),
+    style: Schema.Literals(["bulleted", "numbered"]),
     children: Schema.Array(ListItemNodeSchema),
   })
 );
 
-export const ListItemNodeSchema: Schema.Schema<ListItemNodeType> = Schema.suspend(() =>
+export const ListItemNodeSchema: Schema.Codec<ListItemNodeType> = Schema.suspend((): Schema.Codec<ListItemNodeType> =>
   Schema.Struct({
     type: Schema.Literal("listItem"),
-    children: Schema.Array(Schema.Union(
+    children: Schema.Array(Schema.Union([
       ParagraphNodeSchema,
       ListNodeSchema,
-    )),
+    ])),
   })
 );
 
 export const BlockquoteNodeSchema = Schema.Struct({
   type: Schema.Literal("blockquote"),
-  attribution: Schema.optionalWith(Schema.String, { exact: true }),
+  attribution: Schema.optionalKey(Schema.String),
   children: Schema.Array(ParagraphNodeSchema),
 });
 
 export const CodeNodeSchema = Schema.Struct({
   type: Schema.Literal("code"),
   code: Schema.String,
-  language: Schema.optionalWith(Schema.String, { exact: true }),
-  highlight: Schema.optionalWith(Schema.Array(Schema.Number), { exact: true }),
+  language: Schema.optionalKey(Schema.String),
+  highlight: Schema.optionalKey(Schema.Array(Schema.Number)),
 });
 
 export const ThematicBreakNodeSchema = Schema.Struct({
@@ -155,7 +155,7 @@ export const TableNodeSchema = Schema.Struct({
 });
 
 // --- Block-level union ---
-export const BlockLevelNodeSchema = Schema.Union(
+export const BlockLevelNodeSchema = Schema.Union([
   ParagraphNodeSchema,
   HeadingNodeSchema,
   ListNodeSchema,
@@ -164,7 +164,7 @@ export const BlockLevelNodeSchema = Schema.Union(
   ThematicBreakNodeSchema,
   BlockRefNodeSchema,
   TableNodeSchema,
-);
+]);
 
 // --- Root and document ---
 export const RootNodeSchema = Schema.Struct({
@@ -184,9 +184,8 @@ export type DastDocumentInput = typeof DastDocumentSchema.Type;
 /** Decode a StructuredText write payload */
 export const StructuredTextWriteInput = Schema.Struct({
   value: DastDocumentSchema,
-  blocks: Schema.optionalWith(
-    Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-    { default: () => ({}) }
+  blocks: Schema.Record(Schema.String, Schema.Unknown).pipe(
+    Schema.withDecodingDefaultType(Effect.sync(() => ({}))),
   ),
 });
 

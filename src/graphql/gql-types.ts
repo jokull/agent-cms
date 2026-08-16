@@ -2,14 +2,19 @@
  * Shared types for the GraphQL schema builder modules.
  */
 import type { Effect } from "effect";
-import type { SqlClient } from "@effect/sql";
-import type { AssetRow, ModelRow, ParsedFieldRow } from "../db/row-types.js";
-
-/** A dynamic row from a content/block table */
-export type DynamicRow = Record<string, unknown>;
+import type { SqlClient } from "effect/unstable/sql";
+import type { ModelRow, ParsedFieldRow } from "../db/row-types.js";
 
 /** The minimal DAST document shape expected by extract*Ids helpers */
 export type DastDocInput = { document: { children: readonly unknown[] } };
+
+import type { DynamicRow, StoredFieldValue } from "../dynamic/row-types.js";
+
+/**
+ * A value as it appears in GraphQL query variables or argument ASTs: a stored
+ * field value, or a (possibly nested, possibly sparse) array of the same.
+ */
+export type QueryVariableValue = StoredFieldValue | readonly (QueryVariableValue | undefined)[];
 
 /** GraphQL resolver context passed through from Yoga */
 export interface GqlContext {
@@ -18,57 +23,6 @@ export interface GqlContext {
   locale?: string;
   fallbackLocales?: string[];
   linkedRecordCache?: Map<string, Promise<DynamicRow | null>>;
-  linkedRecordLoaders?: Map<string, {
-    cache: Map<string, Promise<DynamicRow | null>>;
-    pending: Map<string, {
-      promise: Promise<DynamicRow | null>;
-      resolve: (value: DynamicRow | null) => void;
-      reject: (error: unknown) => void;
-    }>;
-    scheduled: boolean;
-  }>;
-  /** Request-scoped asset loader — see `asset-loader.ts`. Needs no key: assets vary by neither drafts nor locale. */
-  assetLoader?: {
-    cache: Map<string, Promise<AssetRow | null>>;
-    pending: Map<string, {
-      promise: Promise<AssetRow | null>;
-      resolve: (value: AssetRow | null) => void;
-      reject: (error: unknown) => void;
-    }>;
-    scheduled: boolean;
-  };
-  reverseRefLoaders?: Map<string, {
-    cache: Map<string, Promise<DynamicRow[]>>;
-    pending: Map<string, {
-      deferred: {
-        promise: Promise<DynamicRow[]>;
-        resolve: (value: DynamicRow[]) => void;
-        reject: (error: unknown) => void;
-      };
-      parentId: string;
-    }>;
-    scheduled: boolean;
-  }>;
-  structuredTextEnvelopeLoaders?: Map<string, {
-    cache: Map<string, Promise<unknown>>;
-    pending: Map<string, {
-      deferred: {
-        promise: Promise<unknown>;
-        resolve: (value: unknown) => void;
-        reject: (error: unknown) => void;
-      };
-      params: {
-        allowedBlockApiKeys?: readonly string[];
-        parentContainerModelApiKey: string;
-        parentBlockId: string | null;
-        parentFieldApiKey: string;
-        rootRecordId: string;
-        rootFieldApiKey: string;
-        rawValue: unknown;
-      };
-    }>;
-    scheduled: boolean;
-  }>;
 }
 
 /** Resolved asset object returned by GraphQL */
@@ -83,7 +37,7 @@ export interface AssetObject {
   title: string | null;
   blurhash: string | null;
   focalPoint: { x: number; y: number } | null;
-  customData: Record<string, unknown> | null;
+  customData: DynamicRow | null;
   tags: string[];
   url: string;
   _createdAt: string;
@@ -126,7 +80,7 @@ export interface SchemaBuilderContext {
   blockTypeNames: Map<string, string>;
   defaultLocale: string | null;
   locales: ReadonlyArray<{ code: string; position: number; fallback_locale_id: string | null }>;
-  resolvers: Record<string, Record<string, unknown>>;
+  resolvers: Record<string, DynamicRow>;
   typeDefs: string[];
   queryFieldDefs: string[];
   isProduction?: boolean;

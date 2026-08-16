@@ -433,7 +433,7 @@ export function dastToEditableMarkdown(doc: DastDocument): EditableMarkdown {
 // ---------------------------------------------------------------------------
 
 /** Map of opening HTML tags to DAST marks */
-const HTML_TAG_TO_MARK: Record<string, Mark> = {
+const HTML_TAG_TO_MARK = {
   "<u>": "underline",
   "<mark>": "highlight",
 };
@@ -502,14 +502,14 @@ function addMark(inline: InlineNode, mark: Mark): InlineNode {
 function mdastPhrasingToSpans(nodes: readonly Mdast.PhrasingContent[], pres: PreservationMap): SpanNode[] {
   const inlines = mdastPhrasingToDastInlines(nodes, pres);
   return inlines.map((inline) =>
-    inline.type === "span" ? inline : { type: "span" as const, value: extractText(inline) }
+    inline.type === "span" ? inline : { type: "span", value: extractText(inline) } satisfies SpanNode
   );
 }
 
 function extractLinkMetaId(
   children: readonly Mdast.PhrasingContent[],
   pattern: RegExp
-): { metaId: string | null; children: readonly Mdast.PhrasingContent[] } {
+) {
   let metaId: string | null = null;
   const remaining: Mdast.PhrasingContent[] = [];
 
@@ -581,8 +581,8 @@ function mdastPhrasingToDastInlines(rawNodes: readonly Mdast.PhrasingContent[], 
             type: "itemLink",
             item: itemId,
             children,
-            ...(preserved?.meta ? { meta: preserved.meta } : {}),
           };
+          if (preserved?.meta) itemLink.meta = preserved.meta;
           result.push(itemLink);
           pendingItemLinkMetaId = null;
         } else {
@@ -595,8 +595,8 @@ function mdastPhrasingToDastInlines(rawNodes: readonly Mdast.PhrasingContent[], 
             type: "link",
             url: node.url,
             children,
-            ...(preserved?.meta ? { meta: preserved.meta } : {}),
           };
+          if (preserved?.meta) link.meta = preserved.meta;
           result.push(link);
           pendingLinkMetaId = null;
         }
@@ -695,6 +695,7 @@ function mdastBlockToDast(
       return {
         type: "paragraph",
         children: mdastPhrasingToDastInlines(node.children, pres),
+        // oxlint-disable-next-line anti-slop/no-conditional-empty-object-spread -- DAST schemas distinguish absent keys from undefined values; omit is the only valid form.
         ...(meta?.style !== undefined ? { style: meta.style } : {}),
       } satisfies ParagraphNode;
 
@@ -703,6 +704,7 @@ function mdastBlockToDast(
         type: "heading",
         level: node.depth,
         children: mdastPhrasingToDastInlines(node.children, pres),
+        // oxlint-disable-next-line anti-slop/no-conditional-empty-object-spread -- DAST schemas distinguish absent keys from undefined values; omit is the only valid form.
         ...(meta?.style !== undefined ? { style: meta.style } : {}),
       } satisfies HeadingNode;
 
@@ -722,6 +724,7 @@ function mdastBlockToDast(
             type: "paragraph",
             children: mdastPhrasingToDastInlines(p.children, pres),
           })),
+        // oxlint-disable-next-line anti-slop/no-conditional-empty-object-spread -- DAST schemas distinguish absent keys from undefined values; omit is the only valid form.
         ...(meta?.attribution !== undefined ? { attribution: meta.attribution } : {}),
       } satisfies BlockquoteNode;
 
@@ -729,7 +732,9 @@ function mdastBlockToDast(
       return {
         type: "code",
         code: node.value,
+        // oxlint-disable-next-line anti-slop/no-conditional-empty-object-spread -- DAST schemas distinguish absent keys from undefined values; omit is the only valid form.
         ...(node.lang ? { language: node.lang } : {}),
+        // oxlint-disable-next-line anti-slop/no-conditional-empty-object-spread -- DAST schemas distinguish absent keys from undefined values; omit is the only valid form.
         ...(meta?.highlight !== undefined ? { highlight: meta.highlight } : {}),
       } satisfies CodeNode;
 
@@ -746,6 +751,8 @@ function mdastBlockToDast(
     }
 
     case "table":
+      // SAFETY: a GFM table always includes its header row, so remark-parse
+      // never yields an empty table; the mapped rows are therefore non-empty.
       return {
         type: "table",
         children: node.children.map((row) => mdastTableRowToDast(row, pres)) as [TableRowNode, ...TableRowNode[]],
@@ -773,6 +780,8 @@ function mdastListItemToDast(item: Mdast.ListItem, pres: PreservationMap): ListI
 }
 
 function mdastTableRowToDast(row: Mdast.TableRow, pres: PreservationMap): TableRowNode {
+  // SAFETY: remark-parse always emits at least one cell per table row
+  // (even a bare pipe yields an empty cell), so the mapped cells are non-empty.
   return {
     type: "tableRow",
     children: row.children.map((cell) => mdastTableCellToDast(cell, pres)) as [TableCellNode, ...TableCellNode[]],
@@ -859,6 +868,10 @@ export { DastdownParseError };
  * for table-bearing documents.
  */
 export function dastToDastdown(doc: DastDocument): string {
+  // SAFETY: callers pass table-free documents (documented above — tables are not part of
+  // Dato's DAST utility types), so our DastDocument is structurally Dato's Document; the
+  // hop through unknown bridges the two independent type packages.
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- serializer boundary: DastDocument and DatoDastDocument are parallel typed views of the same node shape.
   return serializeDastdown(doc as unknown as DatoDastDocument);
 }
 
@@ -867,5 +880,9 @@ export function dastToDastdown(doc: DastDocument): string {
  * item link references use Dato's syntax, such as <block id="..."/>.
  */
 export function dastdownToDast(dastdown: string): DastDocument {
+  // SAFETY: dastdown encodes only Dato's node set (no tables), so the parsed
+  // Dato Document is structurally our DastDocument; the hop through unknown
+  // bridges the two independent type packages.
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- parser boundary: the wire format is typed separately from the domain DastDocument.
   return parseDastdown(dastdown) as unknown as DastDocument;
 }

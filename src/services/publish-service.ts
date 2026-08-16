@@ -1,5 +1,7 @@
-import { Effect } from "effect";
-import { SqlClient } from "@effect/sql";
+import { DateTime, Effect } from "effect";
+import { isString, type DynamicRow } from "../dynamic/row-types.js";
+import { contentTableName } from "../dynamic/tables.js";
+import { SqlClient } from "effect/unstable/sql";
 import { NotFoundError, AggregateValidationError, type ValidationIssue } from "../errors.js";
 import { selectById } from "../schema-engine/sql-records.js";
 import type { ModelRow, FieldRow } from "../db/row-types.js";
@@ -23,7 +25,7 @@ export function publishRecord(modelApiKey: string, recordId: string, actor?: Req
     if (models.length === 0) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
 
     const model = models[0];
-    const tableName = `content_${model.api_key}`;
+    const tableName = contentTableName(model.api_key);
     const record = yield* selectById(tableName, recordId);
     if (!record) return yield* new NotFoundError({ entity: "Record", id: recordId });
 
@@ -77,7 +79,7 @@ export function publishRecord(modelApiKey: string, recordId: string, actor?: Req
 
     // Version the previous published state (skip on first publish)
     if (record._published_snapshot) {
-      const prevSnapshot = typeof record._published_snapshot === "string"
+      const prevSnapshot = isString(record._published_snapshot)
         ? record._published_snapshot
         : encodeJson(record._published_snapshot);
       yield* VersionService.createVersion(modelApiKey, recordId, prevSnapshot, {
@@ -87,14 +89,14 @@ export function publishRecord(modelApiKey: string, recordId: string, actor?: Req
     }
 
     // Build snapshot from current field values (exclude system columns)
-    const snapshot: Record<string, unknown> = {};
+    const snapshot: DynamicRow = {};
     for (const [key, value] of Object.entries(materialized)) {
       if (!key.startsWith("_") && key !== "id") {
         snapshot[key] = value;
       }
     }
 
-    const now = new Date().toISOString();
+    const now = DateTime.formatIso(yield* DateTime.now);
     yield* sql.unsafe(
       `UPDATE "${tableName}" SET _status = 'published', _published_at = ?, _first_published_at = COALESCE(_first_published_at, ?), _published_snapshot = ?, _updated_at = ?, _updated_by = ?, _published_by = ?, _scheduled_publish_at = NULL WHERE id = ?`,
       [now, now, encodeJson(snapshot), now, actor?.label ?? null, actor?.label ?? null, recordId]
@@ -150,11 +152,11 @@ export function unpublishRecord(modelApiKey: string, recordId: string, actor?: R
     );
     if (models.length === 0) return yield* new NotFoundError({ entity: "Model", id: modelApiKey });
 
-    const tableName = `content_${models[0].api_key}`;
+    const tableName = contentTableName(models[0].api_key);
     const record = yield* selectById(tableName, recordId);
     if (!record) return yield* new NotFoundError({ entity: "Record", id: recordId });
 
-    const now = new Date().toISOString();
+    const now = DateTime.formatIso(yield* DateTime.now);
     yield* sql.unsafe(
       `UPDATE "${tableName}" SET _status = 'draft', _published_snapshot = NULL, _updated_at = ?, _updated_by = ?, _scheduled_unpublish_at = NULL WHERE id = ?`,
       [now, actor?.label ?? null, recordId]

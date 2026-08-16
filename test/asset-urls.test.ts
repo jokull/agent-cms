@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import { Effect, Layer } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import { createTestApp, jsonRequest } from "./app-helpers.js";
 import * as RecordService from "../src/services/record-service.js";
 import { AssetUrlContext, resolveAssetUrl } from "../src/media-field.js";

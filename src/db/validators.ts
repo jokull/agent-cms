@@ -1,8 +1,10 @@
-import { Effect } from "effect";
-import { SqlClient } from "@effect/sql";
+import { isBoolean, isNumber, isObjectRecord, isString, type DynamicRow, type StoredFieldValue } from "../dynamic/row-types.js";
+import { DateTime, Effect, Option } from "effect";
+
+import { SqlClient } from "effect/unstable/sql";
 import { decodeJsonRecordStringOr } from "../json.js";
 import { parseMediaFieldReference } from "../media-field.js";
-import { isObjectRecord } from "../value-utils.js";
+
 import type { ValidationIssueCode } from "../errors.js";
 
 /**
@@ -12,21 +14,21 @@ import type { ValidationIssueCode } from "../errors.js";
  */
 
 /** Safely get the slug source field from validators */
-export function getSlugSource(validators: Record<string, unknown>): string | undefined {
+export function getSlugSource(validators: DynamicRow): string | undefined {
   const v = validators.slug_source;
-  return typeof v === "string" ? v : undefined;
+  return isString(v) ? v : undefined;
 }
 
 /** Safely get the structured_text_blocks whitelist */
-export function getBlockWhitelist(validators: Record<string, unknown>): string[] | undefined {
+export function getBlockWhitelist(validators: DynamicRow): string[] | undefined {
   const v = validators.structured_text_blocks;
-  return Array.isArray(v) && v.every((x) => typeof x === "string") ? v : undefined;
+  return Array.isArray(v) && v.every((x) => isString(x)) ? v : undefined;
 }
 
 /** Safely get the rich_text_blocks whitelist */
-export function getRichTextBlockWhitelist(validators: Record<string, unknown>): string[] | undefined {
+export function getRichTextBlockWhitelist(validators: DynamicRow): string[] | undefined {
   const v = validators.rich_text_blocks;
-  return Array.isArray(v) && v.every((x) => typeof x === "string") ? v : undefined;
+  return Array.isArray(v) && v.every((x) => isString(x)) ? v : undefined;
 }
 
 /**
@@ -36,46 +38,46 @@ export function getRichTextBlockWhitelist(validators: Record<string, unknown>): 
  * not "no inline blocks" (DatoCMS requires it for inline blocks at all; we diverge
  * deliberately). Enforcement lives in structured-text-service.
  */
-export function getInlineBlockWhitelist(validators: Record<string, unknown>): string[] | undefined {
+export function getInlineBlockWhitelist(validators: DynamicRow): string[] | undefined {
   const v = validators.structured_text_inline_blocks;
-  return Array.isArray(v) && v.every((x) => typeof x === "string") ? v : undefined;
+  return Array.isArray(v) && v.every((x) => isString(x)) ? v : undefined;
 }
 
 /** Safely get the structured_text_links allowed-model whitelist (api_keys) */
-export function getStructuredTextLinkModels(validators: Record<string, unknown>): string[] | undefined {
+export function getStructuredTextLinkModels(validators: DynamicRow): string[] | undefined {
   const v = validators.structured_text_links;
-  return Array.isArray(v) && v.every((x) => typeof x === "string") ? v : undefined;
+  return Array.isArray(v) && v.every((x) => isString(x)) ? v : undefined;
 }
 
 /** Safely get the blocks_only flag */
-export function getBlocksOnly(validators: Record<string, unknown>): boolean {
+export function getBlocksOnly(validators: DynamicRow): boolean {
   return validators.blocks_only === true;
 }
 
 /** Safely check if field is required */
-export function isRequired(validators: Record<string, unknown>): boolean {
+export function isRequired(validators: DynamicRow): boolean {
   return validators.required === true;
 }
 
 /** Safely check if field must be unique */
-export function isUnique(validators: Record<string, unknown>): boolean {
+export function isUnique(validators: DynamicRow): boolean {
   return validators.unique === true;
 }
 
 /** Safely get link target model types (for `link` fields) */
-export function getLinkTargets(validators: Record<string, unknown>): string[] | undefined {
+export function getLinkTargets(validators: DynamicRow): string[] | undefined {
   const v = validators.item_item_type;
-  return Array.isArray(v) && v.every((x) => typeof x === "string") ? v : undefined;
+  return Array.isArray(v) && v.every((x) => isString(x)) ? v : undefined;
 }
 
 /** Safely get links target model types (for `links` fields) */
-export function getLinksTargets(validators: Record<string, unknown>): string[] | undefined {
+export function getLinksTargets(validators: DynamicRow): string[] | undefined {
   const v = validators.items_item_type;
-  return Array.isArray(v) && v.every((x) => typeof x === "string") ? v : undefined;
+  return Array.isArray(v) && v.every((x) => isString(x)) ? v : undefined;
 }
 
 /** Check if field is searchable (default: true — opt out with {"searchable": false}) */
-export function isSearchable(validators: Record<string, unknown>): boolean {
+export function isSearchable(validators: DynamicRow): boolean {
   return validators.searchable !== false;
 }
 
@@ -102,19 +104,21 @@ export function supportsUniqueValidation(fieldType: string): boolean {
  * Returns { valid, missingFields } where missingFields lists api_keys that are missing.
  */
 export function computeIsValid(
-  record: Record<string, unknown>,
-  fields: ReadonlyArray<{ api_key: string; field_type: string; localized: number; validators: Record<string, unknown> }>,
+  record: DynamicRow,
+  fields: ReadonlyArray<{ api_key: string; field_type: string; localized: number; validators: DynamicRow }>,
   defaultLocale: string | null,
   allLocales?: readonly string[]
-): { valid: boolean; missingFields: string[] } {
+) {
   const missingFields: string[] = [];
   for (const field of fields) {
-    const value = record[field.api_key];
+    // SAFETY: DynamicRow cells are StoredFieldValue by the dynamic-zone contract
+    // (the Record<string, unknown> window hides the union).
+    const value = record[field.api_key] as StoredFieldValue;
     let fieldInvalid = false;
     if (field.localized && defaultLocale) {
       // Localized field: check locale keys in JSON map
       let localeMap = value;
-      if (typeof localeMap === "string") {
+      if (isString(localeMap)) {
         localeMap = decodeJsonRecordStringOr(localeMap, {});
       }
       if (!isObjectRecord(localeMap)) {
@@ -124,7 +128,8 @@ export function computeIsValid(
       // When allLocales is set, check every locale; otherwise just the default
       const localesToCheck = allLocales ?? [defaultLocale];
       for (const locale of localesToCheck) {
-        const locValue = localeMap[locale];
+        // SAFETY: locale-map values are content-table cells (StoredFieldValue).
+        const locValue = localeMap[locale] as StoredFieldValue;
         if (!isValueValidForField(locValue, field.field_type, field.validators)) {
           fieldInvalid = true;
           break; // One missing locale is enough to mark the field invalid
@@ -141,9 +146,9 @@ export function computeIsValid(
 }
 
 function isValueValidForField(
-  value: unknown,
+  value: StoredFieldValue,
   fieldType: string,
-  validators: Record<string, unknown>,
+  validators: DynamicRow,
 ): boolean {
   return valueValidationCode(value, fieldType, validators) === null;
 }
@@ -155,9 +160,9 @@ function isValueValidForField(
  * (dry-run) so the two never diverge on what counts as valid.
  */
 function valueValidationCode(
-  value: unknown,
+  value: StoredFieldValue,
   fieldType: string,
-  validators: Record<string, unknown>,
+  validators: DynamicRow,
 ): ValidationIssueCode | null {
   if (isRequired(validators) && !hasMeaningfulValue(value)) {
     return "required";
@@ -196,17 +201,19 @@ export interface ValueValidationIssue {
  * checked per the same locale rules as `computeIsValid`.
  */
 export function collectValueValidationIssues(
-  record: Record<string, unknown>,
-  fields: ReadonlyArray<{ api_key: string; field_type: string; localized: number; validators: Record<string, unknown> }>,
+  record: DynamicRow,
+  fields: ReadonlyArray<{ api_key: string; field_type: string; localized: number; validators: DynamicRow }>,
   defaultLocale: string | null,
   allLocales?: readonly string[],
 ): ValueValidationIssue[] {
   const issues: ValueValidationIssue[] = [];
   for (const field of fields) {
-    const value = record[field.api_key];
+    // SAFETY: DynamicRow cells are StoredFieldValue by the dynamic-zone contract
+    // (the Record<string, unknown> window hides the union).
+    const value = record[field.api_key] as StoredFieldValue;
     if (field.localized && defaultLocale) {
       let localeMap = value;
-      if (typeof localeMap === "string") {
+      if (isString(localeMap)) {
         localeMap = decodeJsonRecordStringOr(localeMap, {});
       }
       if (!isObjectRecord(localeMap)) {
@@ -216,7 +223,8 @@ export function collectValueValidationIssues(
       const localesToCheck = allLocales ?? [defaultLocale];
       let fieldCode: ValidationIssueCode | null = null;
       for (const locale of localesToCheck) {
-        fieldCode = valueValidationCode(localeMap[locale], field.field_type, field.validators);
+        // SAFETY: locale-map values are content-table cells (StoredFieldValue).
+        fieldCode = valueValidationCode(localeMap[locale] as StoredFieldValue, field.field_type, field.validators);
         if (fieldCode !== null) break;
       }
       if (fieldCode !== null) issues.push({ field: field.api_key, code: fieldCode });
@@ -228,40 +236,40 @@ export function collectValueValidationIssues(
   return issues;
 }
 
-function passesEnumValidation(value: unknown, validators: Record<string, unknown>): boolean {
+function passesEnumValidation(value: StoredFieldValue, validators: DynamicRow): boolean {
   const enumValues = validators.enum;
-  if (!Array.isArray(enumValues) || !enumValues.every((entry) => typeof entry === "string")) {
+  if (!Array.isArray(enumValues) || !enumValues.every((entry) => isString(entry))) {
     return true;
   }
-  return typeof value === "string" && enumValues.includes(value);
+  return isString(value) && enumValues.includes(value);
 }
 
-function passesLengthValidation(value: unknown, fieldType: string, validators: Record<string, unknown>): boolean {
+function passesLengthValidation(value: StoredFieldValue, fieldType: string, validators: DynamicRow): boolean {
   if (!["string", "text", "slug"].includes(fieldType)) return true;
   const lengthConfig = validators.length;
   if (!isObjectRecord(lengthConfig)) return true;
-  if (typeof value !== "string") return false;
-  const min = typeof lengthConfig.min === "number" ? lengthConfig.min : undefined;
-  const max = typeof lengthConfig.max === "number" ? lengthConfig.max : undefined;
+  if (!isString(value)) return false;
+  const min = isNumber(lengthConfig.min) ? lengthConfig.min : undefined;
+  const max = isNumber(lengthConfig.max) ? lengthConfig.max : undefined;
   if (min !== undefined && value.length < min) return false;
   if (max !== undefined && value.length > max) return false;
   return true;
 }
 
-function passesNumberRangeValidation(value: unknown, fieldType: string, validators: Record<string, unknown>): boolean {
+function passesNumberRangeValidation(value: StoredFieldValue, fieldType: string, validators: DynamicRow): boolean {
   if (!["integer", "float"].includes(fieldType)) return true;
   const rangeConfig = validators.number_range;
   if (!isObjectRecord(rangeConfig)) return true;
-  if (typeof value !== "number") return false;
-  const min = typeof rangeConfig.min === "number" ? rangeConfig.min : undefined;
-  const max = typeof rangeConfig.max === "number" ? rangeConfig.max : undefined;
+  if (!isNumber(value)) return false;
+  const min = isNumber(rangeConfig.min) ? rangeConfig.min : undefined;
+  const max = isNumber(rangeConfig.max) ? rangeConfig.max : undefined;
   if (min !== undefined && value < min) return false;
   if (max !== undefined && value > max) return false;
   return true;
 }
 
-function passesFormatValidation(value: unknown, fieldType: string, validators: Record<string, unknown>): boolean {
-  if (!["string", "text", "slug"].includes(fieldType) || typeof value !== "string") return true;
+function passesFormatValidation(value: StoredFieldValue, fieldType: string, validators: DynamicRow): boolean {
+  if (!["string", "text", "slug"].includes(fieldType) || !isString(value)) return true;
   const format = validators.format;
   if (!format) return true;
   if (format === "email") {
@@ -275,7 +283,7 @@ function passesFormatValidation(value: unknown, fieldType: string, validators: R
       return false;
     }
   }
-  if (isObjectRecord(format) && typeof format.custom_pattern === "string") {
+  if (isObjectRecord(format) && isString(format.custom_pattern)) {
     try {
       return new RegExp(format.custom_pattern).test(value);
     } catch {
@@ -285,35 +293,37 @@ function passesFormatValidation(value: unknown, fieldType: string, validators: R
   return true;
 }
 
-function passesDateRangeValidation(value: unknown, fieldType: string, validators: Record<string, unknown>): boolean {
-  if (!["date", "date_time"].includes(fieldType) || typeof value !== "string") return true;
+function passesDateRangeValidation(value: StoredFieldValue, fieldType: string, validators: DynamicRow): boolean {
+  if (!["date", "date_time"].includes(fieldType) || !isString(value)) return true;
   const rangeConfig = validators.date_range;
   if (!isObjectRecord(rangeConfig)) return true;
   const valueTime = parseDateValue(value);
   if (valueTime === null) return false;
-  const minTime = parseDateBoundary(rangeConfig.min);
-  const maxTime = parseDateBoundary(rangeConfig.max);
+  // SAFETY: validator-config cells are content-table cells (StoredFieldValue).
+  const minTime = parseDateBoundary(rangeConfig.min as StoredFieldValue);
+  // SAFETY: validator-config cells are content-table cells (StoredFieldValue).
+  const maxTime = parseDateBoundary(rangeConfig.max as StoredFieldValue);
   if (minTime !== null && valueTime < minTime) return false;
   if (maxTime !== null && valueTime > maxTime) return false;
   return true;
 }
 
 function parseDateValue(value: string): number | null {
-  const time = Date.parse(value);
-  return Number.isNaN(time) ? null : time;
+  const parsed = DateTime.make(value);
+  return Option.isSome(parsed) ? DateTime.toEpochMillis(parsed.value) : null;
 }
 
-function parseDateBoundary(value: unknown): number | null {
-  if (value === undefined) return null;
-  if (value === "now") return Date.now();
-  if (typeof value !== "string") return null;
+function parseDateBoundary(value: StoredFieldValue): number | null {
+  if (value == null) return null;
+  if (value === "now") return DateTime.toEpochMillis(DateTime.nowUnsafe());
+  if (!isString(value)) return null;
   return parseDateValue(value);
 }
 
 export function findUniqueConstraintViolations(options: {
   tableName: string;
-  record: Record<string, unknown>;
-  fields: ReadonlyArray<{ api_key: string; localized: number; field_type: string; validators: Record<string, unknown> }>;
+  record: DynamicRow;
+  fields: ReadonlyArray<{ api_key: string; localized: number; field_type: string; validators: DynamicRow }>;
   excludeId?: string | null;
   onlyFieldApiKeys?: ReadonlySet<string>;
 }) {
@@ -325,10 +335,14 @@ export function findUniqueConstraintViolations(options: {
       if (!isUnique(field.validators) || !supportsUniqueValidation(field.field_type)) continue;
       if (options.onlyFieldApiKeys && !options.onlyFieldApiKeys.has(field.api_key)) continue;
 
-      const value = options.record[field.api_key];
+      // SAFETY: DynamicRow cells are StoredFieldValue by the dynamic-zone contract
+      // (the Record<string, unknown> window hides the union).
+      const value = options.record[field.api_key] as StoredFieldValue;
       if (field.localized) {
         const localeMap = parseLocaleMap(value);
-        for (const [localeCode, localeValue] of Object.entries(localeMap)) {
+        for (const [localeCode, rawLocaleValue] of Object.entries(localeMap)) {
+          // SAFETY: locale-map values are content-table cells (StoredFieldValue).
+          const localeValue = rawLocaleValue as StoredFieldValue;
           if (!hasMeaningfulValue(localeValue)) continue;
           const path = `$."${localeCode.replace(/"/g, '\\"')}"`;
           const rows = yield* sql.unsafe<{ id: string }>(
@@ -364,17 +378,17 @@ export function findUniqueConstraintViolations(options: {
   });
 }
 
-function parseLocaleMap(value: unknown): Record<string, unknown> {
-  if (value === null || value === undefined) return {};
-  const parsed = typeof value === "string" ? decodeJsonRecordStringOr(value, {}) : value;
+function parseLocaleMap(value: StoredFieldValue): DynamicRow {
+  if (value == null) return {};
+  const parsed = isString(value) ? decodeJsonRecordStringOr(value, {}) : value;
   return isObjectRecord(parsed) ? parsed : {};
 }
 
-function hasMeaningfulValue(value: unknown): boolean {
-  return value !== null && value !== undefined && value !== "";
+function hasMeaningfulValue(value: StoredFieldValue): boolean {
+  return value != null && value !== "";
 }
 
-function serializeUniqueValue(value: unknown): unknown {
-  if (typeof value === "boolean") return value ? 1 : 0;
+function serializeUniqueValue(value: StoredFieldValue): StoredFieldValue {
+  if (isBoolean(value)) return value ? 1 : 0;
   return value;
 }

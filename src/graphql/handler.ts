@@ -1,6 +1,7 @@
-import { createYoga, type YogaSchemaDefinition } from "graphql-yoga";
+import { createYoga } from "graphql-yoga";
+import { isObjectRecord, isString } from "../dynamic/row-types.js";
 import { Effect, Layer, Logger } from "effect";
-import type { DynamicRow } from "./gql-types.js";
+import type { DynamicRow } from "../dynamic/row-types.js";
 import {
   Kind,
   type DocumentNode,
@@ -13,11 +14,12 @@ import {
   validate,
   visit,
 } from "graphql";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import { buildGraphQLSchema } from "./schema-builder.js";
 import { enforceQueryLimits } from "./query-limits.js";
 import { getSqlMetrics, withSqlMetrics } from "./sql-metrics.js";
 import { createPublishedFastPath } from "./published-fast-path.js";
+import type { FastPathSqlMetrics } from "./published-fast-path.js";
 import { createCustomQueryExecutor } from "./custom-query-executor.js";
 import { createVersionedCache } from "../services/schema-version.js";
 
@@ -44,18 +46,20 @@ interface SchemaTiming {
 interface GraphqlRequestBody {
   operationName?: string | null;
   query?: string | null;
-  variables?: Record<string, unknown> | null;
+  variables?: DynamicRow | null;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+function readCredentialType(request: Request): CredentialType {
+  const raw = request.headers.get("X-Credential-Type");
+  return raw === "admin" || raw === "editor" ? raw : null;
 }
 
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- HTTP boundary validator: narrows an arbitrary parsed JSON request body to the GraphQL request shape; the input contract is "anything parseable" by construction.
 function isGraphqlRequestBody(value: unknown): value is GraphqlRequestBody {
-  if (!isRecord(value)) return false;
-  const operationNameValid = value.operationName === undefined || value.operationName === null || typeof value.operationName === "string";
-  const queryValid = value.query === undefined || value.query === null || typeof value.query === "string";
-  const variablesValid = value.variables === undefined || value.variables === null || isRecord(value.variables);
+  if (!isObjectRecord(value)) return false;
+  const operationNameValid = value.operationName === undefined || value.operationName === null || isString(value.operationName);
+  const queryValid = value.query === undefined || value.query === null || isString(value.query);
+  const variablesValid = value.variables === undefined || value.variables === null || isObjectRecord(value.variables);
   return operationNameValid && queryValid && variablesValid;
 }
 
@@ -193,7 +197,7 @@ export function createGraphQLHandler(
   sqlLayer: Layer.Layer<SqlClient.SqlClient>,
   options?: GraphQLHandlerOptions
 ) {
-  const runtimeLayer = Layer.merge(sqlLayer, Logger.json);
+  const runtimeLayer = Layer.merge(sqlLayer, Logger.layer([Logger.formatJson]));
   const queryLimits = {
     maxDepth: 12,
     maxSelections: 250,
@@ -252,13 +256,12 @@ export function createGraphQLHandler(
   const customQueryExecutor = createCustomQueryExecutor(sqlLayer);
 
   const yoga = createYoga({
-    // Yoga's schema function type expects the full context, but our schema is context-agnostic
-    schema: (() => getSchema()) as YogaSchemaDefinition<object, GraphQLContext>,
+    schema: () => getSchema(),
     graphqlEndpoint: "/graphql",
     landingPage: true,
     plugins: [{
       onParams({ params, setResult }) {
-        if (typeof params.query !== "string") return;
+        if (!isString(params.query)) return;
         const errors = enforceQueryLimits(params.query, queryLimits);
         if (errors.length > 0) {
           setResult({ errors: errors });
@@ -266,7 +269,7 @@ export function createGraphQLHandler(
       },
     }],
     context: ({ request }: { request: Request }) => {
-      const credentialType = request.headers.get("X-Credential-Type") as CredentialType;
+      const credentialType = readCredentialType(request);
       const headerDrafts = request.headers.get("X-Include-Drafts") === "true";
       // Editor tokens always see drafts; admin respects header; no credential = published only
       const includeDrafts = credentialType === "editor" ? true
@@ -288,7 +291,7 @@ export function createGraphQLHandler(
     return Promise.resolve();
   }
 
-  function logGraphqlInfo(message: string, fields: Record<string, unknown>) {
+  function logGraphqlInfo(message: string, fields: DynamicRow) {
     Effect.runFork(
       Effect.logInfo(message).pipe(
         Effect.annotateLogs(fields),
@@ -300,9 +303,9 @@ export function createGraphQLHandler(
 
   async function executeDocument(
     document: DocumentNode,
-    variables?: Record<string, unknown>,
+    variables?: DynamicRow,
     context?: { includeDrafts?: boolean; excludeInvalid?: boolean },
-  ): Promise<{ data: unknown; errors?: ReadonlyArray<{ message: string }>; _trace?: Record<string, unknown> }> {
+  ): Promise<{ data: unknown; errors?: ReadonlyArray<{ message: string }>; _trace?: DynamicRow }> {
     const schema = await getSchema();
     const validationErrors = validate(schema, document);
     if (validationErrors.length > 0) {
@@ -332,14 +335,16 @@ export function createGraphQLHandler(
         linkedRecordCache: new Map(),
       },
     });
-    return result as { data: unknown; errors?: ReadonlyArray<{ message: string }> };
+    // GraphQL execution results are structurally { data?, errors? } objects whose
+    // errors carry a `message` field, matching this function's return shape.
+    return { data: result.data, errors: result.errors };
   }
 
   async function executeWithRootFallback(
     query: string,
-    variables?: Record<string, unknown>,
+    variables?: DynamicRow,
     context?: { includeDrafts?: boolean; excludeInvalid?: boolean },
-  ): Promise<{ data: unknown; errors?: ReadonlyArray<{ message: string }>; _trace?: Record<string, unknown> }> {
+  ): Promise<{ data: unknown; errors?: ReadonlyArray<{ message: string }>; _trace?: DynamicRow }> {
     const directFastPath = await publishedFastPath.tryExecute({
       query,
       variables,
@@ -413,9 +418,9 @@ export function createGraphQLHandler(
       return { ...yogaResult, _trace: { path: "yoga", rootPaths, rootReasons } };
     }
 
-    const mergedData: Record<string, unknown> = {};
+    const mergedData: DynamicRow = {};
     const mergedErrors: Array<{ message: string }> = [];
-    let fastPathMetrics: Record<string, unknown> | undefined;
+    let fastPathMetrics: FastPathSqlMetrics | undefined;
 
     const supportedDocument = buildSubsetDocument(document, operation, supportedSelections);
     const supportedCombinedResult = await publishedFastPath.tryExecute({
@@ -429,7 +434,7 @@ export function createGraphQLHandler(
 
     if (supportedCombinedResult) {
       Object.assign(mergedData, supportedCombinedResult.response.data);
-      fastPathMetrics = supportedCombinedResult.metrics as unknown as Record<string, unknown>;
+      fastPathMetrics = supportedCombinedResult.metrics;
     } else {
       for (const selection of supportedSelections) {
         const subsetDocument = buildSubsetDocument(document, operation, [selection]);
@@ -450,8 +455,8 @@ export function createGraphQLHandler(
     if (unsupportedSelections.length > 0) {
       const unsupportedDocument = buildSubsetDocument(document, operation, unsupportedSelections);
       const unsupportedResult = await executeDocument(unsupportedDocument, variables, context);
-      if (unsupportedResult.data && typeof unsupportedResult.data === "object") {
-        Object.assign(mergedData, unsupportedResult.data as Record<string, unknown>);
+      if (isObjectRecord(unsupportedResult.data)) {
+        Object.assign(mergedData, unsupportedResult.data);
       }
       if (unsupportedResult.errors) {
         mergedErrors.push(...unsupportedResult.errors);
@@ -460,7 +465,7 @@ export function createGraphQLHandler(
 
     return {
       data: mergedData,
-      ...(mergedErrors.length > 0 ? { errors: mergedErrors } : {}),
+      errors: mergedErrors.length > 0 ? mergedErrors : undefined,
       _trace: {
         path: unsupportedSelections.length > 0 ? "partial" : "fast-path",
         rootPaths,
@@ -475,7 +480,7 @@ export function createGraphQLHandler(
     const traceEnabled = request.headers.get("X-Bench-Trace") === "1" || debugSql;
 
     if (!traceEnabled) {
-      const credentialType = request.headers.get("X-Credential-Type") as CredentialType;
+      const credentialType = readCredentialType(request);
       const headerDrafts = request.headers.get("X-Include-Drafts") === "true";
       const includeDrafts = credentialType === "editor" ? true
         : credentialType === "admin" ? headerDrafts
@@ -485,7 +490,7 @@ export function createGraphQLHandler(
       if (request.method === "POST" && contentType.includes("application/json")) {
         try {
           const body = await request.clone().json();
-          if (isGraphqlRequestBody(body) && typeof body.query === "string") {
+          if (isGraphqlRequestBody(body) && isString(body.query)) {
             const query = body.query;
             const errors = enforceQueryLimits(body.query, queryLimits);
             if (errors.length === 0) {
@@ -601,9 +606,9 @@ export function createGraphQLHandler(
 
   async function execute(
     query: string,
-    variables?: Record<string, unknown>,
+    variables?: DynamicRow,
     context?: { includeDrafts?: boolean; excludeInvalid?: boolean }
-  ): Promise<{ data: unknown; errors?: ReadonlyArray<{ message: string }>; _trace?: Record<string, unknown> }> {
+  ): Promise<{ data: unknown; errors?: ReadonlyArray<{ message: string }>; _trace?: DynamicRow }> {
     return executeWithRootFallback(query, variables, context);
   }
 

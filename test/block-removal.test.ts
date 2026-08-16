@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { Effect } from "effect";
-import { SqlClient } from "@effect/sql";
+import { SqlClient } from "effect/unstable/sql";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { runMigrations } from "./migrate.js";

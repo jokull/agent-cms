@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 
-import * as Command from "@effect/cli/Command";
-import * as Options from "@effect/cli/Options";
+import * as Command from "effect/unstable/cli/Command";
+import * as Flag from "effect/unstable/cli/Flag";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import { Effect } from "effect";
 
@@ -10,69 +10,69 @@ import { readReport } from "./commands/report.mjs";
 import { readProjectStatus, readStatus } from "./commands/status.mjs";
 
 const defaultOutDir = resolve(process.cwd(), "scripts/dato-import/out");
-const tokenOption = Options.text("dato-token").pipe(
-  Options.withDescription("Dato read token. Falls back to DATOCMS_API_TOKEN."),
-  Options.withDefault(process.env.DATOCMS_API_TOKEN ?? ""),
+const tokenOption = Flag.string("dato-token").pipe(
+  Flag.withDescription("Dato read token. Falls back to DATOCMS_API_TOKEN."),
+  Flag.withDefault(process.env.DATOCMS_API_TOKEN ?? ""),
 );
-const cmsUrlOption = Options.text("cms-url").pipe(
-  Options.withDescription("agent-cms base URL."),
-  Options.withDefault(process.env.CMS_URL ?? "http://127.0.0.1:8791"),
+const cmsUrlOption = Flag.string("cms-url").pipe(
+  Flag.withDescription("agent-cms base URL."),
+  Flag.withDefault(process.env.CMS_URL ?? "http://127.0.0.1:8791"),
 );
-const cmsWriteKeyOption = Options.text("cms-write-key").pipe(
-  Options.withDescription("agent-cms write key. Falls back to CMS_WRITE_KEY."),
-  Options.withDefault(process.env.CMS_WRITE_KEY ?? ""),
+const cmsWriteKeyOption = Flag.string("cms-write-key").pipe(
+  Flag.withDescription("agent-cms write key. Falls back to CMS_WRITE_KEY."),
+  Flag.withDefault(process.env.CMS_WRITE_KEY ?? ""),
 );
-const modelOption = Options.text("model").pipe(
-  Options.withDescription("Root content model to import. Optional with --from-export to import all exported models."),
-  Options.withDefault(""),
+const modelOption = Flag.string("model").pipe(
+  Flag.withDescription("Root content model to import. Optional with --from-export to import all exported models."),
+  Flag.withDefault(""),
 );
-const limitOption = Options.integer("limit").pipe(
-  Options.withDescription("Root record count. The importer expands dependencies beyond this. Ignored for whole-export imports without --model."),
-  Options.withDefault(5),
+const limitOption = Flag.integer("limit").pipe(
+  Flag.withDescription("Root record count. The importer expands dependencies beyond this. Ignored for whole-export imports without --model."),
+  Flag.withDefault(5),
 );
-const skipOption = Options.integer("skip").pipe(
-  Options.withDescription("Root offset for slice imports."),
-  Options.withDefault(0),
+const skipOption = Flag.integer("skip").pipe(
+  Flag.withDescription("Root offset for slice imports."),
+  Flag.withDefault(0),
 );
-const localeOption = Options.text("locale").pipe(
-  Options.withDescription("Import locale. Non-default locale passes merge localized draft values only."),
-  Options.withDefault("en"),
+const localeOption = Flag.string("locale").pipe(
+  Flag.withDescription("Import locale. Non-default locale passes merge localized draft values only."),
+  Flag.withDefault("en"),
 );
-const outDirOption = Options.text("out-dir").pipe(
-  Options.withDescription("Directory for findings, summaries, and resumable import output."),
-  Options.withDefault(defaultOutDir),
+const outDirOption = Flag.string("out-dir").pipe(
+  Flag.withDescription("Directory for findings, summaries, and resumable import output."),
+  Flag.withDefault(defaultOutDir),
 );
-const constantsOutOption = Options.text("constants-out").pipe(
-  Options.withDescription("Optional TypeScript path for generated schema API-key constants."),
-  Options.withDefault(""),
+const constantsOutOption = Flag.string("constants-out").pipe(
+  Flag.withDescription("Optional TypeScript path for generated schema API-key constants."),
+  Flag.withDefault(""),
 );
-const exportItemChunkSizeOption = Options.integer("item-chunk-size").pipe(
-  Options.withDescription("Records per exported item chunk file."),
-  Options.withDefault(300),
+const exportItemChunkSizeOption = Flag.integer("item-chunk-size").pipe(
+  Flag.withDescription("Records per exported item chunk file."),
+  Flag.withDefault(300),
 );
-const exportUploadChunkSizeOption = Options.integer("upload-chunk-size").pipe(
-  Options.withDescription("Uploads per exported upload chunk file."),
-  Options.withDefault(1000),
+const exportUploadChunkSizeOption = Flag.integer("upload-chunk-size").pipe(
+  Flag.withDescription("Uploads per exported upload chunk file."),
+  Flag.withDefault(1000),
 );
-const exportItemConcurrencyOption = Options.integer("item-page-concurrency").pipe(
-  Options.withDescription("Concurrent Dato nested item page requests during export."),
-  Options.withDefault(8),
+const exportItemConcurrencyOption = Flag.integer("item-page-concurrency").pipe(
+  Flag.withDescription("Concurrent Dato nested item page requests during export."),
+  Flag.withDefault(8),
 );
-const exportUploadConcurrencyOption = Options.integer("upload-page-concurrency").pipe(
-  Options.withDescription("Concurrent Dato upload page requests during export."),
-  Options.withDefault(4),
+const exportUploadConcurrencyOption = Flag.integer("upload-page-concurrency").pipe(
+  Flag.withDescription("Concurrent Dato upload page requests during export."),
+  Flag.withDefault(4),
 );
-const fromExportOption = Options.text("from-export").pipe(
-  Options.withDescription("Path to a Dato export JSON snapshot. When set, import reads local JSON instead of CMA."),
-  Options.withDefault(""),
+const fromExportOption = Flag.string("from-export").pipe(
+  Flag.withDescription("Path to a Dato export JSON snapshot. When set, import reads local JSON instead of CMA."),
+  Flag.withDefault(""),
 );
-const projectOption = Options.text("project").pipe(
-  Options.withDescription("Dato project identifier for scoped import state."),
-  Options.withDefault(""),
+const projectOption = Flag.string("project").pipe(
+  Flag.withDescription("Dato project identifier for scoped import state."),
+  Flag.withDefault(""),
 );
-const incrementalOption = Options.boolean("incremental").pipe(
-  Options.withDescription("Skip records unchanged since last import (compare updated_at)."),
-  Options.withDefault(false),
+const incrementalOption = Flag.boolean("incremental").pipe(
+  Flag.withDescription("Skip records unchanged since last import (compare updated_at)."),
+  Flag.withDefault(false),
 );
 
 const inspectCommand = Command.make("inspect", { datoToken: tokenOption }).pipe(
@@ -171,17 +171,17 @@ const exportCommand = Command.make("export", {
     })),
 );
 
-const skipAssetUploadOption = Options.boolean("skip-asset-upload").pipe(
-  Options.withDescription("Skip R2 asset upload, register metadata only. Useful for dry runs."),
-  Options.withDefault(false),
+const skipAssetUploadOption = Flag.boolean("skip-asset-upload").pipe(
+  Flag.withDescription("Skip R2 asset upload, register metadata only. Useful for dry runs."),
+  Flag.withDefault(false),
 );
-const maxDepthOption = Options.integer("max-depth").pipe(
-  Options.withDescription("Max recursion depth for linked record crawling. Default 3."),
-  Options.withDefault(3),
+const maxDepthOption = Flag.integer("max-depth").pipe(
+  Flag.withDescription("Max recursion depth for linked record crawling. Default 3."),
+  Flag.withDefault(3),
 );
-const skipLinksOption = Options.text("skip-links").pipe(
-  Options.withDescription("Comma-separated field api_keys to skip crawling (e.g. similar_tours,nearby_places). IDs are preserved but targets are not imported."),
-  Options.withDefault(""),
+const skipLinksOption = Flag.string("skip-links").pipe(
+  Flag.withDescription("Comma-separated field api_keys to skip crawling (e.g. similar_tours,nearby_places). IDs are preserved but targets are not imported."),
+  Flag.withDefault(""),
 );
 
 const importCommand = Command.make("import", {
@@ -311,13 +311,13 @@ const assetImportCommand = Command.make("asset-import", {
   cmsUrl: cmsUrlOption,
   cmsWriteKey: cmsWriteKeyOption,
   project: projectOption,
-  concurrency: Options.integer("concurrency").pipe(
-    Options.withDescription("Concurrent asset imports."),
-    Options.withDefault(6),
+  concurrency: Flag.integer("concurrency").pipe(
+    Flag.withDescription("Concurrent asset imports."),
+    Flag.withDefault(6),
   ),
-  dryRun: Options.boolean("dry-run").pipe(
-    Options.withDescription("Count pending assets without importing."),
-    Options.withDefault(false),
+  dryRun: Flag.boolean("dry-run").pipe(
+    Flag.withDescription("Count pending assets without importing."),
+    Flag.withDefault(false),
   ),
   outDir: outDirOption,
 }).pipe(

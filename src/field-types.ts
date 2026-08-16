@@ -9,20 +9,20 @@
  * - Middle: which fields exist on which models is dynamic (runtime)
  * - Bottom: each field type's shape is statically known (this file)
  */
-import { Schema } from "effect";
+import { DateTime, Option, Schema } from "effect";
 import type { FieldType } from "./types.js";
 
 /** Effect Schemas for composite field type validation */
 export const ColorSchema = Schema.Struct({
-  red: Schema.Number.pipe(Schema.int(), Schema.between(0, 255)),
-  green: Schema.Number.pipe(Schema.int(), Schema.between(0, 255)),
-  blue: Schema.Number.pipe(Schema.int(), Schema.between(0, 255)),
-  alpha: Schema.optional(Schema.Number.pipe(Schema.int(), Schema.between(0, 255))),
+  red: Schema.Number.pipe(Schema.check(Schema.isInt()), Schema.check(Schema.isBetween({ minimum: 0, maximum: 255 }))),
+  green: Schema.Number.pipe(Schema.check(Schema.isInt()), Schema.check(Schema.isBetween({ minimum: 0, maximum: 255 }))),
+  blue: Schema.Number.pipe(Schema.check(Schema.isInt()), Schema.check(Schema.isBetween({ minimum: 0, maximum: 255 }))),
+  alpha: Schema.optional(Schema.Number.pipe(Schema.check(Schema.isInt()), Schema.check(Schema.isBetween({ minimum: 0, maximum: 255 })))),
 });
 
 export const LatLonSchema = Schema.Struct({
-  latitude: Schema.Number.pipe(Schema.between(-90, 90)),
-  longitude: Schema.Number.pipe(Schema.between(-180, 180)),
+  latitude: Schema.Number.pipe(Schema.check(Schema.isBetween({ minimum: -90, maximum: 90 }))),
+  longitude: Schema.Number.pipe(Schema.check(Schema.isBetween({ minimum: -180, maximum: 180 }))),
 });
 
 export const SeoSchema = Schema.Struct({
@@ -33,8 +33,8 @@ export const SeoSchema = Schema.Struct({
 });
 
 export const MediaFocalPointSchema = Schema.Struct({
-  x: Schema.Number.pipe(Schema.between(0, 1)),
-  y: Schema.Number.pipe(Schema.between(0, 1)),
+  x: Schema.Number.pipe(Schema.check(Schema.isBetween({ minimum: 0, maximum: 1 }))),
+  y: Schema.Number.pipe(Schema.check(Schema.isBetween({ minimum: 0, maximum: 1 }))),
 });
 
 export const MediaFieldObjectSchema = Schema.Struct({
@@ -42,29 +42,29 @@ export const MediaFieldObjectSchema = Schema.Struct({
   alt: Schema.optional(Schema.NullOr(Schema.String)),
   title: Schema.optional(Schema.NullOr(Schema.String)),
   focal_point: Schema.optional(Schema.NullOr(MediaFocalPointSchema)),
-  custom_data: Schema.optional(Schema.NullOr(Schema.Record({ key: Schema.String, value: Schema.Unknown }))),
+  custom_data: Schema.optional(Schema.NullOr(Schema.Record(Schema.String, Schema.Unknown))),
 });
 
-export const MediaFieldSchema = Schema.Union(Schema.String, MediaFieldObjectSchema);
+export const MediaFieldSchema = Schema.Union([Schema.String, MediaFieldObjectSchema]);
 export const MediaGalleryFieldSchema = Schema.Array(MediaFieldSchema);
 
 function isValidIsoDate(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const parsed = new Date(`${value}T00:00:00.000Z`);
-  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+  const parsed = DateTime.make(`${value}T00:00:00.000Z`);
+  return Option.isSome(parsed) && DateTime.formatIso(parsed.value).slice(0, 10) === value;
 }
 
 function isValidIsoDateTime(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}T/.test(value)) return false;
-  return !Number.isNaN(Date.parse(value));
+  return Option.isSome(DateTime.make(value));
 }
 
 const DateSchema = Schema.String.pipe(
-  Schema.filter(isValidIsoDate, { message: () => "expected ISO date string YYYY-MM-DD" })
+  Schema.check(Schema.makeFilter(isValidIsoDate, { message: "expected ISO date string YYYY-MM-DD" }))
 );
 
 const DateTimeSchema = Schema.String.pipe(
-  Schema.filter(isValidIsoDateTime, { message: () => "expected ISO datetime string" })
+  Schema.check(Schema.makeFilter(isValidIsoDateTime, { message: "expected ISO datetime string" }))
 );
 
 /** Static definition for a field type — everything known at compile time */
@@ -85,7 +85,7 @@ export interface FieldTypeDefinition {
   readonly multiLocaleType: string;
 
   /** Effect Schema for write-time validation, or null if no validation needed */
-  readonly inputSchema: Schema.Schema<any, any> | null;
+  readonly inputSchema: Schema.Codec<unknown> | null;
 
   /** Whether the stored value is JSON that needs parsing */
   readonly jsonStored: boolean;
@@ -102,7 +102,7 @@ export interface FieldTypeDefinition {
  * The field type registry — one entry per field type.
  * Add a new field type here and TypeScript will enforce all properties are defined.
  */
-export const FIELD_TYPE_REGISTRY: Record<FieldType, FieldTypeDefinition> = {
+export const FIELD_TYPE_REGISTRY = {
   string: {
     sqliteType: "TEXT",
     graphqlType: "String",
@@ -139,7 +139,7 @@ export const FIELD_TYPE_REGISTRY: Record<FieldType, FieldTypeDefinition> = {
     filterType: "IntFilter",
     localizable: true,
     multiLocaleType: "IntMultiLocaleField",
-    inputSchema: Schema.Number.pipe(Schema.int()),
+    inputSchema: Schema.Number.pipe(Schema.check(Schema.isInt())),
     jsonStored: false,
     hasCustomResolver: false,
   },
@@ -293,8 +293,7 @@ export const FIELD_TYPE_REGISTRY: Record<FieldType, FieldTypeDefinition> = {
     jsonStored: true,
     hasCustomResolver: true,
   },
-};
-
+} satisfies Record<FieldType, FieldTypeDefinition>;
 /** Get the registry definition for a field type */
 export function getFieldTypeDef(fieldType: FieldType): FieldTypeDefinition {
   return FIELD_TYPE_REGISTRY[fieldType];
