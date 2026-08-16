@@ -24,6 +24,29 @@ export function isObjectRecord(value: unknown): value is Record<string, unknown>
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** Narrow `unknown` to a string. */
+export function isString(value: unknown): value is string {
+  return typeof value === "string";
+}
+
+/** Narrow `unknown` to a number. */
+export function isNumber(value: unknown): value is number {
+  return typeof value === "number";
+}
+
+/**
+ * Narrow `unknown` to a plain object. Arrays pass (object-typed); null does
+ * not. Prefer isObjectRecord where records are meant.
+ */
+export function isObject(value: unknown): value is object {
+  return typeof value === "object" && value !== null;
+}
+
+/** Narrow `unknown` to a boolean. */
+export function isBoolean(value: unknown): value is boolean {
+  return typeof value === "boolean";
+}
+
 /** Extract the string entries of an unknown array, if it is one. */
 export function stringArrayFrom(value: unknown): string[] {
   return Array.isArray(value)

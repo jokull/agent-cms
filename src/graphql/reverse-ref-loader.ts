@@ -14,6 +14,7 @@
  * facts).
  */
 import { Effect, Exit, Request, RequestResolver } from "effect";
+import { isString } from "../dynamic/row-types.js";
 import { SqlClient } from "effect/unstable/sql";
 import type { GqlContext, ReverseRef } from "./gql-types.js";
 import type { DynamicRow } from "../dynamic/row-types.js";
@@ -94,7 +95,7 @@ function extractMatchingParentIds(row: DynamicRow, sourceRefs: readonly ReverseR
     if (rawValue == null) continue;
 
     if (ref.fieldType === "link") {
-      if (typeof rawValue === "string" && parentIdSet.has(rawValue)) {
+      if (isString(rawValue) && parentIdSet.has(rawValue)) {
         matches.add(rawValue);
       }
       continue;
@@ -103,7 +104,7 @@ function extractMatchingParentIds(row: DynamicRow, sourceRefs: readonly ReverseR
     const decoded = decodeJsonIfString(rawValue);
     if (!Array.isArray(decoded)) continue;
     for (const item of decoded) {
-      if (typeof item === "string" && parentIdSet.has(item)) {
+      if (isString(item) && parentIdSet.has(item)) {
         matches.add(item);
       }
     }
@@ -198,7 +199,7 @@ export function buildReverseRefResolver(
       }
 
       for (const row of decodeRows(rows, params.includeDrafts)) {
-        const rowId = typeof row.id === "string" ? row.id : String(row.id);
+        const rowId = isString(row.id) ? row.id : String(row.id);
         const matchingParentIds = extractMatchingParentIds(row, params.sourceRefs, parentIdSet);
         for (const parentId of matchingParentIds) {
           const parentSeenRowIds = seenRowIds.get(parentId);

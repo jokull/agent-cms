@@ -1,3 +1,4 @@
+import { isString, stringifyTemplateValue } from "../dynamic/row-types.js";
 /**
  * Canonical path resolver — batch-resolves canonical_path_template for all
  * published records of a model, traversing link fields via dot notation.
@@ -10,22 +11,23 @@
  * Unresolvable tokens (null link, missing field) are left as-is: {token}.
  */
 import { Effect } from "effect";
+
 import { contentTableName } from "../dynamic/tables.js";
 import { SqlClient } from "effect/unstable/sql";
 import { NotFoundError, ValidationError } from "../errors.js";
 import type { ModelRow, FieldRow } from "../db/row-types.js";
 import { getLinkTargets } from "../db/validators.js";
 import { decodeJsonRecordStringOr } from "../json.js";
-import { stringifyTemplateValue } from "../dynamic/row-types.js";
+
 
 const MAX_DEPTH = 10;
 
 function rowId(row: Record<string, unknown>): string | null {
-  return typeof row.id === "string" ? row.id : null;
+  return isString(row.id) ? row.id : null;
 }
 
 function timestampValue(value: unknown): string | null {
-  return typeof value === "string" ? value : null;
+  return isString(value) ? value : null;
 }
 
 /** A parsed token from the template, e.g. {category.parent.slug} → ["category", "parent", "slug"] */
@@ -229,7 +231,7 @@ const resolveLinkedTokens = Effect.fn("resolveLinkedTokens")(function* (
       const linkIdToOriginalRecords = new Map<string, string[]>();
       for (const [origId, rec] of currentRecords) {
         const linkId = rec[fieldName];
-        if (typeof linkId === "string" && linkId) {
+        if (isString(linkId) && linkId) {
           const list = linkIdToOriginalRecords.get(linkId) ?? [];
           list.push(origId);
           linkIdToOriginalRecords.set(linkId, list);
@@ -261,7 +263,7 @@ const resolveLinkedTokens = Effect.fn("resolveLinkedTokens")(function* (
       const nextRecords = new Map<string, Record<string, unknown>>();
       for (const [origId, rec] of currentRecords) {
         const linkId = rec[fieldName];
-        if (typeof linkId === "string" && linkId) {
+        if (isString(linkId) && linkId) {
           const linked = linkedRecords.get(linkId);
           if (linked) {
             nextRecords.set(origId, linked);

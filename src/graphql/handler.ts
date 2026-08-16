@@ -1,4 +1,5 @@
 import { createYoga } from "graphql-yoga";
+import { isString } from "../dynamic/row-types.js";
 import { Effect, Layer, Logger } from "effect";
 import type { DynamicRow } from "../dynamic/row-types.js";
 import {
@@ -59,8 +60,8 @@ function readCredentialType(request: Request): CredentialType {
 
 function isGraphqlRequestBody(value: unknown): value is GraphqlRequestBody {
   if (!isRecord(value)) return false;
-  const operationNameValid = value.operationName === undefined || value.operationName === null || typeof value.operationName === "string";
-  const queryValid = value.query === undefined || value.query === null || typeof value.query === "string";
+  const operationNameValid = value.operationName === undefined || value.operationName === null || isString(value.operationName);
+  const queryValid = value.query === undefined || value.query === null || isString(value.query);
   const variablesValid = value.variables === undefined || value.variables === null || isRecord(value.variables);
   return operationNameValid && queryValid && variablesValid;
 }
@@ -263,7 +264,7 @@ export function createGraphQLHandler(
     landingPage: true,
     plugins: [{
       onParams({ params, setResult }) {
-        if (typeof params.query !== "string") return;
+        if (!isString(params.query)) return;
         const errors = enforceQueryLimits(params.query, queryLimits);
         if (errors.length > 0) {
           setResult({ errors: errors });
@@ -492,7 +493,7 @@ export function createGraphQLHandler(
       if (request.method === "POST" && contentType.includes("application/json")) {
         try {
           const body = await request.clone().json();
-          if (isGraphqlRequestBody(body) && typeof body.query === "string") {
+          if (isGraphqlRequestBody(body) && isString(body.query)) {
             const query = body.query;
             const errors = enforceQueryLimits(body.query, queryLimits);
             if (errors.length === 0) {

@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { isString } from "../dynamic/row-types.js";
 import { contentTableName } from "../dynamic/tables.js";
 import { SqlClient } from "effect/unstable/sql";
 import { generateId } from "../id.js";
@@ -301,7 +302,7 @@ export const updateModel = Effect.fn("updateModel")(function* (id: string, body:
   yield* sql.unsafe(`UPDATE models SET ${sets.join(", ")} WHERE id = ?`, [...values, id]);
 
   // Rebuild FTS index if apiKey was renamed (model row now has the new apiKey)
-  if (typeof body.apiKey === "string" && body.apiKey !== model.api_key && !model.is_block) {
+  if (isString(body.apiKey) && body.apiKey !== model.api_key && !model.is_block) {
     yield* SearchService.rebuildIndex(body.apiKey).pipe(Effect.ignore);
   }
 

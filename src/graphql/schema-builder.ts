@@ -3,6 +3,7 @@
  * Loads CMS metadata, builds context, and delegates to sub-modules.
  */
 import { createSchema } from "graphql-yoga";
+import { isBoolean, isNumber, isString } from "../dynamic/row-types.js";
 import { GraphQLScalarType, Kind } from "graphql";
 import { Effect, Layer } from "effect";
 import { SqlClient } from "effect/unstable/sql";
@@ -21,8 +22,8 @@ import { encodeJson } from "../json.js";
 
 function serializeGraphqlScalar(value: unknown): string | null {
   if (value == null) return null;
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (isString(value)) return value;
+  if (isNumber(value) || isBoolean(value)) return String(value);
   return encodeJson(value);
 }
 

@@ -1,11 +1,13 @@
+import { isObjectRecord, isString } from "../dynamic/row-types.js";
 /**
  * Build GraphQL types and resolvers for block models.
  * Also computes per-field StructuredText union types.
  */
 import { getLinkTargets, getLinksTargets, getBlockWhitelist, getRichTextBlockWhitelist } from "../db/validators.js";
+
 import type { SchemaBuilderContext, GqlContext } from "./gql-types.js";
 import type { DynamicRow } from "../dynamic/row-types.js";
-import { isObjectRecord } from "../dynamic/row-types.js";
+
 import { toTypeName, toCamelCase, fieldToSDL, getRegistryDef, resolveVideoField } from "./gql-utils.js";
 import { resolveStructuredTextValue } from "./structured-text-resolver.js";
 import { materializeRichTextValue } from "../services/structured-text-service.js";
@@ -37,14 +39,14 @@ function pickLocalizedEntry(rawValue: unknown, context: GqlContext) {
 }
 
 function withFieldLocaleArgs(context: GqlContext, args: unknown): GqlContext {
-  if (typeof args !== "object" || args === null || Array.isArray(args)) return context;
+  if (!isObjectRecord(args)) return context;
   // SAFETY: args guarded as a plain object above; locale keys are GraphQL field args.
-  const rawLocale = Reflect.get(args, "locale") as unknown;
-  const locale = typeof rawLocale === "string" ? rawLocale : context.locale;
+  const rawLocale: unknown = Reflect.get(args, "locale");
+  const locale = isString(rawLocale) ? rawLocale : context.locale;
   // SAFETY: same args-object guarantee for fallbackLocales.
-  const rawFallbackLocales = Reflect.get(args, "fallbackLocales") as unknown;
+  const rawFallbackLocales: unknown = Reflect.get(args, "fallbackLocales");
   const fallbackLocales = Array.isArray(rawFallbackLocales)
-    ? rawFallbackLocales.filter((value): value is string => typeof value === "string")
+    ? rawFallbackLocales.filter((value): value is string => isString(value))
     : context.fallbackLocales;
   return {
     ...context,
@@ -114,7 +116,7 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
         if (targets && targets.length > 0) {
           bmResolvers[gqlName] = async (parent: DynamicRow, _args: unknown, context: GqlContext) => {
             const linkedId = parent[f.api_key];
-            if (typeof linkedId !== "string" || !linkedId) return null;
+            if (!isString(linkedId) || !linkedId) return null;
             const resolved = await loadLinkedRecords({
               runSql,
               targetApiKeys: targets,
@@ -136,8 +138,8 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
           return await resolveStructuredTextValue({
             runSql,
             rawValue: raw,
-            rootRecordId: typeof parent._root_record_id === "string" ? parent._root_record_id : undefined,
-            rootFieldApiKey: typeof parent._root_field_api_key === "string"
+            rootRecordId: isString(parent._root_record_id) ? parent._root_record_id : undefined,
+            rootFieldApiKey: isString(parent._root_field_api_key)
               ? parent._root_field_api_key
               : undefined,
             parentContainerModelApiKey: bm.api_key,
@@ -165,15 +167,15 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
               parentContainerModelApiKey: bm.api_key,
               parentBlockId: String(parent.id),
               parentFieldApiKey: f.api_key,
-              rootRecordId: typeof parent._root_record_id === "string" ? parent._root_record_id : String(parent.id),
-              rootFieldApiKey: typeof parent._root_field_api_key === "string" ? parent._root_field_api_key : f.api_key,
+              rootRecordId: isString(parent._root_record_id) ? parent._root_record_id : String(parent.id),
+              rootFieldApiKey: isString(parent._root_field_api_key) ? parent._root_field_api_key : f.api_key,
               rawValue: raw,
             })
           );
           if (!blocks) return [];
           return blocks.map((block) => ({
             ...block,
-            __typename: typeof block._type === "string"
+            __typename: isString(block._type)
               ? (blockTypeNames.get(block._type) ?? block._type)
               : undefined,
             _modelApiKey: block._type,
@@ -186,7 +188,7 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
             let linkedIds = parent[f.api_key];
             linkedIds = decodeJsonIfString(linkedIds);
             if (!Array.isArray(linkedIds)) return [];
-            const linkedIdStrings = linkedIds.filter((id): id is string => typeof id === "string");
+            const linkedIdStrings = linkedIds.filter((id): id is string => isString(id));
             const resolved = await loadLinkedRecords({
               runSql,
               targetApiKeys: targets,
@@ -209,7 +211,7 @@ export function buildBlockModelResolvers(ctx: SchemaBuilderContext): Map<string,
           }
           // Parse JSON-stored fields
           const def = getRegistryDef(f.field_type);
-          if (def?.graphqlType === "JSON" && typeof rawVal === "string") {
+          if (def?.graphqlType === "JSON" && isString(rawVal)) {
             return decodeJsonStringOr(rawVal, rawVal);
           }
           return rawVal;

@@ -1,8 +1,10 @@
+import { isBoolean, isNumber, isObjectRecord, isString } from "../dynamic/row-types.js";
 import { DateTime, Effect, Option } from "effect";
+
 import { SqlClient } from "effect/unstable/sql";
 import { decodeJsonRecordStringOr } from "../json.js";
 import { parseMediaFieldReference } from "../media-field.js";
-import { isObjectRecord } from "../dynamic/row-types.js";
+
 import type { ValidationIssueCode } from "../errors.js";
 
 /**
@@ -14,19 +16,19 @@ import type { ValidationIssueCode } from "../errors.js";
 /** Safely get the slug source field from validators */
 export function getSlugSource(validators: Record<string, unknown>): string | undefined {
   const v = validators.slug_source;
-  return typeof v === "string" ? v : undefined;
+  return isString(v) ? v : undefined;
 }
 
 /** Safely get the structured_text_blocks whitelist */
 export function getBlockWhitelist(validators: Record<string, unknown>): string[] | undefined {
   const v = validators.structured_text_blocks;
-  return Array.isArray(v) && v.every((x) => typeof x === "string") ? v : undefined;
+  return Array.isArray(v) && v.every((x) => isString(x)) ? v : undefined;
 }
 
 /** Safely get the rich_text_blocks whitelist */
 export function getRichTextBlockWhitelist(validators: Record<string, unknown>): string[] | undefined {
   const v = validators.rich_text_blocks;
-  return Array.isArray(v) && v.every((x) => typeof x === "string") ? v : undefined;
+  return Array.isArray(v) && v.every((x) => isString(x)) ? v : undefined;
 }
 
 /**
@@ -38,13 +40,13 @@ export function getRichTextBlockWhitelist(validators: Record<string, unknown>): 
  */
 export function getInlineBlockWhitelist(validators: Record<string, unknown>): string[] | undefined {
   const v = validators.structured_text_inline_blocks;
-  return Array.isArray(v) && v.every((x) => typeof x === "string") ? v : undefined;
+  return Array.isArray(v) && v.every((x) => isString(x)) ? v : undefined;
 }
 
 /** Safely get the structured_text_links allowed-model whitelist (api_keys) */
 export function getStructuredTextLinkModels(validators: Record<string, unknown>): string[] | undefined {
   const v = validators.structured_text_links;
-  return Array.isArray(v) && v.every((x) => typeof x === "string") ? v : undefined;
+  return Array.isArray(v) && v.every((x) => isString(x)) ? v : undefined;
 }
 
 /** Safely get the blocks_only flag */
@@ -65,13 +67,13 @@ export function isUnique(validators: Record<string, unknown>): boolean {
 /** Safely get link target model types (for `link` fields) */
 export function getLinkTargets(validators: Record<string, unknown>): string[] | undefined {
   const v = validators.item_item_type;
-  return Array.isArray(v) && v.every((x) => typeof x === "string") ? v : undefined;
+  return Array.isArray(v) && v.every((x) => isString(x)) ? v : undefined;
 }
 
 /** Safely get links target model types (for `links` fields) */
 export function getLinksTargets(validators: Record<string, unknown>): string[] | undefined {
   const v = validators.items_item_type;
-  return Array.isArray(v) && v.every((x) => typeof x === "string") ? v : undefined;
+  return Array.isArray(v) && v.every((x) => isString(x)) ? v : undefined;
 }
 
 /** Check if field is searchable (default: true — opt out with {"searchable": false}) */
@@ -114,7 +116,7 @@ export function computeIsValid(
     if (field.localized && defaultLocale) {
       // Localized field: check locale keys in JSON map
       let localeMap = value;
-      if (typeof localeMap === "string") {
+      if (isString(localeMap)) {
         localeMap = decodeJsonRecordStringOr(localeMap, {});
       }
       if (!isObjectRecord(localeMap)) {
@@ -206,7 +208,7 @@ export function collectValueValidationIssues(
     const value = record[field.api_key];
     if (field.localized && defaultLocale) {
       let localeMap = value;
-      if (typeof localeMap === "string") {
+      if (isString(localeMap)) {
         localeMap = decodeJsonRecordStringOr(localeMap, {});
       }
       if (!isObjectRecord(localeMap)) {
@@ -230,19 +232,19 @@ export function collectValueValidationIssues(
 
 function passesEnumValidation(value: unknown, validators: Record<string, unknown>): boolean {
   const enumValues = validators.enum;
-  if (!Array.isArray(enumValues) || !enumValues.every((entry) => typeof entry === "string")) {
+  if (!Array.isArray(enumValues) || !enumValues.every((entry) => isString(entry))) {
     return true;
   }
-  return typeof value === "string" && enumValues.includes(value);
+  return isString(value) && enumValues.includes(value);
 }
 
 function passesLengthValidation(value: unknown, fieldType: string, validators: Record<string, unknown>): boolean {
   if (!["string", "text", "slug"].includes(fieldType)) return true;
   const lengthConfig = validators.length;
   if (!isObjectRecord(lengthConfig)) return true;
-  if (typeof value !== "string") return false;
-  const min = typeof lengthConfig.min === "number" ? lengthConfig.min : undefined;
-  const max = typeof lengthConfig.max === "number" ? lengthConfig.max : undefined;
+  if (!isString(value)) return false;
+  const min = isNumber(lengthConfig.min) ? lengthConfig.min : undefined;
+  const max = isNumber(lengthConfig.max) ? lengthConfig.max : undefined;
   if (min !== undefined && value.length < min) return false;
   if (max !== undefined && value.length > max) return false;
   return true;
@@ -252,16 +254,16 @@ function passesNumberRangeValidation(value: unknown, fieldType: string, validato
   if (!["integer", "float"].includes(fieldType)) return true;
   const rangeConfig = validators.number_range;
   if (!isObjectRecord(rangeConfig)) return true;
-  if (typeof value !== "number") return false;
-  const min = typeof rangeConfig.min === "number" ? rangeConfig.min : undefined;
-  const max = typeof rangeConfig.max === "number" ? rangeConfig.max : undefined;
+  if (!isNumber(value)) return false;
+  const min = isNumber(rangeConfig.min) ? rangeConfig.min : undefined;
+  const max = isNumber(rangeConfig.max) ? rangeConfig.max : undefined;
   if (min !== undefined && value < min) return false;
   if (max !== undefined && value > max) return false;
   return true;
 }
 
 function passesFormatValidation(value: unknown, fieldType: string, validators: Record<string, unknown>): boolean {
-  if (!["string", "text", "slug"].includes(fieldType) || typeof value !== "string") return true;
+  if (!["string", "text", "slug"].includes(fieldType) || !isString(value)) return true;
   const format = validators.format;
   if (!format) return true;
   if (format === "email") {
@@ -275,7 +277,7 @@ function passesFormatValidation(value: unknown, fieldType: string, validators: R
       return false;
     }
   }
-  if (isObjectRecord(format) && typeof format.custom_pattern === "string") {
+  if (isObjectRecord(format) && isString(format.custom_pattern)) {
     try {
       return new RegExp(format.custom_pattern).test(value);
     } catch {
@@ -286,7 +288,7 @@ function passesFormatValidation(value: unknown, fieldType: string, validators: R
 }
 
 function passesDateRangeValidation(value: unknown, fieldType: string, validators: Record<string, unknown>): boolean {
-  if (!["date", "date_time"].includes(fieldType) || typeof value !== "string") return true;
+  if (!["date", "date_time"].includes(fieldType) || !isString(value)) return true;
   const rangeConfig = validators.date_range;
   if (!isObjectRecord(rangeConfig)) return true;
   const valueTime = parseDateValue(value);
@@ -306,7 +308,7 @@ function parseDateValue(value: string): number | null {
 function parseDateBoundary(value: unknown): number | null {
   if (value === undefined) return null;
   if (value === "now") return DateTime.toEpochMillis(DateTime.nowUnsafe());
-  if (typeof value !== "string") return null;
+  if (!isString(value)) return null;
   return parseDateValue(value);
 }
 
@@ -366,7 +368,7 @@ export function findUniqueConstraintViolations(options: {
 
 function parseLocaleMap(value: unknown): Record<string, unknown> {
   if (value === null || value === undefined) return {};
-  const parsed = typeof value === "string" ? decodeJsonRecordStringOr(value, {}) : value;
+  const parsed = isString(value) ? decodeJsonRecordStringOr(value, {}) : value;
   return isObjectRecord(parsed) ? parsed : {};
 }
 
@@ -375,6 +377,6 @@ function hasMeaningfulValue(value: unknown): boolean {
 }
 
 function serializeUniqueValue(value: unknown): unknown {
-  if (typeof value === "boolean") return value ? 1 : 0;
+  if (isBoolean(value)) return value ? 1 : 0;
   return value;
 }

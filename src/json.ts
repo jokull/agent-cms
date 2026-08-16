@@ -1,4 +1,5 @@
 import { Exit, Schema } from "effect";
+import { isString } from "./dynamic/row-types.js";
 
 const UnknownJson = Schema.fromJsonString(Schema.Unknown);
 const JsonRecord = Schema.Record(Schema.String, Schema.Unknown);
@@ -34,6 +35,6 @@ export function decodeJsonRecordStringOr(
 }
 
 export function decodeJsonIfString(value: unknown): unknown {
-  if (typeof value !== "string") return value;
+  if (!isString(value)) return value;
   return decodeJsonStringOr(value, value);
 }

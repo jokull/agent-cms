@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { isBoolean } from "../dynamic/row-types.js";
 import { SqlClient } from "effect/unstable/sql";
 import { SchemaEngineError, ValidationError, CmsErrorSchema } from "../errors.js";
 
@@ -63,7 +64,7 @@ export function updateSiteSettings(args: SiteSettingsInput) {
       // yields exactly its keys and fieldMap has an entry for every one.
       const col = fieldMap[key as keyof SiteSettingsInput];
       sets.push(`"${col}" = ?`);
-      params.push(typeof value === "boolean" ? (value ? 1 : 0) : value);
+      params.push(isBoolean(value) ? (value ? 1 : 0) : value);
     }
 
     if (sets.length === 0) {

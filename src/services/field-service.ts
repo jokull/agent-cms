@@ -1,4 +1,6 @@
+import { isBoolean, isNumber, isObject, isObjectRecord, isString } from "../dynamic/row-types.js";
 import { Effect } from "effect";
+
 import { contentTableName } from "../dynamic/tables.js";
 import { SqlClient } from "effect/unstable/sql";
 import { generateId } from "../id.js";
@@ -12,7 +14,7 @@ import { deleteBlockSubtrees } from "./structured-text-service.js";
 import { isUnique, supportsUniqueValidation } from "../db/validators.js";
 import { decodeJsonRecordStringOr, encodeJson } from "../json.js";
 import { bumpSchemaVersion } from "./schema-version.js";
-import { isObjectRecord } from "../dynamic/row-types.js";
+
 
 const ALLOWED_FIELD_VALIDATOR_KEYS = new Set([
   "required",
@@ -60,7 +62,7 @@ function normalizeBooleanValidators(validators: Record<string, unknown>): Record
   const out = { ...validators };
   for (const key of BOOLEAN_VALIDATOR_KEYS) {
     const v = out[key];
-    if (v !== null && typeof v === "object" && !Array.isArray(v)) out[key] = true;
+    if (isObjectRecord(v)) out[key] = true;
   }
   return out;
 }
@@ -102,7 +104,7 @@ const normalizeItemTypeValidators = Effect.fn("normalizeItemTypeValidators")(fun
     if (!Array.isArray(v)) continue;
     const resolved: unknown[] = [];
     for (const t of v) {
-      if (typeof t !== "string") {
+      if (!isString(t)) {
         resolved.push(t);
         continue;
       }
@@ -130,7 +132,7 @@ const validateFieldValidators = Effect.fn("validateFieldValidators")(function* (
     });
   }
 
-  if (validators.required !== undefined && typeof validators.required !== "boolean") {
+  if (validators.required !== undefined && !isBoolean(validators.required)) {
     return yield* new ValidationError({
       message: `required validator must be a boolean`,
       field: apiKey,
@@ -143,14 +145,14 @@ const validateFieldValidators = Effect.fn("validateFieldValidators")(function* (
       field: apiKey,
     });
   }
-  if (validators.unique !== undefined && typeof validators.unique !== "boolean") {
+  if (validators.unique !== undefined && !isBoolean(validators.unique)) {
     return yield* new ValidationError({
       message: `unique validator must be a boolean`,
       field: apiKey,
     });
   }
 
-  if (validators.searchable !== undefined && typeof validators.searchable !== "boolean") {
+  if (validators.searchable !== undefined && !isBoolean(validators.searchable)) {
     return yield* new ValidationError({
       message: `searchable validator must be a boolean`,
       field: apiKey,
@@ -165,7 +167,7 @@ const validateFieldValidators = Effect.fn("validateFieldValidators")(function* (
         field: apiKey,
       });
     }
-    if (!Array.isArray(enumValues) || !enumValues.every((value) => typeof value === "string")) {
+    if (!Array.isArray(enumValues) || !enumValues.every((value) => isString(value))) {
       return yield* new ValidationError({
         message: `enum validator must be an array of strings`,
         field: apiKey,
@@ -188,13 +190,13 @@ const validateFieldValidators = Effect.fn("validateFieldValidators")(function* (
       });
     }
     const lengthConfig = length;
-    if (lengthConfig.min !== undefined && (typeof lengthConfig.min !== "number" || lengthConfig.min < 0)) {
+    if (lengthConfig.min !== undefined && (!isNumber(lengthConfig.min) || lengthConfig.min < 0)) {
       return yield* new ValidationError({
         message: `length.min must be a non-negative number`,
         field: apiKey,
       });
     }
-    if (lengthConfig.max !== undefined && (typeof lengthConfig.max !== "number" || lengthConfig.max < 0)) {
+    if (lengthConfig.max !== undefined && (!isNumber(lengthConfig.max) || lengthConfig.max < 0)) {
       return yield* new ValidationError({
         message: `length.max must be a non-negative number`,
         field: apiKey,
@@ -210,7 +212,7 @@ const validateFieldValidators = Effect.fn("validateFieldValidators")(function* (
         field: apiKey,
       });
     }
-    if (typeof slugSource !== "string" || slugSource.length === 0) {
+    if (!isString(slugSource) || slugSource.length === 0) {
       return yield* new ValidationError({
         message: `slug_source validator must be a non-empty string`,
         field: apiKey,
@@ -226,7 +228,7 @@ const validateFieldValidators = Effect.fn("validateFieldValidators")(function* (
         field: apiKey,
       });
     }
-    if (!Array.isArray(itemItemType) || !itemItemType.every((value) => typeof value === "string")) {
+    if (!Array.isArray(itemItemType) || !itemItemType.every((value) => isString(value))) {
       return yield* new ValidationError({
         message: `item_item_type validator must be an array of strings`,
         field: apiKey,
@@ -242,7 +244,7 @@ const validateFieldValidators = Effect.fn("validateFieldValidators")(function* (
         field: apiKey,
       });
     }
-    if (!Array.isArray(itemsItemType) || !itemsItemType.every((value) => typeof value === "string")) {
+    if (!Array.isArray(itemsItemType) || !itemsItemType.every((value) => isString(value))) {
       return yield* new ValidationError({
         message: `items_item_type validator must be an array of strings`,
         field: apiKey,
@@ -258,7 +260,7 @@ const validateFieldValidators = Effect.fn("validateFieldValidators")(function* (
         field: apiKey,
       });
     }
-    if (typeof blocksOnly !== "boolean") {
+    if (!isBoolean(blocksOnly)) {
       return yield* new ValidationError({
         message: `blocks_only validator must be a boolean`,
         field: apiKey,
@@ -274,7 +276,7 @@ const validateFieldValidators = Effect.fn("validateFieldValidators")(function* (
         field: apiKey,
       });
     }
-    if (!Array.isArray(structuredTextBlocks) || !structuredTextBlocks.every((value) => typeof value === "string")) {
+    if (!Array.isArray(structuredTextBlocks) || !structuredTextBlocks.every((value) => isString(value))) {
       return yield* new ValidationError({
         message: `structured_text_blocks validator must be an array of strings`,
         field: apiKey,
@@ -290,7 +292,7 @@ const validateFieldValidators = Effect.fn("validateFieldValidators")(function* (
         field: apiKey,
       });
     }
-    if (!Array.isArray(richTextBlocks) || !richTextBlocks.every((value) => typeof value === "string")) {
+    if (!Array.isArray(richTextBlocks) || !richTextBlocks.every((value) => isString(value))) {
       return yield* new ValidationError({
         message: `rich_text_blocks validator must be an array of strings`,
         field: apiKey,
@@ -306,7 +308,7 @@ const validateFieldValidators = Effect.fn("validateFieldValidators")(function* (
         field: apiKey,
       });
     }
-    if (!Array.isArray(structuredTextLinks) || !structuredTextLinks.every((value) => typeof value === "string")) {
+    if (!Array.isArray(structuredTextLinks) || !structuredTextLinks.every((value) => isString(value))) {
       return yield* new ValidationError({
         message: `structured_text_links validator must be an array of strings`,
         field: apiKey,
@@ -322,7 +324,7 @@ const validateFieldValidators = Effect.fn("validateFieldValidators")(function* (
         field: apiKey,
       });
     }
-    if (!Array.isArray(structuredTextInlineBlocks) || !structuredTextInlineBlocks.every((value) => typeof value === "string")) {
+    if (!Array.isArray(structuredTextInlineBlocks) || !structuredTextInlineBlocks.every((value) => isString(value))) {
       return yield* new ValidationError({
         message: `structured_text_inline_blocks validator must be an array of strings`,
         field: apiKey,
@@ -345,13 +347,13 @@ const validateFieldValidators = Effect.fn("validateFieldValidators")(function* (
       });
     }
     const rangeConfig = numberRange;
-    if (rangeConfig.min !== undefined && typeof rangeConfig.min !== "number") {
+    if (rangeConfig.min !== undefined && !isNumber(rangeConfig.min)) {
       return yield* new ValidationError({
         message: `number_range.min must be a number`,
         field: apiKey,
       });
     }
-    if (rangeConfig.max !== undefined && typeof rangeConfig.max !== "number") {
+    if (rangeConfig.max !== undefined && !isNumber(rangeConfig.max)) {
       return yield* new ValidationError({
         message: `number_range.max must be a number`,
         field: apiKey,
@@ -369,7 +371,7 @@ const validateFieldValidators = Effect.fn("validateFieldValidators")(function* (
     }
     const isPreset = format === "email" || format === "url";
     const isCustom = isObjectRecord(format)
-      && typeof format.custom_pattern === "string";
+      && isString(format.custom_pattern);
     if (!isPreset && !isCustom) {
       return yield* new ValidationError({
         message: `format validator must be 'email', 'url', or { custom_pattern: string }`,
@@ -395,7 +397,7 @@ const validateFieldValidators = Effect.fn("validateFieldValidators")(function* (
     const dateRangeConfig = dateRange;
     for (const key of ["min", "max"] as const) {
       const boundary = dateRangeConfig[key];
-      if (boundary !== undefined && boundary !== "now" && typeof boundary !== "string") {
+      if (boundary !== undefined && boundary !== "now" && !isString(boundary)) {
         return yield* new ValidationError({
           message: `date_range.${key} must be an ISO datetime string or 'now'`,
           field: apiKey,
@@ -407,14 +409,14 @@ const validateFieldValidators = Effect.fn("validateFieldValidators")(function* (
 
 function serializeDefaultValueForFieldMetadata(value: unknown): string | null {
   if (value === undefined) return null;
-  if (typeof value === "string") return value;
+  if (isString(value)) return value;
   return encodeJson(value);
 }
 
 function serializeDefaultValueForRecordColumn(value: unknown): unknown {
   if (value === undefined) return null;
-  if (typeof value === "object" && value !== null) return encodeJson(value);
-  if (typeof value === "boolean") return value ? 1 : 0;
+  if (isObject(value)) return encodeJson(value);
+  if (isBoolean(value)) return value ? 1 : 0;
   return value;
 }
 

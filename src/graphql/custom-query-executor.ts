@@ -1,4 +1,5 @@
 import { SqlClient } from "effect/unstable/sql";
+import { isBoolean, isNumber, isString } from "../dynamic/row-types.js";
 import { contentTableName } from "../dynamic/tables.js";
 import { Effect, Layer } from "effect";
 import {
@@ -175,7 +176,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
+  return Array.isArray(value) && value.every((item) => isString(item));
 }
 
 function isDastDocument(value: unknown): value is DastDocInput {
@@ -204,7 +205,7 @@ function getStructuredTextBlockIds(value: StructuredTextEnvelope) {
 }
 
 function parseBooleanValue(value: unknown): boolean | null {
-  if (typeof value === "boolean") return value;
+  if (isBoolean(value)) return value;
   if (value === 1) return true;
   if (value === 0) return false;
   return null;
@@ -382,9 +383,9 @@ function buildFieldPlans(
         kind: "scalar",
         responseKey,
         field,
-        localeOptions: typeof locale === "string" || isStringArray(fallbackLocales)
+        localeOptions: isString(locale) || isStringArray(fallbackLocales)
           ? {
-              locale: typeof locale === "string" ? locale : undefined,
+              locale: isString(locale) ? locale : undefined,
               fallbackLocales: isStringArray(fallbackLocales) ? fallbackLocales : undefined,
             }
           : undefined,
@@ -482,9 +483,9 @@ function buildRootPlan(
       args: {
         filter: isRecord(filter) ? filter : undefined,
         orderBy: isStringArray(orderBy) ? orderBy : undefined,
-        first: typeof first === "number" ? first : undefined,
-        skip: typeof skip === "number" ? skip : undefined,
-        locale: typeof locale === "string" ? locale : undefined,
+        first: isNumber(first) ? first : undefined,
+        skip: isNumber(skip) ? skip : undefined,
+        locale: isString(locale) ? locale : undefined,
         fallbackLocales: isStringArray(fallbackLocales) ? fallbackLocales : undefined,
       },
       selections,
@@ -501,8 +502,8 @@ function buildRootPlan(
     model,
     args: {
       filter: isRecord(filter) ? filter : undefined,
-      id: typeof id === "string" || typeof id === "number" ? id : undefined,
-      locale: typeof locale === "string" ? locale : undefined,
+      id: isString(id) || isNumber(id) ? id : undefined,
+      locale: isString(locale) ? locale : undefined,
       fallbackLocales: isStringArray(fallbackLocales) ? fallbackLocales : undefined,
     },
     selections,
@@ -564,7 +565,7 @@ function projectBlock(
 ): Record<string, unknown> | null {
   if (!isRecord(rawBlock)) return null;
   const blockType = Reflect.get(rawBlock, "_type");
-  if (typeof blockType !== "string") return null;
+  if (!isString(blockType)) return null;
   const blockSelections = plan.selectionsByBlockApiKey.get(blockType) ?? [];
   const result: Record<string, unknown> = {};
 
@@ -592,7 +593,7 @@ function projectBlock(
       continue;
     }
     const linkedId = Reflect.get(rawBlock, selection.field.api_key);
-    if (typeof linkedId !== "string") {
+    if (!isString(linkedId)) {
       result[selection.responseKey] = null;
       continue;
     }
@@ -640,7 +641,7 @@ function projectRow(
         continue;
       }
       const linkedId = row[selection.field.api_key];
-      if (typeof linkedId !== "string") {
+      if (!isString(linkedId)) {
         result[selection.responseKey] = null;
         continue;
       }
@@ -919,7 +920,7 @@ async function queryRoots(
 
       const effectiveOrderBy = plan.args.orderBy
         ? [...plan.args.orderBy]
-        : (typeof plan.model.model.ordering === "string" ? [plan.model.model.ordering] : undefined);
+        : (isString(plan.model.model.ordering) ? [plan.model.model.ordering] : undefined);
       const orderBy = compileOrderBy(effectiveOrderBy, filterOpts);
       if (orderBy) {
         query += ` ORDER BY ${orderBy}`;
@@ -1024,7 +1025,7 @@ async function materializeRootStructuredText(
 
   for (const row of rows) {
     const rowId = row.id;
-    if (typeof rowId !== "string" && typeof rowId !== "number") continue;
+    if (!isString(rowId) && !isNumber(rowId)) continue;
     for (const selection of structuredTextPlans) {
       const rawValue = row[selection.field.api_key];
       if (!rawValue || isStructuredTextEnvelope(rawValue)) continue;
@@ -1089,7 +1090,7 @@ async function materializeRootStructuredText(
 
   for (const row of rows) {
     const rowId = row.id;
-    if (typeof rowId !== "string" && typeof rowId !== "number") continue;
+    if (!isString(rowId) && !isNumber(rowId)) continue;
     for (const selection of structuredTextPlans) {
       if (selection.field.localized) {
         const mapKey = `${selection.field.api_key}:${String(rowId)}`;
@@ -1126,12 +1127,12 @@ function collectStructuredTextLinkIds(
       const rawBlock = value.blocks[blockId];
       if (!isRecord(rawBlock)) continue;
       const blockType = Reflect.get(rawBlock, "_type");
-      if (typeof blockType !== "string") continue;
+      if (!isString(blockType)) continue;
       const blockSelections = blocksPlan.selectionsByBlockApiKey.get(blockType) ?? [];
       for (const selection of blockSelections) {
         if (selection.kind === "link") {
           const linkedId = Reflect.get(rawBlock, selection.field.api_key);
-          if (typeof linkedId !== "string") continue;
+          if (!isString(linkedId)) continue;
           const bucketKey = getLinkBucketKey(selection.field.api_key, selection.target.model.api_key);
           const bucket = idsByBucket.get(bucketKey) ?? new Set<string>();
           bucket.add(linkedId);
@@ -1177,7 +1178,7 @@ async function loadStructuredTextLinks(
       linkedRows
         .map((row) => {
           const rowId = row.id;
-          return typeof rowId === "string" ? [rowId, row] as const : null;
+          return isString(rowId) ? [rowId, row] as const : null;
         })
         .filter((item): item is readonly [string, DynamicRow] => item !== null),
     )] as const;
@@ -1246,7 +1247,7 @@ function buildRootLinkQueries(
     if (prefetchedFieldApiKeys.has(selection.field.api_key)) {
       continue;
     }
-    const ids = [...new Set(rows.map((row) => row[selection.field.api_key]).filter((value): value is string => typeof value === "string"))];
+    const ids = [...new Set(rows.map((row) => row[selection.field.api_key]).filter((value): value is string => isString(value)))];
     if (ids.length === 0) {
       continue;
     }

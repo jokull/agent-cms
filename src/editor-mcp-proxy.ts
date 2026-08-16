@@ -1,4 +1,5 @@
 import { createCmsAdminClient, type CmsAdminClientConfig } from "./admin-client.js";
+import { isString } from "./dynamic/row-types.js";
 import { tryDecodeJsonString } from "./json.js";
 
 export interface EditorMcpPrincipal {
@@ -267,10 +268,10 @@ export function createEditorMcpProxy(config: EditorMcpProxyConfig): EditorMcpPro
 
     if (
       grantType !== "authorization_code"
-      || typeof code !== "string"
-      || typeof clientId !== "string"
-      || typeof redirectUri !== "string"
-      || typeof codeVerifier !== "string"
+      || !isString(code)
+      || !isString(clientId)
+      || !isString(redirectUri)
+      || !isString(codeVerifier)
     ) {
       return jsonResponse({ error: "invalid_request" }, 400);
     }

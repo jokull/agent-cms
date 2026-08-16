@@ -1,8 +1,10 @@
+import { isNumber, isObjectRecord, isString, stringArrayFrom } from "../dynamic/row-types.js";
 /**
  * Build asset-related resolvers: allUploads, _allUploadsMeta,
  * Asset.responsiveImage, SeoField.image, ColorField.hex.
  */
 import { Effect } from "effect";
+
 import { SqlClient } from "effect/unstable/sql";
 import type { AssetRow } from "../db/row-types.js";
 import { compileFilterToSql, compileOrderBy } from "./filter-compiler.js";
@@ -14,7 +16,7 @@ import { decodeJsonIfString } from "../json.js";
 import { mergeAssetWithMediaReference } from "../media-field.js";
 import { buildResponsiveImage } from "./responsive-image.js";
 import { normalizeImgixParams } from "./responsive-image.js";
-import { isObjectRecord, stringArrayFrom } from "../dynamic/row-types.js";
+
 
 type RunSqlFn = SchemaBuilderContext["runSql"];
 
@@ -39,7 +41,7 @@ function pickLocalizedSiteValue(rawValue: unknown, locale?: string | null, fallb
 
 function pickLocalizedSiteString(rawValue: unknown, locale?: string | null, fallbackLocales: string[] = []) {
   const value = pickLocalizedSiteValue(rawValue, locale, fallbackLocales);
-  return typeof value === "string" ? value : null;
+  return isString(value) ? value : null;
 }
 
 /** Generate favicon meta tags from a favicon asset */
@@ -104,7 +106,7 @@ function buildAssetUrl(
   const params = args.imgixParams ? normalizeImgixParams(rawParams) : rawParams;
   const queryParams: Record<string, string | number> = {};
   for (const [key, value] of Object.entries(params)) {
-    if (typeof value === "string" || typeof value === "number") {
+    if (isString(value) || isNumber(value)) {
       queryParams[key] = value;
     }
   }
@@ -142,7 +144,7 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
       })
     );
 
-    const locale = typeof args.locale === "string" ? args.locale : typeof context.locale === "string" ? context.locale : null;
+    const locale = isString(args.locale) ? args.locale : isString(context.locale) ? context.locale : null;
     const argFallbackLocales = stringArrayFrom(args.fallbackLocales);
     const fallbackLocales = argFallbackLocales.length > 0 ? argFallbackLocales : stringArrayFrom(context.fallbackLocales);
     const fallbackSeo = settings
@@ -162,7 +164,7 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
     return {
       locales: locales.map((l) => l.code),
       noIndex: settings?.no_index === 1 || settings?.no_index === true || false,
-      faviconMetaTags: typeof settings?.favicon_id === "string" ? await buildFaviconMetaTags(runSql, settings.favicon_id) : [],
+      faviconMetaTags: isString(settings?.favicon_id) ? await buildFaviconMetaTags(runSql, settings.favicon_id) : [],
       globalSeo: settings ? {
         siteName: pickLocalizedSiteString(settings.site_name, locale, fallbackLocales),
         titleSuffix: pickLocalizedSiteString(settings.title_suffix, locale, fallbackLocales),
@@ -190,9 +192,9 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
         const orderByArg = stringArrayFrom(args.orderBy);
         const orderBy = compileOrderBy(orderByArg.length > 0 ? orderByArg : undefined, { fieldNameMap: uploadFieldMap });
         if (orderBy) query += ` ORDER BY ${orderBy}`;
-        const limit = Math.min(typeof args.first === "number" ? args.first : 20, 500);
+        const limit = Math.min(isNumber(args.first) ? args.first : 20, 500);
         query += ` LIMIT ?`; params.push(limit);
-        if (typeof args.skip === "number" && args.skip > 0) { query += ` OFFSET ?`; params.push(args.skip); }
+        if (isNumber(args.skip) && args.skip > 0) { query += ` OFFSET ?`; params.push(args.skip); }
         const rows = yield* s.unsafe<AssetRow>(query, params);
         return rows.map((a): AssetObject => ({
           ...mergeAssetWithMediaReference(a, null, assetUrl),
@@ -231,7 +233,7 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
   resolvers.SeoField = {
     image: async (seo: DynamicRow, _args: unknown, context: GqlContext) => {
       const assetId = seo.image;
-      if (typeof assetId !== "string") return null;
+      if (!isString(assetId)) return null;
       const a = await loadAsset({ runSql, id: assetId, context });
       return a ? mergeAssetWithMediaReference(a, null, assetUrl) : null;
     },
@@ -240,9 +242,9 @@ export function buildAssetResolvers(ctx: SchemaBuilderContext): void {
   // ColorField.hex resolver: compute hex from RGB
   resolvers.ColorField = {
     hex: (color: DynamicRow) => {
-      const r = typeof color.red === "number" ? color.red : 0;
-      const g = typeof color.green === "number" ? color.green : 0;
-      const b = typeof color.blue === "number" ? color.blue : 0;
+      const r = isNumber(color.red) ? color.red : 0;
+      const g = isNumber(color.green) ? color.green : 0;
+      const b = isNumber(color.blue) ? color.blue : 0;
       return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
     },
   };

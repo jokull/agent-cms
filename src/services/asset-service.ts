@@ -1,4 +1,6 @@
+import { isObjectRecord, isString } from "../dynamic/row-types.js";
 import { DateTime, Context, Effect } from "effect";
+
 import { contentTableName } from "../dynamic/tables.js";
 import { SqlClient } from "effect/unstable/sql";
 import { generateId } from "../id.js";
@@ -6,7 +8,7 @@ import { NotFoundError, ValidationError, ReferenceConflictError } from "../error
 import type { AssetRow, ModelRow } from "../db/row-types.js";
 import type { CreateAssetInput, CreateUploadUrlInput, ImportAssetFromUrlInput } from "./input-schemas.js";
 import { encodeJson, decodeJsonIfString } from "../json.js";
-import { isObjectRecord } from "../dynamic/row-types.js";
+
 import {
   assetUrlResolver,
   parseMediaFieldReference,
@@ -529,7 +531,7 @@ function extractAssetIds(fieldType: string, rawValue: unknown): string[] {
   if (fieldType === "media_gallery") {
     return parseMediaGalleryReferences(value).map((ref) => ref.uploadId);
   }
-  if (fieldType === "seo" && isObjectRecord(value) && typeof value.image === "string" && value.image.length > 0) {
+  if (fieldType === "seo" && isObjectRecord(value) && isString(value.image) && value.image.length > 0) {
     return [value.image];
   }
   return [];
@@ -611,8 +613,8 @@ export function getAssetUsages(id: string) {
           if (!assetIds.includes(id)) continue;
 
           if (isBlock) {
-            const rootRecordId = typeof row._root_record_id === "string" ? row._root_record_id : null;
-            const rootFieldApiKey = typeof row._root_field_api_key === "string" ? row._root_field_api_key : null;
+            const rootRecordId = isString(row._root_record_id) ? row._root_record_id : null;
+            const rootFieldApiKey = isString(row._root_field_api_key) ? row._root_field_api_key : null;
             if (!rootRecordId || !rootFieldApiKey) continue;
             const rootModelApiKey = yield* resolveRootModel(rootRecordId);
             if (!rootModelApiKey) continue;

@@ -1,10 +1,12 @@
+import { isNumber, isObjectRecord, isString } from "../dynamic/row-types.js";
 import {
   HttpEffect,
   HttpRouter,
   HttpServerRequest,
   HttpServerResponse,
 } from "effect/unstable/http";
-import { isObjectRecord } from "../dynamic/row-types.js";
+
+
 import { Cause, DateTime, Effect, Layer, Logger, Schema, SchemaIssue, Option } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import * as ModelService from "../services/model-service.js";
@@ -55,7 +57,7 @@ import {
 
 function describeUnknown(error: unknown): string {
   if (error instanceof Error) return `${error.name}: ${error.message}`;
-  if (typeof error === "string") return error;
+  if (isString(error)) return error;
   try {
     return JSON.stringify(error);
   } catch {
@@ -745,7 +747,7 @@ const previewTokensRouter = HttpRouter.use((router) => {
     "/",
     Effect.gen(function* () {
       const body = yield* readJsonBody();
-      const expiresIn = isObjectRecord(body) && typeof body.expiresIn === "number"
+      const expiresIn = isObjectRecord(body) && isNumber(body.expiresIn)
         ? body.expiresIn
         : undefined;
       return yield* handle(PreviewService.createPreviewToken(expiresIn), 201);

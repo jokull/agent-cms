@@ -3,6 +3,7 @@
  * All functions return Effect — async boundaries use Effect.tryPromise.
  */
 import { Data, Effect } from "effect";
+import { isString } from "../dynamic/row-types.js";
 
 /**
  * Minimal structural type for Workers AI binding.
@@ -28,7 +29,7 @@ export class VectorizeError extends Data.TaggedError("VectorizeError")<{
 
 function describeUnknown(error: unknown): string {
   if (error instanceof Error) return `${error.name}: ${error.message}`;
-  if (typeof error === "string") return error;
+  if (isString(error)) return error;
   return JSON.stringify(error);
 }
 

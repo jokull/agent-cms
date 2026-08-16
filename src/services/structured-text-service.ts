@@ -1,6 +1,8 @@
+import { isBoolean, isObject, isObjectRecord, isString, type DynamicRow } from "../dynamic/row-types.js";
 import { Effect, Schema, SchemaIssue } from "effect";
+
 import { contentTableName } from "../dynamic/tables.js";
-import { isObjectRecord, type DynamicRow } from "../dynamic/row-types.js";
+
 import { SqlClient, SqlError } from "effect/unstable/sql";
 import { validateBlocksOnly, extractAllBlockIds, extractBlockIds, extractLinkIds } from "../dast/index.js";
 import { ValidationError } from "../errors.js";
@@ -73,13 +75,13 @@ function mergeRowMaps(target: Map<string, DynamicRow[]>, source: Map<string, Dyn
 
 function serializeValue(value: unknown): unknown {
   if (value === undefined || value === null) return null;
-  if (typeof value === "boolean") return value ? 1 : 0;
-  if (typeof value === "object") return encodeJson(value);
+  if (isBoolean(value)) return value ? 1 : 0;
+  if (isObject(value)) return encodeJson(value);
   return value;
 }
 
 function deserializeValue(value: unknown): unknown {
-  if (typeof value === "string" && (value.startsWith("{") || value.startsWith("["))) {
+  if (isString(value) && (value.startsWith("{") || value.startsWith("["))) {
     return decodeJsonStringOr(value, value);
   }
   return value;
@@ -319,7 +321,7 @@ const compileStructuredText = Effect.fn("compileStructuredText")(function* (
       });
     }
     const blockData = rawBlock;
-    if (typeof blockData._type !== "string" || blockData._type.length === 0) {
+    if (!isString(blockData._type) || blockData._type.length === 0) {
       return yield* new ValidationError({
         message: `Block '${blockId}' must have a _type property`,
         field: fieldApiKey,
@@ -619,8 +621,8 @@ interface ParsedMaterializeStructuredTextRequest {
 
 function parseMaterializeStructuredTextRequest(request: MaterializeStructuredTextRequest) {
   const dast = decodeJsonIfString(request.rawValue);
-  if (!dast || typeof dast !== "object") return null;
-  if (!("document" in dast) || typeof dast.document !== "object" || dast.document === null || !("children" in dast.document)) {
+  if (!dast || !isObject(dast)) return null;
+  if (!("document" in dast) || !isObjectRecord(dast.document) || !("children" in dast.document)) {
     return null;
   }
 
@@ -834,7 +836,7 @@ export const materializeStructuredTextValues = Effect.fn("materializeStructuredT
 
     for (const row of rows) {
       const rootRecordId = String(row._root_record_id);
-      const parentBlockId = typeof row._parent_block_id === "string" ? row._parent_block_id : "root";
+      const parentBlockId = isString(row._parent_block_id) ? row._parent_block_id : "root";
       const request = requestByParentKey.get(`${rootRecordId}:${parentBlockId}`);
       if (!request) continue;
 
@@ -842,12 +844,12 @@ export const materializeStructuredTextValues = Effect.fn("materializeStructuredT
       const rowId = String(row.id);
       if (!allowedBlockIds?.has(rowId)) continue;
 
-      const blockApiKey = typeof row.__block_api_key === "string" ? row.__block_api_key : null;
+      const blockApiKey = isString(row.__block_api_key) ? row.__block_api_key : null;
       if (!blockApiKey) continue;
       const blockModel = blockModelByApiKey.get(blockApiKey);
       if (!blockModel) continue;
       const rawPayload = decodeJsonIfString(row.__payload);
-      if (typeof rawPayload !== "object" || rawPayload === null || Array.isArray(rawPayload)) continue;
+      if (!isObjectRecord(rawPayload)) continue;
 
       const payload: DynamicRow = { _type: blockApiKey };
       const selectedFieldPlans = request.params.selectedNestedFieldsPlan?.fieldsByBlockApiKey.get(blockApiKey);
@@ -1120,7 +1122,7 @@ const writeRichTextBlocks = Effect.fn("writeRichTextBlocks")(function* (params: 
 
   for (let i = 0; i < blocks.length; i++) {
     const block = blocks[i];
-    if (typeof block.block_type !== "string" || block.block_type.length === 0) {
+    if (!isString(block.block_type) || block.block_type.length === 0) {
       return yield* new ValidationError({
         message: `rich_text block at index ${i} must have a block_type property`,
         field: fieldApiKey,
@@ -1134,7 +1136,7 @@ const writeRichTextBlocks = Effect.fn("writeRichTextBlocks")(function* (params: 
       });
     }
 
-    const blockId = typeof block.id === "string" && block.id.length > 0
+    const blockId = isString(block.id) && block.id.length > 0
       ? block.id
       : crypto.randomUUID();
 
@@ -1262,7 +1264,7 @@ export const materializeRichTextValue = Effect.fn("materializeRichTextValue")(fu
   const parsed = decodeJsonIfString(params.rawValue);
   if (!Array.isArray(parsed) || parsed.length === 0) return parsed === null ? null : [];
 
-  const blockIds = parsed.filter((id): id is string => typeof id === "string");
+  const blockIds = parsed.filter((id): id is string => isString(id));
   if (blockIds.length === 0) return [];
 
   const materializeContext = params.materializeContext ?? {
@@ -1306,13 +1308,13 @@ export const materializeRichTextValue = Effect.fn("materializeRichTextValue")(fu
       const rowId = String(row.id);
       if (!blockIdSet.has(rowId)) continue;
 
-      const blockApiKey = typeof row.__block_api_key === "string" ? row.__block_api_key : null;
+      const blockApiKey = isString(row.__block_api_key) ? row.__block_api_key : null;
       if (!blockApiKey) continue;
       const blockModel = blockModelByApiKey.get(blockApiKey);
       if (!blockModel) continue;
 
       const rawPayload = decodeJsonIfString(row.__payload);
-      if (typeof rawPayload !== "object" || rawPayload === null || Array.isArray(rawPayload)) continue;
+      if (!isObjectRecord(rawPayload)) continue;
 
       const payload: DynamicRow = { _type: blockApiKey, id: rowId };
       for (const field of blockModel.fields) {

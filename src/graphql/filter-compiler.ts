@@ -1,3 +1,4 @@
+import { isBoolean, isNumber, isObjectRecord, isString } from "../dynamic/row-types.js";
 /**
  * Compile GraphQL filter inputs to SQL WHERE clauses.
  * Pushes filtering to the database instead of doing it in-memory.
@@ -13,7 +14,8 @@
  */
 
 import { buildPatternMatch } from "../sql-util.js";
-import { isObjectRecord } from "../dynamic/row-types.js";
+
+
 
 /**
  * A locale code is interpolated into a JSON path literal (`'$.<locale>'`) — it
@@ -55,9 +57,9 @@ function isFilterInput(value: unknown): value is FilterInput {
 function isPrimitiveArray(value: unknown): value is Array<string | number | boolean | null> {
   return Array.isArray(value)
     && value.every((item) =>
-      typeof item === "string"
-      || typeof item === "number"
-      || typeof item === "boolean"
+      isString(item)
+      || isNumber(item)
+      || isBoolean(item)
       || item === null);
 }
 
@@ -228,14 +230,14 @@ function compileOperator(
         const json = JSON.stringify(expected);
         return { sql: `${col} = ?`, params: [json] };
       }
-      const val = typeof expected === "boolean" ? (expected ? 1 : 0) : expected;
+      const val = isBoolean(expected) ? (expected ? 1 : 0) : expected;
       return { sql: `${col} = ?`, params: [val] };
     }
     case "neq": {
       if (isJsonObjectId) {
         return { sql: `${objectIdExpr} != ?`, params: [expected] };
       }
-      const val = typeof expected === "boolean" ? (expected ? 1 : 0) : expected;
+      const val = isBoolean(expected) ? (expected ? 1 : 0) : expected;
       return { sql: `${col} != ?`, params: [val] };
     }
     case "gt":
@@ -298,7 +300,7 @@ function compileOperator(
 
     // --- String matching ---
     case "matches":
-      if (typeof expected === "string") {
+      if (isString(expected)) {
         const m = buildPatternMatch(col, expected);
         return { sql: m.sql, params: [m.param] };
       }
@@ -310,7 +312,7 @@ function compileOperator(
       }
       return null;
     case "notMatches":
-      if (typeof expected === "string") {
+      if (isString(expected)) {
         const m = buildPatternMatch(col, expected, { negated: true });
         return { sql: m.sql, params: [m.param] };
       }
@@ -344,9 +346,9 @@ function compileOperator(
     case "near": {
       if (!isObjectRecord(expected)) return null;
       const geo = expected;
-      const latitude = typeof geo.latitude === "number" ? geo.latitude : undefined;
-      const longitude = typeof geo.longitude === "number" ? geo.longitude : undefined;
-      const radius = typeof geo.radius === "number" ? geo.radius : undefined;
+      const latitude = isNumber(geo.latitude) ? geo.latitude : undefined;
+      const longitude = isNumber(geo.longitude) ? geo.longitude : undefined;
+      const radius = isNumber(geo.radius) ? geo.radius : undefined;
       if (latitude == null || longitude == null || radius == null) return null;
 
       // Bounding-box approximation: 1° latitude ≈ 111,320 meters
@@ -406,9 +408,9 @@ function compileLocalesFilter(
   value: Record<string, unknown>,
   localizedDbColumns: string[]
 ): SqlCondition | null {
-  const allIn = Array.isArray(value.allIn) ? value.allIn.filter((v): v is string => typeof v === "string") : undefined;
-  const anyIn = Array.isArray(value.anyIn) ? value.anyIn.filter((v): v is string => typeof v === "string") : undefined;
-  const notIn = Array.isArray(value.notIn) ? value.notIn.filter((v): v is string => typeof v === "string") : undefined;
+  const allIn = Array.isArray(value.allIn) ? value.allIn.filter((v): v is string => isString(v)) : undefined;
+  const anyIn = Array.isArray(value.anyIn) ? value.anyIn.filter((v): v is string => isString(v)) : undefined;
+  const notIn = Array.isArray(value.notIn) ? value.notIn.filter((v): v is string => isString(v)) : undefined;
 
   const parts: SqlCondition[] = [];
 

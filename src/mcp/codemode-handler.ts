@@ -1,3 +1,4 @@
+import { isBoolean, isObjectRecord, isString } from "../dynamic/row-types.js";
 /**
  * Code Mode MCP endpoint.
  *
@@ -16,10 +17,11 @@ import {
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { McpServer as SdkMcpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+
 import { DynamicWorkerExecutor } from "@cloudflare/codemode";
 import { codeMcpServer } from "@cloudflare/codemode/mcp";
 import { getToolMeta } from "./server.js";
-import { isObjectRecord } from "../dynamic/row-types.js";
+
 
 export interface CreateCodeModeHandlerOptions {
   /** WorkerLoader binding from wrangler worker_loaders config */
@@ -128,12 +130,12 @@ function parseToolCallResponse(
   function parseToolCallResult(value: unknown): { content: Array<{ type: "text"; text: string }>; isError?: boolean } | null {
     if (!isObjectRecord(value) || !Array.isArray(value.content)) return null;
     const content = value.content.filter((entry): entry is { type: "text"; text: string } =>
-      isObjectRecord(entry) && entry.type === "text" && typeof entry.text === "string"
+      isObjectRecord(entry) && entry.type === "text" && isString(entry.text)
     );
     if (content.length !== value.content.length) return null;
     return {
       content,
-      ...(typeof value.isError === "boolean" ? { isError: value.isError } : {}),
+      ...(isBoolean(value.isError) ? { isError: value.isError } : {}),
     };
   }
 

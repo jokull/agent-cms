@@ -1,10 +1,12 @@
+import { isBoolean, isNumber, isObjectRecord, isString, type DynamicRow } from "../dynamic/row-types.js";
 /**
  * Shared utility functions for the GraphQL schema builder.
  */
 import { FIELD_TYPE_REGISTRY, type FieldTypeDefinition } from "../field-types.js";
+
 import { isFieldType } from "../types.js";
 import { getLinkTargets, getLinksTargets } from "../db/validators.js";
-import { isObjectRecord, type DynamicRow } from "../dynamic/row-types.js";
+
 import { decodeJsonIfString } from "../json.js";
 
 /** Convert snake_case api_key to PascalCase GraphQL type name */
@@ -98,22 +100,22 @@ export function applyFilters(records: DynamicRow[], filter: DynamicRow): Dynamic
         switch (op) {
           case "eq": {
             // Handle boolean coercion (SQLite stores 0/1)
-            const ev = typeof exp === "boolean" ? (exp ? 1 : 0) : exp;
+            const ev = isBoolean(exp) ? (exp ? 1 : 0) : exp;
             if (v !== ev && v !== exp) return false;
             break;
           }
           case "neq": {
-            const ev = typeof exp === "boolean" ? (exp ? 1 : 0) : exp;
+            const ev = isBoolean(exp) ? (exp ? 1 : 0) : exp;
             if (v === ev || v === exp) return false;
             break;
           }
           // SAFETY: gt/lt/gte/lte ops only compile for numeric columns (filter-compiler);
           // non-numeric values are a malformed filter and fail the predicate.
-          case "gt": if (typeof v !== "number" || typeof exp !== "number" || !(v > exp)) return false; break;
-          case "lt": if (typeof v !== "number" || typeof exp !== "number" || !(v < exp)) return false; break;
-          case "gte": if (typeof v !== "number" || typeof exp !== "number" || !(v >= exp)) return false; break;
-          case "lte": if (typeof v !== "number" || typeof exp !== "number" || !(v <= exp)) return false; break;
-          case "matches": if (typeof v !== "string" || typeof exp !== "string" || !new RegExp(exp, "i").test(v)) return false; break;
+          case "gt": if (!isNumber(v) || !isNumber(exp) || !(v > exp)) return false; break;
+          case "lt": if (!isNumber(v) || !isNumber(exp) || !(v < exp)) return false; break;
+          case "gte": if (!isNumber(v) || !isNumber(exp) || !(v >= exp)) return false; break;
+          case "lte": if (!isNumber(v) || !isNumber(exp) || !(v <= exp)) return false; break;
+          case "matches": if (!isString(v) || !isString(exp) || !new RegExp(exp, "i").test(v)) return false; break;
           case "isBlank": if (exp && v != null && v !== "") return false; if (!exp && (v == null || v === "")) return false; break;
           case "exists": if (exp && v == null) return false; if (!exp && v != null) return false; break;
         }
@@ -151,7 +153,7 @@ export function applyOrdering(records: DynamicRow[], orderBy: string[] | undefin
 export function resolveVideoField(raw: unknown): Record<string, unknown> | null {
   if (!raw) return null;
   const val = decodeJsonIfString(raw);
-  if (typeof val === "string") {
+  if (isString(val)) {
     return { url: val, title: null, provider: null, providerUid: null, thumbnailUrl: null, width: null, height: null };
   }
   if (isObjectRecord(val)) {

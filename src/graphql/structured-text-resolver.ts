@@ -1,17 +1,19 @@
+import { isObjectRecord, isString } from "../dynamic/row-types.js";
 import { Effect } from "effect";
+
 import { contentTableName } from "../dynamic/tables.js";
 import { SqlClient } from "effect/unstable/sql";
 import { extractBlockIds, extractInlineBlockIds, extractLinkIds } from "../dast/index.js";
 import type { DastDocInput, GqlContext } from "./gql-types.js";
 import type { DynamicRow } from "../dynamic/row-types.js";
-import { isObjectRecord } from "../dynamic/row-types.js";
+
 import { toTypeName } from "./gql-utils.js";
 import { decodeSnapshot, deserializeRecord } from "../dynamic/decode.js";
 import { loadLinkedRecords } from "./linked-record-loader.js";
 import { materializeStructuredTextValue as materializeStructuredTextEnvelope } from "../services/structured-text-service.js";
 
 function parseUnknownJson(value: unknown): unknown {
-  if (typeof value === "string") {
+  if (isString(value)) {
     try {
       return JSON.parse(value);
     } catch {
@@ -147,7 +149,7 @@ function materializeBlocksFromEnvelope(
     blocks.push({
       id,
       ...payload,
-      __typename: typeof payload._type === "string" ? `${toTypeName(payload._type)}Record` : undefined,
+      __typename: isString(payload._type) ? `${toTypeName(payload._type)}Record` : undefined,
     });
   }
 
@@ -158,7 +160,7 @@ function materializeBlocksFromEnvelope(
     inlineBlocks.push({
       id,
       ...payload,
-      __typename: typeof payload._type === "string" ? `${toTypeName(payload._type)}Record` : undefined,
+      __typename: isString(payload._type) ? `${toTypeName(payload._type)}Record` : undefined,
     });
   }
 

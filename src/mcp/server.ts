@@ -1,8 +1,10 @@
+import { isObjectRecord, isString } from "../dynamic/row-types.js";
 /**
  * Effect-native MCP (Model Context Protocol) server for agent-cms.
  * 3-layer architecture: Discovery -> Schema -> Content
  */
 import * as McpServer from "effect/unstable/ai/McpServer";
+
 import * as McpSchema from "effect/unstable/ai/McpSchema";
 import * as McpProtocol from "effect/unstable/ai/McpProtocol";
 import * as AiTool from "effect/unstable/ai/Tool";
@@ -42,7 +44,7 @@ import type { ModelRow, FieldRow, LocaleRow } from "../db/row-types.js";
 import { VectorizeContext } from "../search/vectorize-context.js";
 import { HooksContext } from "../hooks.js";
 import { decodeJsonRecordStringOr, encodeJson, tryDecodeJsonString } from "../json.js";
-import { isObjectRecord } from "../dynamic/row-types.js";
+
 import { likeContains } from "../sql-util.js";
 
 import { actorFromHeaders, type RequestActor } from "../attribution.js";
@@ -277,7 +279,7 @@ function compactPatchBlocksResponse(
 
   const envelope: Record<string, unknown> | null = (() => {
     if (fieldValue === null || fieldValue === undefined) return null;
-    if (typeof fieldValue === "string") {
+    if (isString(fieldValue)) {
       const parsed = decodeJsonRecordStringOr(fieldValue, {});
       return Object.keys(parsed).length > 0 ? parsed : null;
     }
@@ -303,14 +305,14 @@ function compactPatchBlocksResponse(
   function walkDast(node: unknown) {
     if (!isObjectRecord(node)) return;
     const n = node;
-    if (n.type === "block" && typeof n.item === "string") blockOrder.push(n.item);
+    if (n.type === "block" && isString(n.item)) blockOrder.push(n.item);
     if (Array.isArray(n.children)) n.children.forEach(walkDast);
   }
   const value = envelope.value;
   if (isObjectRecord(value)) {
     walkDast(value.document);
   }
-  const recordId = typeof fullRecord.id === "string" ? fullRecord.id : "";
+  const recordId = isString(fullRecord.id) ? fullRecord.id : "";
 
   return {
     recordId,
@@ -325,7 +327,7 @@ function compactPatchBlocksResponse(
 
 function parseValidators(value: unknown): Record<string, unknown> {
   if (value == null || value === "") return {};
-  if (typeof value === "string") return decodeJsonRecordStringOr(value, {});
+  if (isString(value)) return decodeJsonRecordStringOr(value, {});
   return isObjectRecord(value) ? value : {};
 }
 

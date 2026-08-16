@@ -1,3 +1,4 @@
+import { isObjectRecord, isString } from "../dynamic/row-types.js";
 /**
  * Expand structured_text shorthand formats into the canonical
  * { value: DastDocument, blocks: Record<string, unknown> } shape.
@@ -11,9 +12,10 @@
  */
 
 import { agentTextToDast } from "./agent-text.js";
+
 import { markdownToDast } from "./markdown.js";
 import type { InlineNode, ListItemNode, ParagraphNode, TableRowNode } from "./types.js";
-import { isObjectRecord } from "../dynamic/row-types.js";
+
 
 /**
  * Parse a text string with inline markdown into DAST inline (span) nodes.
@@ -41,10 +43,10 @@ function buildBlockMapFromArray(blocks: readonly unknown[]): Record<string, unkn
     if (!isObjectRecord(b)) continue;
     const entry = b;
     const id = entry.id;
-    if (typeof id !== "string") continue;
+    if (!isString(id)) continue;
 
     // Canonical format: { id, _type, ...fields }
-    if (typeof entry._type === "string") {
+    if (isString(entry._type)) {
       const { id: _, ...rest } = entry;
       map[id] = rest;
       continue;
@@ -52,7 +54,7 @@ function buildBlockMapFromArray(blocks: readonly unknown[]): Record<string, unkn
 
     // Shorthand format: { id, type, data: { ...fields } }
     const type = entry.type;
-    if (typeof type === "string") {
+    if (isString(type)) {
       const data = entry.data;
       const rest = isObjectRecord(data) ? data : {};
       map[id] = { _type: type, ...rest };
@@ -83,7 +85,7 @@ function normalizeBlocks(blocks: unknown): Record<string, unknown> {
  */
 export function expandStructuredTextShorthand(rawValue: unknown): unknown {
   // 1. String → Agent Text mode
-  if (typeof rawValue === "string") {
+  if (isString(rawValue)) {
     const doc = agentTextToDast(rawValue);
     return { value: doc, blocks: {} };
   }
@@ -91,9 +93,9 @@ export function expandStructuredTextShorthand(rawValue: unknown): unknown {
   if (!isObjectRecord(rawValue)) return rawValue;
 
   // 2 & 3. Object with "text" or "agentText" key → Agent Text + optional blocks wrapper
-  const agentText = typeof rawValue.text === "string"
+  const agentText = isString(rawValue.text)
     ? rawValue.text
-    : (typeof rawValue.agentText === "string" ? rawValue.agentText : null);
+    : (isString(rawValue.agentText) ? rawValue.agentText : null);
   if (agentText !== null) {
     const doc = agentTextToDast(agentText);
     const blocks = normalizeBlocks(rawValue.blocks);

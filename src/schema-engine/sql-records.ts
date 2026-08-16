@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { isBoolean, isString , isObject } from "../dynamic/row-types.js";
 import { SqlClient } from "effect/unstable/sql";
 
 /**
@@ -114,8 +115,8 @@ export function countRecords(tableName: string) {
 /** Serialize a JS value for SQLite storage */
 function serializeValue(value: unknown): unknown {
   if (value === undefined || value === null) return null;
-  if (typeof value === "boolean") return value ? 1 : 0;
-  if (typeof value === "object") return JSON.stringify(value);
+  if (isBoolean(value)) return value ? 1 : 0;
+  if (isObject(value)) return JSON.stringify(value);
   return value;
 }
 
@@ -123,7 +124,7 @@ function serializeValue(value: unknown): unknown {
 export function deserializeRow(row: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(row)) {
-    if (typeof value === "string" && (value.startsWith("{") || value.startsWith("["))) {
+    if (isString(value) && (value.startsWith("{") || value.startsWith("["))) {
       try {
         result[key] = JSON.parse(value);
       } catch {

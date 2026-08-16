@@ -1,10 +1,12 @@
+import { isObject, isObjectRecord, isString } from "../dynamic/row-types.js";
 /**
  * Schema lifecycle operations for complex cascading changes.
  * These go beyond simple CRUD and handle content-level cascades.
  */
 import { Effect } from "effect";
+
 import { contentTableName } from "../dynamic/tables.js";
-import { isObjectRecord } from "../dynamic/row-types.js";
+
 import { SqlClient } from "effect/unstable/sql";
 import { NotFoundError, ValidationError } from "../errors.js";
 import type { ModelRow, FieldRow } from "../db/row-types.js";
@@ -78,7 +80,7 @@ export const removeBlockType = Effect.fn("removeBlockType")(function* (blockApiK
     // Remove from whitelist
     const validators = decodeJsonRecordStringOr(field.validators || "{}", {});
     const whitelist = Array.isArray(validators.structured_text_blocks)
-      ? validators.structured_text_blocks.filter((b): b is string => typeof b === "string")
+      ? validators.structured_text_blocks.filter((b): b is string => isString(b))
       : [];
     validators.structured_text_blocks = whitelist.filter((b) => b !== blockApiKey);
     yield* sql.unsafe(
@@ -127,7 +129,7 @@ export const removeBlockFromWhitelist = Effect.fn("removeBlockFromWhitelist")(fu
 
   const validators = decodeJsonRecordStringOr(field.validators || "{}", {});
   const whitelist = Array.isArray(validators.structured_text_blocks)
-    ? validators.structured_text_blocks.filter((b): b is string => typeof b === "string")
+    ? validators.structured_text_blocks.filter((b): b is string => isString(b))
     : [];
   if (!whitelist.includes(blockApiKey))
     return yield* new ValidationError({
@@ -298,7 +300,7 @@ function removeBlockNodesFromStructuredTextValue(value: unknown, blockIds: Set<s
   if (!isObjectRecord(value)) return value;
   const obj: DastLike = value;
 
-  if (obj.value && typeof obj.value === "object" && obj.blocks && typeof obj.blocks === "object") {
+  if (obj.value && isObject(obj.value) && obj.blocks && isObject(obj.blocks)) {
     const cleanedBlocks = { ...(obj.blocks) };
     for (const blockId of blockIds) delete cleanedBlocks[blockId];
     return {
@@ -318,7 +320,7 @@ function removeBlockNodesFromStructuredTextValue(value: unknown, blockIds: Set<s
 function filterNodes(nodes: DastNode[], blockIds: Set<string>): DastNode[] {
   return nodes
     .filter((node) => {
-      if ((node.type === "block" || node.type === "inlineBlock") && typeof node.item === "string" && blockIds.has(node.item)) {
+      if ((node.type === "block" || node.type === "inlineBlock") && isString(node.item) && blockIds.has(node.item)) {
         return false;
       }
       return true;

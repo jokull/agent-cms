@@ -1,4 +1,5 @@
 import { DateTime, Effect } from "effect";
+import { isString } from "../dynamic/row-types.js";
 import { contentTableName } from "../dynamic/tables.js";
 import { SqlClient } from "effect/unstable/sql";
 import { NotFoundError, AggregateValidationError, type ValidationIssue } from "../errors.js";
@@ -78,7 +79,7 @@ export function publishRecord(modelApiKey: string, recordId: string, actor?: Req
 
     // Version the previous published state (skip on first publish)
     if (record._published_snapshot) {
-      const prevSnapshot = typeof record._published_snapshot === "string"
+      const prevSnapshot = isString(record._published_snapshot)
         ? record._published_snapshot
         : encodeJson(record._published_snapshot);
       yield* VersionService.createVersion(modelApiKey, recordId, prevSnapshot, {

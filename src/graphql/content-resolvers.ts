@@ -2,6 +2,7 @@
  * Build GraphQL types and field resolvers for content models.
  */
 import { Effect } from "effect";
+import { isNumber, isString , isObject, isObjectRecord } from "../dynamic/row-types.js";
 import { contentTableName } from "../dynamic/tables.js";
 import { SqlClient } from "effect/unstable/sql";
 import { getLinkTargets, getLinksTargets, computeIsValid, findUniqueConstraintViolations } from "../db/validators.js";
@@ -55,14 +56,14 @@ function pickLocalizedValue(rawValue: unknown, context: GqlContext, defaultLocal
 }
 
 function withFieldLocaleArgs(context: GqlContext, args: unknown): GqlContext {
-  if (typeof args !== "object" || args === null || Array.isArray(args)) return context;
+  if (!isObjectRecord(args)) return context;
   // SAFETY: args guarded as a plain object above; locale keys are GraphQL field args.
-  const rawLocale = Reflect.get(args, "locale") as unknown;
-  const locale = typeof rawLocale === "string" ? rawLocale : context.locale;
+  const rawLocale: unknown = Reflect.get(args, "locale");
+  const locale = isString(rawLocale) ? rawLocale : context.locale;
   // SAFETY: same args-object guarantee for fallbackLocales.
-  const rawFallbackLocales = Reflect.get(args, "fallbackLocales") as unknown;
+  const rawFallbackLocales: unknown = Reflect.get(args, "fallbackLocales");
   const fallbackLocales = Array.isArray(rawFallbackLocales)
-    ? rawFallbackLocales.filter((value): value is string => typeof value === "string")
+    ? rawFallbackLocales.filter((value): value is string => isString(value))
     : context.fallbackLocales;
   return {
     ...context,
@@ -156,11 +157,11 @@ export function buildContentModelResolvers(
     typeResolvers._modelApiKey = () => model.api_key;
     typeResolvers._createdAt = (p: DynamicRow) => p._created_at;
     typeResolvers._updatedAt = (p: DynamicRow) => p._updated_at;
-    typeResolvers._createdBy = (p: DynamicRow) => typeof p._created_by === "string" ? p._created_by : null;
-    typeResolvers._updatedBy = (p: DynamicRow) => typeof p._updated_by === "string" ? p._updated_by : null;
-    typeResolvers._publishedBy = (p: DynamicRow) => typeof p._published_by === "string" ? p._published_by : null;
-    typeResolvers._publicationScheduledAt = (p: DynamicRow) => typeof p._scheduled_publish_at === "string" ? p._scheduled_publish_at : null;
-    typeResolvers._unpublishingScheduledAt = (p: DynamicRow) => typeof p._scheduled_unpublish_at === "string" ? p._scheduled_unpublish_at : null;
+    typeResolvers._createdBy = (p: DynamicRow) => isString(p._created_by) ? p._created_by : null;
+    typeResolvers._updatedBy = (p: DynamicRow) => isString(p._updated_by) ? p._updated_by : null;
+    typeResolvers._publishedBy = (p: DynamicRow) => isString(p._published_by) ? p._published_by : null;
+    typeResolvers._publicationScheduledAt = (p: DynamicRow) => isString(p._scheduled_publish_at) ? p._scheduled_publish_at : null;
+    typeResolvers._unpublishingScheduledAt = (p: DynamicRow) => isString(p._scheduled_unpublish_at) ? p._scheduled_unpublish_at : null;
     typeResolvers._publishedAt = (p: DynamicRow) => p._published_at;
     typeResolvers._firstPublishedAt = (p: DynamicRow) => p._first_published_at;
     typeResolvers._editingUrl = (p: DynamicRow) => `/api/records/${String(p.id)}?modelApiKey=${model.api_key}`;
@@ -174,7 +175,7 @@ export function buildContentModelResolvers(
         tableName,
         record: parent,
         fields,
-        excludeId: typeof parent.id === "string" ? parent.id : null,
+        excludeId: isString(parent.id) ? parent.id : null,
       }));
       return uniqueViolations.length === 0;
     };
@@ -198,13 +199,13 @@ export function buildContentModelResolvers(
         let seo = seoField.localized
           ? pickLocalizedValue(parent[seoField.api_key], context, defaultLocale)
           : parent[seoField.api_key];
-        if (typeof seo === "string") seo = decodeJsonStringOr(seo, null);
+        if (isString(seo)) seo = decodeJsonStringOr(seo, null);
         if (isDynamicRow(seo)) {
           const seoObj = seo;
-          title = typeof seoObj.title === "string" ? seoObj.title : null;
-          description = typeof seoObj.description === "string" ? seoObj.description : null;
-          twitterCard = typeof seoObj.twitterCard === "string" ? seoObj.twitterCard : null;
-          if (typeof seoObj.image === "string") {
+          title = isString(seoObj.title) ? seoObj.title : null;
+          description = isString(seoObj.description) ? seoObj.description : null;
+          twitterCard = isString(seoObj.twitterCard) ? seoObj.twitterCard : null;
+          if (isString(seoObj.image)) {
             // Resolve image URL from asset ID
             const asset = await loadAsset({ runSql, id: seoObj.image, context });
             if (asset) imageUrl = assetUrl(asset.r2_key);
@@ -217,13 +218,13 @@ export function buildContentModelResolvers(
         const raw = firstStringField.localized
           ? pickLocalizedValue(parent[firstStringField.api_key], context, defaultLocale)
           : parent[firstStringField.api_key];
-        title = (typeof raw === "string" ? raw : null);
+        title = (isString(raw) ? raw : null);
       }
       if (!description && firstTextField) {
         const raw = firstTextField.localized
           ? pickLocalizedValue(parent[firstTextField.api_key], context, defaultLocale)
           : parent[firstTextField.api_key];
-        description = (typeof raw === "string" ? raw : null);
+        description = (isString(raw) ? raw : null);
       }
       if (!imageUrl && firstMediaField && parent[firstMediaField.api_key]) {
         const assetId = parseMediaFieldReference(parent[firstMediaField.api_key])?.uploadId;
@@ -249,17 +250,17 @@ export function buildContentModelResolvers(
       tags.push({ tag: "meta", attributes: { property: "og:type", content: "article" }, content: null });
       tags.push({ tag: "meta", attributes: { name: "twitter:card", content: twitterCard ?? "summary" }, content: null });
       const updatedAt = parent._updated_at;
-      if (typeof updatedAt === "string" && updatedAt) {
+      if (isString(updatedAt) && updatedAt) {
         tags.push({ tag: "meta", attributes: { property: "article:modified_time", content: updatedAt }, content: null });
       }
 
       return tags;
     };
     if (model.sortable || model.tree) {
-      typeResolvers._position = (p: DynamicRow) => typeof p._position === "number" ? p._position : 0;
+      typeResolvers._position = (p: DynamicRow) => isNumber(p._position) ? p._position : 0;
     }
     if (model.tree) {
-      typeResolvers._parentId = (p: DynamicRow) => typeof p._parent_id === "string" ? p._parent_id : null;
+      typeResolvers._parentId = (p: DynamicRow) => isString(p._parent_id) ? p._parent_id : null;
       typeResolvers._parent = async (parent: DynamicRow) => {
         const parentId = parent._parent_id;
         if (!parentId) return null;
@@ -294,7 +295,7 @@ export function buildContentModelResolvers(
           const dbKey = camelToSnake.get(camelKey) ?? camelKey;
           let localeMap = parent[dbKey];
           if (!localeMap) continue;
-          if (typeof localeMap === "string") {
+          if (isString(localeMap)) {
             localeMap = decodeJsonIfString(localeMap);
           }
           if (isDynamicRow(localeMap)) {
@@ -317,7 +318,7 @@ export function buildContentModelResolvers(
       typeResolvers[resolverName] = (parent: DynamicRow) => {
         let localeMap = parent[f.api_key];
         if (!localeMap) return [];
-        if (typeof localeMap === "string") {
+        if (isString(localeMap)) {
           localeMap = decodeJsonIfString(localeMap);
         }
         if (!isDynamicRow(localeMap)) return [];
@@ -368,7 +369,7 @@ export function buildContentModelResolvers(
               return decodeSnapshot(prefetched, context.includeDrafts ?? false);
             }
             const linkedId = parent[f.api_key];
-            if (typeof linkedId !== "string" || !linkedId) return null;
+            if (!isString(linkedId) || !linkedId) return null;
             return await loadLinkedRecords({
               runSql,
               targetApiKeys: targets,
@@ -385,11 +386,11 @@ export function buildContentModelResolvers(
         if (targets && targets.length > 0) {
           typeResolvers[gqlName] = async (parent: DynamicRow, _args: unknown, context: GqlContext) => {
             let linkedIds = parent[f.api_key];
-            if (typeof linkedIds === "string") {
+            if (isString(linkedIds)) {
               linkedIds = decodeJsonIfString(linkedIds);
             }
             if (!Array.isArray(linkedIds)) return [];
-            const linkedIdStrings = linkedIds.filter((id): id is string => typeof id === "string");
+            const linkedIdStrings = linkedIds.filter((id): id is string => isString(id));
             const resolved = await loadLinkedRecords({
               runSql,
               targetApiKeys: targets,
@@ -447,7 +448,7 @@ export function buildContentModelResolvers(
             ? pickLocalizedValue(parent[f.api_key], context, defaultLocale)
             : parent[f.api_key];
           if (!seo) return null;
-          if (typeof seo === "string") {
+          if (isString(seo)) {
             seo = decodeJsonStringOr(seo, null);
           }
           // Return the object as-is; image is resolved by the SeoField type resolver
@@ -459,7 +460,7 @@ export function buildContentModelResolvers(
         typeResolvers[gqlName] = async (parent: DynamicRow) => {
           let color = parent[f.api_key];
           if (!color) return null;
-          if (typeof color === "string") {
+          if (isString(color)) {
             color = decodeJsonStringOr(color, null);
           }
           return color;
@@ -474,7 +475,7 @@ export function buildContentModelResolvers(
         typeResolvers[gqlName] = async (parent: DynamicRow) => {
           let ll = parent[f.api_key];
           if (!ll) return null;
-          if (typeof ll === "string") {
+          if (isString(ll)) {
             ll = decodeJsonStringOr(ll, null);
           }
           return ll;
@@ -487,14 +488,14 @@ export function buildContentModelResolvers(
             ? pickLocalizedEntry(parent[f.api_key], context, defaultLocale)
             : { locale: null, value: parent[f.api_key] };
           const prefetched = parent[`__prefetch_st_${f.api_key}`];
-          if (prefetched && typeof prefetched === "object" && !Array.isArray(prefetched)) {
+          if (isObjectRecord(prefetched)) {
             return prefetched;
           }
 
           let dast = localized.value;
           if (!dast) return null;
           const includeDrafts = context.includeDrafts ?? false;
-          const isEnvelope = typeof dast === "object" && !Array.isArray(dast)
+          const isEnvelope = isObject(dast) && !Array.isArray(dast)
             && "value" in dast
             && "blocks" in dast;
           const resolvedLocale = f.localized ? localized.locale : null;
@@ -558,7 +559,7 @@ export function buildContentModelResolvers(
           if (!blocks) return [];
           return blocks.map((block) => ({
             ...block,
-            __typename: typeof block._type === "string"
+            __typename: isString(block._type)
               ? (typeNames.get(block._type) ?? blockTypeNames.get(block._type) ?? block._type)
               : undefined,
             _modelApiKey: block._type,

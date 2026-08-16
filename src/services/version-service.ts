@@ -1,4 +1,6 @@
+import { isObject, isObjectRecord, isString } from "../dynamic/row-types.js";
 import { DateTime, Effect } from "effect";
+
 import { contentTableName } from "../dynamic/tables.js";
 import { SqlClient } from "effect/unstable/sql";
 import { generateId } from "../id.js";
@@ -10,7 +12,7 @@ import { materializeRecordStructuredTextFields } from "./structured-text-service
 import { fireHook } from "../hooks.js";
 import { decodeJsonRecordStringOr, decodeJsonString, encodeJson } from "../json.js";
 import type { RequestActor, VersionAttribution } from "../attribution.js";
-import { isObjectRecord } from "../dynamic/row-types.js";
+
 
 /**
  * Create a version snapshot for a record.
@@ -186,7 +188,7 @@ export const restoreVersion = Effect.fn("restoreVersion")(function* (modelApiKey
   const values = setCols.map((c) => {
     const v = updates[c];
     if (v === undefined || v === null) return null;
-    if (typeof v === "object") return encodeJson(v);
+    if (isObject(v)) return encodeJson(v);
     return v;
   });
   values.push(recordId);
@@ -222,7 +224,7 @@ export const compareVersions = Effect.fn("compareVersions")(function* (modelApiK
   if (leftRows.length === 0) return yield* new NotFoundError({ entity: "Version", id: leftVersionId });
   const left = leftRows[0];
   const leftSnapshot = decodeJsonString(left.snapshot);
-  if (typeof leftSnapshot !== "object" || leftSnapshot === null || Array.isArray(leftSnapshot)) {
+  if (!isObjectRecord(leftSnapshot)) {
     return yield* new ValidationError({ message: `Version '${leftVersionId}' has an invalid snapshot` });
   }
 
@@ -245,7 +247,7 @@ export const compareVersions = Effect.fn("compareVersions")(function* (modelApiK
       action: right.action,
     };
     rightSnapshot = decodeJsonString(right.snapshot);
-    if (typeof rightSnapshot !== "object" || rightSnapshot === null || Array.isArray(rightSnapshot)) {
+    if (!isObjectRecord(rightSnapshot)) {
       return yield* new ValidationError({ message: `Version '${rightVersionId}' has an invalid snapshot` });
     }
   } else {
@@ -254,10 +256,10 @@ export const compareVersions = Effect.fn("compareVersions")(function* (modelApiK
       recordId,
       publishedAt: current._published_at ?? null,
     };
-    rightSnapshot = typeof current._published_snapshot === "string"
+    rightSnapshot = isString(current._published_snapshot)
       ? decodeJsonString(current._published_snapshot)
       : current._published_snapshot;
-    if (typeof rightSnapshot !== "object" || rightSnapshot === null || Array.isArray(rightSnapshot)) {
+    if (!isObjectRecord(rightSnapshot)) {
       return yield* new ValidationError({ message: `Record '${recordId}' has no current published snapshot to compare` });
     }
   }

@@ -1,6 +1,8 @@
+import { isBoolean, isNumber, isObject, isObjectRecord, isString, type DynamicRow } from "../dynamic/row-types.js";
 import { Effect, Schema } from "effect";
+
 import { contentTableName } from "../dynamic/tables.js";
-import { isObjectRecord, type DynamicRow } from "../dynamic/row-types.js";
+
 import { SqlClient } from "effect/unstable/sql";
 import { generateId } from "../id.js";
 import { NotFoundError, ValidationError, AggregateValidationError, DuplicateError, CmsErrorSchema, isCmsError, errorToResponse, type ValidationIssue } from "../errors.js";
@@ -196,11 +198,11 @@ function isJsonRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isMistakenMediaObject(value: unknown): value is Record<string, unknown> {
-  return isJsonRecord(value) && typeof value.id === "string" && value.id.length > 0 && value.upload_id === undefined;
+  return isJsonRecord(value) && isString(value.id) && value.id.length > 0 && value.upload_id === undefined;
 }
 
 function isMistakenLinkObject(value: unknown): value is Record<string, unknown> {
-  return isJsonRecord(value) && typeof value.id === "string" && value.id.length > 0;
+  return isJsonRecord(value) && isString(value.id) && value.id.length > 0;
 }
 
 function hasMistakenLinkObject(value: unknown): boolean {
@@ -208,8 +210,8 @@ function hasMistakenLinkObject(value: unknown): boolean {
 }
 
 function toSlugSourceString(value: unknown): string | null {
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (isString(value)) return value;
+  if (isNumber(value) || isBoolean(value)) return String(value);
   return null;
 }
 
@@ -239,7 +241,7 @@ function normalizeBooleanFields(record: Record<string, unknown>, fields: Readonl
 }
 
 function scopeStructuredTextIds<T>(value: T, scope: string): T {
-  if (!value || typeof value !== "object") return value;
+  if (!value || !isObject(value)) return value;
 
   const clone = structuredClone(value);
   if (!isObjectRecord(clone)) return clone;
@@ -258,7 +260,7 @@ function scopeStructuredTextIds<T>(value: T, scope: string): T {
     for (const [key, child] of Object.entries(node)) {
       next[key] = rewriteNode(child);
     }
-    if ((next.type === "block" || next.type === "inlineBlock") && typeof next.item === "string") {
+    if ((next.type === "block" || next.type === "inlineBlock") && isString(next.item)) {
       next.item = idMap.get(next.item) ?? next.item;
     }
     return next;
@@ -304,11 +306,11 @@ function createFieldErrorMessage(prefix: string | undefined, message: string) {
 
 function getReferenceIds(fieldType: string, value: unknown): string[] {
   if (fieldType === "link") {
-    return typeof value === "string" && value.length > 0 ? [value] : [];
+    return isString(value) && value.length > 0 ? [value] : [];
   }
   if (fieldType === "links") {
     return Array.isArray(value)
-      ? value.filter((entry): entry is string => typeof entry === "string" && entry.length > 0)
+      ? value.filter((entry): entry is string => isString(entry) && entry.length > 0)
       : [];
   }
   return [];
@@ -322,7 +324,7 @@ function getAssetIds(fieldType: string, value: unknown): string[] {
   if (fieldType === "media_gallery") {
     return parseMediaGalleryReferences(value).map((ref) => ref.uploadId);
   }
-  if (fieldType === "seo" && isJsonRecord(value) && typeof value.image === "string" && value.image.length > 0) {
+  if (fieldType === "seo" && isJsonRecord(value) && isString(value.image) && value.image.length > 0) {
     return [value.image];
   }
   return [];
@@ -963,7 +965,7 @@ export function patchRecord(id: string, body: PatchRecordInput, actor?: RequestA
       } else {
         // Auto-re-publish: version old state, snapshot will be rebuilt after field processing
         if (existing._published_snapshot) {
-          const prevSnapshot = typeof existing._published_snapshot === "string"
+          const prevSnapshot = isString(existing._published_snapshot)
             ? existing._published_snapshot
             : encodeJson(existing._published_snapshot);
           yield* VersionService.createVersion(body.modelApiKey, id, prevSnapshot, {
@@ -1404,7 +1406,7 @@ export const bulkCreateRecords = Effect.fn("bulkCreateRecords")(function* ({ mod
       if (missing.length > 0) return yield* new AggregateValidationError({ issues: missing });
     }
 
-    const requestedId = typeof data.id === "string" && data.id.trim().length > 0 ? data.id : undefined;
+    const requestedId = isString(data.id) && data.id.trim().length > 0 ? data.id : undefined;
     if (requestedId) delete data.id;
     const id = requestedId ?? generateId();
     const duplicateId = yield* sql.unsafe<{ id: string }>(
@@ -1457,9 +1459,9 @@ function isStructuredTextEnvelopeLike(value: unknown): value is { value: unknown
 
 function getPrunableDast(value: unknown): { schema: string; document: { type: string; children: readonly unknown[] } } | null {
   if (!isJsonRecord(value)) return null;
-  if (typeof value.schema !== "string") return null;
+  if (!isString(value.schema)) return null;
   if (!isJsonRecord(value.document)) return null;
-  if (typeof value.document.type !== "string") return null;
+  if (!isString(value.document.type)) return null;
   if (!Array.isArray(value.document.children)) return null;
   return {
     schema: value.schema,
@@ -1489,7 +1491,7 @@ function applyPatchToNestedStructuredText(
             if (dast) {
               nestedValue.value = pruneBlockNodes(dast, new Set([blockId]));
             }
-          } else if (typeof patchValue === "string") {
+          } else if (isString(patchValue)) {
             // keep unchanged
           } else if (isJsonRecord(patchValue)) {
             const existingBlock = blocks[blockId];
@@ -1597,12 +1599,12 @@ export const patchBlocksForField = Effect.fn("patchBlocksForField")(function* (b
           field: body.fieldApiKey,
         });
       }
-    } else if (typeof patchValue === "string") {
+    } else if (isString(patchValue)) {
       return yield* new ValidationError({
         message: `Invalid patch value for block '${blockId}': use an object to update fields, null to delete, or omit the key to keep unchanged.`,
         field: body.fieldApiKey,
       });
-    } else if (typeof patchValue === "object" && !Array.isArray(patchValue)) {
+    } else if (isObject(patchValue) && !Array.isArray(patchValue)) {
       // Partial merge
       if (!Object.hasOwn(existingBlocks, blockId)) {
         let nestedMatched = false;
@@ -1747,7 +1749,7 @@ export const patchBlocksForField = Effect.fn("patchBlocksForField")(function* (b
   // Auto-re-publish for has_draft=false models
   if (!model.has_draft) {
     if (existing._published_snapshot) {
-      const prevSnapshot = typeof existing._published_snapshot === "string"
+      const prevSnapshot = isString(existing._published_snapshot)
         ? existing._published_snapshot
         : encodeJson(existing._published_snapshot);
       yield* VersionService.createVersion(body.modelApiKey, body.recordId, prevSnapshot, {
@@ -2093,7 +2095,7 @@ export function searchRecords(modelApiKey: string, q: string, page?: PickerSearc
 function isRichTextBlockArray(value: unknown): value is Array<Record<string, unknown>> {
   return Array.isArray(value)
     && value.length > 0
-    && value.every((entry) => isJsonRecord(entry) && typeof entry.block_type === "string");
+    && value.every((entry) => isJsonRecord(entry) && isString(entry.block_type));
 }
 
 /**
@@ -2112,7 +2114,7 @@ function remapStructuredTextEnvelopeIds(
     if (!isJsonRecord(node)) return node;
     const next: Record<string, unknown> = {};
     for (const [key, child] of Object.entries(node)) next[key] = rewriteNode(child);
-    if ((next.type === "block" || next.type === "inlineBlock") && typeof next.item === "string") {
+    if ((next.type === "block" || next.type === "inlineBlock") && isString(next.item)) {
       next.item = idMap.get(next.item) ?? next.item;
     }
     return next;

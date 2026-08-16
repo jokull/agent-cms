@@ -1,4 +1,5 @@
 import { Effect, Layer } from "effect";
+import { isNumber, isString } from "../dynamic/row-types.js";
 import { SqlClient } from "effect/unstable/sql";
 import {
   Kind,
@@ -237,7 +238,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function parseJsonValue(value: unknown): unknown {
-  if (typeof value !== "string") return value;
+  if (!isString(value)) return value;
   return decodeJsonIfString(value);
 }
 
@@ -397,21 +398,21 @@ function resolveIntArg(plan: IntArgPlan, variables: Record<string, unknown>): nu
   if (!plan) return null;
   if (plan.kind === "const") return plan.value;
   const value = variables[plan.name];
-  return typeof value === "number" ? value : null;
+  return isNumber(value) ? value : null;
 }
 
 function resolveStringListArg(plan: StringListArgPlan, variables: Record<string, unknown>): string[] | undefined {
   if (plan === undefined || plan === null) return undefined;
   if (plan.kind === "const") return plan.value;
   const value = variables[plan.name];
-  return Array.isArray(value) && value.every((entry) => typeof entry === "string") ? value : undefined;
+  return Array.isArray(value) && value.every((entry) => isString(entry)) ? value : undefined;
 }
 
 function resolveStringArg(plan: StringArgPlan, variables: Record<string, unknown>): string | undefined {
   if (plan === undefined || plan === null) return undefined;
   if (plan.kind === "const") return plan.value;
   const value = variables[plan.name];
-  return typeof value === "string" ? value : undefined;
+  return isString(value) ? value : undefined;
 }
 
 function resolveValueArg(plan: ValueArgPlan, variables: Record<string, unknown>): unknown {
@@ -1348,7 +1349,7 @@ function collectStructuredTextDependencies(
       const rawBlock = envelopeBlocks[id];
       if (!isRecord(rawBlock)) continue;
       const blockApiKey = Reflect.get(rawBlock, "_type");
-      if (typeof blockApiKey !== "string") continue;
+      if (!isString(blockApiKey)) continue;
       const nestedPlan = plan.blocksPlan.selectionsByBlockApiKey.get(blockApiKey);
       if (nestedPlan) {
         collectModelDependencies(metadata, rawBlock, nestedPlan, pending);
@@ -1361,7 +1362,7 @@ function collectStructuredTextDependencies(
       const rawBlock = envelopeBlocks[id];
       if (!isRecord(rawBlock)) continue;
       const blockApiKey = Reflect.get(rawBlock, "_type");
-      if (typeof blockApiKey !== "string") continue;
+      if (!isString(blockApiKey)) continue;
       const nestedPlan = plan.inlineBlocksPlan.selectionsByBlockApiKey.get(blockApiKey);
       if (nestedPlan) {
         collectModelDependencies(metadata, rawBlock, nestedPlan, pending);
@@ -1398,7 +1399,7 @@ function collectModelDependencies(
         break;
       case "link": {
         const rawId = rawFieldValue;
-        if (typeof rawId === "string" && rawId.length > 0) {
+        if (isString(rawId) && rawId.length > 0) {
           addPendingLinkRequest(pending, selection.targetApiKeys, [rawId], selection.nested);
         }
         break;
@@ -1409,7 +1410,7 @@ function collectModelDependencies(
         addPendingLinkRequest(
           pending,
           selection.targetApiKeys,
-          rawValue.filter((entry): entry is string => typeof entry === "string"),
+          rawValue.filter((entry): entry is string => isString(entry)),
           selection.nested,
         );
         break;
@@ -1626,7 +1627,7 @@ async function projectModelSelections(
         const rawId = selection.field.localized
           ? pickLocalizedFastPathValue(Reflect.get(source, selection.field.api_key), localeOptions?.locale, localeOptions?.fallbackLocales, ctx.defaultLocale)
           : Reflect.get(source, selection.field.api_key);
-        if (typeof rawId !== "string" || rawId.length === 0) {
+        if (!isString(rawId) || rawId.length === 0) {
           result[selection.responseKey] = null;
           break;
         }
@@ -1651,7 +1652,7 @@ async function projectModelSelections(
           result[selection.responseKey] = [];
           break;
         }
-        const ids = rawValue.filter((entry): entry is string => typeof entry === "string");
+        const ids = rawValue.filter((entry): entry is string => isString(entry));
         const linkedMap = await loadLinkedRecordMap(ctx, selection.targetApiKeys, ids);
         const projected: Record<string, unknown>[] = [];
         const targetMeta = ctx.metadata.contentModelsByApiKey.get(selection.targetApiKeys[0]);
@@ -1720,7 +1721,7 @@ async function projectStructuredTextBlockArray(
     const raw = envelopeBlocks[id];
     if (!isRecord(raw)) continue;
     const blockApiKeyValue = Reflect.get(raw, "_type");
-    const typename = typeof blockApiKeyValue === "string" ? `${toTypeName(blockApiKeyValue)}Record` : undefined;
+    const typename = isString(blockApiKeyValue) ? `${toTypeName(blockApiKeyValue)}Record` : undefined;
 
     if (plan.kind === "generic") {
       result.push({
@@ -1736,7 +1737,7 @@ async function projectStructuredTextBlockArray(
       projected.__typename = typename;
     }
 
-    if (typeof blockApiKeyValue === "string") {
+    if (isString(blockApiKeyValue)) {
       const blockMeta = ctx.metadata.blockModelsByApiKey.get(blockApiKeyValue);
       const nestedPlan = plan.selectionsByBlockApiKey.get(blockApiKeyValue);
       if (blockMeta && nestedPlan) {
@@ -1839,7 +1840,7 @@ function buildRootResultSql(
     const orderBy = resolveStringListArg(root.orderBy, variables);
     const locale = resolveStringArg(root.locale, variables);
     const compiledOrderBy = compileOrderBy(
-      orderBy ?? (typeof root.meta.model.ordering === "string" ? [root.meta.model.ordering] : undefined),
+      orderBy ?? (isString(root.meta.model.ordering) ? [root.meta.model.ordering] : undefined),
       { ...buildFilterOpts(root.meta), locale },
     );
     const filter = buildFilterSql(root.filter, variables, root.meta, locale);
@@ -1877,7 +1878,7 @@ function buildRecursiveRootFetchSql(
   if (root.kind === "list") {
     const orderBy = resolveStringListArg(root.orderBy, variables);
     const compiledOrderBy = compileOrderBy(
-      orderBy ?? (typeof root.meta.model.ordering === "string" ? [root.meta.model.ordering] : undefined),
+      orderBy ?? (isString(root.meta.model.ordering) ? [root.meta.model.ordering] : undefined),
       { ...buildFilterOpts(root.meta), locale },
     );
     let innerSql =

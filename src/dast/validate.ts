@@ -1,5 +1,7 @@
+import { isNumber, isObjectRecord, isString } from "../dynamic/row-types.js";
 import { Cause, Option, Schema, SchemaIssue } from "effect";
-import { isObjectRecord } from "../dynamic/row-types.js";
+
+
 import { DastDocumentSchema } from "./schema.js";
 import type {
   BlockLevelNode,
@@ -16,8 +18,8 @@ export interface ValidationError {
 
 function formatIssuePath(path: ReadonlyArray<unknown>): string {
   return path.reduce<string>((acc, segment) => {
-    if (typeof segment === "number") return `${acc}[${segment}]`;
-    if (typeof segment === "string") {
+    if (isNumber(segment)) return `${acc}[${segment}]`;
+    if (isString(segment)) {
       if (acc.length === 0) return segment;
       return `${acc}.${segment}`;
     }
@@ -81,7 +83,7 @@ const BLOCK_LEVEL_NODE_TYPES = new Set<string>([
 /** Narrow unknown to a block-level DAST node via its type discriminant. */
 function isBlockLevelNode(value: unknown): value is BlockLevelNode {
   return isObjectRecord(value)
-    && typeof value.type === "string"
+    && isString(value.type)
     && BLOCK_LEVEL_NODE_TYPES.has(value.type);
 }
 

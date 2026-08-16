@@ -1,4 +1,5 @@
 import type { ParsedFieldRow } from "../db/row-types.js";
+import { isBoolean, isNumber, isString } from "../dynamic/row-types.js";
 import { isSearchable } from "../db/validators.js";
 
 /**
@@ -111,7 +112,7 @@ function extractFieldText(field: ParsedFieldRow, value: unknown): string[] {
 
   switch (field.field_type) {
     case "structured_text": {
-      const parsed = typeof value === "string" ? safeParse(value) : value;
+      const parsed = isString(value) ? safeParse(value) : value;
       if (!isRecord(parsed)) return [];
       const dast = isRecord(parsed.value) ? parsed.value : parsed;
       const parts: string[] = [];
@@ -126,11 +127,11 @@ function extractFieldText(field: ParsedFieldRow, value: unknown): string[] {
     case "rich_text": {
       // Rich text stores a JSON array of block IDs — block content is in block tables.
       // At this point, the record may be materialized (array of block objects) or raw (array of IDs).
-      const parsed = typeof value === "string" ? safeParse(value) : value;
+      const parsed = isString(value) ? safeParse(value) : value;
       if (!Array.isArray(parsed)) return [];
       const parts: string[] = [];
       for (const item of parsed) {
-        if (typeof item === "string") continue; // raw block ID — no text to extract
+        if (isString(item)) continue; // raw block ID — no text to extract
         if (isRecord(item)) {
           parts.push(...extractGenericText(item));
         }
@@ -139,11 +140,11 @@ function extractFieldText(field: ParsedFieldRow, value: unknown): string[] {
     }
 
     case "seo": {
-      const parsed = typeof value === "string" ? safeParse(value) : value;
+      const parsed = isString(value) ? safeParse(value) : value;
       if (!isRecord(parsed)) return [];
       const parts: string[] = [];
-      if (typeof parsed.title === "string") parts.push(parsed.title);
-      if (typeof parsed.description === "string") parts.push(parsed.description);
+      if (isString(parsed.title)) parts.push(parsed.title);
+      if (isString(parsed.description)) parts.push(parsed.description);
       return parts;
     }
 
@@ -155,14 +156,14 @@ function extractFieldText(field: ParsedFieldRow, value: unknown): string[] {
 
 /** Extract text from any value — strings directly, JSON objects recursively. */
 function extractGenericText(value: unknown): string[] {
-  if (typeof value === "string") {
+  if (isString(value)) {
     // Skip values that look like IDs (ULIDs, UUIDs)
     if (/^[0-9a-z]{10}$/.test(value)) return []; // nanoid (lowercase alphanumeric, 10 chars)
     if (/^[0-9A-HJKMNP-TV-Z]{26}$/i.test(value)) return []; // legacy ULID (Crockford base32)
     if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) return []; // UUID
     return value.length > 0 ? [value] : [];
   }
-  if (typeof value === "number" || typeof value === "boolean") return [];
+  if (isNumber(value) || isBoolean(value)) return [];
   if (Array.isArray(value)) {
     // Arrays of strings (e.g. tags) — extract each
     // Arrays of IDs (links) — skip
@@ -199,11 +200,11 @@ function collectText(nodes: unknown[], parts: string[]) {
   for (const node of nodes) {
     if (!isRecord(node)) continue;
     // Span nodes contain the actual text
-    if (node.type === "span" && typeof node.value === "string") {
+    if (node.type === "span" && isString(node.value)) {
       parts.push(node.value);
     }
     // Code blocks
-    if (node.type === "code" && typeof node.code === "string") {
+    if (node.type === "code" && isString(node.code)) {
       parts.push(node.code);
     }
     // Recurse into children

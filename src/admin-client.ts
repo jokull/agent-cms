@@ -1,3 +1,4 @@
+import { isObject } from "./dynamic/row-types.js";
 export interface CmsAdminClientConfig {
   readonly endpoint: string;
   readonly writeKey: string;
@@ -57,7 +58,7 @@ export function createCmsAdminClient(config: CmsAdminClientConfig) {
 
     if (!response.ok) {
       const errorPayload = await readJsonOrError(response);
-      const message = typeof errorPayload === "object" && errorPayload !== null && "error" in errorPayload
+      const message = isObject(errorPayload) && "error" in errorPayload
         ? String(errorPayload.error)
         : `Request failed with status ${response.status}`;
       throw new Error(message);
