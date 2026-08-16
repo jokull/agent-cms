@@ -9,35 +9,26 @@ import {
 
 import { Cause, DateTime, Effect, Layer, Logger, Schema, SchemaIssue, Option } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import * as RecordService from "../services/record-service.js";
-import * as PublishService from "../services/publish-service.js";
 import * as AssetService from "../services/asset-service.js";
 import { AssetImportContext, AssetUrlContext, type AssetUrlConfig } from "../services/asset-service.js";
 import * as LocaleService from "../services/locale-service.js";
-import * as ScheduleService from "../services/schedule-service.js";
 import { isCmsError, errorToResponse } from "../errors.js";
 import { ApiLayer, ApiHandlersLayer } from "./api.js";
 import {
-  CreateRecordInput, PatchRecordInput,
-  PatchBlocksInput,
+  SearchInput,
+  ReindexSearchInput,
   CreateAssetInput,
   ImportAssetFromUrlInput,
   ListAssetsInput,
   UpdateAssetMetadataInput,
   CreateLocaleInput,
-  BulkCreateRecordsInput,
-  BulkRecordOperationInput,
-  QueryRecordsInput,
-  ValidateRecordInput,
-  ScheduleRecordInput,
   ImportSchemaInput,
-  ReindexSearchInput, ReorderInput, SearchInput,
   CreateUploadUrlInput,
   CreateEditorTokenInput,
 } from "../services/input-schemas.js";
 import { UnauthorizedError, ValidationError } from "../errors.js";
 import * as SchemaIO from "../services/schema-io.js";
-import * as VersionService from "../services/version-service.js";
+import * as ScheduleService from "../services/schedule-service.js";
 import * as TokenService from "../services/token-service.js";
 import * as PreviewService from "../services/preview-service.js";
 import * as PathService from "../services/path-service.js";
@@ -95,37 +86,6 @@ function handle<A, R>(
   );
 }
 
-/**
- * Run a CMS Effect purely for its success/failure, returning 204 No Content on
- * success (the body is intentionally discarded — used by the validation dry-run
- * endpoints, which signal "valid" with an empty 204). Failures map through
- * `errorToResponse` exactly like `handle` (so an AggregateValidationError still
- * yields 400 `{ error, issues }`).
- */
-function handleNoContent<A, R>(effect: Effect.Effect<A, unknown, R>) {
-  return effect.pipe(
-    Effect.map(() => HttpServerResponse.empty({ status: 204 })),
-    Effect.tapCause((cause) => Effect.logError("REST effect failed", cause)),
-    Effect.catchIf(isCmsError, (error) => {
-      const mapped = errorToResponse(error);
-      return HttpServerResponse.json(mapped.body, { status: mapped.status });
-    }),
-    Effect.catch((error) =>
-      Effect.logError("Unhandled REST error").pipe(
-        Effect.annotateLogs({ error: describeUnknown(error) }),
-        Effect.andThen(HttpServerResponse.json({ error: "Internal server error" }, { status: 500 })),
-      )
-    ),
-    // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Effect's defect channel is opaque; catchDefect receives any thrown non-error value.
-    Effect.catchDefect((defect: unknown) =>
-      Effect.logError("REST defect").pipe(
-        Effect.annotateLogs({ defect: describeUnknown(defect) }),
-        Effect.andThen(HttpServerResponse.json({ error: "Internal server error" }, { status: 500 })),
-      ),
-    ),
-  );
-}
-
 /** Extract a required path parameter, defaulting to empty string if missing */
 function param(params: Record<string, string | undefined>, name: string): string {
   return params[name] ?? "";
@@ -165,306 +125,6 @@ const currentActor = Effect.fn("currentActor")(function* () {
   const req = yield* HttpServerRequest.HttpServerRequest;
   return actorFromHeaders(new Headers(req.headers));
 });
-
-// --- Records ---
-const recordsRouter1 = HttpRouter.use((router) => {
-  const api = router.prefixed("/api");
-  return Effect.all([
-  api.add("POST", 
-    "/records/bulk",
-    Effect.gen(function* () {
-      const body = yield* readJsonBody();
-      const input = yield* decodeUnknownInput(BulkCreateRecordsInput, body);
-      const actor = yield* currentActor();
-      return yield* handle(RecordService.bulkCreateRecords(input, actor), 201);
-    })
-  ),
-
-  api.add("POST", 
-    "/records",
-    Effect.gen(function* () {
-      const body = yield* readJsonBody();
-      const input = yield* decodeUnknownInput(CreateRecordInput, body);
-      const actor = yield* currentActor();
-      return yield* handle(RecordService.createRecord(input, actor), 201);
-    })
-  ),
-
-  api.add("GET", 
-    "/records",
-    Effect.gen(function* () {
-      const modelApiKey = yield* queryParam("modelApiKey");
-      return yield* handle(RecordService.listRecords(modelApiKey));
-    })
-  ),
-
-  // --- Queryable list / picker / bulk (static paths, before /records/:id) ---
-  api.add("POST", 
-    "/records/query",
-    Effect.gen(function* () {
-      const body = yield* readJsonBody();
-      const input = yield* decodeUnknownInput(QueryRecordsInput, body);
-      return yield* handle(RecordService.queryRecords(input.modelApiKey, {
-        filter: input.filter,
-        orderBy: input.orderBy,
-        page: input.page,
-        status: input.status,
-        locale: input.locale,
-      }));
-    })
-  ),
-
-  api.add("GET", 
-    "/records/picker-search",
-    Effect.gen(function* () {
-      const req = yield* HttpServerRequest.HttpServerRequest;
-      const url = new URL(req.url, "http://localhost");
-      const modelApiKey = url.searchParams.get("modelApiKey") ?? "";
-      const q = url.searchParams.get("q") ?? "";
-      const limitParam = url.searchParams.get("limit");
-      const offsetParam = url.searchParams.get("offset");
-      return yield* handle(RecordService.searchRecords(modelApiKey, q, {
-        limit: limitParam !== null ? Number(limitParam) : undefined,
-        offset: offsetParam !== null ? Number(offsetParam) : undefined,
-      }));
-    })
-  ),
-
-  // Validation dry-run (create-shaped) — 204 valid / 400 issues, no persistence
-  api.add("POST", 
-    "/records/validate",
-    Effect.gen(function* () {
-      const body = yield* readJsonBody();
-      const input = yield* decodeUnknownInput(ValidateRecordInput, body);
-      return yield* handleNoContent(RecordService.validateRecord(input.modelApiKey, input.data));
-    })
-  ),
-
-  api.add("POST", 
-    "/records/bulk-publish",
-    Effect.gen(function* () {
-      const body = yield* readJsonBody();
-      const input = yield* decodeUnknownInput(BulkRecordOperationInput, body);
-      const actor = yield* currentActor();
-      return yield* handle(RecordService.publishRecords(input.modelApiKey, input.ids, actor));
-    })
-  ),
-
-  api.add("POST", 
-    "/records/bulk-unpublish",
-    Effect.gen(function* () {
-      const body = yield* readJsonBody();
-      const input = yield* decodeUnknownInput(BulkRecordOperationInput, body);
-      const actor = yield* currentActor();
-      return yield* handle(RecordService.unpublishRecords(input.modelApiKey, input.ids, actor));
-    })
-  ),
-
-  api.add("POST", 
-    "/records/bulk-delete",
-    Effect.gen(function* () {
-      const body = yield* readJsonBody();
-      const input = yield* decodeUnknownInput(BulkRecordOperationInput, body);
-      const actor = yield* currentActor();
-      return yield* handle(RecordService.deleteRecords(input.modelApiKey, input.ids, actor));
-    })
-  ),
-  ]);
-});
-
-const recordsRouter2 = HttpRouter.use((router) => {
-  const api = router.prefixed("/api");
-  return Effect.all([
-  // --- Versions (must be before /records/:id) ---
-  api.add("GET", 
-    "/records/:id/versions",
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      const modelApiKey = yield* queryParam("modelApiKey");
-      return yield* handle(VersionService.listVersions(modelApiKey, param(params, "id")));
-    })
-  ),
-
-  api.add("GET", 
-    "/records/:id/versions/:versionId",
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      return yield* handle(VersionService.getVersion(param(params, "versionId")));
-    })
-  ),
-
-  api.add("POST", 
-    "/records/:id/versions/:versionId/restore",
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      const modelApiKey = yield* queryParam("modelApiKey");
-      const actor = yield* currentActor();
-      return yield* handle(VersionService.restoreVersion(modelApiKey, param(params, "id"), param(params, "versionId"), actor));
-    })
-  ),
-
-  // Inbound references (backlinks) — before /records/:id
-  api.add("GET", 
-    "/records/:id/links",
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      const modelApiKey = yield* queryParam("modelApiKey");
-      return yield* handle(RecordService.getRecordBacklinks(modelApiKey, param(params, "id")));
-    })
-  ),
-
-  // Duplicate a record
-  api.add("POST", 
-    "/records/:id/duplicate",
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      const body = yield* readJsonBody();
-      const input = yield* decodeUnknownInput(
-        Schema.Struct({ modelApiKey: Schema.NonEmptyString }),
-        body,
-      );
-      const actor = yield* currentActor();
-      return yield* handle(RecordService.duplicateRecord(input.modelApiKey, param(params, "id"), actor), 201);
-    })
-  ),
-
-  // Validation dry-run (patch-shaped) — 204 valid / 400 issues / 404 missing
-  api.add("POST", 
-    "/records/:id/validate",
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      const body = yield* readJsonBody();
-      const input = yield* decodeUnknownInput(ValidateRecordInput, body);
-      return yield* handleNoContent(RecordService.validateRecordUpdate(input.modelApiKey, param(params, "id"), input.data));
-    })
-  ),
-
-  // Sync state — sidebar status cluster (publish/schedule timestamps + diff)
-  api.add("GET", 
-    "/records/:id/sync-state",
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      const modelApiKey = yield* queryParam("modelApiKey");
-      return yield* handle(RecordService.getSyncState(modelApiKey, param(params, "id")));
-    })
-  ),
-
-  api.add("GET", 
-    "/records/:id",
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      const modelApiKey = yield* queryParam("modelApiKey");
-      return yield* handle(RecordService.getRecord(modelApiKey, param(params, "id")));
-    })
-  ),
-
-  api.add("PATCH", 
-    "/records/:id",
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      const body = yield* readJsonBody();
-      const input = yield* decodeUnknownInput(PatchRecordInput, body);
-      const actor = yield* currentActor();
-      return yield* handle(RecordService.patchRecord(param(params, "id"), input, actor));
-    })
-  ),
-
-  // Partial block update for structured text fields
-  api.add("PATCH", 
-    "/records/:id/blocks",
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      const body = yield* readJsonBody();
-      const merged = isObjectRecord(body)
-        ? { ...body, recordId: param(params, "id") }
-        : { recordId: param(params, "id") };
-      const input = yield* decodeUnknownInput(PatchBlocksInput, merged);
-      const actor = yield* currentActor();
-      return yield* handle(RecordService.patchBlocksForField(input, actor));
-    })
-  ),
-
-  api.add("DELETE", 
-    "/records/:id",
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      const modelApiKey = yield* queryParam("modelApiKey");
-      return yield* handle(RecordService.removeRecord(modelApiKey, param(params, "id")));
-    })
-  ),
-
-  // Publish / Unpublish
-  api.add("POST", 
-    "/records/:id/publish",
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      const modelApiKey = yield* queryParam("modelApiKey");
-      const actor = yield* currentActor();
-      return yield* handle(PublishService.publishRecord(modelApiKey, param(params, "id"), actor));
-    })
-  ),
-
-  api.add("POST", 
-    "/records/:id/unpublish",
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      const modelApiKey = yield* queryParam("modelApiKey");
-      const actor = yield* currentActor();
-      return yield* handle(PublishService.unpublishRecord(modelApiKey, param(params, "id"), actor));
-    })
-  ),
-
-  api.add("POST", 
-    "/records/:id/schedule-publish",
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      const body = yield* readJsonBody();
-      const input = yield* decodeUnknownInput(ScheduleRecordInput, body);
-      const actor = yield* currentActor();
-      return yield* handle(ScheduleService.schedulePublish(input.modelApiKey, param(params, "id"), input.at, actor));
-    })
-  ),
-
-  api.add("POST", 
-    "/records/:id/schedule-unpublish",
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      const body = yield* readJsonBody();
-      const input = yield* decodeUnknownInput(ScheduleRecordInput, body);
-      const actor = yield* currentActor();
-      return yield* handle(ScheduleService.scheduleUnpublish(input.modelApiKey, param(params, "id"), input.at, actor));
-    })
-  ),
-
-  api.add("POST", 
-    "/records/:id/clear-schedule",
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      const body = yield* readJsonBody();
-      const input = yield* decodeUnknownInput(Schema.Struct({ modelApiKey: Schema.NonEmptyString }), body);
-      const actor = yield* currentActor();
-      return yield* handle(ScheduleService.clearSchedule(input.modelApiKey, param(params, "id"), actor));
-    })
-  ),
-
-  // Reorder
-  api.add("POST", 
-    "/reorder",
-    Effect.gen(function* () {
-      const rawBody = yield* readJsonBody();
-      return yield* handle(
-        Effect.gen(function* () {
-          const { modelApiKey, recordIds } = yield* decodeUnknownInput(ReorderInput, rawBody);
-          const actor = yield* currentActor();
-          return yield* RecordService.reorderRecords(modelApiKey, recordIds, actor);
-        })
-      );
-    })
-  )
-  ]);
-});
-
-const recordsRouter = Layer.merge(recordsRouter1, recordsRouter2);
 
 // --- Assets ---
 // Upload URL endpoint is handled in fetchHandler (needs r2Credentials from options)
@@ -728,7 +388,6 @@ export const appRouter = Layer.mergeAll(
   openApiRouter,
   healthRouter,
   ApiLayer.pipe(Layer.provide(ApiHandlersLayer)),
-  recordsRouter,
   assetsRouter,
   localesRouter,
   schemaRouter,
