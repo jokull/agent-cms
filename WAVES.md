@@ -209,3 +209,32 @@ Wave 16 (HttpApi) assessment: 57 routes, 12 HttpRouter.use groups, inputs
 already schema-validated per route, errorToResponse at 8 boundary sites.
 Migration is the decision-gated capstone (PLAN Q4: in-roadmap vs separate
 product decision — touches the public API surface). Not started.
+
+## Wave 16 — HttpApi migration (REST surface, committed 2e21743..efbfeaf)
+
+41 of 49 REST routes migrated from HttpRouter to HttpApi with declared
+contracts (per-endpoint error codecs carrying the old errorToResponse
+body shapes + annotated statuses, declared as arrays so each keeps its
+status):
+
+- 16.1 (2e21743) models (5 routes) — the pattern: error codecs via
+  Schema.encodeTo with rc.109 getter-direction drift documented in-code
+- 16.2 (5f80d08) fields (4 routes)
+- 16.3 (949560f) records (26 routes) — actor from handler args, query
+  schemas, 204 NoContent validates, patch-blocks recordId from URL
+- 16.4 (393dc10) locales/schema/search/tokens/preview-tokens/paths/setup
+  (14 routes) — token expiresIn checks moved to the handler (payload-
+  decode errors render empty 400s), paths at /paths (no /api prefix)
+- 16.5 (efbfeaf) assets group built and REVERTED
+
+Assets blocker (rc.109): the assets create endpoint fails with a cryptic
+"Expected JSON value" SchemaError in the response encode — the service
+succeeds, the encode of the identical status(201)(Unknown) success works
+for models/records, but the assets group poisons the whole CmsApi layer
+(model create 500s while the group is registered). Root cause not found
+after deep tracing of the response-transformation internals. Assets stay
+on HttpRouter (routes + handle/readJsonBody helpers restored verbatim).
+health + openapi remain on HttpRouter by design (specials outside the
+API contract surface).
+
+Verified at each commit: tsc 0, oxlint 0/0, 916/916, tsdown green.
