@@ -8,10 +8,11 @@
  * DTO schemas land; the response shapes are byte-identical to the previous
  * HttpRouter routes (verified by the api-models suite).
  */
-import { Effect, Schema } from "effect";
+import { Effect, Layer, Schema } from "effect";
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
 import * as ModelService from "../services/model-service.js";
-import { CreateModelInput, UpdateModelInput } from "../services/input-schemas.js";
+import * as FieldService from "../services/field-service.js";
+import { CreateModelInput, UpdateModelInput, CreateFieldInput, UpdateFieldInput } from "../services/input-schemas.js";
 import { SchemaEngineError, isCmsError, type CmsError } from "../errors.js";
 import { CmsApiErrorList } from "./api-errors.js";
 
@@ -55,9 +56,36 @@ const ModelsGroup = HttpApiGroup.make("models").add(
   }),
 ).prefix("/api/models");
 
-export const CmsApi = HttpApi.make("cms").add(ModelsGroup);
 
-export const ModelsHandlers = HttpApiBuilder.group(CmsApi, "models", (handlers) =>
+
+const FieldsGroup = HttpApiGroup.make("fields").add(
+  HttpApiEndpoint.get("list", "/models/:modelId/fields", {
+    params: Schema.Struct({ modelId: Schema.String }),
+    success: Schema.Array(Schema.Unknown),
+    error: CmsApiErrorList,
+  }),
+  HttpApiEndpoint.post("create", "/models/:modelId/fields", {
+    params: Schema.Struct({ modelId: Schema.String }),
+    payload: CreateFieldInput,
+    success: HttpApiSchema.status(201)(Schema.Unknown),
+    error: CmsApiErrorList,
+  }),
+  HttpApiEndpoint.patch("update", "/models/:modelId/fields/:fieldId", {
+    params: Schema.Struct({ modelId: Schema.String, fieldId: Schema.String }),
+    payload: UpdateFieldInput,
+    success: Schema.Unknown,
+    error: CmsApiErrorList,
+  }),
+  HttpApiEndpoint.delete("delete", "/models/:modelId/fields/:fieldId", {
+    params: Schema.Struct({ modelId: Schema.String, fieldId: Schema.String }),
+    success: Schema.Unknown,
+    error: CmsApiErrorList,
+  }),
+).prefix("/api");
+
+export const CmsApi = HttpApi.make("cms").add(ModelsGroup, FieldsGroup);
+
+const ModelsHandlers = HttpApiBuilder.group(CmsApi, "models", (handlers) =>
   handlers.handle("list", () => ModelService.listModels().pipe(Effect.mapError(toDeclaredError)))
     .handle("create", ({ payload }) => ModelService.createModel(payload).pipe(Effect.mapError(toDeclaredError)))
     .handle("get", ({ params }) => ModelService.getModel(params.id).pipe(Effect.mapError(toDeclaredError)))
@@ -65,5 +93,13 @@ export const ModelsHandlers = HttpApiBuilder.group(CmsApi, "models", (handlers) 
     .handle("delete", ({ params }) => ModelService.deleteModel(params.id).pipe(Effect.mapError(toDeclaredError))),
 );
 
+
+const FieldsHandlers = HttpApiBuilder.group(CmsApi, "fields", (handlers) =>
+  handlers.handle("list", ({ params }) => FieldService.listFields(params.modelId).pipe(Effect.mapError(toDeclaredError)))
+    .handle("create", ({ params, payload }) => FieldService.createField(params.modelId, payload).pipe(Effect.mapError(toDeclaredError)))
+    .handle("update", ({ params, payload }) => FieldService.updateField(params.fieldId, payload).pipe(Effect.mapError(toDeclaredError)))
+    .handle("delete", ({ params }) => FieldService.deleteField(params.fieldId).pipe(Effect.mapError(toDeclaredError))),
+);
+
 export const ApiLayer = HttpApiBuilder.layer(CmsApi);
-export const ApiHandlersLayer = ModelsHandlers;
+export const ApiHandlersLayer = Layer.mergeAll(ModelsHandlers, FieldsHandlers);

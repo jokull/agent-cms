@@ -9,7 +9,6 @@ import {
 
 import { Cause, DateTime, Effect, Layer, Logger, Schema, SchemaIssue, Option } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import * as FieldService from "../services/field-service.js";
 import * as RecordService from "../services/record-service.js";
 import * as PublishService from "../services/publish-service.js";
 import * as AssetService from "../services/asset-service.js";
@@ -19,7 +18,6 @@ import * as ScheduleService from "../services/schedule-service.js";
 import { isCmsError, errorToResponse } from "../errors.js";
 import { ApiLayer, ApiHandlersLayer } from "./api.js";
 import {
-  CreateFieldInput, UpdateFieldInput,
   CreateRecordInput, PatchRecordInput,
   PatchBlocksInput,
   CreateAssetInput,
@@ -166,48 +164,6 @@ const readJsonBody = Effect.fn("readJsonBody")(function* (message: string = "Inv
 const currentActor = Effect.fn("currentActor")(function* () {
   const req = yield* HttpServerRequest.HttpServerRequest;
   return actorFromHeaders(new Headers(req.headers));
-});
-
-// --- Fields ---
-const fieldsRouter = HttpRouter.use((router) => {
-  const api = router.prefixed("/api");
-  return Effect.all([
-  api.add("GET", 
-    "/models/:modelId/fields",
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      return yield* handle(FieldService.listFields(param(params, "modelId")));
-    })
-  ),
-
-  api.add("POST", 
-    "/models/:modelId/fields",
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      const body = yield* readJsonBody();
-      const input = yield* decodeUnknownInput(CreateFieldInput, body);
-      return yield* handle(FieldService.createField(param(params, "modelId"), input), 201);
-    })
-  ),
-
-  api.add("PATCH", 
-    "/models/:modelId/fields/:fieldId",
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      const body = yield* readJsonBody();
-      const input = yield* decodeUnknownInput(UpdateFieldInput, body);
-      return yield* handle(FieldService.updateField(param(params, "fieldId"), input));
-    })
-  ),
-
-  api.add("DELETE", 
-    "/models/:modelId/fields/:fieldId",
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      return yield* handle(FieldService.deleteField(param(params, "fieldId")));
-    })
-  )
-  ]);
 });
 
 // --- Records ---
@@ -772,7 +728,6 @@ export const appRouter = Layer.mergeAll(
   openApiRouter,
   healthRouter,
   ApiLayer.pipe(Layer.provide(ApiHandlersLayer)),
-  fieldsRouter,
   recordsRouter,
   assetsRouter,
   localesRouter,
