@@ -9,7 +9,6 @@ import {
 
 import { Cause, DateTime, Effect, Layer, Logger, Schema, SchemaIssue, Option } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import * as ModelService from "../services/model-service.js";
 import * as FieldService from "../services/field-service.js";
 import * as RecordService from "../services/record-service.js";
 import * as PublishService from "../services/publish-service.js";
@@ -18,8 +17,8 @@ import { AssetImportContext, AssetUrlContext, type AssetUrlConfig } from "../ser
 import * as LocaleService from "../services/locale-service.js";
 import * as ScheduleService from "../services/schedule-service.js";
 import { isCmsError, errorToResponse } from "../errors.js";
+import { ApiLayer, ApiHandlersLayer } from "./api.js";
 import {
-  CreateModelInput, UpdateModelInput,
   CreateFieldInput, UpdateFieldInput,
   CreateRecordInput, PatchRecordInput,
   PatchBlocksInput,
@@ -167,49 +166,6 @@ const readJsonBody = Effect.fn("readJsonBody")(function* (message: string = "Inv
 const currentActor = Effect.fn("currentActor")(function* () {
   const req = yield* HttpServerRequest.HttpServerRequest;
   return actorFromHeaders(new Headers(req.headers));
-});
-
-// --- Models ---
-const modelsRouter = HttpRouter.use((router) => {
-  const api = router.prefixed("/api/models");
-  return Effect.all([
-  api.add("GET", "/", handle(ModelService.listModels())),
-
-  api.add("POST", 
-    "/",
-    Effect.gen(function* () {
-      const body = yield* readJsonBody();
-      const input = yield* decodeUnknownInput(CreateModelInput, body);
-      return yield* handle(ModelService.createModel(input), 201);
-    })
-  ),
-
-  api.add("GET", 
-    "/:id",
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      return yield* handle(ModelService.getModel(param(params, "id")));
-    })
-  ),
-
-  api.add("PATCH", 
-    "/:id",
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      const body = yield* readJsonBody();
-      const input = yield* decodeUnknownInput(UpdateModelInput, body);
-      return yield* handle(ModelService.updateModel(param(params, "id"), input));
-    })
-  ),
-
-  api.add("DELETE", 
-    "/:id",
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      return yield* handle(ModelService.deleteModel(param(params, "id")));
-    })
-  )
-  ]);
 });
 
 // --- Fields ---
@@ -815,7 +771,7 @@ const openApiRouter = HttpRouter.use((router) =>
 export const appRouter = Layer.mergeAll(
   openApiRouter,
   healthRouter,
-  modelsRouter,
+  ApiLayer.pipe(Layer.provide(ApiHandlersLayer)),
   fieldsRouter,
   recordsRouter,
   assetsRouter,
@@ -1418,7 +1374,10 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
       }
 
       // Everything else to the Effect router
-      const response = await restHandler(instrumentedRequest);
+      // SAFETY: the HttpApi layer types the handler as requiring extra context
+      // (its request service is provided per-fetch by toWebHandlerLayer);
+      // undefined skips the extra-context merge in toWebHandlerWith.
+      const response = await restHandler(instrumentedRequest, undefined as never);
       if (response.status < 400 && isSchemaMutationRequest(url, instrumentedRequest.method)) {
         invalidateGraphqlSchemaCache();
       }
