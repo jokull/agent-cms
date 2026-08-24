@@ -1,16 +1,15 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { Effect } from "effect";
 import { SqliteClient } from "@effect/sql-sqlite-node";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { createTestMcpClient, type TestMcpClient, parseToolResult as parse } from "./mcp-helpers.js";
 import { runMigrations } from "./migrate.js";
 import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { createTestMcpClient, parseToolResult as parse } from "./mcp-helpers.js";
 import { createTestApp, jsonRequest } from "./app-helpers.js";
 
 describe("patch_blocks compact MCP response", () => {
-  let agent: Client;
+  let agent: TestMcpClient;
   let sqlLayer: any;
 
   beforeEach(async () => {

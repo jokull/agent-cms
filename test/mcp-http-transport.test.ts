@@ -4,18 +4,17 @@ import { SqliteClient } from "@effect/sql-sqlite-node";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { runMigrations } from "./migrate.ts";
 import { createWebHandler } from "../src/http/router.ts";
+import { createTestMcpClient } from "./mcp-helpers.ts";
 import * as TokenService from "../src/services/token-service.js";
 
-describe("MCP HTTP transport", () => {
+describe("MCP stateless HTTP transport (2026-07-28)", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it("supports real Streamable HTTP client initialization and follow-up requests", async () => {
+  it("serves discover, tools/list, resources/list and resources/read without any handshake", async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "agent-cms-mcp-http-"));
     const dbPath = join(tmpDir, "test.db");
     const sqlLayer = SqliteClient.layer({ filename: dbPath, disableWAL: true });
@@ -23,22 +22,7 @@ describe("MCP HTTP transport", () => {
     Effect.runSync(runMigrations().pipe(Effect.provide(sqlLayer)));
 
     const handler = createWebHandler(sqlLayer, { writeKey: "write-key" }).fetch;
-
-    const transport = new StreamableHTTPClientTransport(new URL("http://localhost/mcp"), {
-      requestInit: { headers: { Authorization: "Bearer write-key" } },
-      fetch: (input, init) => {
-        const url =
-          typeof input === "string"
-            ? input
-            : input instanceof URL
-              ? input.toString()
-              : input.url;
-        return handler(new Request(url, init));
-      },
-    });
-    const client = new Client({ name: "test-client", version: "1.0.0" });
-
-    await client.connect(transport);
+    const { client } = await createTestMcpClient(sqlLayer, { handler });
 
     const tools = await client.listTools();
     expect(tools.tools.some((tool) => tool.name === "schema_info")).toBe(true);
@@ -48,8 +32,6 @@ describe("MCP HTTP transport", () => {
 
     const schema = await client.readResource({ uri: "agent-cms://schema" });
     expect(schema.contents[0]?.uri).toBe("agent-cms://schema");
-
-    await transport.close();
   });
 
   it("supports editor MCP transport with the reduced editorial toolset", async () => {
@@ -64,21 +46,11 @@ describe("MCP HTTP transport", () => {
     );
     const handler = createWebHandler(sqlLayer, { writeKey: "write-key" }).fetch;
 
-    const transport = new StreamableHTTPClientTransport(new URL("http://localhost/mcp/editor"), {
-      requestInit: { headers: { Authorization: `Bearer ${editorToken.token}` } },
-      fetch: (input, init) => {
-        const url =
-          typeof input === "string"
-            ? input
-            : input instanceof URL
-              ? input.toString()
-              : input.url;
-        return handler(new Request(url, init));
-      },
+    const { client } = await createTestMcpClient(sqlLayer, {
+      handler,
+      path: "/mcp/editor",
+      token: editorToken.token,
     });
-    const client = new Client({ name: "test-editor-client", version: "1.0.0" });
-
-    await client.connect(transport);
 
     const tools = await client.listTools();
     expect(tools.tools.some((tool) => tool.name === "schema_info")).toBe(true);
@@ -90,8 +62,6 @@ describe("MCP HTTP transport", () => {
     expect(tools.tools.some((tool) => tool.name === "reindex_search")).toBe(false);
     expect(tools.tools.some((tool) => tool.name === "create_asset_upload_url")).toBe(true);
     expect(tools.tools.some((tool) => tool.name === "import_asset_from_url")).toBe(true);
-
-    await transport.close();
   });
 
   it("lets editor MCP create a presigned asset upload URL", async () => {
@@ -114,21 +84,11 @@ describe("MCP HTTP transport", () => {
       },
     }).fetch;
 
-    const transport = new StreamableHTTPClientTransport(new URL("http://localhost/mcp/editor"), {
-      requestInit: { headers: { Authorization: `Bearer ${editorToken.token}` } },
-      fetch: (input, init) => {
-        const url =
-          typeof input === "string"
-            ? input
-            : input instanceof URL
-              ? input.toString()
-              : input.url;
-        return handler(new Request(url, init));
-      },
+    const { client } = await createTestMcpClient(sqlLayer, {
+      handler,
+      path: "/mcp/editor",
+      token: editorToken.token,
     });
-    const client = new Client({ name: "test-editor-upload-url-client", version: "1.0.0" });
-
-    await client.connect(transport);
 
     const result = await client.callTool({
       name: "create_asset_upload_url",
@@ -143,8 +103,6 @@ describe("MCP HTTP transport", () => {
     expect(body.r2Key).toBe(`uploads/${body.assetId}/photo.jpg`);
     expect(body.uploadUrl).toEqual(expect.stringContaining("https://test-bucket.test-account.r2.cloudflarestorage.com/"));
     expect(body.uploadUrl).toEqual(expect.stringContaining("X-Amz-Signature="));
-
-    await transport.close();
   });
 
   it("lets editor MCP import an asset directly from a public URL", async () => {
@@ -177,21 +135,11 @@ describe("MCP HTTP transport", () => {
 
     const handler = createWebHandler(sqlLayer, { writeKey: "write-key", r2Bucket: fakeBucket }).fetch;
 
-    const transport = new StreamableHTTPClientTransport(new URL("http://localhost/mcp/editor"), {
-      requestInit: { headers: { Authorization: `Bearer ${editorToken.token}` } },
-      fetch: (input, init) => {
-        const url =
-          typeof input === "string"
-            ? input
-            : input instanceof URL
-              ? input.toString()
-              : input.url;
-        return handler(new Request(url, init));
-      },
+    const { client } = await createTestMcpClient(sqlLayer, {
+      handler,
+      path: "/mcp/editor",
+      token: editorToken.token,
     });
-    const client = new Client({ name: "test-editor-import-client", version: "1.0.0" });
-
-    await client.connect(transport);
 
     const imported = await client.callTool({
       name: "import_asset_from_url",
@@ -219,8 +167,6 @@ describe("MCP HTTP transport", () => {
     expect(asset.title).toBe("Pigeon");
     expect(asset.r2Key).toContain(asset.id);
     expect(put).toHaveBeenCalledTimes(1);
-
-    await transport.close();
   });
 
   it("rejects importing an asset from localhost-style URLs", async () => {
@@ -239,21 +185,11 @@ describe("MCP HTTP transport", () => {
     const fakeBucket = { put: vi.fn(async () => undefined) } as unknown as R2Bucket;
     const handler = createWebHandler(sqlLayer, { writeKey: "write-key", r2Bucket: fakeBucket }).fetch;
 
-    const transport = new StreamableHTTPClientTransport(new URL("http://localhost/mcp/editor"), {
-      requestInit: { headers: { Authorization: `Bearer ${editorToken.token}` } },
-      fetch: (input, init) => {
-        const url =
-          typeof input === "string"
-            ? input
-            : input instanceof URL
-              ? input.toString()
-              : input.url;
-        return handler(new Request(url, init));
-      },
+    const { client } = await createTestMcpClient(sqlLayer, {
+      handler,
+      path: "/mcp/editor",
+      token: editorToken.token,
     });
-    const client = new Client({ name: "test-editor-import-localhost-client", version: "1.0.0" });
-
-    await client.connect(transport);
 
     const result = await client.callTool({
       name: "import_asset_from_url",
@@ -266,7 +202,6 @@ describe("MCP HTTP transport", () => {
     expect(result.structuredContent).toMatchObject({ message: expect.stringMatching(/host is not allowed/i) });
 
     expect(fetchSpy).not.toHaveBeenCalled();
-    await transport.close();
   });
 
   it("follows redirecting asset imports", async () => {
@@ -300,21 +235,11 @@ describe("MCP HTTP transport", () => {
     const fakeBucket = { put } as unknown as R2Bucket;
     const handler = createWebHandler(sqlLayer, { writeKey: "write-key", r2Bucket: fakeBucket }).fetch;
 
-    const transport = new StreamableHTTPClientTransport(new URL("http://localhost/mcp/editor"), {
-      requestInit: { headers: { Authorization: `Bearer ${editorToken.token}` } },
-      fetch: (input, init) => {
-        const url =
-          typeof input === "string"
-            ? input
-            : input instanceof URL
-              ? input.toString()
-              : input.url;
-        return handler(new Request(url, init));
-      },
+    const { client } = await createTestMcpClient(sqlLayer, {
+      handler,
+      path: "/mcp/editor",
+      token: editorToken.token,
     });
-    const client = new Client({ name: "test-editor-import-redirect-client", version: "1.0.0" });
-
-    await client.connect(transport);
 
     const result = await client.callTool({
       name: "import_asset_from_url",
@@ -337,7 +262,6 @@ describe("MCP HTTP transport", () => {
     });
     expect(fetchSpy).toHaveBeenCalledTimes(2);
     expect(put).toHaveBeenCalledTimes(1);
-    await transport.close();
   });
 
   it("rejects oversized asset imports before storing them", async () => {
@@ -364,21 +288,11 @@ describe("MCP HTTP transport", () => {
 
     const handler = createWebHandler(sqlLayer, { writeKey: "write-key", r2Bucket: fakeBucket }).fetch;
 
-    const transport = new StreamableHTTPClientTransport(new URL("http://localhost/mcp/editor"), {
-      requestInit: { headers: { Authorization: `Bearer ${editorToken.token}` } },
-      fetch: (input, init) => {
-        const url =
-          typeof input === "string"
-            ? input
-            : input instanceof URL
-              ? input.toString()
-              : input.url;
-        return handler(new Request(url, init));
-      },
+    const { client } = await createTestMcpClient(sqlLayer, {
+      handler,
+      path: "/mcp/editor",
+      token: editorToken.token,
     });
-    const client = new Client({ name: "test-editor-import-oversized-client", version: "1.0.0" });
-
-    await client.connect(transport);
 
     const result = await client.callTool({
       name: "import_asset_from_url",
@@ -391,7 +305,6 @@ describe("MCP HTTP transport", () => {
     expect(result.structuredContent).toMatchObject({ message: expect.stringMatching(/too large to import/i) });
 
     expect(put).not.toHaveBeenCalled();
-    await transport.close();
   });
 
   it("threads editor attribution through MCP record mutations", async () => {
@@ -425,21 +338,11 @@ describe("MCP HTTP transport", () => {
       body: JSON.stringify({ label: "Title", apiKey: "title", fieldType: "string" }),
     }));
 
-    const transport = new StreamableHTTPClientTransport(new URL("http://localhost/mcp/editor"), {
-      requestInit: { headers: { Authorization: `Bearer ${editorToken.token}` } },
-      fetch: (input, init) => {
-        const url =
-          typeof input === "string"
-            ? input
-            : input instanceof URL
-              ? input.toString()
-              : input.url;
-        return handler(new Request(url, init));
-      },
+    const { client } = await createTestMcpClient(sqlLayer, {
+      handler,
+      path: "/mcp/editor",
+      token: editorToken.token,
     });
-    const client = new Client({ name: "test-editor-attribution-client", version: "1.0.0" });
-
-    await client.connect(transport);
 
     const created = await client.callTool({
       name: "create_record",
@@ -463,8 +366,6 @@ describe("MCP HTTP transport", () => {
     expect(parsedVersions[0]?.actor_type).toBe("editor");
     expect(parsedVersions[0]?.actor_label).toBe("Editor MCP");
     expect(parsedVersions[0]?.actor_token_id).toBe(editorToken.id);
-
-    await transport.close();
   });
 
   it("threads editor attribution through MCP asset mutations", async () => {
@@ -479,21 +380,11 @@ describe("MCP HTTP transport", () => {
     );
     const handler = createWebHandler(sqlLayer, { writeKey: "write-key" }).fetch;
 
-    const transport = new StreamableHTTPClientTransport(new URL("http://localhost/mcp/editor"), {
-      requestInit: { headers: { Authorization: `Bearer ${editorToken.token}` } },
-      fetch: (input, init) => {
-        const url =
-          typeof input === "string"
-            ? input
-            : input instanceof URL
-              ? input.toString()
-              : input.url;
-        return handler(new Request(url, init));
-      },
+    const { client } = await createTestMcpClient(sqlLayer, {
+      handler,
+      path: "/mcp/editor",
+      token: editorToken.token,
     });
-    const client = new Client({ name: "test-editor-asset-attribution-client", version: "1.0.0" });
-
-    await client.connect(transport);
 
     const created = await client.callTool({
       name: "upload_asset",
@@ -522,7 +413,5 @@ describe("MCP HTTP transport", () => {
 
     expect(stored.created_by).toBe("Asset MCP Editor");
     expect(stored.updated_by).toBe("Asset MCP Editor");
-
-    await transport.close();
   });
 });

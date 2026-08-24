@@ -1,13 +1,12 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { Effect } from "effect";
 import { SqliteClient } from "@effect/sql-sqlite-node";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { createTestMcpClient, type TestMcpClient } from "./mcp-helpers.js";
 import { createWebHandler } from "../src/http/router.js";
 import { runMigrations } from "./migrate.js";
 import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { createTestMcpClient } from "./mcp-helpers.js";
 
 /**
  * P5.6: End-to-end MCP test
@@ -16,7 +15,7 @@ import { createTestMcpClient } from "./mcp-helpers.js";
  * and blocks, publishes records, then queries via GraphQL. The full loop.
  */
 describe("P5.6: End-to-end MCP → GraphQL", () => {
-  let agent: Client;
+  let agent: TestMcpClient;
   let graphqlHandler: (req: Request) => Promise<Response>;
 
   beforeEach(async () => {

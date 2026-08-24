@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { Effect } from "effect";
 import { SqliteClient } from "@effect/sql-sqlite-node";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { runMigrations } from "./migrate.js";
 import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
@@ -21,7 +20,7 @@ async function createTestMcp() {
 }
 
 describe("MCP Server", () => {
-  let client: Client;
+  let client: TestMcpClient;
 
   beforeEach(async () => {
     ({ client } = await createTestMcp());

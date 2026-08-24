@@ -1,15 +1,13 @@
 import { isObjectRecord, isString, type DynamicRow, type StoredFieldValue } from "../dynamic/row-types.js";
 /**
- * Effect-native MCP (Model Context Protocol) server for agent-cms.
- * 3-layer architecture: Discovery -> Schema -> Content
+ * Stateless MCP server for agent-cms — hand-rolled MCP 2026-07-28 wire
+ * protocol ("stateless core") over plain JSON-RPC 2.0, built directly on
+ * Effect's HTTP stack. No sessions, no initialize handshake: every request
+ * carries its protocol version and capabilities in `_meta`.
  */
-import * as McpServer from "effect/unstable/ai/McpServer";
-
-import * as McpSchema from "effect/unstable/ai/McpSchema";
-import * as McpProtocol from "effect/unstable/ai/McpProtocol";
 import * as AiTool from "effect/unstable/ai/Tool";
 import * as Toolkit from "effect/unstable/ai/Toolkit";
-import { Context, Effect, Layer, Option, Schema, SchemaIssue, Stream } from "effect";
+import { Context, Effect, Layer, ManagedRuntime, Option, Schema, SchemaIssue, Stream } from "effect";
 import { HttpServerRequest } from "effect/unstable/http";
 import { SqlClient, SqlError } from "effect/unstable/sql";
 import { NotFoundError, ValidationError } from "../errors.js";
@@ -177,14 +175,6 @@ const GetRecordInput = Schema.Struct({
 
 const GetPreviewUrlInput = Schema.Struct({
   recordId: Schema.String,
-  modelApiKey: Schema.String,
-});
-
-const SetupContentModelPromptInput = Schema.Struct({
-  description: Schema.String,
-});
-
-const GenerateGraphqlQueriesPromptInput = Schema.Struct({
   modelApiKey: Schema.String,
 });
 
@@ -613,8 +603,25 @@ export function getToolMeta(mode: "admin" | "editor" = "admin") {
   }));
 }
 
-function createGuideResource() {
-  return McpServer.resource({
+/** A stateless MCP resource: uri + metadata + content Effect (SqlClient-backed for the schema resource). */
+interface McpResource {
+  readonly uri: string;
+  readonly name: string;
+  readonly description?: string;
+  readonly mimeType?: string;
+  readonly content: Effect.Effect<unknown, unknown, SqlClient.SqlClient>;
+}
+
+/** A stateless MCP prompt: name + arguments + content Effect built from args. */
+interface McpPrompt {
+  readonly name: string;
+  readonly description?: string;
+  readonly arguments: ReadonlyArray<{ readonly name: string; readonly description?: string; readonly required?: boolean }>;
+  readonly content: (args: Record<string, string>) => Effect.Effect<string>;
+}
+
+function createGuideResource(): McpResource {
+  return {
     uri: "agent-cms://guide",
     name: "agent-cms-guide",
     description: "Orientation guide for agents: workflow, naming conventions, field formats, and lifecycle",
@@ -719,11 +726,11 @@ Translation:
   Leave CMS handles ([[block:ID]], [[inline_block:ID]], [[inline_item:ID]]) untouched. For record links, translate only the visible label in [[record:ID|label]] and keep the ID unchanged.
   The CMS reconstructs DAST from Agent Text when you update the record.
   This gives full article context for fluid translations vs. isolated sentence-level machine translation.`),
-  });
+  };
 }
 
-function createSchemaResource() {
-  return McpServer.resource({
+function createSchemaResource(): McpResource {
+  return {
     uri: "agent-cms://schema",
     name: "agent-cms-schema",
     description: "Current CMS schema: models, fields, and locales as JSON",
@@ -758,14 +765,14 @@ function createSchemaResource() {
         })),
       });
     }),
-  });
+  };
 }
 
-function createSetupContentModelPrompt() {
-  return McpServer.prompt({
+function createSetupContentModelPrompt(): McpPrompt {
+  return {
     name: "setup-content-model",
     description: "Guide an agent through designing and creating content models from a description",
-    parameters: SetupContentModelPromptInput.fields,
+    arguments: [{ name: "description", required: true }],
     content: ({ description }) =>
       Effect.succeed(`Set up content models for: ${description}
 
@@ -783,14 +790,14 @@ Follow these steps:
 6. Publish the sample records with set_publish_status.
 7. Show the GraphQL query that a frontend would use to fetch this content.
    Remember: api_key snake_case -> GraphQL camelCase fields, PascalCase types.`),
-  });
+  };
 }
 
-function createGenerateGraphqlQueriesPrompt() {
-  return McpServer.prompt({
+function createGenerateGraphqlQueriesPrompt(): McpPrompt {
+  return {
     name: "generate-graphql-queries",
     description: "Generate GraphQL queries for a content model with proper naming conventions",
-    parameters: GenerateGraphqlQueriesPromptInput.fields,
+    arguments: [{ name: "modelApiKey", required: true }],
     content: ({ modelApiKey }) =>
       Effect.succeed(`Generate GraphQL queries for the "${modelApiKey}" model.
 
@@ -810,7 +817,7 @@ Steps:
    - color -> { red green blue alpha hex }
    - lat_lon -> { latitude longitude }
 5. Include both a "full" query with all fields and a "list" query with essential fields only.`),
-  });
+  };
 }
 
 export interface CreateMcpLayerOptions {
@@ -824,12 +831,14 @@ export interface CreateMcpLayerOptions {
   readonly siteUrl?: string;
 }
 
-export function createMcpLayer(
+export function createStatelessMcpHandler(
   sqlLayer: Layer.Layer<SqlClient.SqlClient | VectorizeContext | HooksContext>,
   options?: CreateMcpLayerOptions,
-){
+): (request: Request) => Promise<Response> {
   const mode = options?.mode ?? "admin";
-  const path = options?.path ?? (mode === "editor" ? "/mcp/editor" : "/mcp");
+  const name = mode === "editor" ? "agent-cms-editor" : "agent-cms";
+  const version = "0.1.0";
+  const serverInfo = { name, version };
   const defaultVectorizeLayer: Layer.Layer<VectorizeContext> = Layer.succeed(VectorizeContext, Option.none());
   const defaultHooksLayer: Layer.Layer<HooksContext> = Layer.succeed(HooksContext, Option.none());
   const defaultAssetImportLayer: Layer.Layer<AssetImportContext> = Layer.succeed(AssetImportContext, {
@@ -841,15 +850,6 @@ export function createMcpLayer(
     Layer.merge(Layer.merge(defaultVectorizeLayer, defaultHooksLayer), defaultAssetImportLayer),
     sqlLayer,
   );
-  const serverLayer = McpServer.layerHttp({
-    name: mode === "editor" ? "agent-cms-editor" : "agent-cms",
-    version: "0.1.0",
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Effect MCP path is typed as a route literal, but this server accepts a runtime-configured route.
-    // SAFETY: the resolved path is always a `/`-prefixed route (defaults `/mcp` and `/mcp/editor`;
-    // every call site passes a `/`-prefixed literal), which satisfies PathInput = `/${string}` | "*".
-    path: path as never,
-    protocols: [McpProtocol.v2025_06_18],
-  });
 
   function assetUrl(r2Key: string): string | undefined {
     if (!options?.assetBaseUrl) return undefined;
@@ -1112,105 +1112,313 @@ export function createMcpLayer(
     }),
   } as const;
 
-  // Handler layer built against the admin toolkit (editor tools are a subset);
-  // the registration loop below selects which tools each mode actually exposes.
+  // Handler layer built against the admin toolkit (editor tools are a subset).
   const toolkitHandlers = CmsToolkit.toLayer(pickToolkitHandlers(CmsToolkit, toolHandlers));
 
-  const toolkitRegistration = Layer.effectDiscard(Effect.gen(function* () {
-    const registry = yield* McpServer.McpServer;
-    // Editor tools are a strict subset of admin tools (same consts), so the
-    // registration mechanics run against the admin toolkit while the mode
-    // selects which tools actually get registered.
-    const built = yield* CmsToolkit;
-    const context = yield* Effect.context();
-    const registeredTools = mode === "editor" ? EditorToolkit.tools : built.tools;
+  // A single managed runtime keeps the SQL layer alive across requests; the
+  // stateless protocol dispatches plain JSON-RPC through it per request.
+  const runtime = ManagedRuntime.make(Layer.merge(toolkitHandlers, fullLayer));
 
-    for (const tool of Object.values(registeredTools)) {
-      const mcpTool = new McpSchema.Tool({
-        name: tool.name,
-        description: tool.description,
-        inputSchema: toMcpInputSchema(tool),
-        annotations: {
-          ...Context.getOption(tool.annotations, AiTool.Title).pipe(Option.map((title) => ({ title })), Option.getOrUndefined),
-          readOnlyHint: Context.get(tool.annotations, AiTool.Readonly),
-          destructiveHint: Context.get(tool.annotations, AiTool.Destructive),
-          idempotentHint: Context.get(tool.annotations, AiTool.Idempotent),
-          openWorldHint: Context.get(tool.annotations, AiTool.OpenWorld),
-        },
-      });
+  /** Wire result for a completed tool call (no MRTR — this server never requests client input). */
+  interface CallToolResultJson {
+    readonly isError?: boolean;
+    readonly structuredContent?: unknown;
+    readonly content: Array<{ readonly type: "text"; readonly text: string }>;
+  }
 
-      yield* registry.addTool({
-        tool: mcpTool,
-        annotations: Context.empty(),
-        handle(payload) {
-          const params = isToolPayload(payload) ? payload : {};
-          // Enforce `additionalProperties: false` on the raw payload before the
-          // Toolkit decode silently strips unknown keys (see collectExcessProperties).
-          const excess = collectExcessProperties(mcpTool.inputSchema, params);
-          if (excess.length > 0) {
-            const error = {
-              _tag: "ValidationError",
-              message: `${excess.join("; ")}. Check the tool's inputSchema.`,
-            };
-            return Effect.succeed(
-              new McpSchema.CallToolResult({
-                isError: true,
-                structuredContent: toStructuredContent(error),
-                content: [{ type: "text", text: encodeJson(error) }],
-              }),
+  // Tool registry: metadata is synchronous from the toolkit; handlers run the
+  // built toolkit (with its generated handlers) through the managed runtime.
+  // RuntimeR is the exact service set the managed runtime provides, so the
+  // registry's effects type-check against runtime.runPromise below.
+  type RuntimeR = typeof runtime extends ManagedRuntime.ManagedRuntime<infer R, any> ? R : never;
+  interface ToolAnnotations {
+    readonly title?: string;
+    readonly readOnlyHint: boolean;
+    readonly destructiveHint: boolean;
+    readonly idempotentHint: boolean;
+    readonly openWorldHint: boolean;
+  }
+  const toolRegistry = new Map<string, {
+    readonly name: string;
+    readonly description: string | undefined;
+    readonly inputSchema: DynamicRow;
+    readonly annotations: ToolAnnotations;
+    readonly handle: (params: DynamicRow) => Effect.Effect<CallToolResultJson, never, RuntimeR>;
+  }>();
+
+  const registeredTools = mode === "editor" ? EditorToolkit.tools : CmsToolkit.tools;
+  for (const tool of Object.values(registeredTools)) {
+    const inputSchema = toMcpInputSchema(tool);
+    const annotations: ToolAnnotations = {
+      ...Context.getOption(tool.annotations, AiTool.Title).pipe(Option.map((title) => ({ title })), Option.getOrUndefined),
+      readOnlyHint: Context.get(tool.annotations, AiTool.Readonly),
+      destructiveHint: Context.get(tool.annotations, AiTool.Destructive),
+      idempotentHint: Context.get(tool.annotations, AiTool.Idempotent),
+      openWorldHint: Context.get(tool.annotations, AiTool.OpenWorld),
+    };
+    toolRegistry.set(tool.name, {
+      name: tool.name,
+      description: tool.description,
+      inputSchema,
+      annotations,
+      handle: (payload) => {
+        const params = isToolPayload(payload) ? payload : {};
+        // Enforce `additionalProperties: false` on the raw payload before the
+        // Toolkit decode silently strips unknown keys (see collectExcessProperties).
+        const excess = collectExcessProperties(inputSchema, params);
+        if (excess.length > 0) {
+          const error = {
+            _tag: "ValidationError",
+            message: `${excess.join("; ")}. Check the tool's inputSchema.`,
+          };
+          return Effect.succeed({
+            isError: true,
+            structuredContent: toStructuredContent(error),
+            content: [{ type: "text", text: encodeJson(error) }],
+          });
+        }
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- dynamic toolkit dispatch crosses Effect Toolkit's generated tool-name/payload types.
+        // SAFETY: `tool` comes from registeredTools, which is either CmsToolkit's own
+        // tools or EditorToolkit's tools (the editor list is the same consts as a subset
+        // of admin tools), so `tool.name` is always a key of CmsToolkit's tools; `params`
+        // is the raw JSON payload, which handle() validates and decodes at runtime via
+        // the tool's parameter schema.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the toolkit's HandlersFor service is provided by the managed runtime (Layer.merge(toolkitHandlers, fullLayer)), which is exactly the RuntimeR contract; the gen's narrowed requirement is the same service set, so the cast only satisfies the variance check.
+        // SAFETY: the runtime layer above provides both the toolkit handlers and the SQL/default services, so an effect typed against RuntimeR can be run via runtime.runPromise below; the narrower inferred requirement is a subset of RuntimeR.
+        const call: Effect.Effect<CallToolResultJson, never, RuntimeR> =
+          Effect.gen(function* () {
+            const built = yield* CmsToolkit;
+            // Capture the full request-time context (runtime services + the
+            // per-request HttpServerRequest) and bake it into the toolkit call so
+            // the loosely-typed LooseToolHandler requirements stay satisfied.
+            const context = yield* Effect.context();
+            // SAFETY: the toolkit dispatch crosses Effect Toolkit's generated tool-name/payload
+            // types; handle() validates and decodes the raw payload at runtime via the tool's
+            // parameter schema, and `tool.name` is always a key of the built toolkit.
+            const maybeResult = yield* built.handle(tool.name as never, params as never).pipe(
+              Effect.provide(context),
+              Effect.flatMap((stream) => Stream.runLast(stream)),
             );
-          }
-          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- dynamic MCP registry dispatch crosses Effect Toolkit's generated tool-name/payload types.
-          // SAFETY: `tool` comes from registeredTools, which is either CmsToolkit's own
-          // tools or EditorToolkit's tools (the editor list is the same consts as a subset
-          // of admin tools), so `tool.name` is always a key of CmsToolkit's tools; `params`
-          // is the raw JSON payload, which handle() validates and decodes at runtime via
-          // the tool's parameter schema.
-          return built.handle(tool.name as never, params as never).pipe(
-            Effect.provide(context),
-            Effect.flatMap((stream) => Stream.runLast(stream)),
-            Effect.map((maybeResult) =>
-              Option.isSome(maybeResult)
-                ? (() => {
-                    // SAFETY: encodedResult is the tool's JSON-encoded success value; toStructuredContent
-                    // and encodeJson only branch on object records (DynamicRow is in StoredFieldValue) and
-                    // handle any other runtime value without crashing, so the type is a safe approximation.
-                    const encoded = maybeResult.value.encodedResult as StoredFieldValue;
-                    return new McpSchema.CallToolResult({
-                      isError: maybeResult.value.isFailure,
-                      structuredContent: toStructuredContent(encoded),
-                      content: [{ type: "text", text: encodeJson(encoded) }],
-                    });
-                  })()
-                : new McpSchema.CallToolResult({
-                    content: [{ type: "text", text: "Tool returned no result" }],
-                  }),
-            ),
+            if (Option.isNone(maybeResult)) {
+              return { content: [{ type: "text", text: "Tool returned no result" }] };
+            }
+            // SAFETY: encodedResult is the tool's JSON-encoded success value; toStructuredContent
+            // and encodeJson only branch on object records (DynamicRow is in StoredFieldValue) and
+            // handle any other runtime value without crashing, so the type is a safe approximation.
+            const encoded = maybeResult.value.encodedResult as StoredFieldValue;
+            return {
+              isError: maybeResult.value.isFailure,
+              structuredContent: toStructuredContent(encoded),
+              content: [{ type: "text", text: encodeJson(encoded) }],
+            };
+          }).pipe(
             Effect.catch((rawError) => {
               const error = formatToolError(rawError);
               // SAFETY: formatToolError returns either a ValidationError (a record) or the raw
               // error untouched; toStructuredContent and encodeJson handle non-record values without
               // crashing, so the cast only affects type-checking, not runtime behavior.
               const errorPayload = error as StoredFieldValue;
-              return Effect.succeed(new McpSchema.CallToolResult({
+              return Effect.succeed({
                 isError: true,
                 structuredContent: toStructuredContent(errorPayload),
                 content: [{ type: "text", text: encodeJson(errorPayload) }],
-              }));
+              });
             }),
-          );
-        },
-      });
-    }
-  })).pipe(Layer.provide(toolkitHandlers));
+          ) as Effect.Effect<CallToolResultJson, never, RuntimeR>;
+        return call;
+      },
+    });
+  }
 
-  const registeredContent = Layer.mergeAll(
-    toolkitRegistration,
+  const resources: ReadonlyArray<McpResource> = [
     createGuideResource(),
     createSchemaResource(),
+  ];
+  const prompts: ReadonlyArray<McpPrompt> = [
     createSetupContentModelPrompt(),
     createGenerateGraphqlQueriesPrompt(),
-  ).pipe(Layer.provide(serverLayer));
+  ];
 
-  return Layer.merge(serverLayer, registeredContent).pipe(Layer.provide(fullLayer));
+  // --- MCP 2026-07-28 stateless wire helpers ---
+
+  const RESULT_META = { _meta: { "io.modelcontextprotocol/serverInfo": serverInfo }, resultType: "complete" as const };
+  const CACHEABLE = { ttlMs: 0, cacheScope: "private" as const };
+
+  function mcpError(code: number, message: string) {
+    return { code, message };
+  }
+
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- JSON-RPC ids are opaque wire values (string | number | null) by protocol; this boundary function echoes them back verbatim.
+  function jsonResponse(
+    // oxlint-disable-next-line anti-slop/no-unknown-parameters -- JSON-RPC ids are opaque wire values (string | number | null) by protocol; this boundary function echoes them back verbatim.
+    id: unknown,
+    payload: { readonly result?: unknown; readonly error?: unknown },
+    status = 200,
+  ): Response {
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id, ...payload }), {
+      status,
+      headers: {
+        "Content-Type": "application/json",
+        "MCP-Protocol-Version": "2026-07-28",
+      },
+    });
+  }
+
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- tool call ids are opaque JSON-RPC ids echoed back verbatim (see jsonResponse).
+  function toolResultOk(id: unknown, result: CallToolResultJson): Response {
+    return jsonResponse(id, { result: { ...RESULT_META, ...result } });
+  }
+
+  // --- Request dispatch ---
+
+  return async (request: Request): Promise<Response> => {
+    if (request.method !== "POST") {
+      return jsonResponse(null, { error: mcpError(-32600, "Method Not Allowed: MCP uses POST") }, 405);
+    }
+    const text = await request.text();
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return jsonResponse(null, { error: mcpError(-32700, "Parse error") }, 400);
+    }
+    if (!isObjectRecord(parsed) || parsed.jsonrpc !== "2.0" || !isString(parsed.method)) {
+      return jsonResponse(null, { error: mcpError(-32600, "Invalid Request") }, 400);
+    }
+    const hasId = "id" in parsed;
+    const id: unknown = hasId ? parsed.id : undefined;
+    const method = parsed.method;
+    const params = isObjectRecord(parsed.params) ? parsed.params : {};
+    const meta = isObjectRecord(params._meta) ? params._meta : {};
+
+    // Protocol version lives in `_meta` per request (or the MCP-Protocol-Version
+    // header); absent means our own clients default to 2026-07-28.
+    const version = isString(meta["io.modelcontextprotocol/protocolVersion"])
+      ? meta["io.modelcontextprotocol/protocolVersion"]
+      : (request.headers.get("mcp-protocol-version") ?? "2026-07-28");
+    if (version !== "2026-07-28") {
+      return jsonResponse(id, { error: mcpError(-32022, `Unsupported MCP protocol version: ${version}`) }, 400);
+    }
+
+    switch (method) {
+      case "server/discover":
+        return jsonResponse(id, {
+          result: {
+            ...RESULT_META,
+            ...CACHEABLE,
+            supportedVersions: ["2026-07-28"],
+            capabilities: { tools: {}, resources: {}, prompts: {} },
+            instructions: "agent-cms MCP server: content model, records, publishing, assets, search, and site settings.",
+          },
+        });
+
+      case "tools/list":
+        return jsonResponse(id, {
+          result: {
+            ...RESULT_META,
+            ...CACHEABLE,
+            tools: [...toolRegistry.values()].map((t) => ({
+              name: t.name,
+              description: t.description,
+              inputSchema: t.inputSchema,
+              annotations: t.annotations,
+            })),
+          },
+        });
+
+      case "tools/call": {
+        const name = isString(params.name) ? params.name : "";
+        const entry = toolRegistry.get(name);
+        if (!entry) return jsonResponse(id, { error: mcpError(-32602, `Unknown tool: ${name}`) });
+        const args = isObjectRecord(params.arguments) ? params.arguments : {};
+        const result = await runtime.runPromise(
+          entry.handle(args).pipe(
+            Effect.provideService(HttpServerRequest.HttpServerRequest, HttpServerRequest.fromWeb(request)),
+          ),
+        );
+        return toolResultOk(id, result);
+      }
+
+      case "resources/list":
+        return jsonResponse(id, {
+          result: {
+            ...RESULT_META,
+            ...CACHEABLE,
+            resources: resources.map((r) => ({
+              uri: r.uri,
+              name: r.name,
+              description: r.description,
+              mimeType: r.mimeType,
+            })),
+          },
+        });
+
+      case "resources/read": {
+        const uri = isString(params.uri) ? params.uri : "";
+        const resource = resources.find((r) => r.uri === uri);
+        if (!resource) return jsonResponse(id, { error: mcpError(-32602, `Unknown resource: ${uri}`) });
+        const content = await runtime.runPromise(resource.content);
+        const text = isString(content) ? content : JSON.stringify(content);
+        return jsonResponse(id, {
+          result: {
+            ...RESULT_META,
+            ...CACHEABLE,
+            contents: [{ uri, mimeType: resource.mimeType, text }],
+          },
+        });
+      }
+
+      case "prompts/list":
+        return jsonResponse(id, {
+          result: {
+            ...RESULT_META,
+            ...CACHEABLE,
+            prompts: prompts.map((p) => ({
+              name: p.name,
+              description: p.description,
+              arguments: p.arguments,
+            })),
+          },
+        });
+
+      case "prompts/get": {
+        const name = isString(params.name) ? params.name : "";
+        const prompt = prompts.find((p) => p.name === name);
+        if (!prompt) return jsonResponse(id, { error: mcpError(-32602, `Unknown prompt: ${name}`) });
+        // SAFETY: prompt arguments are a flat string-keyed record by the McpPrompt contract;
+        // the raw wire object is validated to be a record by isObjectRecord above.
+        const args = isObjectRecord(params.arguments) ? (params.arguments as Record<string, string>) : {};
+        const text = await runtime.runPromise(prompt.content(args));
+        return jsonResponse(id, {
+          result: {
+            ...RESULT_META,
+            description: prompt.description,
+            messages: [{ role: "user", content: { type: "text", text } }],
+          },
+        });
+      }
+
+      case "subscriptions/listen": {
+        // This server never emits notifications, so acknowledge the subscription
+        // and close the stream immediately. We advertise no listChanged
+        // capabilities, so conforming clients should not subscribe at all.
+        const subscriptionId = crypto.randomUUID();
+        return jsonResponse(id, {
+          result: {
+            _meta: {
+              "io.modelcontextprotocol/serverInfo": serverInfo,
+              "io.modelcontextprotocol/subscriptionId": subscriptionId,
+            },
+            resultType: "complete",
+          },
+        });
+      }
+
+      case "notifications/cancelled":
+        return new Response(null, { status: 202 });
+
+      default:
+        return jsonResponse(id, { error: mcpError(-32601, `Method not found: ${method}`) });
+    }
+  };
 }

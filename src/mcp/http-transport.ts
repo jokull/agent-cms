@@ -1,23 +1,15 @@
-import * as HttpRouter from "effect/unstable/http/HttpRouter";
-import * as Layer from "effect/Layer";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { createMcpLayer, type CreateMcpLayerOptions } from "./server.js";
-import { VectorizeContext } from "../search/vectorize-context.js";
-import { HooksContext } from "../hooks.js";
+import { createStatelessMcpHandler, type CreateMcpLayerOptions } from "./server.js";
 
 /**
- * Create a cached Web Standard handler for the Effect-native MCP server.
+ * Create a Web Standard handler for the stateless MCP server (2026-07-28).
+ *
+ * The stateless protocol is plain JSON-RPC 2.0 over HTTP POST — no sessions,
+ * no initialize handshake — so the handler is a direct `Request -> Response`
+ * function wired through the same Effect layer graph as the rest of the CMS.
  */
 export function createMcpHttpHandler(
-  sqlLayer: Layer.Layer<SqlClient.SqlClient | VectorizeContext | HooksContext>,
+  sqlLayer: Parameters<typeof createStatelessMcpHandler>[0],
   options?: CreateMcpLayerOptions,
-) {
-  // SAFETY: Effect AI's MCP layer composes correctly at runtime (createMcpLayer wires the
-  // router through HttpRouter.toWebHandler below), but Layer inference widens the remaining
-  // router requirement to `unknown` at this boundary; the cast restores the typed requirement.
-  const mcpLayer = createMcpLayer(sqlLayer, options) as Layer.Layer<unknown, never, HttpRouter.HttpRouter>;
-  const { handler } = HttpRouter.toWebHandler(mcpLayer, {
-    disableLogger: true,
-  });
-  return handler;
+): (request: Request) => Promise<Response> {
+  return createStatelessMcpHandler(sqlLayer, options);
 }
