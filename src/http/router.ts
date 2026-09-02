@@ -20,6 +20,7 @@ import { CreateUploadUrlInput } from "../services/input-schemas.js";
 import { UnauthorizedError } from "../errors.js";
 import * as ScheduleService from "../services/schedule-service.js";
 import type { AiBinding, VectorizeBinding } from "../search/vectorize.js";
+import type { ImagesBinding } from "../images-binding.js";
 import { VectorizeContext } from "../search/vectorize-context.js";
 import { HooksContext, type CmsHooks } from "../hooks.js";
 import {
@@ -72,7 +73,7 @@ export interface WebHandlerOptions {
   isProduction?: boolean;
   /** Write API key — if set, required for REST writes, MCP, publish/unpublish (like DatoCMS CMA token) */
   writeKey?: string;
-  /** R2 bucket for serving asset files */
+  /** R2 bucket for serving non-image asset files */
   r2Bucket?: R2Bucket;
   /** Workers AI binding for embedding generation (optional — enables vector search) */
   ai?: AiBinding;
@@ -80,13 +81,8 @@ export interface WebHandlerOptions {
   vectorize?: VectorizeBinding;
   /** Lifecycle hooks fired on content events */
   hooks?: CmsHooks;
-  /** R2 credentials for generating presigned upload URLs */
-  r2Credentials?: {
-    accessKeyId: string;
-    secretAccessKey: string;
-    bucketName: string;
-    accountId: string;
-  };
+  /** Cloudflare Images binding — enables hosted image assets and keyless direct uploads */
+  images?: ImagesBinding;
   /** Public URL of the frontend site — used for assembling preview URLs */
   siteUrl?: string;
   /** Worker Loader binding for Code Mode MCP (optional — enables /mcp/codemode) */
@@ -108,7 +104,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
   );
   const assetImportLayer = Layer.succeed(AssetImportContext, {
     r2Bucket: options?.r2Bucket,
-    r2Credentials: options?.r2Credentials,
+    images: options?.images,
     fetch: options?.fetch ?? globalThis.fetch,
   });
   /**
@@ -472,7 +468,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
             mode: "admin",
             path: "/mcp",
             r2Bucket: options.r2Bucket,
-            r2Credentials: options.r2Credentials,
+            images: options.images,
             assetBaseUrl: options.assetBaseUrl,
             siteUrl: options.siteUrl,
             actor: { type: "admin", label: "admin" },
@@ -503,7 +499,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
           mode: "admin",
           path: "/mcp",
           r2Bucket: options?.r2Bucket,
-          r2Credentials: options?.r2Credentials,
+          images: options?.images,
           assetBaseUrl: options?.assetBaseUrl,
           siteUrl: options?.siteUrl,
           actor,
@@ -520,7 +516,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
             mode: "editor",
             path: "/mcp/editor",
             r2Bucket: options.r2Bucket,
-            r2Credentials: options.r2Credentials,
+            images: options.images,
             assetBaseUrl: options.assetBaseUrl,
             siteUrl: options.siteUrl,
             actor: { type: "editor", label: "editor" },
@@ -553,7 +549,7 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
           mode: "editor",
           path: "/mcp/editor",
           r2Bucket: options?.r2Bucket,
-          r2Credentials: options?.r2Credentials,
+          images: options?.images,
           assetBaseUrl: options?.assetBaseUrl,
           siteUrl: options?.siteUrl,
           actor,
@@ -601,10 +597,10 @@ export function createWebHandler(sqlLayer: Layer.Layer<SqlClient.SqlClient>, opt
         }));
       }
 
-      // POST /api/assets/upload-url — generate presigned R2 upload URL
+      // POST /api/assets/upload-url — mint a keyless direct-upload URL (hosted image)
       if (url.pathname === "/api/assets/upload-url" && instrumentedRequest.method === "POST") {
-        if (!options?.r2Credentials) {
-          return finish(new Response(JSON.stringify({ error: "Presigned uploads not configured" }), {
+        if (!options?.images) {
+          return finish(new Response(JSON.stringify({ error: "Direct image uploads are not configured (missing Cloudflare Images binding)" }), {
             status: 501,
             headers: { "Content-Type": "application/json" },
           }));

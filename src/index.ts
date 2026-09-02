@@ -2,6 +2,7 @@ import { D1Client } from "@effect/sql-d1";
 import { DateTime, Layer } from "effect";
 import { createWebHandler } from "./http/router.js";
 import type { AiBinding, VectorizeBinding } from "./search/vectorize.js";
+import type { ImagesBinding } from "./images-binding.js";
 import type { CmsHooks } from "./hooks.js";
 import { decodeCmsBindings, type DecodedCmsBindings } from "./config-schema.js";
 export { createCmsAdminClient } from "./admin-client.js";
@@ -35,14 +36,9 @@ export interface CmsBindings {
   ai?: AiBinding;
   /** Vectorize index binding (optional — enables semantic search) */
   vectorize?: VectorizeBinding;
-  /** R2 API token access key ID — enables presigned upload URLs */
-  r2AccessKeyId?: string;
-  /** R2 API token secret access key — enables presigned upload URLs */
-  r2SecretAccessKey?: string;
-  /** R2 bucket name — needed for presigned upload URLs */
-  r2BucketName?: string;
-  /** Cloudflare account ID — needed for the R2 S3-compatible endpoint */
-  cfAccountId?: string;
+  /** Cloudflare Images binding (optional — enables hosted image assets and
+   *  keyless direct uploads via binding-minted URLs; no S3 credentials needed) */
+  images?: ImagesBinding;
   /** Public URL of the frontend site — used for assembling preview URLs */
   siteUrl?: string;
   /** Worker Loader binding for Code Mode MCP (optional — enables /mcp/codemode) */
@@ -77,13 +73,11 @@ function cacheKey(bindings: DecodedCmsBindings, hooks: CmsHooks | undefined): st
     getObjectId(bindings.assets),
     getObjectId(bindings.ai),
     getObjectId(bindings.vectorize),
+    getObjectId(bindings.images),
     getObjectId(hooks),
     bindings.environment ?? "",
     bindings.assetBaseUrl ?? "",
     bindings.writeKey ?? "",
-    bindings.r2Credentials?.accessKeyId ?? "",
-    bindings.r2Credentials?.bucketName ?? "",
-    bindings.r2Credentials?.accountId ?? "",
     bindings.siteUrl ?? "",
   ].join("|");
 }
@@ -141,7 +135,7 @@ function createCMSHandlerUncached(bindings: DecodedCmsBindings, hooks?: CmsHooks
     ai: bindings.ai,
     vectorize: bindings.vectorize,
     hooks,
-    r2Credentials: bindings.r2Credentials,
+    images: bindings.images,
     siteUrl: bindings.siteUrl,
     loader: bindings.loader,
   });

@@ -44,7 +44,7 @@ export function parseMediaGalleryReferences(value: StoredFieldValue): MediaField
 export function mergeAssetWithMediaReference(
   asset: AssetRow,
   reference: MediaFieldReference | null,
-  assetUrl: (r2Key: string) => string,
+  assetUrl: (asset: AssetUrlSource) => string,
 ): AssetObject {
   const defaultCustomData = asset.custom_data ? decodeJsonStringOr(asset.custom_data, null) : null;
   const defaultFocalPoint = asset.focal_point ? decodeJsonStringOr(asset.focal_point, null) : null;
@@ -68,7 +68,7 @@ export function mergeAssetWithMediaReference(
     // SAFETY: a missing/invalid tags JSON decodes to the empty array, a StoredFieldValue per the json contract.
     // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- fallback literal for an absent tags cell; the union bridge is the honest typed default.
     tags: stringArrayFrom(decodeJsonStringOr(asset.tags, [] as unknown as StoredFieldValue)),
-    url: assetUrl(asset.r2_key),
+    url: assetUrl(asset),
     _createdAt: asset.created_at,
     _updatedAt: asset.updated_at,
     _createdBy: asset.created_by,
@@ -81,20 +81,25 @@ export function mergeAssetWithMediaReference(
 // ===========================================================================
 
 /**
- * How an absolute asset URL is resolved. Both members are optional; the
- * resolution order (documented once, here, and relied on by REST, RPC and the
- * record-read enrichment below) is:
+ * How an absolute asset URL is resolved. Two storage kinds:
  *
- *  1. `baseUrl` — the configured `ASSET_BASE_URL` (a bucket custom domain or
- *     CDN host serving R2 objects at their key path). Produces
- *     `<baseUrl>/<r2_key>`, byte-identical to what GraphQL already emits
- *     (`src/graphql/schema-builder.ts`), so the two surfaces cannot drift.
- *  2. `origin` — no base URL configured, but the caller knows the CMS's own
- *     origin (the HTTP router fills this in from the incoming request).
- *     Produces `<origin>/assets/<id>/<filename>`, the route the Worker serves
- *     from R2 (`src/http/router.ts`).
- *  3. Neither — an in-process library/test host with nothing configured.
- *     Produces the same-origin relative path `/assets/<id>/<filename>`.
+ *  - **Hosted image rows** (`image_id` + `image_delivery_base` set, r2_key
+ *    empty) resolve to the Cloudflare Images delivery URL
+ *    `<image_delivery_base>/<image_id>/<variant>` — self-contained, no config
+ *    needed (the base is the account's imagedelivery.net hash, persisted at
+ *    registration).
+ *  - **File rows** (stored in R2) resolve per the ambient config below:
+ *
+ *   1. `baseUrl` — the configured `ASSET_BASE_URL` (a bucket custom domain or
+ *      CDN host serving R2 objects at their key path). Produces
+ *      `<baseUrl>/<r2_key>`, byte-identical to what GraphQL already emits
+ *      (`src/graphql/schema-builder.ts`), so the two surfaces cannot drift.
+ *   2. `origin` — no base URL configured, but the caller knows the CMS's own
+ *      origin (the HTTP router fills this in from the incoming request).
+ *      Produces `<origin>/assets/<id>/<filename>`, the route the Worker serves
+ *      from R2 (`src/http/router.ts`).
+ *   3. Neither — an in-process library/test host with nothing configured.
+ *      Produces the same-origin relative path `/assets/<id>/<filename>`.
  *
  * A URL is therefore ALWAYS produced; it is never null.
  */
@@ -102,6 +107,9 @@ export interface AssetUrlConfig {
   readonly baseUrl?: string | undefined;
   readonly origin?: string | undefined;
 }
+
+/** Variant name agent-cms resolves hosted-image delivery URLs against. */
+export const IMAGE_DELIVERY_VARIANT = "public";
 
 /**
  * Optional service carrying the asset-URL configuration. Read with
@@ -123,6 +131,8 @@ export interface AssetUrlSource {
   readonly id: string;
   readonly filename: string;
   readonly r2_key: string;
+  readonly image_id?: string | null;
+  readonly image_delivery_base?: string | null;
 }
 
 function trimTrailingSlash(value: string) {
@@ -130,11 +140,33 @@ function trimTrailingSlash(value: string) {
 }
 
 export function resolveAssetUrl(asset: AssetUrlSource, config: AssetUrlConfig): string {
+  if (asset.image_id && asset.image_delivery_base) {
+    // Hosted-image row: self-contained Cloudflare Images delivery URL.
+    return `${trimTrailingSlash(asset.image_delivery_base)}/${asset.image_id}/${IMAGE_DELIVERY_VARIANT}`;
+  }
   if (config.baseUrl && config.baseUrl.length > 0) {
     return `${trimTrailingSlash(config.baseUrl)}/${asset.r2_key}`;
   }
   const path = `/assets/${encodeURIComponent(asset.id)}/${encodeURIComponent(asset.filename)}`;
   return config.origin && config.origin.length > 0 ? `${trimTrailingSlash(config.origin)}${path}` : path;
+}
+
+/** Bind a URL config into a row resolver — the shared choke point read surfaces use. */
+export function assetUrlResolverFor(config: AssetUrlConfig): (asset: AssetUrlSource) => string {
+  return (asset) => resolveAssetUrl(asset, config);
+}
+
+/** Whether a URL is a Cloudflare Images delivery URL (imagedelivery.net / images.dev). */
+export function isHostedDeliveryUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname;
+    return host === "imagedelivery.net"
+      || host.endsWith(".imagedelivery.net")
+      || host === "images.dev"
+      || host.endsWith(".images.dev");
+  } catch {
+    return false;
+  }
 }
 
 /** A resolver closed over the ambient config (absent → relative-path fallback). */

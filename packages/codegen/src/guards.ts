@@ -255,7 +255,9 @@ const isAssetCreateResultCheck: (value: unknown) => boolean = shape(
     createdBy: isNullableString,
     updatedBy: isNullableString,
   },
-  { width: isNumber, height: isNumber, alt: isString, title: isString },
+  // The service returns null for absent optional metadata, so present-but-null
+  // must validate.
+  { width: isNullableNumber, height: isNullableNumber, alt: isNullableString, title: isNullableString, imageId: isString, imageDeliveryBase: isString },
 );
 export function isAssetCreateResult<T>(value: unknown): value is T {
   return isAssetCreateResultCheck(value);
@@ -275,7 +277,7 @@ const isAssetReplaceResultCheck: (value: unknown) => boolean = shape(
     updatedAt: isString,
     updatedBy: isNullableString,
   },
-  { width: isNumber, height: isNumber },
+  { width: isNumber, height: isNumber, imageId: isString, imageDeliveryBase: isString },
 );
 export function isAssetReplaceResult<T>(value: unknown): value is T {
   return isAssetReplaceResultCheck(value);
@@ -297,8 +299,9 @@ export function isAssetUpdateResult<T>(value: unknown): value is T {
 
 const isUploadUrlResultCheck: (value: unknown) => boolean = shape({
   uploadUrl: isString,
-  r2Key: isString,
   assetId: isString,
+  imageId: isString,
+  deliveryBase: isString,
 });
 export function isUploadUrlResult<T>(value: unknown): value is T {
   return isUploadUrlResultCheck(value);
@@ -337,7 +340,8 @@ const isAssetCreateInputCheck: (value: unknown) => boolean = shape(
   { filename: isString, mimeType: isString },
   {
     id: isString, size: isNumber, width: isNumber, height: isNumber,
-    alt: isString, title: isString, r2Key: isString, blurhash: isString,
+    alt: isString, title: isString, r2Key: isString, imageId: isString,
+    imageDeliveryBase: isString, blurhash: isString,
     colors: isStringArray, focalPoint: isFocalPoint, tags: isStringArray,
   },
 );
@@ -350,7 +354,8 @@ const isAssetImportInputCheck: (value: unknown) => boolean = shape(
   {
     id: isString, filename: isString, mimeType: isString,
     width: isNumber, height: isNumber, alt: isString, title: isString,
-    r2Key: isString, blurhash: isString,
+    r2Key: isString, imageId: isString,
+    imageDeliveryBase: isString, blurhash: isString,
     colors: isStringArray, focalPoint: isFocalPoint, tags: isStringArray,
   },
 );

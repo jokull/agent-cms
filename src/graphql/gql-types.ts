@@ -3,6 +3,7 @@
  */
 import type { Effect } from "effect";
 import type { SqlClient } from "effect/unstable/sql";
+import type { AssetUrlSource } from "../media-field.js";
 import type { ModelRow, ParsedFieldRow } from "../db/row-types.js";
 
 /** The minimal DAST document shape expected by extract*Ids helpers */
@@ -71,7 +72,8 @@ export interface ModelQueryMeta {
 /** The shared context passed between schema builder sub-modules */
 export interface SchemaBuilderContext {
   runSql: <A>(effect: Effect.Effect<A, unknown, SqlClient.SqlClient>) => Promise<A>;
-  assetUrl: (r2Key: string) => string;
+  /** Resolve an asset row's public URL (hosted images + R2 files). */
+  assetUrl: (asset: AssetUrlSource) => string;
   cfImageUrl: (assetPath: string, params: Record<string, string | number>) => string;
   models: readonly ModelRow[];
   blockModels: readonly ModelRow[];

@@ -2,6 +2,7 @@ import { isBoolean, isNumber, isObject, isObjectRecord, isString, type StoredFie
 import type { AssetObject } from "./gql-types.js";
 
 import type { DynamicRow } from "../dynamic/row-types.js";
+import { isHostedDeliveryUrl } from "../media-field.js";
 
 
 function coerceStringListValue(value: StoredFieldValue): string[] {
@@ -82,6 +83,10 @@ export function buildResponsiveImage(
   cfImageUrl: (assetPath: string, params: Record<string, string | number>) => string,
 ) {
   if (!asset.width || !asset.height) return null;
+  // Hosted (Cloudflare Images) assets have no cdn-cgi transform pipeline —
+  // their delivery URL is a configured variant. Responsive transform output is
+  // unavailable for them (return null); widths/variants come later.
+  if (isHostedDeliveryUrl(asset.url)) return null;
 
   const rawParamsValue = args.transforms ?? args.cfImagesParams ?? args.imgixParams;
   const rawParams = isObjectRecord(rawParamsValue) ? rawParamsValue : {};

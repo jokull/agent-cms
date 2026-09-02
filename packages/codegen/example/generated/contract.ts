@@ -283,8 +283,13 @@ export interface VersionOf<T> {
 export interface AssetRecord {
   id: string; filename: string; basename: string | null; format: string | null;
   mime_type: string; size: number; width: number | null; height: number | null;
-  alt: string | null; title: string | null; r2_key: string; blurhash: string | null;
-  /** Canonical absolute URL (ASSET_BASE_URL, else the CMS's own /assets route). */
+  alt: string | null; title: string | null; r2_key: string;
+  /** Hosted-image storage: Cloudflare Images image ID (file rows: null). */
+  image_id: string | null;
+  /** Hosted-image storage: imagedelivery.net delivery base (file rows: null). */
+  image_delivery_base: string | null;
+  blurhash: string | null;
+  /** Canonical absolute URL (delivery URL for hosted images; ASSET_BASE_URL / /assets route for files). */
   url: string;
   colors: string | null; focal_point: string | null; tags: string; custom_data: string | null;
   created_at: string; updated_at: string; created_by: string | null; updated_by: string | null;
@@ -292,27 +297,31 @@ export interface AssetRecord {
 export interface AssetCreateInput {
   id?: string; filename: string; mimeType: string; size?: number;
   width?: number; height?: number; alt?: string; title?: string; r2Key?: string;
+  imageId?: string; imageDeliveryBase?: string;
   blurhash?: string; colors?: readonly string[]; focalPoint?: { x: number; y: number }; tags?: readonly string[];
 }
 export interface AssetImportInput {
   id?: string; url: string; filename?: string; mimeType?: string;
   width?: number; height?: number; alt?: string; title?: string; r2Key?: string;
+  imageId?: string; imageDeliveryBase?: string;
   blurhash?: string; colors?: readonly string[]; focalPoint?: { x: number; y: number }; tags?: readonly string[];
 }
 export interface AssetUpdateInput { alt?: string; title?: string; width?: number; height?: number; }
 export interface AssetUsage { modelApiKey: string; recordId: string; fieldApiKey: string; }
 export interface AssetCreateResult {
   id: string; filename: string; mimeType: string; size: number;
-  width?: number; height?: number; alt?: string; title?: string; r2Key: string; url: string;
+  width?: number; height?: number; alt?: string; title?: string; r2Key: string;
+  imageId?: string; imageDeliveryBase?: string; url: string;
   createdAt: string; updatedAt: string; createdBy: string | null; updatedBy: string | null;
 }
 export interface AssetReplaceResult {
   id: string; filename: string; mimeType: string; size: number;
   width?: number; height?: number; alt: string | null; title: string | null;
-  r2Key: string; url: string; replaced: true; updatedAt: string; updatedBy: string | null;
+  r2Key: string; imageId?: string; imageDeliveryBase?: string; url: string;
+  replaced: true; updatedAt: string; updatedBy: string | null;
 }
 export interface AssetUpdateResult { id: string; alt: string | null; title: string | null; width: number | null; height: number | null; url: string; updatedAt: string; updatedBy: string | null; }
-export interface UploadUrlResult { uploadUrl: string; r2Key: string; assetId: string; }
+export interface UploadUrlResult { uploadUrl: string; assetId: string; imageId: string; deliveryBase: string; }
 
 // --- Shared reusable codecs (defined once, referenced by every model) ---
 const nullableString = wire.union([wire.string, wire.null] as const);

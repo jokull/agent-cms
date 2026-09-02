@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { runMigrations } from "./migrate.js";
 import { createWebHandler } from "../src/http/router.js";
+import { fakeImagesBinding } from "./fake-images.js";
 import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -16,7 +17,7 @@ function createApp(options?: Parameters<typeof createWebHandler>[1]) {
 }
 
 describe("visual edit routes", () => {
-  it("returns 501 for presigned uploads when R2 credentials are not configured", async () => {
+  it("returns 501 for direct uploads when the Images binding is not configured", async () => {
     const handler = createApp({ writeKey: "write-key" });
     const res = await handler(new Request("http://localhost/api/assets/upload-url", {
       method: "POST",
@@ -28,19 +29,12 @@ describe("visual edit routes", () => {
     }));
 
     expect(res.status).toBe(501);
-    await expect(res.json()).resolves.toEqual({ error: "Presigned uploads not configured" });
+    await expect(res.json()).resolves.toEqual({ error: "Direct image uploads are not configured (missing Cloudflare Images binding)" });
   });
 
-  it("creates presigned R2 upload URLs when credentials are configured", async () => {
-    const handler = createApp({
-      writeKey: "write-key",
-      r2Credentials: {
-        accessKeyId: "test-access-key",
-        secretAccessKey: "test-secret-key",
-        bucketName: "test-bucket",
-        accountId: "test-account",
-      },
-    });
+  it("mints keyless direct-upload URLs via the Images binding", async () => {
+    const { binding } = fakeImagesBinding();
+    const handler = createApp({ writeKey: "write-key", images: binding });
     const res = await handler(new Request("http://localhost/api/assets/upload-url", {
       method: "POST",
       headers: {
@@ -53,9 +47,9 @@ describe("visual edit routes", () => {
     expect(res.status).toBe(200);
     const body = await res.json() as Record<string, unknown>;
     expect(body.assetId).toEqual(expect.any(String));
-    expect(body.r2Key).toBe(`uploads/${body.assetId}/photo.jpg`);
-    expect(body.uploadUrl).toEqual(expect.stringContaining("https://test-bucket.test-account.r2.cloudflarestorage.com/"));
-    expect(body.uploadUrl).toEqual(expect.stringContaining("X-Amz-Signature="));
+    expect(body.imageId).toEqual(expect.any(String));
+    expect(body.deliveryBase).toBe("https://imagedelivery.net/testaccounthash");
+    expect(body.uploadUrl).toEqual(expect.stringContaining("https://upload.imagedelivery.net/testaccounthash/"));
   });
 
   it("returns 501 for direct binary upload when R2 bucket is not configured", async () => {

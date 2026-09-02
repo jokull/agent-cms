@@ -63,6 +63,10 @@ export interface AssetRow {
   readonly alt: string | null;
   readonly title: string | null;
   readonly r2_key: string;
+  /** Hosted-image storage (image assets): Cloudflare Images image ID. File rows are null. */
+  readonly image_id: string | null;
+  /** Hosted-image storage: delivery base URL (https://imagedelivery.net/<account-hash>). File rows are null. */
+  readonly image_delivery_base: string | null;
   readonly blurhash: string | null;
   readonly colors: string | null; // JSON string
   readonly focal_point: string | null; // JSON string

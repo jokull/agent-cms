@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createCMSHandler } from "../src/index.js";
+import { fakeImagesBinding } from "./fake-images.js";
 
 // Shape-valid binding stubs: config-schema's guards duck-check the methods
 // the CMS calls (D1 prepare/batch, R2 get/put), so bare `{} as D1Database`
@@ -13,11 +14,13 @@ describe("createCMSHandler", () => {
   it("reuses the same isolate-scoped handler for identical bindings", () => {
     const db = makeDb();
     const assets = makeBucket();
+    const { binding: images } = fakeImagesBinding();
 
     const first = createCMSHandler({
       bindings: {
         db,
         assets,
+        images,
         environment: "production",
         assetBaseUrl: "https://cms.example.com",
         writeKey: "write",
@@ -28,6 +31,7 @@ describe("createCMSHandler", () => {
       bindings: {
         db,
         assets,
+        images,
         environment: "production",
         assetBaseUrl: "https://cms.example.com",
         writeKey: "write",
@@ -49,14 +53,14 @@ describe("createCMSHandler", () => {
     expect(second).not.toBe(first);
   });
 
-  it("fails fast when only some R2 credentials are provided", () => {
+  it("fails fast when the Images binding lacks the expected surface", () => {
     expect(() => createCMSHandler({
       bindings: {
         db: makeDb(),
-        r2AccessKeyId: "key",
-        r2BucketName: "bucket",
+        // SAFETY: test-only — deliberately shape-invalid to exercise the guard.
+        images: {} as never,
       },
-    })).toThrow(/R2 credentials must include/);
+    })).toThrow(/binding "images" failed validation\. Expected Cloudflare Images binding with hosted\.createDirectUpload\(\) and hosted\.upload\(\)/);
   });
 
   it("fails fast when ai and vectorize are not configured together", () => {

@@ -19,6 +19,7 @@ import { buildReverseRefs, buildReverseRefResolvers } from "./reverse-ref-resolv
 import { buildAssetResolvers } from "./asset-resolvers.js";
 import { recordSqlMetrics } from "./sql-metrics.js";
 import { encodeJson } from "../json.js";
+import { assetUrlResolverFor } from "../media-field.js";
 
 function serializeGraphqlScalar(value: StoredFieldValue): string | null {
   if (value == null) return null;
@@ -78,12 +79,11 @@ export function buildGraphQLSchema(sqlLayer: Layer.Layer<SqlClient.SqlClient>, o
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
 
-    // Asset URL helpers
+    // Asset URL helpers. Hosted-image rows resolve from their own delivery
+    // base + image id; R2 file rows resolve against assetBaseUrl.
     const assetBase = (options?.assetBaseUrl ?? "").replace(/\/$/, "");
 
-    function assetUrl(r2Key: string): string {
-      return `${assetBase}/${r2Key}`;
-    }
+    const assetUrl = assetUrlResolverFor({ baseUrl: assetBase.length > 0 ? assetBase : undefined });
 
     function cfImageUrl(assetPath: string, params: Record<string, string | number>): string {
       if (options?.isProduction) {

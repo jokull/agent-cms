@@ -357,47 +357,47 @@ Only `DB` is required. Everything else is optional and degrades gracefully.
 | `AI` | Workers AI | Embedding generation for semantic search. |
 | `VECTORIZE` | Vectorize | Semantic vector search. Requires `AI`. |
 | `CMS_WRITE_KEY` | Secret | Auth for writes, MCP, and publish. Without it, writes are open. |
-| `ASSET_BASE_URL` | Variable | Public URL prefix for assets and Image Resizing. Must be a custom domain for transforms. |
+| `ASSET_BASE_URL` | Variable | Public URL prefix for non-image asset files served from R2. |
 | `SITE_URL` | Variable | Your site's public URL (e.g. `https://mysite.com`). Required for `get_preview_url` to generate fully assembled preview links. |
 | `LOADER` | Worker Loader | Code Mode — collapses MCP tools into a single `code` tool. Requires [Dynamic Workers](https://developers.cloudflare.com/dynamic-workers/) (Workers Paid plan). |
-| `r2AccessKeyId` | Secret | Presigned browser uploads. All four R2 S3 values are required together. |
-| `r2SecretAccessKey` | Secret | Presigned browser uploads. |
-| `r2BucketName` | Variable | Bucket name for the S3-compatible endpoint. |
-| `cfAccountId` | Variable | Account ID for the S3-compatible endpoint. |
+| `IMAGES` | Images binding | **Hosted image assets** — keyless direct uploads (`create_asset_upload_url`, `POST /api/assets/upload-url`) and server-side image import. Requires a Cloudflare Images plan. |
 
-### Presigned browser uploads
+### Keyless direct image uploads
 
-Server-side uploads (`import_asset_from_url`, or writing to R2 yourself) only need the `ASSETS`
-binding. **Direct browser uploads additionally need R2 S3-compatible credentials** — without all
-four, `create_asset_upload_url` and `POST /api/assets/upload-url` are unavailable.
+Images are stored in **Cloudflare Images**, managed through the `images` binding on the Worker —
+no S3-compatible signing credentials are involved and image bytes never pass through the CMS
+Worker. `create_asset_upload_url` / `POST /api/assets/upload-url` mint a one-time upload URL via
+`IMAGES.hosted.createDirectUpload()`, the client uploads straight to Cloudflare
+(multipart form POST, field `file`), then registers the asset with the returned
+`imageId` + `deliveryBase`. Non-image files (PDFs, videos) still go to R2 via
+`import_asset_from_url` or the `PUT /api/assets/:id/file` route.
 
-These are S3 API credentials, not a Worker binding, so they can only be created in the dashboard:
-**R2 → Manage R2 API Tokens → Create token**, with **Object Read & Write** scoped to your bucket.
-The account ID is the first path segment of the endpoint it shows you
-(`https://<accountId>.r2.cloudflarestorage.com`).
+Requires an **Images binding**:
 
-Pass them through `createCMSHandler`:
+```jsonc
+{
+  "images": { "binding": "IMAGES" }
+}
+```
+
+Pass it through `createCMSHandler`:
 
 ```ts
 createCMSHandler({
   bindings: {
     db: env.DB,
     assets: env.ASSETS,
+    images: env.IMAGES,
     writeKey: env.CMS_WRITE_KEY,
-    r2AccessKeyId: env.R2_ACCESS_KEY_ID,
-    r2SecretAccessKey: env.R2_SECRET_ACCESS_KEY,
-    r2BucketName: "my-cms-assets",
-    cfAccountId: env.CF_ACCOUNT_ID,
   },
 });
 ```
-
-Use `wrangler secret put` for the two secrets in production, and `.dev.vars` locally.
 
 ```jsonc
 {
   "d1_databases": [{ "binding": "DB", "database_name": "my-cms-db", "database_id": "..." }],
   "r2_buckets": [{ "binding": "ASSETS", "bucket_name": "my-cms-assets" }],
+  "images": { "binding": "IMAGES" },
   "vectorize": [{ "binding": "VECTORIZE", "index_name": "my-cms-content" }],
   "ai": { "binding": "AI" },
   "worker_loaders": [{ "binding": "LOADER" }],
@@ -409,10 +409,16 @@ To create the Vectorize index: `npx wrangler vectorize create my-cms-content --d
 
 ## Assets
 
-Asset binaries live in R2. Metadata in D1. Served from `/assets/:id/:filename`.
+Two storage kinds behind one metadata model (D1 `assets` rows):
 
-- **MCP/editor**: `import_asset_from_url` — download, store, register in one step
-- **Browser**: `PUT /api/assets/:id/file` then register metadata
+- **Images** (`image/*`) live in Cloudflare Images and deliver from
+  `https://imagedelivery.net/...` variant URLs. Direct uploads are keyless:
+  `create_asset_upload_url` (MCP) / `POST /api/assets/upload-url` mint a
+  one-time URL via the Images binding and the client uploads straight to
+  Cloudflare. `import_asset_from_url` ingests server-side into Images.
+- **Other files** (PDFs, videos) live in R2 and serve from `/assets/:id/:filename`
+  (or your `ASSET_BASE_URL`). Server-side import (`import_asset_from_url`) or
+  worker-mediated `PUT /api/assets/:id/file`, then register metadata.
 - **Server**: upload to R2, then `POST /api/assets`
 
 Focal points, blurhash, and color palette are stored per-asset. Cloudflare Image Resizing generates responsive variants at the edge.

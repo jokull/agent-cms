@@ -205,7 +205,7 @@ export function buildContentModelResolvers(
           if (isString(seoObj.image)) {
             // Resolve image URL from asset ID
             const asset = await loadAsset({ runSql, id: seoObj.image, context });
-            if (asset) imageUrl = assetUrl(asset.r2_key);
+            if (asset) imageUrl = assetUrl(asset);
           }
         }
       }
@@ -230,7 +230,7 @@ export function buildContentModelResolvers(
         // (StoredFieldValue); the reference parser validates the shape.
         const assetId = parseMediaFieldReference(parent[firstMediaField.api_key] as StoredFieldValue)?.uploadId;
         const asset = assetId ? await loadAsset({ runSql, id: assetId, context }) : null;
-        if (asset) imageUrl = assetUrl(asset.r2_key);
+        if (asset) imageUrl = assetUrl(asset);
       }
 
       // Generate tags

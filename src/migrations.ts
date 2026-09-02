@@ -156,6 +156,17 @@ const MIGRATIONS: readonly Migration[] = [
       `ALTER TABLE "models" ADD COLUMN "image_preview_field" text`,
     ],
   },
+  {
+    version: 4,
+    statements: [
+      // Image assets live in Cloudflare Images (hosted via the `images`
+      // binding); non-image files stay in R2. Image rows carry the hosted image
+      // ID and its delivery base (https://imagedelivery.net/<account-hash>) with
+      // an empty r2_key; file rows keep r2_key and leave both columns null.
+      `ALTER TABLE "assets" ADD COLUMN "image_id" text`,
+      `ALTER TABLE "assets" ADD COLUMN "image_delivery_base" text`,
+    ],
+  },
 ];
 
 /**

@@ -171,11 +171,13 @@ machine-readable `code` per issue. Bulk ops declare *no* cms error tags (results
 are data). Asset delete adds `cms/reference-conflict` (the force-guard 409).
 Every output decoded against a codec carries `cms/schema-drift`.
 
-**Asset R2 deps.** `createUploadUrl` (presigned S3 PUT) and `importFromUrl`
-(fetch → R2 put) need storage config the host supplies via
-`deps.assets = { r2Bucket, r2Credentials }`. When it is absent those two
-procedures fail as `server/internal` incidents; the rest of the asset surface
-(metadata CRUD, list, usages) needs neither.
+**Asset storage deps.** Image assets are hosted in Cloudflare Images and
+`createUploadUrl` mints a keyless direct-upload URL through the host's `images`
+binding; non-image files use R2. The host supplies storage config via
+`deps.assets = { images: env.IMAGES, r2Bucket: env.ASSETS, baseUrl }`. Without
+the `images` binding, `createUploadUrl` fails as a validation error and image
+`importFromUrl` falls back to R2; the rest of the asset surface (metadata CRUD,
+list, usages) needs neither.
 
 **Asset URLs.** Every `AssetRecord` carries an absolute `url`, and every `media` /
 `media_gallery` value read off a record is the enriched `MediaRead` shape

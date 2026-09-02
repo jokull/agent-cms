@@ -21,7 +21,7 @@ import {
   createAssetUploadUrl,
 } from "./services/asset-service.js";
 import { CreateAssetInput, ImportAssetFromUrlInput, CreateUploadUrlInput } from "./services/input-schemas.js";
-import type { R2UploadCredentials } from "./services/asset-service.js";
+import type { ImagesBinding } from "./images-binding.js";
 import type { RequestActor } from "./attribution.js";
 
 export * as RecordService from "./services/record-service.js";
@@ -54,8 +54,8 @@ export type { AssetRow } from "./db/row-types.js";
 export type {
   ListAssetsOptions,
   AssetUsage,
-  R2UploadCredentials,
 } from "./services/asset-service.js";
+export type { ImagesBinding } from "./images-binding.js";
 export { ensureSchema } from "./migrations.js";
 
 /**
@@ -114,15 +114,16 @@ export type CmsR2Bucket = R2Bucket;
 /**
  * Optional asset-storage config a host supplies so the upload/import procedures
  * (`assets.createUploadUrl`, `assets.importFromUrl`) work in-process:
- * - `r2Bucket` — an R2 binding, required by `importFromUrl` (server-side fetch
- *   → R2 put). Absent → the op fails as an incident (`server/internal`).
- * - `r2Credentials` — access keys, required by `createUploadUrl` (presigned S3
- *   PUT). Absent → the op fails as an incident.
+ * - `images` — a Cloudflare Images binding, required by `createUploadUrl`
+ *   (binding-minted keyless direct-upload URL) and by image `importFromUrl`
+ *   (server-side fetch → Images upload). Absent → hosted-image ops fail.
+ * - `r2Bucket` — an R2 binding, required by `importFromUrl` for non-image
+ *   files (server-side fetch → R2 put).
  * The rest of the surface (records + asset CRUD metadata) needs neither.
  */
 export interface CmsAssetConfig {
   readonly r2Bucket?: CmsR2Bucket;
-  readonly r2Credentials?: R2UploadCredentials;
+  readonly images?: ImagesBinding;
   readonly fetch?: typeof globalThis.fetch;
   /**
    * Public asset base (`ASSET_BASE_URL`) — a bucket/CDN host serving R2 objects
@@ -152,7 +153,7 @@ export function cmsRuntimeLayer(sqlLayer: CmsSqlLayer, assets?: CmsAssetConfig):
     Layer.succeed(HooksContext, Option.none()),
     Layer.succeed(AssetImportContext, {
       r2Bucket: assets?.r2Bucket,
-      r2Credentials: assets?.r2Credentials,
+      images: assets?.images,
       fetch: assets?.fetch ?? globalThis.fetch,
     }),
     Layer.succeed(AssetUrlContext, {

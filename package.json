@@ -61,8 +61,6 @@
     ]
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1014.0",
-    "@aws-sdk/s3-request-presigner": "^3.1014.0",
     "@cloudflare/codemode": "^0.3.2",
     "@datocms/cma-client-node": "^5.4.18",
     "@effect/platform-node": "4.0.0-rc.109",

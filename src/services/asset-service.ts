@@ -6,6 +6,7 @@ import { SqlClient } from "effect/unstable/sql";
 import { generateId } from "../id.js";
 import { NotFoundError, ValidationError, ReferenceConflictError } from "../errors.js";
 import type { AssetRow, ModelRow } from "../db/row-types.js";
+import type { ImagesBinding } from "../images-binding.js";
 import type { CreateAssetInput, CreateUploadUrlInput, ImportAssetFromUrlInput } from "./input-schemas.js";
 import { encodeJson, decodeJsonIfString } from "../json.js";
 
@@ -30,17 +31,59 @@ import { likeContains } from "../sql-util.js";
 export class AssetImportContext extends Context.Service<
   AssetImportContext,
   {
+    /** R2 bucket binding — stores non-image file assets (worker-mediated). */
     readonly r2Bucket: R2Bucket | undefined;
-    readonly r2Credentials: R2UploadCredentials | undefined;
+    /** Cloudflare Images binding — hosts image assets, mints keyless direct-upload URLs. */
+    readonly images: ImagesBinding | undefined;
     readonly fetch: typeof globalThis.fetch;
   }
 >()("AssetImportContext") {}
 
-export interface R2UploadCredentials {
-  accessKeyId: string;
-  secretAccessKey: string;
-  bucketName: string;
-  accountId: string;
+/** `image/*` mime prefix — the kind of asset Cloudflare Images hosts. */
+export const IMAGE_MIME_PREFIX = "image/";
+
+/** Service return of `createAsset`. Hosted-image rows add `imageId` + `imageDeliveryBase`. */
+export interface AssetCreateOutput {
+  id: string; filename: string; mimeType: string; size: number;
+  width: number | null; height: number | null; alt: string | null; title: string | null;
+  r2Key: string; imageId?: string; imageDeliveryBase?: string;
+  url: string; createdAt: string; updatedAt: string; createdBy: string | null; updatedBy: string | null;
+}
+
+/** Service return of `replaceAsset`. Hosted-image rows add `imageId` + `imageDeliveryBase`. */
+export interface AssetReplaceOutput {
+  id: string; filename: string; mimeType: string; size: number;
+  width: number | undefined; height: number | undefined; alt: string | null; title: string | null;
+  r2Key: string; imageId?: string; imageDeliveryBase?: string;
+  url: string; replaced: true; updatedAt: string; updatedBy: string | null;
+}
+
+/**
+ * Derive the delivery base (`https://imagedelivery.net/<account-hash>`, or the
+ * equivalent on a custom delivery host) from an imagedelivery-family URL such
+ * as a minted direct-upload URL (`https://upload.imagedelivery.net/<hash>/<id>`)
+ * or a metadata variant URL (`https://imagedelivery.net/<hash>/<id>/<variant>`).
+ * Both live under the same account hash. Returns null when unparseable.
+ */
+export function imageDeliveryBaseFromUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    const hash = segments[0];
+    if (!hash) return null;
+    const host = parsed.hostname.replace(/^upload\./, "");
+    return `${parsed.protocol}//${host}/${hash}`;
+  } catch {
+    return null;
+  }
+}
+
+/** Best-effort delete of a hosted image (replacement/row deletion cleanup). */
+function deleteHostedImage(images: ImagesBinding, imageId: string): Effect.Effect<void> {
+  return Effect.tryPromise({
+    try: () => images.hosted.image(imageId).delete(),
+    catch: () => undefined,
+  }).pipe(Effect.asVoid, Effect.ignore);
 }
 
 const MAX_REMOTE_ASSET_BYTES = 25 * 1024 * 1024;
@@ -290,14 +333,22 @@ export function createAsset(body: CreateAssetInput, actor?: RequestActor | null)
       return yield* new ValidationError({ message: `Asset with id '${id}' already exists` });
     }
 
+    // Hosted-image rows carry a Cloudflare Images imageId (r2_key is empty);
+    // file rows carry an R2 key (image_id null). Registration decides the kind.
+    const imageId = body.imageId ?? null;
+    const imageDeliveryBase = body.imageDeliveryBase ?? null;
+    const r2Key = body.r2Key ?? (imageId ? "" : `uploads/${id}/${body.filename}`);
+
     yield* sql.unsafe(
-      `INSERT INTO assets (id, filename, basename, format, mime_type, size, width, height, alt, title, r2_key, blurhash, colors, focal_point, tags, created_at, updated_at, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO assets (id, filename, basename, format, mime_type, size, width, height, alt, title, r2_key, image_id, image_delivery_base, blurhash, colors, focal_point, tags, created_at, updated_at, created_by, updated_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id, body.filename, getAssetBasename(body.filename), getAssetFormat(body.filename, body.mimeType), body.mimeType,
         body.size, body.width ?? null, body.height ?? null,
         body.alt ?? null, body.title ?? null,
-        body.r2Key ?? `uploads/${id}/${body.filename}`,
+        r2Key,
+        imageId,
+        imageDeliveryBase,
         body.blurhash ?? null,
         body.colors ? encodeJson(body.colors) : null,
         body.focalPoint ? encodeJson(body.focalPoint) : null,
@@ -309,10 +360,9 @@ export function createAsset(body: CreateAssetInput, actor?: RequestActor | null)
       ]
     );
 
-    const r2Key = body.r2Key ?? `uploads/${id}/${body.filename}`;
     const resolveUrl = yield* assetUrlResolver;
 
-    return {
+    const created: AssetCreateOutput = {
       id,
       filename: body.filename,
       mimeType: body.mimeType,
@@ -322,12 +372,15 @@ export function createAsset(body: CreateAssetInput, actor?: RequestActor | null)
       alt: body.alt ?? null,
       title: body.title ?? null,
       r2Key,
-      url: resolveUrl({ id, filename: body.filename, r2_key: r2Key }),
+      url: resolveUrl({ id, filename: body.filename, r2_key: r2Key, image_id: imageId, image_delivery_base: imageDeliveryBase }),
       createdAt: now,
       updatedAt: now,
       createdBy: actor?.label ?? null,
       updatedBy: actor?.label ?? null,
     };
+    if (imageId) created.imageId = imageId;
+    if (imageDeliveryBase) created.imageDeliveryBase = imageDeliveryBase;
+    return created;
   }).pipe(
     Effect.withSpan("asset.create"),
     Effect.annotateSpans({
@@ -408,9 +461,12 @@ export const getAsset = Effect.fn("getAsset")(function* (id: string) {
 });
 
 /**
- * Replace an asset's file while keeping the same ID and URL.
- * Updates metadata (filename, mimeType, size, dimensions, r2Key) but the asset ID
- * and all content references remain stable. DatoCMS can't do this (imgix regenerates URLs).
+ * Replace an asset's file while keeping the same ID. Updates metadata
+ * (filename, mimeType, size, dimensions, storage locator). File rows keep the
+ * same R2 key → same URL. Hosted-image rows upload a new image (new imageId —
+ * the old hosted image is deleted best-effort), so their delivery URL changes;
+ * content references stay stable because they point at the asset ID and reads
+ * re-resolve the URL.
  */
 export const replaceAsset = Effect.fn("replaceAsset")(function* (id: string, body: CreateAssetInput, actor?: RequestActor | null) {
   const sql = yield* SqlClient.SqlClient;
@@ -418,18 +474,23 @@ export const replaceAsset = Effect.fn("replaceAsset")(function* (id: string, bod
   const rows = yield* sql.unsafe<AssetRow>("SELECT * FROM assets WHERE id = ?", [id]);
   if (rows.length === 0) return yield* new NotFoundError({ entity: "Asset", id });
 
-  const r2Key = body.r2Key ?? `uploads/${id}/${body.filename}`;
+  // Hosted-image replace: new imageId (r2_key stays empty); file replace: new R2 key.
+  const imageId = body.imageId ?? null;
+  const imageDeliveryBase = body.imageDeliveryBase ?? null;
+  const r2Key = body.r2Key ?? (imageId ? "" : `uploads/${id}/${body.filename}`);
 
   const now = DateTime.formatIso(yield* DateTime.now);
   yield* sql.unsafe(
     `UPDATE assets SET filename = ?, basename = ?, format = ?, mime_type = ?, size = ?, width = ?, height = ?,
-     alt = ?, title = ?, r2_key = ?, blurhash = ?, colors = ?, focal_point = ?, tags = ?, updated_at = ?, updated_by = ?
+     alt = ?, title = ?, r2_key = ?, image_id = ?, image_delivery_base = ?, blurhash = ?, colors = ?, focal_point = ?, tags = ?, updated_at = ?, updated_by = ?
      WHERE id = ?`,
     [
       body.filename, getAssetBasename(body.filename), getAssetFormat(body.filename, body.mimeType), body.mimeType, body.size,
       body.width ?? null, body.height ?? null,
       body.alt ?? rows[0].alt, body.title ?? rows[0].title,
       r2Key,
+      imageId,
+      imageDeliveryBase,
       body.blurhash ?? null,
       body.colors ? encodeJson(body.colors) : null,
       body.focalPoint ? encodeJson(body.focalPoint) : null,
@@ -440,15 +501,25 @@ export const replaceAsset = Effect.fn("replaceAsset")(function* (id: string, bod
     ]
   );
 
+  // Replaced a hosted image with a different one — drop the superseded image.
+  const { images } = yield* AssetImportContext;
+  if (images && rows[0].image_id && rows[0].image_id !== imageId) {
+    yield* deleteHostedImage(images, rows[0].image_id);
+  }
+
   const resolveUrl = yield* assetUrlResolver;
 
-  return {
+  const replaced: AssetReplaceOutput = {
     id, filename: body.filename, mimeType: body.mimeType, size: body.size,
     width: body.width, height: body.height,
     alt: body.alt ?? rows[0].alt, title: body.title ?? rows[0].title,
-    r2Key, url: resolveUrl({ id, filename: body.filename, r2_key: r2Key }),
+    r2Key,
+    url: resolveUrl({ id, filename: body.filename, r2_key: r2Key, image_id: imageId, image_delivery_base: imageDeliveryBase }),
     replaced: true, updatedAt: now, updatedBy: actor?.label ?? null,
   };
+  if (imageId) replaced.imageId = imageId;
+  if (imageDeliveryBase) replaced.imageDeliveryBase = imageDeliveryBase;
+  return replaced;
 });
 
 export const updateAssetMetadata = Effect.fn("updateAssetMetadata")(function* (id: string, body: { alt?: string; title?: string; width?: number; height?: number }, actor?: RequestActor | null) {
@@ -472,7 +543,13 @@ export const updateAssetMetadata = Effect.fn("updateAssetMetadata")(function* (i
 
   return {
     id, alt, title, width, height,
-    url: resolveUrl({ id, filename: rows[0].filename, r2_key: rows[0].r2_key }),
+    url: resolveUrl({
+      id,
+      filename: rows[0].filename,
+      r2_key: rows[0].r2_key,
+      image_id: rows[0].image_id,
+      image_delivery_base: rows[0].image_delivery_base,
+    }),
     updatedAt: now,
     updatedBy: actor?.label ?? null,
   };
@@ -497,7 +574,14 @@ export function deleteAsset(id: string, force = false) {
         references: usages.map((usage) => `${usage.modelApiKey}.${usage.fieldApiKey} (${usage.recordId})`),
       });
     }
+    const rows = yield* sql.unsafe<{ image_id: string | null }>("SELECT image_id FROM assets WHERE id = ?", [id]);
     yield* sql.unsafe("DELETE FROM assets WHERE id = ?", [id]);
+    // Hosted image rows: also drop the image from Cloudflare Images storage.
+    const { images } = yield* AssetImportContext;
+    const imageId = rows[0]?.image_id ?? null;
+    if (images && imageId) {
+      yield* deleteHostedImage(images, imageId);
+    }
     return { deleted: true };
   }).pipe(
     Effect.withSpan("asset.delete"),
@@ -629,7 +713,7 @@ export function getAssetUsages(id: string) {
 
     const seen = new Set<string>();
     return usages.filter((usage) => {
-      const key = `${usage.modelApiKey} ${usage.recordId} ${usage.fieldApiKey}`;
+      const key = `${usage.modelApiKey}\u0000${usage.recordId}\u0000${usage.fieldApiKey}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -640,49 +724,45 @@ export function getAssetUsages(id: string) {
   );
 }
 
+/**
+ * Mint a one-time direct-upload URL for an image asset. Uses the Cloudflare
+ * Images binding's `createDirectUpload` — keyless by design: the CMS holds no
+ * signing credentials and never sees the image bytes. The client uploads the
+ * image to `uploadUrl` (multipart form POST, field `file`), then registers the
+ * row with `imageId` + `deliveryBase` via create/replace asset.
+ * Image files only — non-image uploads go through the Worker file route.
+ */
 export const createAssetUploadUrl = Effect.fn("createAssetUploadUrl")(function* (input: CreateUploadUrlInput) {
-  const { r2Credentials } = yield* AssetImportContext;
-  if (!r2Credentials) {
-    return yield* new ValidationError({ message: "Presigned uploads not configured" });
+  const { images } = yield* AssetImportContext;
+  if (!images) {
+    return yield* new ValidationError({ message: "Direct image uploads are not configured (missing Cloudflare Images binding)" });
+  }
+  if (!input.mimeType.startsWith(IMAGE_MIME_PREFIX)) {
+    return yield* new ValidationError({
+      message: "Direct uploads support image files only; use the Worker file-upload route (PUT /api/assets/:id/file) for other file types",
+    });
   }
 
-  const { S3Client, PutObjectCommand } = yield* Effect.tryPromise({
-    try: () => import("@aws-sdk/client-s3"),
-    catch: () => new ValidationError({ message: "Failed to load R2 signing client" }),
+  const minted = yield* Effect.tryPromise({
+    try: () => images.hosted.createDirectUpload({ expiresIn: 3600 }),
+    catch: (error) => new ValidationError({ message: `Failed to create direct upload URL: ${error instanceof Error ? error.message : String(error)}` }),
   });
-  const { getSignedUrl } = yield* Effect.tryPromise({
-    try: () => import("@aws-sdk/s3-request-presigner"),
-    catch: () => new ValidationError({ message: "Failed to load R2 signing helper" }),
-  });
+  const deliveryBase = imageDeliveryBaseFromUrl(minted.uploadURL);
+  if (!deliveryBase) {
+    return yield* new ValidationError({ message: "Failed to determine image delivery URL from the minted upload URL" });
+  }
 
   const assetId = crypto.randomUUID();
-  const r2Key = `uploads/${assetId}/${input.filename}`;
-  const s3 = new S3Client({
-    region: "auto",
-    endpoint: `https://${r2Credentials.accountId}.r2.cloudflarestorage.com`,
-    credentials: {
-      accessKeyId: r2Credentials.accessKeyId,
-      secretAccessKey: r2Credentials.secretAccessKey,
-    },
-  });
-  const command = new PutObjectCommand({
-    Bucket: r2Credentials.bucketName,
-    Key: r2Key,
-    ContentType: input.mimeType,
-  });
-  const uploadUrl = yield* Effect.tryPromise({
-    try: () => getSignedUrl(s3, command, { expiresIn: 3600 }),
-    catch: () => new ValidationError({ message: "Failed to create R2 upload URL" }),
-  });
-
-  return { uploadUrl, r2Key, assetId };
+  return { uploadUrl: minted.uploadURL, assetId, imageId: minted.id, deliveryBase };
 });
 
 export function importAssetFromUrl(input: ImportAssetFromUrlInput, actor?: RequestActor | null) {
   return Effect.gen(function* () {
-    const { r2Bucket, fetch } = yield* AssetImportContext;
-    if (!r2Bucket) {
-      return yield* new ValidationError({ message: "Asset import requires an R2 bucket binding" });
+    const { r2Bucket, images, fetch } = yield* AssetImportContext;
+    if (!r2Bucket && !images) {
+      return yield* new ValidationError({
+        message: "Asset import requires an R2 bucket binding (files) or a Cloudflare Images binding (images)",
+      });
     }
 
     const url = yield* validateRemoteAssetUrl(input.url);
@@ -697,16 +777,9 @@ export function importAssetFromUrl(input: ImportAssetFromUrlInput, actor?: Reque
 
     const mimeType = input.mimeType ?? response.headers.get("content-type")?.split(";")[0] ?? "application/octet-stream";
     const bytes = yield* readResponseBytes(response, resolvedUrl.toString());
-    const r2Key = input.r2Key ?? `uploads/${id}/${filename}`;
-
-    yield* Effect.tryPromise({
-      try: () => r2Bucket.put(r2Key, bytes, { httpMetadata: { contentType: mimeType } }),
-      catch: () => new ValidationError({ message: `Failed to store asset in R2: ${filename}` }),
-    });
-
     const dimensions = detectImageDimensions(bytes, mimeType);
 
-    return yield* createAsset({
+    const baseCreate = {
       id,
       filename,
       mimeType,
@@ -719,8 +792,39 @@ export function importAssetFromUrl(input: ImportAssetFromUrlInput, actor?: Reque
       blurhash: input.blurhash,
       colors: input.colors,
       focalPoint: input.focalPoint,
-      r2Key,
-    }, actor);
+    } as const;
+
+    // Image bytes with an Images binding → hosted image (Cloudflare Images).
+    if (mimeType.startsWith(IMAGE_MIME_PREFIX) && images) {
+      const meta = yield* Effect.tryPromise({
+        try: () => images.hosted.upload(bytes, { filename }),
+        catch: (error) => new ValidationError({
+          message: `Failed to store asset in Cloudflare Images: ${filename} (${error instanceof Error ? error.message : String(error)})`,
+        }),
+      });
+      const deliveryBase = meta.variants[0] ? imageDeliveryBaseFromUrl(meta.variants[0]) : null;
+      if (!deliveryBase) {
+        yield* deleteHostedImage(images, meta.id);
+        return yield* new ValidationError({ message: "Failed to determine image delivery URL after upload" });
+      }
+      return yield* createAsset({ ...baseCreate, imageId: meta.id, imageDeliveryBase: deliveryBase }, actor).pipe(
+        // Registration failed — don't leak the hosted image we just uploaded.
+        Effect.tapError(() => deleteHostedImage(images, meta.id)),
+      );
+    }
+
+    // Everything else (non-image files, or images without an Images binding)
+    // → R2 via the bucket binding.
+    if (!r2Bucket) {
+      return yield* new ValidationError({ message: "Asset import requires an R2 bucket binding for this file type" });
+    }
+    const r2Key = input.r2Key ?? `uploads/${id}/${filename}`;
+    yield* Effect.tryPromise({
+      try: () => r2Bucket.put(r2Key, bytes, { httpMetadata: { contentType: mimeType } }),
+      catch: () => new ValidationError({ message: `Failed to store asset in R2: ${filename}` }),
+    });
+
+    return yield* createAsset({ ...baseCreate, r2Key }, actor);
   }).pipe(
     Effect.withSpan("asset.import_from_url"),
     Effect.annotateSpans({

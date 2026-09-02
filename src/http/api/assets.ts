@@ -47,7 +47,7 @@ export const assetsGroup = HttpApiGroup.make("assets")
       payload: ImportAssetFromUrlInput,
       success: HttpApiSchema.status(201)(Schema.Unknown),
     })
-      .annotate(OpenApi.Summary, "Import a remote asset into R2 and register it"),
+      .annotate(OpenApi.Summary, "Import a remote asset and register it (images -> Cloudflare Images, files -> R2)"),
   )
   .add(
     HttpApiEndpoint.get("getAsset", "/assets/:id", {

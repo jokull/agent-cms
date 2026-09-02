@@ -21,7 +21,7 @@ import { decodeJsonIfString } from "../json.js";
 import { batchResolveLinkedRecordsCached } from "./structured-text-resolver.js";
 import { pluralize, toCamelCase, toContentTypeName, toTypeName } from "./gql-utils.js";
 import { decodeSnapshot } from "../dynamic/decode.js";
-import { mergeAssetWithMediaReference, parseMediaFieldReference, parseMediaGalleryReferences } from "../media-field.js";
+import { mergeAssetWithMediaReference, parseMediaFieldReference, parseMediaGalleryReferences, resolveAssetUrl } from "../media-field.js";
 import type { AssetObject, QueryVariableValue } from "./gql-types.js";
 import { getRegistryDef } from "./gql-utils.js";
 import { buildResponsiveImage } from "./responsive-image.js";
@@ -1268,10 +1268,6 @@ function buildFilterSql(
   };
 }
 
-function buildAssetUrl(assetBaseUrl: string, r2Key: string): string {
-  return `${assetBaseUrl}/${r2Key}`;
-}
-
 function buildCfImageUrl(
   assetBaseUrl: string,
   isProduction: boolean,
@@ -1494,7 +1490,7 @@ async function projectAsset(
   const assetMap = await fetchAssetMap(ctx, [reference.uploadId]);
   const asset = assetMap.get(reference.uploadId);
   if (!asset) return null;
-  const mergedAsset = mergeAssetWithMediaReference(asset, reference, (r2Key) => buildAssetUrl(ctx.assetBaseUrl, r2Key));
+  const mergedAsset = mergeAssetWithMediaReference(asset, reference, (row) => resolveAssetUrl(row, { baseUrl: ctx.assetBaseUrl }));
   const result: DynamicRow = {};
   for (const field of plan.fields) {
     result[field.responseKey] = pickAssetField(mergedAsset, field.fieldName);
@@ -1526,7 +1522,7 @@ async function projectAssetGallery(
   for (const reference of references) {
     const asset = assetMap.get(reference.uploadId);
     if (!asset) continue;
-    const mergedAsset = mergeAssetWithMediaReference(asset, reference, (r2Key) => buildAssetUrl(ctx.assetBaseUrl, r2Key));
+    const mergedAsset = mergeAssetWithMediaReference(asset, reference, (row) => resolveAssetUrl(row, { baseUrl: ctx.assetBaseUrl }));
     const projected: DynamicRow = {};
     for (const field of plan.fields) {
       projected[field.responseKey] = pickAssetField(mergedAsset, field.fieldName);

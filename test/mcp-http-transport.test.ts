@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { runMigrations } from "./migrate.ts";
 import { createWebHandler } from "../src/http/router.ts";
 import { createTestMcpClient } from "./mcp-helpers.ts";
+import { fakeImagesBinding } from "./fake-images.ts";
 import * as TokenService from "../src/services/token-service.js";
 
 describe("MCP stateless HTTP transport (2026-07-28)", () => {
@@ -64,7 +65,7 @@ describe("MCP stateless HTTP transport (2026-07-28)", () => {
     expect(tools.tools.some((tool) => tool.name === "import_asset_from_url")).toBe(true);
   });
 
-  it("lets editor MCP create a presigned asset upload URL", async () => {
+  it("lets editor MCP mint a keyless direct-upload URL via the Images binding", async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "agent-cms-mcp-editor-upload-url-"));
     const dbPath = join(tmpDir, "test.db");
     const sqlLayer = SqliteClient.layer({ filename: dbPath, disableWAL: true });
@@ -74,14 +75,10 @@ describe("MCP stateless HTTP transport (2026-07-28)", () => {
     const editorToken = await Effect.runPromise(
       TokenService.createEditorToken({ name: "editor" }).pipe(Effect.provide(sqlLayer))
     );
+    const { binding } = fakeImagesBinding();
     const handler = createWebHandler(sqlLayer, {
       writeKey: "write-key",
-      r2Credentials: {
-        accessKeyId: "test-access-key",
-        secretAccessKey: "test-secret-key",
-        bucketName: "test-bucket",
-        accountId: "test-account",
-      },
+      images: binding,
     }).fetch;
 
     const { client } = await createTestMcpClient(sqlLayer, {
@@ -100,9 +97,9 @@ describe("MCP stateless HTTP transport (2026-07-28)", () => {
     const body = JSON.parse(result.content[0]?.text ?? "{}") as Record<string, unknown>;
 
     expect(body.assetId).toEqual(expect.any(String));
-    expect(body.r2Key).toBe(`uploads/${body.assetId}/photo.jpg`);
-    expect(body.uploadUrl).toEqual(expect.stringContaining("https://test-bucket.test-account.r2.cloudflarestorage.com/"));
-    expect(body.uploadUrl).toEqual(expect.stringContaining("X-Amz-Signature="));
+    expect(body.imageId).toEqual(expect.any(String));
+    expect(body.deliveryBase).toBe("https://imagedelivery.net/testaccounthash");
+    expect(body.uploadUrl).toEqual(expect.stringContaining("https://upload.imagedelivery.net/testaccounthash/"));
   });
 
   it("lets editor MCP import an asset directly from a public URL", async () => {

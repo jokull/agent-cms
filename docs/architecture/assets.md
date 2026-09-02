@@ -4,9 +4,9 @@ agent-cms separates asset ingestion from asset registration.
 
 ## The Model
 
-There are two distinct concerns:
+Two distinct concerns:
 
-1. Binary storage in R2
+1. Binary storage — **Cloudflare Images** for image assets, **R2** for other files
 2. Asset metadata in D1
 
 The CMS owns metadata:
@@ -19,86 +19,76 @@ The CMS owns metadata:
 - `height`
 - `alt`
 - `title`
-- `r2Key`
+- storage locator: `imageId` + `imageDeliveryBase` (hosted images) or `r2Key` (files)
 
-The bucket owns the original file bytes.
+The storage provider owns the original file bytes.
+
+## Why not R2 S3-compatible signing?
+
+R2 direct uploads only exist via S3 SigV4 presigned URLs, which require the Worker to hold an
+R2 API token (access key ID + secret) at runtime. Those credentials are per-instance secrets:
+rotation, distribution, and scoping cost. The Cloudflare Images binding removes them entirely —
+`IMAGES.hosted.createDirectUpload()` mints a one-time upload URL with the binding's own
+permissions, so the CMS holds **no storage signing credentials** and image bytes never pass
+through the Worker.
 
 ## Canonical Flow
 
-The intended asset flow is:
+1. **Images** (`image/*`): the CMS mints a one-time upload URL via the Images binding
+   (`POST /api/assets/upload-url`, MCP `create_asset_upload_url`); the client uploads straight
+   to Cloudflare (multipart form POST, field `file`); the client registers metadata with the
+   returned `imageId` + `deliveryBase`. Delivery is `https://imagedelivery.net/<hash>/<imageId>/<variant>`.
+2. **Other files**: upload via `import_asset_from_url` (server-side fetch → R2 put) or the
+   worker-mediated `PUT /api/assets/:id/file` route, then register with the returned `r2Key`.
 
-1. Upload the original binary to R2
-2. Register or replace the asset in agent-cms via `/api/assets`
-3. Serve the asset from `/assets/:id/:filename`
-4. Apply Cloudflare Image Resizing at read time
-
-This means agent-cms does **not** accept binary uploads through the Worker.
+This is a deliberate architecture choice: direct-to-storage ingestion (no Worker byte proxy for
+images) plus metadata registration.
 
 ## Why
 
-Workers are a good delivery boundary, but not the right default ingestion boundary for original binaries:
-
-- large or bursty uploads are better handled directly by object storage
-- multipart/resumable upload support already exists at the R2/S3 layer
-- large or bursty binary ingestion is better handled out of band
-- direct-to-R2 uploads are simpler and more operationally reliable
+- large or bursty uploads are better handled directly by the storage provider
+- binding-minted upload URLs avoid holding S3 signing keys anywhere
 - it keeps the CMS API focused on metadata and content, not file streaming
-
-This is a deliberate architecture choice, not a temporary limitation.
+- image delivery gets Cloudflare's edge pipeline (variants, caching) for free
 
 ## Recommended Ingestion Paths
 
+### Images (browser / editor / agents)
+
+Keyless direct upload:
+
+1. authenticated client calls `POST /api/assets/upload-url` (or MCP `create_asset_upload_url`)
+2. client uploads the image bytes directly to the returned URL
+   (multipart form POST, field `file`)
+3. client registers metadata with the returned `assetId`, `imageId`, and `deliveryBase`
+
+Requires an Images binding + a paid Cloudflare Images plan.
+
+### Other files (PDFs, video, archives)
+
+Server-side: `import_asset_from_url` (fetch → R2 put → register) or
+`PUT /api/assets/:id/file` (worker-mediated R2 put) followed by metadata registration.
+Requires the R2 bucket binding. These are rare relative to images, so bytes through the
+Worker are acceptable here.
+
 ### Local Development
 
-For local Miniflare-backed development, the preferred target is the local R2 bucket itself, accessed programmatically.
+Miniflare exposes R2 buckets directly for tests and local tooling; the Images binding has no
+local emulator, so image paths run against an in-memory fake binding in the test suite
+(`test/fake-images.ts`) and the real binding in deployed Workers (`wrangler dev` / production).
 
-Why:
+## URL Resolution
 
-- Miniflare exposes R2 buckets directly for tests and local tooling
-- it avoids repeated `wrangler` subprocess churn
-- it is easier to make deterministic and resumable for bulk imports
+One choke point (`resolveAssetUrl` in `src/media-field.ts`):
 
-The dato-import harness uses this direct Miniflare R2 path.
-
-### Deployed Imports
-
-For deployed or one-off backend import tooling, the preferred path is the R2 S3-compatible API.
-
-Why:
-
-- it is the native path for direct object ingestion into R2
-- it supports standard S3 tooling and SDKs
-- multipart upload is available for larger binaries
-- it keeps the CMS Worker out of the binary data path
-
-### Editor / Agent Uploads
-
-The editor-facing path is signed direct upload:
-
-1. authenticated client asks agent-cms for an upload grant
-2. client uploads the original binary directly to R2
-3. client registers the asset metadata in agent-cms
-
-That keeps the same architecture while avoiding direct R2 credentials for editor agents. In REST this is `POST /api/assets/upload-url`; in MCP this is `create_asset_upload_url`, followed by `upload_asset` after the HTTP PUT succeeds.
-
-## MCP / Agent Usage
-
-Agent tools should guide users through:
-
-1. calling `import_asset_from_url` for public source URLs
-2. calling `create_asset_upload_url` for local/generated files
-3. putting the object into R2 with the returned signed URL
-4. calling the asset registration tool with the resulting `r2Key`
-
-## Future Re-evaluation
-
-If this proves to be a poor developer or editor experience, the ingestion path can be revisited later.
-
-For now, direct-to-R2 upload plus metadata registration is the canonical asset lifecycle in agent-cms.
+- hosted-image rows → `<imageDeliveryBase>/<imageId>/<variant>` (self-contained, no config)
+- file rows → `<ASSET_BASE_URL>/<r2Key>` or the Worker's `/assets/:id/:filename` route
 
 ## Cloudflare References
 
+- Images binding (hosted images, direct creator uploads, signed URLs):
+  <https://developers.cloudflare.com/images/storage/binding/>
+- Images binding changes (September 2026):
+  <https://developers.cloudflare.com/changelog/post/2026-09-02-images-binding-updates/>
 - R2 S3-compatible API: <https://developers.cloudflare.com/r2/api/s3/api/>
-- R2 presigned URLs: <https://developers.cloudflare.com/r2/api/s3/presigned-urls/>
 - Miniflare R2 storage: <https://developers.cloudflare.com/workers/testing/miniflare/storage/r2/>
-- Workers observability config: <https://developers.cloudflare.com/workers/observability/logs/workers-logs/#enable-workers-logs>

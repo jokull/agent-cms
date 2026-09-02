@@ -127,7 +127,12 @@ export const CreateAssetInput = Schema.Struct({
   height: Schema.optional(nonNegativeFiniteNumber("height")),
   alt: Schema.optional(Schema.String),
   title: Schema.optional(Schema.String),
+  /** R2 key — set for non-image file assets stored in R2. */
   r2Key: Schema.optional(Schema.String),
+  /** Cloudflare Images image ID — set for hosted image assets (r2Key then stays empty). */
+  imageId: Schema.optional(Schema.String),
+  /** Delivery base for a hosted image asset (https://imagedelivery.net/<account-hash>). */
+  imageDeliveryBase: Schema.optional(Schema.String),
   blurhash: Schema.optional(Schema.String),
   colors: Schema.optional(Schema.Array(Schema.String).pipe(
     Schema.check(Schema.makeFilter((value) => value.length <= 16, { message: "colors must contain at most 16 entries" })),

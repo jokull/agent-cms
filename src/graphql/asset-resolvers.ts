@@ -13,7 +13,7 @@ import type { SchemaBuilderContext, GqlContext, AssetObject } from "./gql-types.
 import type { DynamicRow } from "../dynamic/row-types.js";
 import { loadAsset } from "./asset-loader.js";
 import { decodeJsonIfString } from "../json.js";
-import { mergeAssetWithMediaReference } from "../media-field.js";
+import { isHostedDeliveryUrl, mergeAssetWithMediaReference } from "../media-field.js";
 import { buildResponsiveImage } from "./responsive-image.js";
 import { normalizeImgixParams } from "./responsive-image.js";
 
@@ -99,6 +99,10 @@ function buildAssetUrl(
   args: DynamicRow,
   cfImageUrl: (assetPath: string, params: Record<string, string | number>) => string,
 ) {
+  // Hosted (Cloudflare Images) assets: the delivery URL is a configured
+  // variant — there is no cdn-cgi transform pipeline to apply params to.
+  if (isHostedDeliveryUrl(asset.url)) return asset.url;
+
   const rawParamsValue = args.transforms ?? args.cfImagesParams ?? args.imgixParams;
   const rawParams = isObjectRecord(rawParamsValue) ? rawParamsValue : undefined;
   if (!rawParams || Object.keys(rawParams).length === 0) return asset.url;

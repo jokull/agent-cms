@@ -1,6 +1,7 @@
 import { Cause, Data, Option, Predicate, Schema, SchemaIssue } from "effect";
 import { isObjectRecord } from "./dynamic/row-types.js";
 import type { AiBinding, VectorizeBinding } from "./search/vectorize.js";
+import type { ImagesBinding } from "./images-binding.js";
 import type { CmsBindings } from "./index.js";
 
 // ---------------------------------------------------------------------------
@@ -103,6 +104,14 @@ function isVectorizeBinding(value: unknown): value is VectorizeBinding {
     && Predicate.isFunction(value.deleteByIds);
 }
 
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- binding boundary parser: duck-checks a Cloudflare Images binding against the surface the CMS calls (hosted.createDirectUpload/upload for direct image uploads and server-side ingest).
+function isImagesBinding(value: unknown): value is ImagesBinding {
+  return isObjectRecord(value)
+    && isObjectRecord(value.hosted)
+    && Predicate.isFunction(value.hosted.createDirectUpload)
+    && Predicate.isFunction(value.hosted.upload);
+}
+
 // oxlint-disable-next-line anti-slop/no-unknown-parameters -- binding boundary parser: accepts the raw binding candidate and narrows it via the guard; failure produces the descriptive BindingValidationError.
 function getBinding<T>(
   binding: string,
@@ -143,10 +152,7 @@ const RawCmsBindingsSchema = Schema.Struct({
   writeKey: OptionalNonEmptyString,
   ai: Schema.optional(Schema.Unknown),
   vectorize: Schema.optional(Schema.Unknown),
-  r2AccessKeyId: OptionalNonEmptyString,
-  r2SecretAccessKey: OptionalNonEmptyString,
-  r2BucketName: OptionalNonEmptyString,
-  cfAccountId: OptionalNonEmptyString,
+  images: Schema.optional(Schema.Unknown),
   siteUrl: Schema.optional(Schema.String),
   loader: Schema.optional(Schema.Unknown),
 }).pipe(
@@ -156,20 +162,6 @@ const RawCmsBindingsSchema = Schema.Struct({
       const hasVectorize = bindings.vectorize !== undefined;
       return hasAi === hasVectorize;
     }, { message: "ai and vectorize bindings must be configured together" }),
-  ),
-  Schema.check(
-    Schema.makeFilter((bindings) => {
-      const r2Fields = [
-        bindings.r2AccessKeyId,
-        bindings.r2SecretAccessKey,
-        bindings.r2BucketName,
-        bindings.cfAccountId,
-      ];
-      const presentCount = r2Fields.filter((value) => value !== undefined).length;
-      return presentCount === 0 || presentCount === r2Fields.length;
-    }, {
-      message: "R2 credentials must include r2AccessKeyId, r2SecretAccessKey, r2BucketName, and cfAccountId together",
-    }),
   ),
 );
 
@@ -181,12 +173,8 @@ export interface DecodedCmsBindings {
   writeKey?: string;
   ai?: AiBinding;
   vectorize?: VectorizeBinding;
-  r2Credentials?: {
-    accessKeyId: string;
-    secretAccessKey: string;
-    bucketName: string;
-    accountId: string;
-  };
+  /** Cloudflare Images binding — enables hosted image assets and keyless direct uploads */
+  images?: ImagesBinding;
   siteUrl?: string;
   loader?: unknown;
 }
@@ -216,14 +204,9 @@ export function decodeCmsBindings(input: CmsBindings): DecodedCmsBindings {
     vectorize: bindings.vectorize === undefined
       ? undefined
       : getBinding("vectorize", bindings.vectorize, isVectorizeBinding, "Vectorize index binding with upsert(), query(), and deleteByIds()"),
-    r2Credentials: bindings.r2AccessKeyId
-      ? {
-          accessKeyId: bindings.r2AccessKeyId,
-          secretAccessKey: bindings.r2SecretAccessKey!,
-          bucketName: bindings.r2BucketName!,
-          accountId: bindings.cfAccountId!,
-        }
-      : undefined,
+    images: bindings.images === undefined
+      ? undefined
+      : getBinding("images", bindings.images, isImagesBinding, "Cloudflare Images binding with hosted.createDirectUpload() and hosted.upload()"),
     siteUrl: bindings.siteUrl,
     loader: bindings.loader,
   };

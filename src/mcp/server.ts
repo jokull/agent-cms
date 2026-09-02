@@ -17,7 +17,9 @@ import * as RecordService from "../services/record-service.js";
 import * as PublishService from "../services/publish-service.js";
 import * as ScheduleService from "../services/schedule-service.js";
 import * as AssetService from "../services/asset-service.js";
-import { AssetImportContext, type R2UploadCredentials } from "../services/asset-service.js";
+import { AssetImportContext } from "../services/asset-service.js";
+import type { ImagesBinding } from "../images-binding.js";
+import { IMAGE_DELIVERY_VARIANT } from "../media-field.js";
 import * as VersionService from "../services/version-service.js";
 import * as SchemaLifecycle from "../services/schema-lifecycle.js";
 import * as SchemaIO from "../services/schema-io.js";
@@ -467,40 +469,40 @@ action: "list" | "get" | "restore"
 const ReorderRecordsTool = cmsTool("reorder_records", "Reorder records in a sortable/tree model by providing ordered record IDs", ReorderInput.fields);
 const RemoveBlockTool = cmsTool("remove_block", "Remove a block type entirely (cleans DAST trees, deletes blocks, drops table), or remove it from a specific field's whitelist (provide fieldId).", RemoveBlockInput.fields);
 const RemoveLocaleTool = cmsTool("remove_locale", "Remove a locale and strip it from all localized field values", LocaleIdInput.fields);
-const UploadAssetTool = cmsTool("upload_asset", `Register an asset after uploading the original file to R2 out of band.
+const UploadAssetTool = cmsTool("upload_asset", `Register an asset after uploading its bytes out of band.
 
 Upload flow:
-1. Upload the original file to R2
-2. Call this tool with the r2Key, filename, mimeType, and image dimensions
+1. Upload the file (hosted image: multipart POST to a create_asset_upload_url URL; file: Worker PUT route)
+2. Call this tool with the storage locator (hosted image: imageId + imageDeliveryBase; file: r2Key), filename, mimeType, and image dimensions
 3. The asset metadata is registered and can be referenced in media fields by its ID`, AssetInput.fields);
-const CreateAssetUploadUrlTool = cmsTool("create_asset_upload_url", `Create a short-lived presigned R2 upload URL for a local/generated file.
+const CreateAssetUploadUrlTool = cmsTool("create_asset_upload_url", `Create a short-lived direct-upload URL for a local/generated IMAGE file (image/* mime only).
 
-Use this when the asset exists in the agent environment and is not already available at a public URL.
+Use this when the image exists in the agent environment and is not already available at a public URL. The CMS mints the URL via its Cloudflare Images binding — no signing credentials are involved and the CMS never sees the image bytes.
 
 Flow:
 1. Call this tool with filename and mimeType
-2. Upload the raw file bytes with HTTP PUT to the returned uploadUrl using the same Content-Type
-3. Call upload_asset with the returned assetId as id, the returned r2Key, filename, mimeType, size, and dimensions
+2. POST the image bytes to the returned uploadUrl as multipart/form-data with the bytes in a field named "file" (NOT a raw PUT)
+3. Call upload_asset with the returned assetId as id, the returned imageId and imageDeliveryBase, filename, mimeType, size, and dimensions
 4. Use the returned asset ID in media/media_gallery fields
 
-Requires the CMS instance to be configured with R2 S3-compatible signing credentials.`, CreateUploadUrlInput.fields);
-const ImportAssetFromUrlTool = cmsTool("import_asset_from_url", `Download an asset from a public URL, store it in R2, and register it in one step.
+Requires the CMS instance to be configured with a Cloudflare Images binding.`, CreateUploadUrlInput.fields);
+const ImportAssetFromUrlTool = cmsTool("import_asset_from_url", `Download an asset from a public URL and register it in one step.
 
 Use this when you have an image URL and want an agent-friendly path.
 
 Flow:
 1. Provide the source URL
-2. The CMS fetches the file (following normal public HTTP redirects), stores it in R2, and creates the asset record
+2. The CMS fetches the file (following normal public HTTP redirects), stores it (images → Cloudflare Images via the binding; other files → R2), and creates the asset record
 3. Use the returned asset ID in media fields (e.g. {image: "<asset_id>"})
 
-The response includes id, r2Key, url (full public URL), and metadata. The id is what you pass to media fields — the CMS validates that the asset exists when creating/updating records.`, ImportAssetFromUrlInput.fields);
-const ListAssetsTool = cmsTool("list_assets", "List all assets with their IDs, filenames, and R2 keys");
-const ReplaceAssetTool = cmsTool("replace_asset", `Replace an asset's file metadata while keeping the same ID and URL. All content references remain stable.
+The response includes id, url (full public URL), and metadata. The id is what you pass to media fields — the CMS validates that the asset exists when creating/updating records.`, ImportAssetFromUrlInput.fields);
+const ListAssetsTool = cmsTool("list_assets", "List all assets with their IDs, filenames, and storage");
+const ReplaceAssetTool = cmsTool("replace_asset", `Replace an asset's file metadata while keeping the same asset ID. All content references remain stable.
 
 Flow:
-1. Upload the new original file to R2
-2. Call this tool with the asset ID and new file metadata
-3. The asset URL stays the same — no broken links in content`, ReplaceAssetInput.fields);
+1. Upload the new original file (hosted image: mint a new URL with create_asset_upload_url and upload; file: Worker PUT route)
+2. Call this tool with the asset ID and the new file metadata plus storage locator (imageId + imageDeliveryBase for hosted images; r2Key for files)
+3. Content references keep pointing at the asset ID — reads re-resolve the URL`, ReplaceAssetInput.fields);
 const SchemaIOTool = cmsTool("schema_io", `Export or import the full CMS schema as portable JSON.
 
 action: "export" | "import"
@@ -684,10 +686,10 @@ Asset upload flow:
   2. The parsed tool payload is the asset object itself; read its top-level id field
   3. Use that returned asset ID in media/media_gallery fields
 
-  Manual fallback:
-  1. Call create_asset_upload_url for a local/generated file
-  2. PUT the raw bytes to the returned uploadUrl
-  3. Register with upload_asset tool (pass returned assetId as id, plus r2Key, filename, mimeType, size, dimensions)
+  Manual fallback (image files only):
+  1. Call create_asset_upload_url for a local/generated image (image/* mime)
+  2. POST the image bytes to the returned uploadUrl as multipart/form-data, field name "file"
+  3. Register with upload_asset tool (pass returned assetId as id, plus imageId, imageDeliveryBase, filename, mimeType, size, dimensions)
   4. Use returned asset ID in media/media_gallery fields
 
 Tool argument encoding:
@@ -824,7 +826,8 @@ export interface CreateMcpLayerOptions {
   readonly mode?: "admin" | "editor";
   readonly path?: string;
   readonly r2Bucket?: R2Bucket;
-  readonly r2Credentials?: R2UploadCredentials;
+  /** Cloudflare Images binding — enables hosted image assets and keyless direct uploads */
+  readonly images?: ImagesBinding;
   readonly fetch?: typeof globalThis.fetch;
   readonly actor?: RequestActor | null;
   readonly assetBaseUrl?: string;
@@ -843,7 +846,7 @@ export function createStatelessMcpHandler(
   const defaultHooksLayer: Layer.Layer<HooksContext> = Layer.succeed(HooksContext, Option.none());
   const defaultAssetImportLayer: Layer.Layer<AssetImportContext> = Layer.succeed(AssetImportContext, {
     r2Bucket: options?.r2Bucket,
-    r2Credentials: options?.r2Credentials,
+    images: options?.images,
     fetch: options?.fetch ?? globalThis.fetch,
   });
   const fullLayer: Layer.Layer<SqlClient.SqlClient | VectorizeContext | HooksContext | AssetImportContext> = Layer.merge(
@@ -851,8 +854,33 @@ export function createStatelessMcpHandler(
     sqlLayer,
   );
 
-  function assetUrl(r2Key: string): string | undefined {
-    if (!options?.assetBaseUrl) return undefined;
+  /**
+   * Resolve the public URL for an asset row or a service return object.
+   * Hosted images (imageId + imageDeliveryBase) resolve to their Cloudflare
+   * Images delivery URL; R2 file rows resolve against the configured
+   * assetBaseUrl; with neither, no URL is attached (readers fall back to the
+   * relative /assets path served by the Worker).
+   */
+  /** Shape both asset DB rows (snake_case) and service returns (camelCase) satisfy. */
+  interface AssetUrlLike {
+    readonly id: string;
+    readonly filename: string;
+    readonly r2_key?: string | null;
+    readonly r2Key?: string | null;
+    readonly image_id?: string | null;
+    readonly imageId?: string | null;
+    readonly image_delivery_base?: string | null;
+    readonly imageDeliveryBase?: string | null;
+  }
+
+  function assetUrl(asset: AssetUrlLike): string | undefined {
+    const imageId = asset.image_id ?? asset.imageId ?? null;
+    const imageBase = asset.image_delivery_base ?? asset.imageDeliveryBase ?? null;
+    if (imageId && imageBase) {
+      return `${imageBase.replace(/\/$/, "")}/${imageId}/${IMAGE_DELIVERY_VARIANT}`;
+    }
+    const r2Key = asset.r2_key ?? asset.r2Key ?? null;
+    if (!options?.assetBaseUrl || !r2Key) return undefined;
     return `${options.assetBaseUrl.replace(/\/$/, "")}/${r2Key}`;
   }
 
@@ -862,8 +890,8 @@ export function createStatelessMcpHandler(
     return actorFromHeaders(new Headers(req.headers)) ?? options?.actor ?? null;
   });
 
-  function withAssetUrl<T extends { r2Key: string }>(asset: T) {
-    const url = assetUrl(asset.r2Key);
+  function withAssetUrl<T extends AssetUrlLike>(asset: T) {
+    const url = assetUrl(asset);
     return url ? { ...asset, url } : asset;
   }
 
@@ -1067,7 +1095,7 @@ export function createStatelessMcpHandler(
       })),
     list_assets: () =>
       AssetService.listAssets().pipe(Effect.map(({ assets }) => assets.map((a) => {
-        const url = assetUrl(a.r2_key);
+        const url = assetUrl(a);
         return url ? { ...a, url } : a;
       }))),
     replace_asset: withDecoded(ReplaceAssetInput, ({ assetId, ...rest }) =>

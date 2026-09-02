@@ -26,7 +26,7 @@ export async function createTestMcpClient(
   options?: {
     path?: "/mcp" | "/mcp/editor";
     token?: string;
-    /** Override the web handler (e.g. to inject r2Bucket/r2Credentials/siteUrl options). */
+    /** Override the web handler (e.g. to inject r2Bucket/images/siteUrl options). */
     handler?: (req: Request) => Promise<Response>;
   },
 ): Promise<{ client: TestMcpClient; transport: { close(): Promise<void> } }> {
