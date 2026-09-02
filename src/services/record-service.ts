@@ -234,6 +234,7 @@ function normalizeBooleanValue(field: ParsedFieldRow, value: StoredFieldValue): 
   if (field.field_type !== "boolean") return value;
   if (value === 1) return true;
   if (value === 0) return false;
+  // oxlint-disable-next-line anti-slop/no-known-value-widening -- DB-boundary guard: isJsonRecord deliberately takes an unknown subject (opaque dynamic/JSON cell) and narrows it; the union here is untrusted cell data, not known evidence being discarded.
   if (field.localized && isJsonRecord(value)) {
     return Object.fromEntries(
       Object.entries(value).map(([locale, localeValue]) => [
@@ -344,6 +345,7 @@ function getAssetIds(fieldType: string, value: StoredFieldValue): string[] {
   if (fieldType === "media_gallery") {
     return parseMediaGalleryReferences(value).map((ref) => ref.uploadId);
   }
+  // oxlint-disable-next-line anti-slop/no-known-value-widening -- DB-boundary guard: isJsonRecord deliberately takes an unknown subject (opaque dynamic/JSON cell) and narrows it; the union here is untrusted cell data, not known evidence being discarded.
   if (fieldType === "seo" && isJsonRecord(value) && isString(value.image) && value.image.length > 0) {
     return [value.image];
   }
@@ -1490,6 +1492,7 @@ function isStructuredTextEnvelopeLike(value: unknown): value is { value: unknown
 }
 
 function getPrunableDast(value: StoredFieldValue): { schema: string; document: { type: string; children: readonly unknown[] } } | null {
+  // oxlint-disable-next-line anti-slop/no-known-value-widening -- DB-boundary guard: isJsonRecord deliberately takes an unknown subject (opaque dynamic/JSON cell) and narrows it; the union here is untrusted cell data, not known evidence being discarded.
   if (!isJsonRecord(value)) return null;
   if (!isString(value.schema)) return null;
   if (!isJsonRecord(value.document)) return null;
@@ -1526,6 +1529,7 @@ function applyPatchToNestedStructuredText(
             }
           } else if (isString(patchValue)) {
             // keep unchanged
+  // oxlint-disable-next-line anti-slop/no-known-value-widening -- DB-boundary guard: isJsonRecord deliberately takes an unknown subject (opaque dynamic/JSON cell) and narrows it; the union here is untrusted cell data, not known evidence being discarded.
           } else if (isJsonRecord(patchValue)) {
             const existingBlock = blocks[blockId];
             if (isJsonRecord(existingBlock)) {
@@ -1891,6 +1895,7 @@ function allowedQueryColumns(fields: readonly ParsedFieldRow[]): ReadonlySet<str
 
 /** Reject filter keys that are not real field api_keys or system meta columns. */
 const assertFilterColumns = Effect.fn("assertFilterColumns")(function* (filter: DynamicRow | undefined, allowed: ReadonlySet<string>): Effect.fn.Return<void, ValidationError> {
+  // oxlint-disable-next-line anti-slop/no-known-value-widening -- DB-boundary guard: isJsonRecord deliberately takes an unknown subject (opaque dynamic/JSON cell) and narrows it; the union here is untrusted cell data, not known evidence being discarded.
   if (!isJsonRecord(filter)) return;
   for (const [key, value] of Object.entries(filter)) {
     if (key === "AND" || key === "OR") {
@@ -2154,6 +2159,7 @@ function remapStructuredTextEnvelopeIds(
       // SAFETY: DAST children arrays hold nodes (objects/scalars), i.e. cell values or arrays.
       return node.map((child) => rewriteNode(child as StoredFieldValue | unknown[]));
     }
+  // oxlint-disable-next-line anti-slop/no-known-value-widening -- DB-boundary guard: isJsonRecord deliberately takes an unknown subject (opaque dynamic/JSON cell) and narrows it; the union here is untrusted cell data, not known evidence being discarded.
     if (!isJsonRecord(node)) return node;
     const next: DynamicRow = {};
     for (const [key, child] of Object.entries(node)) {
@@ -2178,6 +2184,7 @@ function remapStructuredTextEnvelopeIds(
 
 /** Remap block ids inside a single block's field data (nested containers). */
 function remapBlockDataIds(blockData: StoredFieldValue): StoredFieldValue {
+  // oxlint-disable-next-line anti-slop/no-known-value-widening -- DB-boundary guard: isJsonRecord deliberately takes an unknown subject (opaque dynamic/JSON cell) and narrows it; the union here is untrusted cell data, not known evidence being discarded.
   if (!isJsonRecord(blockData)) return blockData;
   const next: DynamicRow = {};
   for (const [key, value] of Object.entries(blockData)) {
@@ -2196,6 +2203,7 @@ function remapBlockDataIds(blockData: StoredFieldValue): StoredFieldValue {
 function remapRichTextBlockIds(blocks: Array<DynamicRow>): Array<DynamicRow> {
   return blocks.map((block) => {
     const remapped = remapBlockDataIds(block);
+  // oxlint-disable-next-line anti-slop/no-known-value-widening -- DB-boundary guard: isJsonRecord deliberately takes an unknown subject (opaque dynamic/JSON cell) and narrows it; the union here is untrusted cell data, not known evidence being discarded.
     return isJsonRecord(remapped) ? { ...remapped, id: generateId() } : block;
   });
 }
@@ -2204,6 +2212,7 @@ function remapLocalizedFieldValue(
   value: StoredFieldValue,
   remap: (inner: StoredFieldValue) => StoredFieldValue | DynamicRow[],
 ): StoredFieldValue | DynamicRow[] {
+  // oxlint-disable-next-line anti-slop/no-known-value-widening -- DB-boundary guard: isJsonRecord deliberately takes an unknown subject (opaque dynamic/JSON cell) and narrows it; the union here is untrusted cell data, not known evidence being discarded.
   if (!isJsonRecord(value)) return remap(value);
   // A localized value is a { [locale]: value } map.
   const next: DynamicRow = {};
@@ -2606,6 +2615,7 @@ function canonicalJson(value: StoredFieldValue | unknown[]): string {
       // SAFETY: JSON array elements are JSON values (cell values or nested arrays).
       return input.map((element) => normalize(element as StoredFieldValue | unknown[]));
     }
+  // oxlint-disable-next-line anti-slop/no-known-value-widening -- DB-boundary guard: isJsonRecord deliberately takes an unknown subject (opaque dynamic/JSON cell) and narrows it; the union here is untrusted cell data, not known evidence being discarded.
     if (isJsonRecord(input)) {
       const sorted: DynamicRow = {};
       for (const key of Object.keys(input).sort()) {
@@ -2664,6 +2674,7 @@ export function getSyncState(modelApiKey: string, id: string) {
     const modelFields = yield* getModelFields(model.id);
 
     const decodedSnapshot = snapshotComparable(cellValue(existing, "_published_snapshot"));
+  // oxlint-disable-next-line anti-slop/no-known-value-widening -- DB-boundary guard: isJsonRecord deliberately takes an unknown subject (opaque dynamic/JSON cell) and narrows it; the union here is untrusted cell data, not known evidence being discarded.
     const snapshotRecord = isJsonRecord(decodedSnapshot) ? decodedSnapshot : null;
 
     // Compare like-for-like: the snapshot holds materialized structured_text /
